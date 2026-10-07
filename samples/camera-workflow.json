@@ -1,0 +1,79 @@
+{
+  "id": "demo-camera",
+  "name": "VisionStudio V0.7 Camera Demo",
+  "nodes": [
+    {
+      "id": "acquire-1",
+      "type": "image.acquire",
+      "name": "Acquire Image",
+      "position": {
+        "x": 60,
+        "y": 150
+      },
+      "parameters": {
+        "cameraId": "virtual-1",
+        "timeoutMs": 1500,
+        "frameMode": "Latest",
+        "autoStart": true
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 380,
+        "y": 150
+      },
+      "parameters": {
+        "threshold": 150
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 700,
+        "y": 150
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "acquire-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "acquire-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    }
+  ]
+}

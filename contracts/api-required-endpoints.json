@@ -1,0 +1,697 @@
+{
+  "version": "v0.63",
+  "required": [
+    {
+      "path": "/api/health",
+      "method": "get"
+    },
+    {
+      "path": "/api/catalog",
+      "method": "get"
+    },
+    {
+      "path": "/api/catalog/meta",
+      "method": "get"
+    },
+    {
+      "path": "/api/validate",
+      "method": "post"
+    },
+    {
+      "path": "/api/run",
+      "method": "post"
+    },
+    {
+      "path": "/api/debug/run",
+      "method": "post"
+    },
+    {
+      "path": "/api/jobs",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs",
+      "method": "post"
+    },
+    {
+      "path": "/api/calibrations",
+      "method": "get"
+    },
+    {
+      "path": "/api/calibration/solve",
+      "method": "post"
+    },
+    {
+      "path": "/api/cameras",
+      "method": "get"
+    },
+    {
+      "path": "/api/devices",
+      "method": "get"
+    },
+    {
+      "path": "/api/devices/{id}/tags/{tagId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/devices/{id}/tags/{tagId}",
+      "method": "put"
+    },
+    {
+      "path": "/api/robots",
+      "method": "get"
+    },
+    {
+      "path": "/api/robots/{id}/target",
+      "method": "post"
+    },
+    {
+      "path": "/api/traces",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/observability",
+      "method": "get"
+    },
+    {
+      "path": "/api/workflows/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/workflows/{id}",
+      "method": "put"
+    },
+    {
+      "path": "/api/production/status",
+      "method": "get"
+    },
+    {
+      "path": "/api/production/config",
+      "method": "get"
+    },
+    {
+      "path": "/api/production/ptp-guard",
+      "method": "get"
+    },
+    {
+      "path": "/api/production/synchronization-guard",
+      "method": "get"
+    },
+    {
+      "path": "/api/production/config",
+      "method": "put"
+    },
+    {
+      "path": "/api/production/start",
+      "method": "post"
+    },
+    {
+      "path": "/api/production/stop",
+      "method": "post"
+    },
+    {
+      "path": "/api/production/recover",
+      "method": "post"
+    },
+    {
+      "path": "/api/alarms",
+      "method": "get"
+    },
+    {
+      "path": "/api/alarms/{id}/ack",
+      "method": "post"
+    },
+    {
+      "path": "/api/host-mode",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/workflow",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/overlays",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/status",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/cleanup",
+      "method": "post"
+    },
+    {
+      "path": "/api/traces/page",
+      "method": "get"
+    },
+    {
+      "path": "/api/auth/status",
+      "method": "get"
+    },
+    {
+      "path": "/api/auth/bootstrap",
+      "method": "post"
+    },
+    {
+      "path": "/api/auth/login",
+      "method": "post"
+    },
+    {
+      "path": "/api/auth/logout",
+      "method": "post"
+    },
+    {
+      "path": "/api/auth/me",
+      "method": "get"
+    },
+    {
+      "path": "/api/auth/change-password",
+      "method": "post"
+    },
+    {
+      "path": "/api/security/users",
+      "method": "get"
+    },
+    {
+      "path": "/api/security/users",
+      "method": "post"
+    },
+    {
+      "path": "/api/security/users/{id}",
+      "method": "put"
+    },
+    {
+      "path": "/api/security/users/{id}/reset-password",
+      "method": "post"
+    },
+    {
+      "path": "/api/audit",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs/{id}/dependencies",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs/{id}/dependencies/validate",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/dependencies",
+      "method": "get"
+    },
+    {
+      "path": "/api/diagnostics/summary",
+      "method": "get"
+    },
+    {
+      "path": "/api/diagnostics/assets",
+      "method": "get"
+    },
+    {
+      "path": "/api/diagnostics/events",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/schema",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/capacity",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/backups",
+      "method": "get"
+    },
+    {
+      "path": "/api/storage/backups",
+      "method": "post"
+    },
+    {
+      "path": "/api/storage/backups/{backupId}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/storage/restore",
+      "method": "post"
+    },
+    {
+      "path": "/api/media/status",
+      "method": "get"
+    },
+    {
+      "path": "/api/media/collections",
+      "method": "get"
+    },
+    {
+      "path": "/api/media/items",
+      "method": "get"
+    },
+    {
+      "path": "/api/media/preview",
+      "method": "get"
+    },
+    {
+      "path": "/api/media/collections",
+      "method": "post"
+    },
+    {
+      "path": "/api/media/import",
+      "method": "post"
+    },
+    {
+      "path": "/api/media/items",
+      "method": "delete"
+    },
+    {
+      "path": "/api/hardware-provenance",
+      "method": "get"
+    },
+    {
+      "path": "/api/hardware-provenance/{kind}/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/hardware-provenance/{kind}/{id}",
+      "method": "put"
+    },
+    {
+      "path": "/api/hardware-provenance/{kind}/{id}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/cameras/adapters",
+      "method": "get"
+    },
+    {
+      "path": "/api/cameras/discover",
+      "method": "get"
+    },
+    {
+      "path": "/api/cameras/vendor",
+      "method": "post"
+    },
+    {
+      "path": "/api/cameras/{id}/commissioning",
+      "method": "get"
+    },
+    {
+      "path": "/api/cameras/{id}/commissioning",
+      "method": "put"
+    },
+    {
+      "path": "/api/cameras/{id}/features",
+      "method": "get"
+    },
+    {
+      "path": "/api/cameras/{id}/features/{key}",
+      "method": "put"
+    },
+    {
+      "path": "/api/camera-feature-profiles",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-feature-profiles/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-feature-profiles/capture",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-feature-profiles/import",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-feature-profiles/{profileId}/apply/{cameraId}",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-feature-profiles/{id}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/camera-sync/groups",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/status",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/validate",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}",
+      "method": "put"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/trigger",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/schedule",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/runs",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/runs/{runId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/statistics",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/ptp-diagnostics",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/commissioning-tests",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/commissioning-tests",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/commissioning-tests/{testId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/commissioning-tests/{testId}/cancel",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/commissioning-tests/{testId}/report",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/commissioning-tests/{testId}/report.html",
+      "method": "get"
+    },
+    {
+      "path": "/api/cameras/{id}/transport-telemetry",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/gige-network-diagnostics",
+      "method": "get"
+    },
+    {
+      "path": "/api/camera-sync/groups/{id}/gige-network-tests",
+      "method": "post"
+    },
+    {
+      "path": "/api/camera-sync/gige-network-tests/{testId}/report",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/replay/context",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/replay/input",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/replay",
+      "method": "post"
+    },
+    {
+      "path": "/api/validation/datasets",
+      "method": "get"
+    },
+    {
+      "path": "/api/validation/datasets",
+      "method": "post"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}/items",
+      "method": "post"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}/items/{itemId}",
+      "method": "put"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}/items/{itemId}",
+      "method": "delete"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}/runs",
+      "method": "post"
+    },
+    {
+      "path": "/api/validation/datasets/{datasetId}/runs",
+      "method": "get"
+    },
+    {
+      "path": "/api/validation/runs/{runId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/validation/runs/{runId}/cancel",
+      "method": "post"
+    },
+    {
+      "path": "/api/validation/runs/{runId}/workflow",
+      "method": "get"
+    },
+    {
+      "path": "/api/tuning/preview",
+      "method": "post"
+    },
+    {
+      "path": "/api/products",
+      "method": "get"
+    },
+    {
+      "path": "/api/products",
+      "method": "post"
+    },
+    {
+      "path": "/api/products/{productId}/recipes",
+      "method": "post"
+    },
+    {
+      "path": "/api/jobs/{id}/clone",
+      "method": "post"
+    },
+    {
+      "path": "/api/jobs/{id}/versions/{fromVersion:int}/diff/{toVersion:int}",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs/{id}/versions/{version:int}/validation-candidates",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs/{id}/versions/{version:int}/validation",
+      "method": "post"
+    },
+    {
+      "path": "/api/products/{productId}/parameters",
+      "method": "get"
+    },
+    {
+      "path": "/api/products/{productId}/parameters",
+      "method": "put"
+    },
+    {
+      "path": "/api/jobs/{id}/parameters",
+      "method": "get"
+    },
+    {
+      "path": "/api/jobs/{id}/parameters",
+      "method": "put"
+    },
+    {
+      "path": "/api/jobs/{id}/parameterization/resolve",
+      "method": "post"
+    },
+    {
+      "path": "/api/jobs/{id}/versions/{version:int}/parameterization",
+      "method": "get"
+    },
+    {
+      "path": "/api/modules",
+      "method": "get"
+    },
+    {
+      "path": "/api/modules/extract",
+      "method": "post"
+    },
+    {
+      "path": "/api/modules/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/modules/{id}/versions/{version:int}",
+      "method": "get"
+    },
+    {
+      "path": "/api/modules/{id}/versions",
+      "method": "post"
+    },
+    {
+      "path": "/api/modules/expand",
+      "method": "post"
+    },
+    {
+      "path": "/api/modules/validate",
+      "method": "post"
+    },
+    {
+      "path": "/api/plugins",
+      "method": "get"
+    },
+    {
+      "path": "/api/plugins/sdk",
+      "method": "get"
+    },
+    {
+      "path": "/api/plugins/rescan",
+      "method": "post"
+    },
+    {
+      "method": "get",
+      "path": "/api/plugin-packages"
+    },
+    {
+      "method": "get",
+      "path": "/api/plugin-publishers"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-packages/preflight"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-packages/install"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-packages/{id}/versions/{version}/select"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-packages/{id}/rollback"
+    },
+    {
+      "method": "delete",
+      "path": "/api/plugin-packages/{id}/versions/{version}"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-publishers/trust"
+    },
+    {
+      "method": "delete",
+      "path": "/api/plugin-publishers/{thumbprint}"
+    },
+    {
+      "method": "get",
+      "path": "/api/plugin-workers"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-workers/{pluginId}/restart"
+    },
+    {
+      "method": "get",
+      "path": "/api/plugin-workers/performance"
+    },
+    {
+      "method": "post",
+      "path": "/api/plugin-workers/{pluginId}/performance/reset"
+    },
+    {
+      "path": "/api/plugin-benchmarks",
+      "method": "get"
+    },
+    {
+      "path": "/api/plugin-benchmarks",
+      "method": "post"
+    },
+    {
+      "path": "/api/plugin-benchmarks/{runId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/plugin-benchmarks/{runId}/ci-spec",
+      "method": "get"
+    },
+    {
+      "path": "/api/plugin-benchmarks/{runId}/cancel",
+      "method": "post"
+    },
+    {
+      "path": "/api/traces/{runId}/compare",
+      "method": "get"
+    },
+    {
+      "path": "/api/traces/{runId}/failure-signature",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations/trends",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations/for-trace/{runId}",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations/{id}",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations/from-trace/{runId}",
+      "method": "post"
+    },
+    {
+      "path": "/api/investigations/{id}",
+      "method": "put"
+    },
+    {
+      "path": "/api/investigations/{id}/verification-evidence",
+      "method": "get"
+    },
+    {
+      "path": "/api/investigations/{id}/verification-evidence",
+      "method": "post"
+    }
+  ]
+}

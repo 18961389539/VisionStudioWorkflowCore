@@ -1,0 +1,217 @@
+{
+  "id": "demo-if",
+  "name": "VisionStudio V0.7 If Demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "Synthetic Image",
+      "position": {
+        "x": 30,
+        "y": 210
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 300,
+        "y": 210
+      },
+      "parameters": {
+        "threshold": 128
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 570,
+        "y": 210
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    },
+    {
+      "id": "if-1",
+      "type": "flow.if",
+      "name": "If",
+      "position": {
+        "x": 840,
+        "y": 210
+      },
+      "parameters": {
+        "operator": ">",
+        "threshold": 15000
+      }
+    },
+    {
+      "id": "true-threshold",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 1120,
+        "y": 70
+      },
+      "parameters": {
+        "threshold": 180
+      }
+    },
+    {
+      "id": "false-threshold",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 1120,
+        "y": 350
+      },
+      "parameters": {
+        "threshold": 80
+      }
+    },
+    {
+      "id": "join-1",
+      "type": "flow.join",
+      "name": "Join",
+      "position": {
+        "x": 1420,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "result-1",
+      "type": "flow.result",
+      "name": "Result / Disposition",
+      "position": {
+        "x": 1690,
+        "y": 210
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "next",
+      "targetNodeId": "if-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "area",
+      "targetNodeId": "if-1",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "if-1",
+      "sourcePort": "true",
+      "targetNodeId": "true-threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "if-1",
+      "sourcePort": "false",
+      "targetNodeId": "false-threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "true-threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "false-threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "true-threshold",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "false-threshold",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "join-1",
+      "sourcePort": "next",
+      "targetNodeId": "result-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "if-1",
+      "sourcePort": "condition",
+      "targetNodeId": "result-1",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

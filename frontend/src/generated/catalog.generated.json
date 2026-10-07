@@ -1,0 +1,2993 @@
+{
+  "schemaVersion": 1,
+  "hash": "aa9e76a9316b9527c003d56556e33f1bc8d2e102ce56f94afb204e86c51ceead",
+  "items": [
+    {
+      "type": "image.acquire",
+      "displayName": "Acquire Image",
+      "category": "Acquisition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "sequence",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "timestamp",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "cameraId",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "cameraId",
+          "label": "Camera ID",
+          "type": "text",
+          "defaultValue": "virtual-1"
+        },
+        {
+          "name": "frameMode",
+          "label": "Frame Mode",
+          "type": "select",
+          "defaultValue": "Latest",
+          "options": [
+            {
+              "label": "Latest",
+              "value": "Latest"
+            },
+            {
+              "label": "Next",
+              "value": "Next"
+            }
+          ]
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout (ms)",
+          "type": "number",
+          "defaultValue": 1500,
+          "min": 50,
+          "max": 10000,
+          "step": 50
+        },
+        {
+          "name": "autoStart",
+          "label": "Auto Start",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "triggerBeforeGrab",
+          "label": "Trigger Before Grab",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "frameset.image",
+      "displayName": "FrameSet Image",
+      "category": "Acquisition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "frameSet",
+          "dataType": "FrameSet",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "sequence",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "timestamp",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "deviceTimestampNs",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "triggerId",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "cameraId",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "cameraId",
+          "label": "Camera ID",
+          "type": "text",
+          "defaultValue": "camera-1"
+        }
+      ],
+      "description": "Select one camera image from a synchronized FrameSet without cloning the underlying frame.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "camera.syncCapture",
+      "displayName": "Synchronized Capture",
+      "category": "Acquisition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "frameSet",
+          "dataType": "FrameSet",
+          "required": true
+        },
+        {
+          "name": "skewUs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "timestampBasis",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "cameraCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "groupId",
+          "label": "Synchronization Group",
+          "type": "text",
+          "defaultValue": "sync-group-1",
+          "group": "Synchronization"
+        },
+        {
+          "name": "scheduled",
+          "label": "Scheduled Action",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Synchronization"
+        },
+        {
+          "name": "leadTimeMs",
+          "label": "Scheduled Lead Time",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 10,
+          "max": 60000,
+          "step": 10,
+          "unit": "ms",
+          "group": "Synchronization"
+        },
+        {
+          "name": "frameTimeoutMs",
+          "label": "Frame Timeout",
+          "type": "number",
+          "defaultValue": 3000,
+          "min": 100,
+          "max": 30000,
+          "step": 100,
+          "unit": "ms",
+          "group": "Acquisition"
+        }
+      ],
+      "description": "Issue one synchronization-group Action Command, collect one new frame from every member camera, and output a workflow-owned FrameSet with measured skew.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      }
+    },
+    {
+      "type": "image.synthetic",
+      "displayName": "Synthetic Image",
+      "category": "Acquisition",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "width",
+          "label": "Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 160,
+          "max": 1920,
+          "step": 1
+        },
+        {
+          "name": "height",
+          "label": "Height",
+          "type": "number",
+          "defaultValue": 480,
+          "min": 120,
+          "max": 1080,
+          "step": 1
+        },
+        {
+          "name": "centerX",
+          "label": "Circle X",
+          "type": "number",
+          "defaultValue": 320,
+          "min": 0,
+          "max": 1920,
+          "step": 1
+        },
+        {
+          "name": "centerY",
+          "label": "Circle Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 1080,
+          "step": 1
+        },
+        {
+          "name": "radius",
+          "label": "Radius",
+          "type": "number",
+          "defaultValue": 80,
+          "min": 5,
+          "max": 400,
+          "step": 1
+        }
+      ],
+      "description": "Generate a deterministic test image for MVP validation.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "calibration.planar",
+      "displayName": "Planar Calibration",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "rmse",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sourceFrame",
+          "label": "Source Frame",
+          "type": "text",
+          "defaultValue": "ImagePixel",
+          "group": "Frames"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Target Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Frames"
+        },
+        {
+          "name": "targetUnit",
+          "label": "Target Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Frames"
+        },
+        {
+          "name": "assetId",
+          "label": "Calibration Asset ID",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Provenance",
+          "description": "Optional immutable calibration asset provenance."
+        },
+        {
+          "name": "assetVersion",
+          "label": "Calibration Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999,
+          "step": 1,
+          "group": "Provenance"
+        },
+        {
+          "name": "pairsJson",
+          "label": "Calibration Pairs JSON",
+          "type": "textarea",
+          "defaultValue": "[{\"imageX\":100,\"imageY\":100,\"worldX\":0,\"worldY\":0},{\"imageX\":320,\"imageY\":100,\"worldX\":22,\"worldY\":0},{\"imageX\":540,\"imageY\":100,\"worldX\":44,\"worldY\":0},{\"imageX\":100,\"imageY\":240,\"worldX\":0,\"worldY\":14},{\"imageX\":320,\"imageY\":240,\"worldX\":22,\"worldY\":14},{\"imageX\":540,\"imageY\":240,\"worldX\":44,\"worldY\":14},{\"imageX\":100,\"imageY\":380,\"worldX\":0,\"worldY\":28},{\"imageX\":320,\"imageY\":380,\"worldX\":22,\"worldY\":28},{\"imageX\":540,\"imageY\":380,\"worldX\":44,\"worldY\":28}]",
+          "group": "Calibration",
+          "description": "Four or more image/world point pairs. Nine points are recommended for MVP validation."
+        }
+      ],
+      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "coordinate.transformCompose",
+      "displayName": "Compose Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "transformA",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "transformB",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformConstant",
+      "displayName": "Constant Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sourceFrame",
+          "label": "Source Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Frames"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Target Frame",
+          "type": "text",
+          "defaultValue": "RobotBase",
+          "group": "Frames"
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Frames"
+        },
+        {
+          "name": "x",
+          "label": "X Translation",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "unit",
+          "group": "Rigid Transform"
+        },
+        {
+          "name": "y",
+          "label": "Y Translation",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "unit",
+          "group": "Rigid Transform"
+        },
+        {
+          "name": "angleDeg",
+          "label": "Rotation",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.001,
+          "unit": "deg",
+          "group": "Rigid Transform"
+        }
+      ],
+      "description": "Create a rigid 2D transform between named engineering coordinate frames.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.distance",
+      "displayName": "Coordinate Distance",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pointA",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        },
+        {
+          "name": "pointB",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "measurement",
+          "dataType": "Measurement",
+          "required": true
+        },
+        {
+          "name": "distance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Distance between two points only when frame and unit match.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.point",
+      "displayName": "Coordinate Point",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 20,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 10,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "frame",
+          "label": "Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Point"
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Point"
+        }
+      ],
+      "description": "Create a constant coordinate-aware reference point.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.pose",
+      "displayName": "Coordinate Pose",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 500,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Pose"
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 200,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Pose"
+        },
+        {
+          "name": "thetaDeg",
+          "label": "Theta",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.001,
+          "unit": "deg",
+          "group": "Pose"
+        },
+        {
+          "name": "frame",
+          "label": "Frame",
+          "type": "text",
+          "defaultValue": "RobotBase",
+          "group": "Pose"
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Pose"
+        }
+      ],
+      "description": "Create a constant frame-aware 2D pose.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.frameTree",
+      "displayName": "Frame Tree",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tree",
+          "dataType": "FrameTree2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "transformsJson",
+          "label": "Transforms JSON",
+          "type": "textarea",
+          "defaultValue": "[{\"sourceFrame\":\"Workpiece\",\"targetFrame\":\"Fixture\",\"unit\":\"mm\",\"x\":100,\"y\":50,\"angleDeg\":5},{\"sourceFrame\":\"Fixture\",\"targetFrame\":\"RobotBase\",\"unit\":\"mm\",\"x\":500,\"y\":200,\"angleDeg\":0}]",
+          "group": "Frame Tree",
+          "description": "Static rigid transforms. Runtime dynamic transforms can still be composed as normal workflow data."
+        }
+      ],
+      "description": "Build a bidirectional frame graph and resolve transforms by named frame path.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformInverse",
+      "displayName": "Inverse Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Invert a Transform2D and swap source/target frame and units.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.poseToTransform",
+      "displayName": "Pose to Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sourceFrame",
+          "label": "Source Frame",
+          "type": "text",
+          "defaultValue": "Tool",
+          "group": "Frames"
+        }
+      ],
+      "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.frameResolve",
+      "displayName": "Resolve Frame Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "tree",
+          "dataType": "FrameTree2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "path",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sourceFrame",
+          "label": "Source Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Resolve"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Target Frame",
+          "type": "text",
+          "defaultValue": "RobotBase",
+          "group": "Resolve"
+        }
+      ],
+      "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformCoordinatePoint",
+      "displayName": "Transform Coordinate Point",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformCoordinatePose",
+      "displayName": "Transform Coordinate Pose",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformLine",
+      "displayName": "Transform Line",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "line",
+          "dataType": "CoordinateLine2D",
+          "required": true
+        },
+        {
+          "name": "length",
+          "dataType": "Measurement",
+          "required": true
+        },
+        {
+          "name": "lengthValue",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformPoint",
+      "displayName": "Transform Point",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint2D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "coordinate.transformPose",
+      "displayName": "Transform Pose",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform X/Y and local orientation into a named target frame.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "device.readTag",
+      "displayName": "Read Device Tag",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "dataType": "DeviceTagValue",
+          "required": true
+        },
+        {
+          "name": "boolValue",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "numberValue",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "textValue",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "timestamp",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "virtual-modbus-1",
+          "group": "Device"
+        },
+        {
+          "name": "tagId",
+          "label": "Tag ID",
+          "type": "text",
+          "defaultValue": "trigger",
+          "group": "Tag"
+        },
+        {
+          "name": "fresh",
+          "label": "Fresh Read",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Read"
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Device"
+        }
+      ],
+      "description": "Read a typed tag through DeviceManager. Returns value, quality and timestamp without exposing protocol SDK objects.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "device.waitTag",
+      "displayName": "Wait Device Tag",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "dataType": "DeviceTagValue",
+          "required": true
+        },
+        {
+          "name": "boolValue",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "numberValue",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "textValue",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "timestamp",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "waitMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "virtual-modbus-1",
+          "group": "Device"
+        },
+        {
+          "name": "tagId",
+          "label": "Tag ID",
+          "type": "text",
+          "defaultValue": "trigger",
+          "group": "Tag"
+        },
+        {
+          "name": "operator",
+          "label": "Condition",
+          "type": "select",
+          "defaultValue": "True",
+          "options": [
+            {
+              "label": "True",
+              "value": "True"
+            },
+            {
+              "label": "False",
+              "value": "False"
+            },
+            {
+              "label": "==",
+              "value": "=="
+            },
+            {
+              "label": "!=",
+              "value": "!="
+            },
+            {
+              "label": ">",
+              "value": ">"
+            },
+            {
+              "label": ">=",
+              "value": ">="
+            },
+            {
+              "label": "<",
+              "value": "<"
+            },
+            {
+              "label": "<=",
+              "value": "<="
+            }
+          ],
+          "group": "Condition"
+        },
+        {
+          "name": "compareValue",
+          "label": "Compare Value",
+          "type": "text",
+          "defaultValue": "1",
+          "group": "Condition"
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 50,
+          "max": 120000,
+          "step": 50,
+          "unit": "ms",
+          "group": "Wait"
+        },
+        {
+          "name": "pollMs",
+          "label": "Poll Interval",
+          "type": "number",
+          "defaultValue": 25,
+          "min": 10,
+          "max": 5000,
+          "step": 5,
+          "unit": "ms",
+          "group": "Wait"
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Device"
+        }
+      ],
+      "description": "Block the workflow until a tag condition becomes true or the timeout expires. Useful for PLC trigger/ready handshakes.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "device.writeTag",
+      "displayName": "Write Device Tag",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "dataType": "DeviceTagValue",
+          "required": true
+        },
+        {
+          "name": "boolValue",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "numberValue",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "textValue",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "timestamp",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "virtual-modbus-1",
+          "group": "Device"
+        },
+        {
+          "name": "tagId",
+          "label": "Tag ID",
+          "type": "text",
+          "defaultValue": "statusText",
+          "group": "Tag"
+        },
+        {
+          "name": "valueType",
+          "label": "Fallback Type",
+          "type": "select",
+          "defaultValue": "String",
+          "options": [
+            {
+              "label": "Boolean",
+              "value": "Boolean"
+            },
+            {
+              "label": "Integer",
+              "value": "Integer"
+            },
+            {
+              "label": "Double",
+              "value": "Double"
+            },
+            {
+              "label": "String",
+              "value": "String"
+            }
+          ],
+          "group": "Fallback"
+        },
+        {
+          "name": "fallbackValue",
+          "label": "Fallback Value",
+          "type": "text",
+          "defaultValue": "Vision OK",
+          "group": "Fallback",
+          "description": "Used only when the optional Any input is not connected."
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Device"
+        }
+      ],
+      "description": "Write a generic device tag. Connected input wins; otherwise the typed fallback parameter is used.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "device.writeVisionResult",
+      "displayName": "Write Vision Result",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "r",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "written",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "r",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "virtual-modbus-1",
+          "group": "Device"
+        },
+        {
+          "name": "resultReadyTag",
+          "label": "Result Ready Tag",
+          "type": "text",
+          "defaultValue": "resultReady",
+          "group": "Mapping"
+        },
+        {
+          "name": "resultOkTag",
+          "label": "Result OK Tag",
+          "type": "text",
+          "defaultValue": "resultOk",
+          "group": "Mapping"
+        },
+        {
+          "name": "xTag",
+          "label": "X Tag",
+          "type": "text",
+          "defaultValue": "resultX",
+          "group": "Mapping"
+        },
+        {
+          "name": "yTag",
+          "label": "Y Tag",
+          "type": "text",
+          "defaultValue": "resultY",
+          "group": "Mapping"
+        },
+        {
+          "name": "rTag",
+          "label": "R Tag",
+          "type": "text",
+          "defaultValue": "resultR",
+          "group": "Mapping"
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Device"
+        }
+      ],
+      "description": "Write OK/NG + optional X/Y/R as an ordered PLC result transaction: Ready=0, payload, Ready=1.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "feature.circle",
+      "displayName": "Circle Finder",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minRadius",
+          "label": "Min Radius",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 1,
+          "max": 5000,
+          "step": 1,
+          "unit": "px",
+          "group": "Geometry"
+        },
+        {
+          "name": "maxRadius",
+          "label": "Max Radius",
+          "type": "number",
+          "defaultValue": 180,
+          "min": 1,
+          "max": 5000,
+          "step": 1,
+          "unit": "px",
+          "group": "Geometry"
+        },
+        {
+          "name": "minDist",
+          "label": "Min Center Distance",
+          "type": "number",
+          "defaultValue": 40,
+          "min": 1,
+          "max": 5000,
+          "step": 1,
+          "unit": "px",
+          "group": "Detection"
+        },
+        {
+          "name": "edgeThreshold",
+          "label": "Edge Threshold",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "group": "Detection"
+        },
+        {
+          "name": "centerThreshold",
+          "label": "Center Threshold",
+          "type": "number",
+          "defaultValue": 24,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "group": "Detection"
+        }
+      ],
+      "description": "Hough circle finder returning Circle + Point2D geometry.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "feature.edge",
+      "displayName": "Edge / Canny",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "edgeCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "lowThreshold",
+          "label": "Low Threshold",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        },
+        {
+          "name": "highThreshold",
+          "label": "High Threshold",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        }
+      ],
+      "description": "Canny edge extraction. Supports image-space ROI and returns a binary edge image.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "feature.line",
+      "displayName": "Line Finder",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "houghThreshold",
+          "label": "Hough Threshold",
+          "type": "number",
+          "defaultValue": 45,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "group": "Detection"
+        },
+        {
+          "name": "minLength",
+          "label": "Min Length",
+          "type": "number",
+          "defaultValue": 60,
+          "min": 1,
+          "max": 4000,
+          "step": 1,
+          "unit": "px",
+          "group": "Detection"
+        },
+        {
+          "name": "maxGap",
+          "label": "Max Gap",
+          "type": "number",
+          "defaultValue": 12,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "unit": "px",
+          "group": "Detection"
+        }
+      ],
+      "description": "Find the longest Hough line and return a strongly typed Line2D.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "flow.if",
+      "displayName": "If",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "true",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "false",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "condition",
+          "dataType": "Boolean",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operator",
+          "label": "Operator",
+          "type": "select",
+          "defaultValue": ">",
+          "options": [
+            {
+              "label": ">",
+              "value": ">"
+            },
+            {
+              "label": ">=",
+              "value": ">="
+            },
+            {
+              "label": "<",
+              "value": "<"
+            },
+            {
+              "label": "<=",
+              "value": "<="
+            },
+            {
+              "label": "==",
+              "value": "=="
+            },
+            {
+              "label": "!=",
+              "value": "!="
+            }
+          ]
+        },
+        {
+          "name": "threshold",
+          "label": "Compare Value",
+          "type": "number",
+          "defaultValue": 15000,
+          "min": -99999999,
+          "max": 99999999,
+          "step": 1
+        }
+      ],
+      "description": "Workflow Core conditional marker.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "flow.join",
+      "displayName": "Join",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "branch1",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "branch2",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "flow.parallel",
+      "displayName": "Parallel",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "branch1",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "branch2",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Start two Workflow Core parallel paths.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "flow.result",
+      "displayName": "Result / Disposition",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "disposition",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "geometry.angle",
+      "displayName": "Line Angle",
+      "category": "Geometry",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "lineA",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "lineB",
+          "dataType": "Line2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Acute angle between two Line2D values in degrees.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "geometry.intersection",
+      "displayName": "Line Intersection",
+      "category": "Geometry",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "lineA",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "lineB",
+          "dataType": "Line2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Intersect two infinite Line2D values and return Point2D.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "geometry.distance",
+      "displayName": "Point Distance",
+      "category": "Geometry",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pointA",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "pointB",
+          "dataType": "Point2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "distance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Euclidean distance between two Point2D values.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "measure.caliper",
+      "displayName": "Caliper Edge",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "strength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "startX",
+          "label": "Start X",
+          "type": "number",
+          "defaultValue": 120,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "startY",
+          "label": "Start Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endX",
+          "label": "End X",
+          "type": "number",
+          "defaultValue": 520,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endY",
+          "label": "End Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "sampleWidth",
+          "label": "Sample Width",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 99,
+          "step": 2,
+          "unit": "px",
+          "group": "Sampling"
+        },
+        {
+          "name": "edgeThreshold",
+          "label": "Edge Threshold",
+          "type": "number",
+          "defaultValue": 12,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Sampling"
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "Any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "Any"
+            },
+            {
+              "label": "Rising",
+              "value": "Rising"
+            },
+            {
+              "label": "Falling",
+              "value": "Falling"
+            }
+          ],
+          "group": "Sampling"
+        }
+      ],
+      "description": "1D grayscale caliper along a configurable search line. Returns the strongest edge point.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "measure.blob",
+      "displayName": "Largest Blob",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 1,
+          "max": 999999,
+          "step": 10
+        }
+      ],
+      "description": "Find the largest contour and return typed geometry.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "measure.rotatedRect",
+      "displayName": "Rotated Rectangle",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 500,
+          "min": 1,
+          "max": 99999999,
+          "step": 10,
+          "unit": "px²",
+          "group": "Contour"
+        }
+      ],
+      "description": "Minimum-area rotated rectangle around the largest accepted contour.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "image.threshold",
+      "displayName": "Threshold",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "threshold",
+          "label": "Threshold",
+          "type": "number",
+          "defaultValue": 128,
+          "min": 0,
+          "max": 255,
+          "step": 1
+        }
+      ],
+      "description": "Binary threshold using OpenCvSharp.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "robot.executeTarget",
+      "displayName": "Execute Robot Target",
+      "category": "Robot",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "target",
+          "dataType": "RobotTarget2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "target",
+          "dataType": "RobotTarget2D",
+          "required": true
+        },
+        {
+          "name": "currentPose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "commandId",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inPosition",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "state",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "traceId",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "attempts",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "robotId",
+          "label": "Robot ID",
+          "type": "text",
+          "defaultValue": "virtual-abb-1",
+          "group": "Robot"
+        },
+        {
+          "name": "action",
+          "label": "Action",
+          "type": "select",
+          "defaultValue": "Handshake",
+          "options": [
+            {
+              "label": "Industrial Handshake",
+              "value": "Handshake"
+            },
+            {
+              "label": "Move",
+              "value": "Move"
+            },
+            {
+              "label": "Send Target Only",
+              "value": "SendTarget"
+            }
+          ],
+          "group": "Command"
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Command"
+        },
+        {
+          "name": "waitForInPosition",
+          "label": "Wait For Complete",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Handshake"
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 50,
+          "max": 120000,
+          "step": 50,
+          "unit": "ms",
+          "group": "Handshake"
+        },
+        {
+          "name": "maxRetries",
+          "label": "Max Retries",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "group": "Handshake"
+        },
+        {
+          "name": "retryDelayMs",
+          "label": "Retry Delay",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 10000,
+          "step": 10,
+          "unit": "ms",
+          "group": "Handshake"
+        },
+        {
+          "name": "autoAck",
+          "label": "Auto Ack",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Handshake"
+        }
+      ],
+      "description": "Execute a vendor-neutral RobotTarget2D using SendTarget/Move or the standard TargetReady→Execute→Busy→Complete/Error→Ack industrial handshake with timeout/retry policy.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "robot.j4TcpCompensation",
+      "displayName": "J4 / TCP Compensation",
+      "category": "Robot",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "target",
+          "dataType": "RobotTarget2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "target",
+          "dataType": "RobotTarget2D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "r",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "tcpOffsetX",
+          "label": "TCP Offset X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "target unit",
+          "group": "Eccentricity"
+        },
+        {
+          "name": "tcpOffsetY",
+          "label": "TCP Offset Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "target unit",
+          "group": "Eccentricity"
+        },
+        {
+          "name": "j4PivotOffsetX",
+          "label": "J4 Pivot Offset X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "target unit",
+          "group": "Eccentricity"
+        },
+        {
+          "name": "j4PivotOffsetY",
+          "label": "J4 Pivot Offset Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "target unit",
+          "group": "Eccentricity"
+        },
+        {
+          "name": "angleZeroOffsetDeg",
+          "label": "J4 Angle Zero Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -360,
+          "max": 360,
+          "step": 0.001,
+          "unit": "deg",
+          "group": "Rotation"
+        }
+      ],
+      "description": "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
+      "pluginId": "builtin"
+    },
+    {
+      "type": "robot.currentPose",
+      "displayName": "Robot Current Pose",
+      "category": "Robot",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "busy",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "inPosition",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "targetReady",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "execute",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "complete",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "handshakeError",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "ack",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "state",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "connection",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "error",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "robotId",
+          "label": "Robot ID",
+          "type": "text",
+          "defaultValue": "virtual-abb-1",
+          "group": "Robot"
+        },
+        {
+          "name": "autoConnect",
+          "label": "Auto Connect",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Robot"
+        }
+      ],
+      "description": "Read the current planar robot pose and neutral handshake state from RobotManager. Vendor protocol objects remain outside Workflow Core.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      }
+    },
+    {
+      "type": "robot.guidance2d",
+      "displayName": "Robot Guidance 2D",
+      "category": "Robot",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "CoordinatePose2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "target",
+          "dataType": "RobotTarget2D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "r",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "robot",
+          "label": "Robot",
+          "type": "text",
+          "defaultValue": "ABB",
+          "group": "Target"
+        },
+        {
+          "name": "guidanceMode",
+          "label": "Guidance Mode",
+          "type": "select",
+          "defaultValue": "EyeToHand",
+          "options": [
+            {
+              "label": "Eye-to-Hand",
+              "value": "EyeToHand"
+            },
+            {
+              "label": "Eye-in-Hand",
+              "value": "EyeInHand"
+            },
+            {
+              "label": "Manual",
+              "value": "Manual"
+            }
+          ],
+          "group": "Target"
+        },
+        {
+          "name": "expectedFrame",
+          "label": "Expected Frame",
+          "type": "text",
+          "defaultValue": "RobotBase",
+          "group": "Target"
+        },
+        {
+          "name": "offsetX",
+          "label": "Pick Offset X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -10000,
+          "max": 10000,
+          "step": 0.001,
+          "unit": "pose unit",
+          "group": "Pick Offset"
+        },
+        {
+          "name": "offsetY",
+          "label": "Pick Offset Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -10000,
+          "max": 10000,
+          "step": 0.001,
+          "unit": "pose unit",
+          "group": "Pick Offset"
+        },
+        {
+          "name": "angleOffsetDeg",
+          "label": "Angle Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.001,
+          "unit": "deg",
+          "group": "Pick Offset"
+        }
+      ],
+      "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
+      "pluginId": "builtin"
+    }
+  ]
+}

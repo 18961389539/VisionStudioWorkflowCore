@@ -1,0 +1,38 @@
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# .NET
+**/bin/
+**/obj/
+.vs/
+
+# IDE
+.idea/
+.vscode/
+
+# runtime data
+backend/src/VisionStudio.Api/data/**
+!backend/src/VisionStudio.Api/data/.gitkeep
+!backend/src/VisionStudio.Api/data/workflows/
+!backend/src/VisionStudio.Api/data/workflows/.gitkeep
+
+# dynamically installed plugin binaries
+backend/src/VisionStudio.Api/plugins/*/*
+!backend/src/VisionStudio.Api/plugins/README.md
+
+# ===== 追加（2026-10-07 push 前补充） =====
+# dotnet artifacts 输出（dotnet build/test --artifacts-path，体积 ~700MB）
+.artifacts/
+
+# WorkBuddy 本地协作记忆
+.workbuddy/
+
+# 构建副产物
+*.user
+*.suo
+*.tsbuildinfo
+frontend/.vite/
+backend/logs/
+Thumbs.db
+.DS_Store

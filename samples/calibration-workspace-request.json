@@ -1,0 +1,25 @@
+{
+  "sourceFrame": "ImagePixel",
+  "targetFrame": "Workpiece",
+  "targetUnit": "mm",
+  "points": [
+    { "index": 1, "imageX": 100.18, "imageY": 100.07, "worldX": 0, "worldY": 0, "enabled": true, "source": "VirtualAuto" },
+    { "index": 2, "imageX": 319.95, "imageY": 99.90, "worldX": 22, "worldY": 0, "enabled": true, "source": "VirtualAuto" },
+    { "index": 3, "imageX": 539.84, "imageY": 99.85, "worldX": 44, "worldY": 0, "enabled": true, "source": "VirtualAuto" },
+    { "index": 4, "imageX": 100.10, "imageY": 239.97, "worldX": 0, "worldY": 14, "enabled": true, "source": "VirtualAuto" },
+    { "index": 5, "imageX": 320.14, "imageY": 240.13, "worldX": 22, "worldY": 14, "enabled": true, "source": "VirtualAuto" },
+    { "index": 6, "imageX": 539.87, "imageY": 240.14, "worldX": 44, "worldY": 14, "enabled": true, "source": "VirtualAuto" },
+    { "index": 7, "imageX": 99.90, "imageY": 380.00, "worldX": 0, "worldY": 28, "enabled": true, "source": "VirtualAuto" },
+    { "index": 8, "imageX": 320.16, "imageY": 379.85, "worldX": 22, "worldY": 28, "enabled": true, "source": "VirtualAuto" },
+    { "index": 9, "imageX": 540.05, "imageY": 379.88, "worldX": 44, "worldY": 28, "enabled": true, "source": "VirtualAuto" }
+  ],
+  "verificationPoints": [
+    { "index": 101, "imageX": 210, "imageY": 170, "worldX": 11, "worldY": 7, "enabled": true, "source": "Verification" },
+    { "index": 102, "imageX": 430, "imageY": 170, "worldX": 33, "worldY": 7, "enabled": true, "source": "Verification" },
+    { "index": 103, "imageX": 210, "imageY": 310, "worldX": 11, "worldY": 21, "enabled": true, "source": "Verification" },
+    { "index": 104, "imageX": 430, "imageY": 310, "worldX": 33, "worldY": 21, "enabled": true, "source": "Verification" },
+    { "index": 105, "imageX": 320, "imageY": 240, "worldX": 22, "worldY": 14, "enabled": true, "source": "Verification" }
+  ],
+  "heatmapColumns": 5,
+  "heatmapRows": 5
+}

@@ -1,0 +1,322 @@
+{
+  "id": "demo-nested-structured",
+  "name": "VisionStudio V0.34 Nested Structured Demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "image.synthetic",
+      "position": {
+        "x": 20,
+        "y": 260
+      },
+      "parameters": {}
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 260,
+        "y": 260
+      },
+      "parameters": {
+        "threshold": 128
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "measure.blob",
+      "position": {
+        "x": 500,
+        "y": 260
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    },
+    {
+      "id": "outer-if",
+      "type": "flow.if",
+      "name": "flow.if",
+      "position": {
+        "x": 740,
+        "y": 260
+      },
+      "parameters": {
+        "operator": ">",
+        "threshold": 15000
+      }
+    },
+    {
+      "id": "inner-if",
+      "type": "flow.if",
+      "name": "flow.if",
+      "position": {
+        "x": 1010,
+        "y": 110
+      },
+      "parameters": {
+        "operator": ">",
+        "threshold": 18000
+      }
+    },
+    {
+      "id": "inner-true",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 1290,
+        "y": 20
+      },
+      "parameters": {
+        "threshold": 190
+      }
+    },
+    {
+      "id": "inner-false",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 1290,
+        "y": 170
+      },
+      "parameters": {
+        "threshold": 145
+      }
+    },
+    {
+      "id": "inner-join",
+      "type": "flow.join",
+      "name": "flow.join",
+      "position": {
+        "x": 1570,
+        "y": 100
+      },
+      "parameters": {}
+    },
+    {
+      "id": "outer-true-tail",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 1810,
+        "y": 100
+      },
+      "parameters": {
+        "threshold": 170
+      }
+    },
+    {
+      "id": "outer-false",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 1160,
+        "y": 410
+      },
+      "parameters": {
+        "threshold": 80
+      }
+    },
+    {
+      "id": "outer-join",
+      "type": "flow.join",
+      "name": "flow.join",
+      "position": {
+        "x": 2070,
+        "y": 260
+      },
+      "parameters": {}
+    },
+    {
+      "id": "result-1",
+      "type": "flow.result",
+      "name": "flow.result",
+      "position": {
+        "x": 2330,
+        "y": 260
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "next",
+      "targetNodeId": "outer-if",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "area",
+      "targetNodeId": "outer-if",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "outer-if",
+      "sourcePort": "true",
+      "targetNodeId": "inner-if",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "outer-if",
+      "sourcePort": "false",
+      "targetNodeId": "outer-false",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "area",
+      "targetNodeId": "inner-if",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "inner-if",
+      "sourcePort": "true",
+      "targetNodeId": "inner-true",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "inner-if",
+      "sourcePort": "false",
+      "targetNodeId": "inner-false",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "inner-true",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "inner-false",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "inner-true",
+      "sourcePort": "next",
+      "targetNodeId": "inner-join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "inner-false",
+      "sourcePort": "next",
+      "targetNodeId": "inner-join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "inner-join",
+      "sourcePort": "next",
+      "targetNodeId": "outer-true-tail",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "outer-true-tail",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c11",
+      "sourceNodeId": "outer-true-tail",
+      "sourcePort": "next",
+      "targetNodeId": "outer-join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "outer-false",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c12",
+      "sourceNodeId": "outer-false",
+      "sourcePort": "next",
+      "targetNodeId": "outer-join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c13",
+      "sourceNodeId": "outer-join",
+      "sourcePort": "next",
+      "targetNodeId": "result-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "outer-if",
+      "sourcePort": "condition",
+      "targetNodeId": "result-1",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+name: Plugin Performance Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "Reachable VisionStudio benchmark host URL"
+        required: true
+        default: "http://127.0.0.1:5080"
+      spec_path:
+        description: "Exported V0.59 CI spec path in this repository"
+        required: true
+        default: "ci/plugin-benchmark-spec.json"
+      timeout_seconds:
+        description: "Overall benchmark timeout"
+        required: true
+        default: "3600"
+
+jobs:
+  performance-gate:
+    # A self-hosted runner is recommended because the benchmark host normally owns the
+    # frozen Dataset, installed signed plugin packages, GPU/native runtime and worker processes.
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Run plugin performance regression gate
+        env:
+          VISIONSTUDIO_BENCH_TOKEN: ${{ secrets.VISIONSTUDIO_BENCH_TOKEN }}
+        shell: pwsh
+        run: |
+          ./scripts/plugin-benchmark-gate.ps1 `
+            -Server '${{ inputs.server_url }}' `
+            -Spec '${{ inputs.spec_path }}' `
+            -Output 'artifacts/plugin-benchmark-result.json' `
+            -Junit 'artifacts/plugin-benchmark-junit.xml' `
+            -TimeoutSeconds ${{ inputs.timeout_seconds }}
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-performance-gate
+          path: artifacts/
+          if-no-files-found: warn

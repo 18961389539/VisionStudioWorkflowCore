@@ -1,0 +1,22 @@
+{
+  "transforms": [
+    {
+      "sourceFrame": "Workpiece",
+      "targetFrame": "Fixture",
+      "unit": "mm",
+      "x": 100,
+      "y": 50,
+      "angleDeg": 5
+    },
+    {
+      "sourceFrame": "Fixture",
+      "targetFrame": "RobotBase",
+      "unit": "mm",
+      "x": 500,
+      "y": 200,
+      "angleDeg": 0
+    }
+  ],
+  "sourceFrame": "Workpiece",
+  "targetFrame": "RobotBase"
+}

@@ -1,0 +1,152 @@
+{
+  "id": "demo-parallel",
+  "name": "VisionStudio V0.7 Parallel Demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "Synthetic Image",
+      "position": {
+        "x": 30,
+        "y": 210
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "parallel-1",
+      "type": "flow.parallel",
+      "name": "Parallel",
+      "position": {
+        "x": 320,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "branch-a-threshold",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 620,
+        "y": 70
+      },
+      "parameters": {
+        "threshold": 160
+      }
+    },
+    {
+      "id": "branch-b-threshold",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 620,
+        "y": 350
+      },
+      "parameters": {
+        "threshold": 95
+      }
+    },
+    {
+      "id": "join-1",
+      "type": "flow.join",
+      "name": "Join",
+      "position": {
+        "x": 930,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 1210,
+        "y": 210
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "parallel-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "parallel-1",
+      "sourcePort": "branch1",
+      "targetNodeId": "branch-a-threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "parallel-1",
+      "sourcePort": "branch2",
+      "targetNodeId": "branch-b-threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "branch-a-threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "branch-b-threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "branch-a-threshold",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "branch-b-threshold",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "join-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "branch-a-threshold",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    }
+  ]
+}

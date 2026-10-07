@@ -1,0 +1,9 @@
+{
+  "values": {
+    "resultReady": false,
+    "resultOk": true,
+    "resultX": 123.45,
+    "resultY": 67.89,
+    "resultR": 12.3
+  }
+}

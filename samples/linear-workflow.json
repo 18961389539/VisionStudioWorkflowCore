@@ -1,0 +1,80 @@
+{
+  "id": "demo-linear",
+  "name": "VisionStudio V0.7 Linear Demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "Synthetic Image",
+      "position": {
+        "x": 60,
+        "y": 150
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 360,
+        "y": 150
+      },
+      "parameters": {
+        "threshold": 128
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 680,
+        "y": 150
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    }
+  ]
+}

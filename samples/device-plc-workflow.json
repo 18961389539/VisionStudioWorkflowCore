@@ -1,0 +1,285 @@
+{
+  "id": "device-plc-demo",
+  "name": "VisionStudio V0.20 Device PLC Demo",
+  "nodes": [
+    {
+      "id": "wait-trigger-1",
+      "type": "device.waitTag",
+      "name": "Wait Vision Trigger",
+      "position": {
+        "x": 20,
+        "y": 210
+      },
+      "parameters": {
+        "deviceId": "virtual-modbus-1",
+        "tagId": "trigger",
+        "operator": "True",
+        "compareValue": "1",
+        "timeoutMs": 10000,
+        "pollMs": 25,
+        "autoConnect": true
+      }
+    },
+    {
+      "id": "acquire-1",
+      "type": "image.acquire",
+      "name": "Acquire Image",
+      "position": {
+        "x": 300,
+        "y": 210
+      },
+      "parameters": {
+        "cameraId": "virtual-1",
+        "frameMode": "Latest",
+        "timeoutMs": 1500,
+        "autoStart": true,
+        "triggerBeforeGrab": false
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 580,
+        "y": 210
+      },
+      "parameters": {
+        "threshold": 128
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 860,
+        "y": 210
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    },
+    {
+      "id": "if-1",
+      "type": "flow.if",
+      "name": "Area OK?",
+      "position": {
+        "x": 1140,
+        "y": 210
+      },
+      "parameters": {
+        "operator": ">",
+        "threshold": 15000
+      }
+    },
+    {
+      "id": "pass-text-1",
+      "type": "device.writeTag",
+      "name": "Write PASS Text",
+      "position": {
+        "x": 1420,
+        "y": 80
+      },
+      "parameters": {
+        "deviceId": "virtual-modbus-1",
+        "tagId": "statusText",
+        "valueType": "String",
+        "fallbackValue": "VISION PASS",
+        "autoConnect": true
+      }
+    },
+    {
+      "id": "fail-text-1",
+      "type": "device.writeTag",
+      "name": "Write FAIL Text",
+      "position": {
+        "x": 1420,
+        "y": 340
+      },
+      "parameters": {
+        "deviceId": "virtual-modbus-1",
+        "tagId": "statusText",
+        "valueType": "String",
+        "fallbackValue": "VISION FAIL",
+        "autoConnect": true
+      }
+    },
+    {
+      "id": "join-1",
+      "type": "flow.join",
+      "name": "Join",
+      "position": {
+        "x": 1710,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "result-1",
+      "type": "flow.result",
+      "name": "Disposition",
+      "position": {
+        "x": 1970,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "write-result-1",
+      "type": "device.writeVisionResult",
+      "name": "Write Vision Result",
+      "position": {
+        "x": 2250,
+        "y": 210
+      },
+      "parameters": {
+        "deviceId": "virtual-modbus-1",
+        "resultReadyTag": "resultReady",
+        "resultOkTag": "resultOk",
+        "xTag": "resultX",
+        "yTag": "resultY",
+        "rTag": "resultR",
+        "autoConnect": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "wait-trigger-1",
+      "sourcePort": "next",
+      "targetNodeId": "acquire-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "acquire-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "acquire-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "next",
+      "targetNodeId": "if-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "area",
+      "targetNodeId": "if-1",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "if-1",
+      "sourcePort": "true",
+      "targetNodeId": "pass-text-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "if-1",
+      "sourcePort": "false",
+      "targetNodeId": "fail-text-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "pass-text-1",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "fail-text-1",
+      "sourcePort": "next",
+      "targetNodeId": "join-1",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "join-1",
+      "sourcePort": "next",
+      "targetNodeId": "result-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "if-1",
+      "sourcePort": "condition",
+      "targetNodeId": "result-1",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "result-1",
+      "sourcePort": "next",
+      "targetNodeId": "write-result-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "result-1",
+      "sourcePort": "pass",
+      "targetNodeId": "write-result-1",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "x",
+      "targetNodeId": "write-result-1",
+      "targetPort": "x",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "y",
+      "targetNodeId": "write-result-1",
+      "targetPort": "y",
+      "kind": "data"
+    }
+  ]
+}

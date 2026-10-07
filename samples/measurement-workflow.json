@@ -1,0 +1,352 @@
+{
+  "id": "demo-measurement",
+  "name": "VisionStudio V0.20 measurement demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 250
+      },
+      "parameters": {}
+    },
+    {
+      "id": "edge-1",
+      "type": "feature.edge",
+      "name": null,
+      "position": {
+        "x": 260,
+        "y": 430
+      },
+      "parameters": {
+        "lowThreshold": 45,
+        "highThreshold": 130,
+        "roi": {
+          "type": "Rectangle",
+          "x": 20,
+          "y": 340,
+          "width": 600,
+          "height": 120
+        }
+      }
+    },
+    {
+      "id": "line-a",
+      "type": "feature.line",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 80
+      },
+      "parameters": {
+        "houghThreshold": 25,
+        "minLength": 60,
+        "maxGap": 15,
+        "roi": {
+          "type": "Rectangle",
+          "x": 20,
+          "y": 340,
+          "width": 600,
+          "height": 120
+        }
+      }
+    },
+    {
+      "id": "line-b",
+      "type": "feature.line",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 260
+      },
+      "parameters": {
+        "houghThreshold": 20,
+        "minLength": 50,
+        "maxGap": 8,
+        "roi": {
+          "type": "Rectangle",
+          "x": 55,
+          "y": 50,
+          "width": 150,
+          "height": 105
+        }
+      }
+    },
+    {
+      "id": "intersection-1",
+      "type": "geometry.intersection",
+      "name": null,
+      "position": {
+        "x": 610,
+        "y": 120
+      },
+      "parameters": {}
+    },
+    {
+      "id": "angle-1",
+      "type": "geometry.angle",
+      "name": null,
+      "position": {
+        "x": 610,
+        "y": 300
+      },
+      "parameters": {}
+    },
+    {
+      "id": "circle-1",
+      "type": "feature.circle",
+      "name": null,
+      "position": {
+        "x": 900,
+        "y": 80
+      },
+      "parameters": {
+        "minRadius": 55,
+        "maxRadius": 110,
+        "minDist": 40,
+        "edgeThreshold": 100,
+        "centerThreshold": 18
+      }
+    },
+    {
+      "id": "distance-1",
+      "type": "geometry.distance",
+      "name": null,
+      "position": {
+        "x": 1210,
+        "y": 120
+      },
+      "parameters": {}
+    },
+    {
+      "id": "caliper-1",
+      "type": "measure.caliper",
+      "name": null,
+      "position": {
+        "x": 900,
+        "y": 320
+      },
+      "parameters": {
+        "startX": 120,
+        "startY": 240,
+        "endX": 520,
+        "endY": 240,
+        "sampleWidth": 7,
+        "edgeThreshold": 10,
+        "polarity": "Any"
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": null,
+      "position": {
+        "x": 1210,
+        "y": 320
+      },
+      "parameters": {
+        "threshold": 80
+      }
+    },
+    {
+      "id": "rect-1",
+      "type": "measure.rotatedRect",
+      "name": null,
+      "position": {
+        "x": 1510,
+        "y": 320
+      },
+      "parameters": {
+        "minArea": 2000
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "edge-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "edge-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "edge-1",
+      "sourcePort": "next",
+      "targetNodeId": "line-a",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "edge-1",
+      "sourcePort": "image",
+      "targetNodeId": "line-a",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "line-a",
+      "sourcePort": "next",
+      "targetNodeId": "line-b",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "line-b",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "line-b",
+      "sourcePort": "next",
+      "targetNodeId": "intersection-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "line-a",
+      "sourcePort": "line",
+      "targetNodeId": "intersection-1",
+      "targetPort": "lineA",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "line-b",
+      "sourcePort": "line",
+      "targetNodeId": "intersection-1",
+      "targetPort": "lineB",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "intersection-1",
+      "sourcePort": "next",
+      "targetNodeId": "angle-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "line-a",
+      "sourcePort": "line",
+      "targetNodeId": "angle-1",
+      "targetPort": "lineA",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "line-b",
+      "sourcePort": "line",
+      "targetNodeId": "angle-1",
+      "targetPort": "lineB",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "angle-1",
+      "sourcePort": "next",
+      "targetNodeId": "circle-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "circle-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "circle-1",
+      "sourcePort": "next",
+      "targetNodeId": "distance-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "intersection-1",
+      "sourcePort": "point",
+      "targetNodeId": "distance-1",
+      "targetPort": "pointA",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "circle-1",
+      "sourcePort": "center",
+      "targetNodeId": "distance-1",
+      "targetPort": "pointB",
+      "kind": "data"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "distance-1",
+      "sourcePort": "next",
+      "targetNodeId": "caliper-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "caliper-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "caliper-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d11",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "rect-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "rect-1",
+      "targetPort": "image",
+      "kind": "data"
+    }
+  ]
+}

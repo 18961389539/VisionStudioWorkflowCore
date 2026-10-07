@@ -1,0 +1,194 @@
+{
+  "id": "demo-calibration",
+  "name": "VisionStudio V0.20 calibration demo",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "Synthetic Image",
+      "position": {
+        "x": 20,
+        "y": 170
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "Threshold",
+      "position": {
+        "x": 280,
+        "y": 170
+      },
+      "parameters": {
+        "threshold": 128
+      }
+    },
+    {
+      "id": "blob-1",
+      "type": "measure.blob",
+      "name": "Largest Blob",
+      "position": {
+        "x": 540,
+        "y": 170
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    },
+    {
+      "id": "calibration-1",
+      "type": "calibration.planar",
+      "name": "Planar Calibration",
+      "position": {
+        "x": 810,
+        "y": 170
+      },
+      "parameters": {
+        "sourceFrame": "ImagePixel",
+        "targetFrame": "Workpiece",
+        "targetUnit": "mm",
+        "pairsJson": "[{\"imageX\":100,\"imageY\":100,\"worldX\":0,\"worldY\":0},{\"imageX\":320,\"imageY\":100,\"worldX\":22,\"worldY\":0},{\"imageX\":540,\"imageY\":100,\"worldX\":44,\"worldY\":0},{\"imageX\":100,\"imageY\":240,\"worldX\":0,\"worldY\":14},{\"imageX\":320,\"imageY\":240,\"worldX\":22,\"worldY\":14},{\"imageX\":540,\"imageY\":240,\"worldX\":44,\"worldY\":14},{\"imageX\":100,\"imageY\":380,\"worldX\":0,\"worldY\":28},{\"imageX\":320,\"imageY\":380,\"worldX\":22,\"worldY\":28},{\"imageX\":540,\"imageY\":380,\"worldX\":44,\"worldY\":28}]"
+      }
+    },
+    {
+      "id": "transform-point-1",
+      "type": "coordinate.transformPoint",
+      "name": "Transform Point",
+      "position": {
+        "x": 1100,
+        "y": 110
+      },
+      "parameters": {}
+    },
+    {
+      "id": "reference-1",
+      "type": "coordinate.point",
+      "name": "Coordinate Point",
+      "position": {
+        "x": 1100,
+        "y": 330
+      },
+      "parameters": {
+        "x": 20,
+        "y": 10,
+        "frame": "Workpiece",
+        "unit": "mm"
+      }
+    },
+    {
+      "id": "world-distance-1",
+      "type": "coordinate.distance",
+      "name": "Coordinate Distance",
+      "position": {
+        "x": 1410,
+        "y": 210
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "blob-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "blob-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "next",
+      "targetNodeId": "calibration-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "calibration-1",
+      "sourcePort": "next",
+      "targetNodeId": "transform-point-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "blob-1",
+      "sourcePort": "center",
+      "targetNodeId": "transform-point-1",
+      "targetPort": "point",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "calibration-1",
+      "sourcePort": "transform",
+      "targetNodeId": "transform-point-1",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "transform-point-1",
+      "sourcePort": "next",
+      "targetNodeId": "reference-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "reference-1",
+      "sourcePort": "next",
+      "targetNodeId": "world-distance-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "transform-point-1",
+      "sourcePort": "point",
+      "targetNodeId": "world-distance-1",
+      "targetPort": "pointA",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "reference-1",
+      "sourcePort": "point",
+      "targetNodeId": "world-distance-1",
+      "targetPort": "pointB",
+      "kind": "data"
+    }
+  ]
+}
