@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Descriptions, InputNumber, message, Modal, Select, Space, Table, Tag } from 'antd';
+import { Alert, Button, Checkbox, Descriptions, InputNumber, message, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { AlarmRecord, ProductionRuntimeConfig, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
 
@@ -39,13 +39,18 @@ const defaultConfig: ProductionRuntimeConfig = {
   synchronizationGuardRecoveryTimeoutMs: 30000
 };
 
+const severityLabels: Record<string, string> = { Critical: '严重', Error: '错误', Warning: '警告', Info: '信息' };
+
 export default function ProductionPanel({ open, onClose, embedded = false }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
   const [status, setStatus] = useState<ProductionRuntimeStatus>();
   const [config, setConfig] = useState<ProductionRuntimeConfig>(defaultConfig);
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [alarms, setAlarms] = useState<AlarmRecord[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [startError, setStartError] = useState<string>();
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>();
+  const [staleConnection, setStaleConnection] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -56,7 +61,9 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       if (configRes.ok) setConfig(await configRes.json());
       if (jobsRes.ok) setJobs(await jobsRes.json());
       if (alarmsRes.ok) setAlarms(await alarmsRes.json());
-    } catch { /* keep the operator screen alive while the host restarts */ }
+      setLastUpdatedAt(new Date());
+      setStaleConnection(false);
+    } catch { setStaleConnection(true); /* keep the operator screen alive while the host restarts */ }
   }, []);
 
   useEffect(() => {
@@ -66,29 +73,83 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     return () => window.clearInterval(timer);
   }, [open, refresh]);
 
-  const call = async (url: string, method = 'POST', body?: unknown) => {
-    setBusy(true);
+  // 错误原因优先后端的 ProblemDetails.detail；失败信息同时返回调用方，用于持久展示而不是一闪而过
+  const call = async (url: string, method = 'POST', body?: unknown, successMessage = '生产配置已更新', action = 'call') => {
+    setBusy(action);
     try {
       const response = await fetch(url, {
         method,
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      const data = response.status === 204 ? undefined : await response.json();
-      if (!response.ok) throw new Error(data?.error ?? '操作失败');
-      messageApi.success('生产运行时配置已更新');
+      const data = response.status === 204 ? undefined : await response.json().catch(() => undefined);
+      if (!response.ok) throw new Error(data?.detail ?? data?.error ?? `操作失败（HTTP ${response.status}）`);
+      messageApi.success(successMessage);
       await refresh();
-      return data;
+      return { ok: true as const, data };
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '操作失败');
-    } finally { setBusy(false); }
+      const text = error instanceof Error ? error.message : '操作失败';
+      messageApi.error(text);
+      return { ok: false as const, error: text };
+    } finally { setBusy(undefined); }
+  };
+
+  const startProduction = async () => {
+    setStartError(undefined);
+    const result = await call('/api/production/start', 'POST', { jobId: config.jobId }, '生产已启动', 'start');
+    if (!result.ok) setStartError(result.error);
   };
 
   const locked = Boolean(status?.productionLocked);
-  const stateColor = status?.state === 'Running' ? 'green' : status?.state === 'Faulted' ? 'red' : status?.state === 'Recovering' ? 'orange' : 'default';
-  const body = (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      {contextHolder}
+  const state = status?.state ?? 'Stopped';
+  const stateColor = state === 'Running' ? 'green' : state === 'Faulted' ? 'red' : state === 'Recovering' ? 'orange' : state === 'Starting' || state === 'Stopping' ? 'processing' : 'default';
+  const selectedJobId = status?.jobId ?? config.jobId ?? undefined;
+  const activeJob = jobs.find((x) => x.id === selectedJobId);
+  const activeAlarms = alarms.filter((a) => a.active);
+  const criticalAlarms = activeAlarms.filter((a) => a.severity === 'Critical');
+  const latestAlarm = [...activeAlarms].sort((a, b) => Date.parse(b.raisedAt) - Date.parse(a.raisedAt))[0];
+  const jobLabel = activeJob
+    ? `${activeJob.productId ? `${activeJob.productId} / ` : ''}${activeJob.recipeCode ?? activeJob.name ?? activeJob.id}`
+    : selectedJobId ?? '未选择';
+  const jobVersion = status?.lockedJobVersion ?? activeJob?.publishedVersion ?? null;
+  const startBlockedReason = locked
+    ? '生产运行中：启动前需要先停止当前运行。'
+    : !config.jobId
+      ? '尚未选择生产作业：请在“生产配置”中选择已发布的配方版本。'
+      : undefined;
+
+  // 首屏：状态、作业版本、产量与节拍集中在一条横幅上（操作员远距离可读）
+  const hero = (
+    <div className="production-hero">
+      <div className="production-hero-state">
+        <Tag color={stateColor}>{localizeStatus(state)}</Tag>
+        <span className="production-hero-sub">{locked ? `已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : '当前已停止：可以编辑生产配置'}</span>
+      </div>
+      <div className="production-hero-metrics">
+        <div className="production-hero-metric"><b title={jobLabel}>{jobLabel}</b><span>作业 / 配方</span></div>
+        <div className="production-hero-metric"><b>{jobVersion != null ? `V${jobVersion}` : '-'}</b><span>版本</span></div>
+        <div className="production-hero-metric"><b>{status?.cycleCount ?? 0}</b><span>周期数</span></div>
+        <div className="production-hero-metric"><b>{status?.okCount ?? 0}</b><span>合格</span></div>
+        <div className="production-hero-metric"><b>{status?.ngCount ?? 0}</b><span>不合格</span></div>
+        <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>最近耗时（毫秒）</span></div>
+      </div>
+      <span className={`production-hero-updated${staleConnection ? ' stale' : ''}`}>
+        {staleConnection ? '数据更新已中断（主机可能重启中）' : `数据更新于 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '-'}`}
+      </span>
+    </div>
+  );
+
+  const actions = (
+    <div className="production-actions">
+      <Button type="primary" disabled={locked || !config.jobId} loading={busy === 'start'} onClick={() => void startProduction()}>启动生产</Button>
+      <Button danger disabled={!locked} loading={busy === 'stop'} onClick={() => void call('/api/production/stop', 'POST', undefined, '生产已停止', 'stop')}>停止</Button>
+      <Button disabled={state !== 'Faulted'} loading={busy === 'recover'} onClick={() => void call('/api/production/recover', 'POST', undefined, '已发送恢复请求', 'recover')}>恢复</Button>
+      {startBlockedReason && <span className="production-actions-hint">{startBlockedReason}</span>}
+    </div>
+  );
+
+  const monitorTab = (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Alert
         type={locked ? 'warning' : 'info'}
         showIcon
@@ -115,16 +176,14 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       )}
 
       <Descriptions bordered size="small" column={4}>
-        <Descriptions.Item label="状态"><Tag color={stateColor}>{localizeStatus(status?.state ?? 'Unknown')}</Tag></Descriptions.Item>
-        <Descriptions.Item label="周期数">{status?.cycleCount ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="合格 / 不合格">{status?.okCount ?? 0} / {status?.ngCount ?? 0}</Descriptions.Item>
+        <Descriptions.Item label="开始时间">{status?.startedAt ? new Date(status.startedAt).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
+        <Descriptions.Item label="最近周期">{status?.lastCycleAt ? new Date(status.lastCycleAt).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
         <Descriptions.Item label="错误数">{status?.errorCount ?? 0}</Descriptions.Item>
-        <Descriptions.Item label="最近耗时（毫秒）">{(status?.lastDurationMs ?? 0).toFixed(2)}</Descriptions.Item>
         <Descriptions.Item label="看门狗触发次数">{status?.watchdogTrips ?? 0}</Descriptions.Item>
         <Descriptions.Item label="连续失败次数">{status?.consecutiveFailures ?? 0}</Descriptions.Item>
         <Descriptions.Item label="最近判定">{localizeStatus(status?.lastDisposition) ?? '-'}</Descriptions.Item>
-        <Descriptions.Item label="依赖哈希" span={2}>{status?.lockedDependencyManifestHash?.slice(0, 20) ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="运行 ID" span={2}>{status?.currentRunId ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="依赖哈希" span={2}>{status?.lockedDependencyManifestHash?.slice(0, 20) ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="最近错误" span={2}>{status?.lastError ?? '-'}</Descriptions.Item>
         <Descriptions.Item label="PTP 保护">
           <Tag color={!status?.ptpGuard?.enabled ? 'default' : status.ptpGuard.healthy ? 'green' : 'red'}>
@@ -139,64 +198,6 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         </Descriptions.Item>
         <Descriptions.Item label="同步组">{status?.synchronizationGuard?.groups?.length ?? 0}</Descriptions.Item>
       </Descriptions>
-
-      <Space wrap>
-        <span>生产作业</span>
-        <Select
-          style={{ width: 260 }}
-          disabled={locked}
-          value={config.jobId ?? undefined}
-          placeholder="选择已发布的配方"
-          options={jobs.filter(x => x.publishedVersion != null).map(x => ({ value: x.id, label: `${x.productId ? `${x.productId} / ${x.recipeCode ?? x.id} · ` : ''}${x.name} · V${x.publishedVersion}` }))}
-          onChange={(jobId) => setConfig({ ...config, jobId })}
-        />
-        <Checkbox disabled={locked} checked={config.autoStart} onChange={e => setConfig({ ...config, autoStart: e.target.checked })}>自动启动</Checkbox>
-        <Checkbox disabled={locked} checked={config.autoRecover} onChange={e => setConfig({ ...config, autoRecover: e.target.checked })}>自动恢复</Checkbox>
-        <Checkbox disabled={locked} checked={config.ptpDriftGuardEnabled} onChange={e => setConfig({ ...config, ptpDriftGuardEnabled: e.target.checked })}>PTP 漂移保护</Checkbox>
-        <Checkbox disabled={locked} checked={config.synchronizationHealthGuardEnabled} onChange={e => setConfig({ ...config, synchronizationHealthGuardEnabled: e.target.checked })}>同步健康保护</Checkbox>
-      </Space>
-
-      <Space wrap>
-        <span>周期延迟</span><InputNumber disabled={locked} min={0} max={60000} value={config.cycleDelayMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, cycleDelayMs: Number(v ?? 0) })} />
-        <span>看门狗超时</span><InputNumber disabled={locked} min={100} max={600000} value={config.maxCycleMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, maxCycleMs: Number(v ?? 15000) })} />
-        <span>最大连续失败次数</span><InputNumber disabled={locked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => setConfig({ ...config, maxConsecutiveFailures: Number(v ?? 3) })} />
-        <span>恢复延迟</span><InputNumber disabled={locked} min={0} max={600000} value={config.recoveryDelayMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, recoveryDelayMs: Number(v ?? 1000) })} />
-        <span>停止超时</span><InputNumber disabled={locked} min={100} max={60000} value={config.stopTimeoutMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, stopTimeoutMs: Number(v ?? 5000) })} />
-      </Space>
-
-      <Space wrap>
-        <b>PTP 保护</b>
-        <span>统计窗口</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} addonAfter="次" onChange={v => setConfig({ ...config, ptpGuardWindowRuns: Number(v ?? 20) })} />
-        <span>最少样本数</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => setConfig({ ...config, ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
-        <span>最低就绪率</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} addonAfter="%" onChange={v => setConfig({ ...config, ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} />
-        <span>检查周期</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} addonAfter="周期" onChange={v => setConfig({ ...config, ptpGuardCheckEveryCycles: Number(v ?? 10) })} />
-        <Checkbox disabled={locked || !config.ptpDriftGuardEnabled} checked={config.ptpGuardFaultOnMasterClockChange} onChange={e => setConfig({ ...config, ptpGuardFaultOnMasterClockChange: e.target.checked })}>主时钟变更时触发故障</Checkbox>
-      </Space>
-
-      <Space wrap>
-        <b>同步健康保护</b>
-        <span>统计窗口</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardWindowRuns: Number(v ?? 20) })} />
-        <span>最少样本数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
-        <span>最大失败率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} />
-        <span>最大帧超时率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} />
-        <span>连续失败阈值</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} />
-        <span>连续偏差阈值</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} />
-        <span>原生帧丢失率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} />
-        <span>最大缓冲区欠载</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => setConfig({ ...config, synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
-        <span>最大重新同步次数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => setConfig({ ...config, synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
-        <span>序号间隔回退率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} />
-        <span>检查周期</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} addonAfter="周期" onChange={v => setConfig({ ...config, synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} />
-        <span>触发故障连续检查数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} />
-        <span>恢复连续检查数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} />
-        <span>恢复超时</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} />
-      </Space>
-
-      <Space>
-        <Button disabled={locked} loading={busy} onClick={() => call('/api/production/config', 'PUT', config)}>保存配置</Button>
-        <Button type="primary" disabled={locked || !config.jobId} loading={busy} onClick={() => call('/api/production/start', 'POST', { jobId: config.jobId })}>启动生产</Button>
-        <Button danger disabled={!locked} loading={busy} onClick={() => call('/api/production/stop')}>停止</Button>
-        <Button disabled={status?.state !== 'Faulted'} loading={busy} onClick={() => call('/api/production/recover')}>恢复</Button>
-      </Space>
 
       {status?.ptpGuard?.enabled && status.ptpGuard.groups.length > 0 && (
         <>
@@ -237,20 +238,142 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           />
         </>
       )}
+    </Space>
+  );
 
-      <div className="panel-title">告警</div>
-      <Table
-        size="small"
-        rowKey="id"
-        pagination={{ pageSize: 6 }}
-        dataSource={alarms}
-        columns={[
-          { title: '状态', width: 90, render: (_: unknown, a: AlarmRecord) => <Tag color={a.active ? 'red' : 'green'}>{a.active ? '活动' : '已恢复'}</Tag> },
-          { title: '级别', dataIndex: 'severity', width: 90, render: (v: string) => ({ Critical: '严重', Error: '错误', Warning: '警告', Info: '信息' }[v] ?? v) },
-          { title: '代码', dataIndex: 'code', width: 150 },
-          { title: '消息', dataIndex: 'message' },
-          { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
-          { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" onClick={() => call(`/api/alarms/${a.id}/ack`)}>确认</Button> }
+  const alarmsTab = (
+    <Table
+      size="small"
+      rowKey="id"
+      pagination={{ pageSize: 8 }}
+      dataSource={alarms}
+      columns={[
+        { title: '状态', width: 90, render: (_: unknown, a: AlarmRecord) => <Tag color={a.active ? 'red' : 'green'}>{a.active ? '活动' : '已恢复'}</Tag> },
+        { title: '级别', dataIndex: 'severity', width: 90, render: (v: string) => severityLabels[v] ?? v },
+        { title: '代码', dataIndex: 'code', width: 150 },
+        { title: '消息', dataIndex: 'message' },
+        { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
+        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy === `ack:${a.id}`} onClick={() => void call(`/api/alarms/${a.id}/ack`, 'POST', undefined, '告警已确认', `ack:${a.id}`)}>确认</Button> }
+      ]}
+    />
+  );
+
+  const saveRow = (
+    <Space>
+      <Button loading={busy === 'save'} disabled={locked} onClick={() => void call('/api/production/config', 'PUT', config, '生产配置已保存', 'save')}>保存配置</Button>
+      <span className="production-actions-hint">{locked ? '运行期间配置已锁定，停止后可编辑。' : '修改后需保存才会生效。'}</span>
+    </Space>
+  );
+
+  const configTab = (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space wrap>
+        <span>生产作业</span>
+        <Select
+          style={{ width: 320 }}
+          disabled={locked}
+          value={config.jobId ?? undefined}
+          placeholder="选择已发布的配方"
+          options={jobs.filter(x => x.publishedVersion != null).map(x => ({ value: x.id, label: `${x.productId ? `${x.productId} / ${x.recipeCode ?? x.id} · ` : ''}${x.name} · V${x.publishedVersion}` }))}
+          onChange={(jobId) => setConfig({ ...config, jobId })}
+        />
+        <Checkbox disabled={locked} checked={config.autoStart} onChange={e => setConfig({ ...config, autoStart: e.target.checked })}>自动启动</Checkbox>
+        <Checkbox disabled={locked} checked={config.autoRecover} onChange={e => setConfig({ ...config, autoRecover: e.target.checked })}>自动恢复</Checkbox>
+      </Space>
+      <Space wrap>
+        <span>周期延迟</span><InputNumber disabled={locked} min={0} max={60000} value={config.cycleDelayMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, cycleDelayMs: Number(v ?? 0) })} />
+        <span>看门狗超时</span><InputNumber disabled={locked} min={100} max={600000} value={config.maxCycleMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, maxCycleMs: Number(v ?? 15000) })} />
+        <span>最大连续失败次数</span><InputNumber disabled={locked} min={1} max={1000} value={config.maxConsecutiveFailures} onChange={v => setConfig({ ...config, maxConsecutiveFailures: Number(v ?? 3) })} />
+        <span>恢复延迟</span><InputNumber disabled={locked} min={0} max={600000} value={config.recoveryDelayMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, recoveryDelayMs: Number(v ?? 1000) })} />
+        <span>停止超时</span><InputNumber disabled={locked} min={100} max={60000} value={config.stopTimeoutMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, stopTimeoutMs: Number(v ?? 5000) })} />
+      </Space>
+      {saveRow}
+    </Space>
+  );
+
+  const ptpTab = (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Checkbox disabled={locked} checked={config.ptpDriftGuardEnabled} onChange={e => setConfig({ ...config, ptpDriftGuardEnabled: e.target.checked })}>启用 PTP 漂移保护</Checkbox>
+      <Space wrap>
+        <span>统计窗口</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={5} max={500} value={config.ptpGuardWindowRuns} addonAfter="次" onChange={v => setConfig({ ...config, ptpGuardWindowRuns: Number(v ?? 20) })} />
+        <span>最少样本数</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={1} max={config.ptpGuardWindowRuns} value={config.ptpGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => setConfig({ ...config, ptpGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
+        <span>最低就绪率</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={50} max={100} value={Math.round(config.ptpGuardMinimumReadyRate * 1000) / 10} addonAfter="%" onChange={v => setConfig({ ...config, ptpGuardMinimumReadyRate: Number(v ?? 99) / 100 })} />
+        <span>检查周期</span><InputNumber disabled={locked || !config.ptpDriftGuardEnabled} min={1} max={10000} value={config.ptpGuardCheckEveryCycles} addonAfter="周期" onChange={v => setConfig({ ...config, ptpGuardCheckEveryCycles: Number(v ?? 10) })} />
+        <Checkbox disabled={locked || !config.ptpDriftGuardEnabled} checked={config.ptpGuardFaultOnMasterClockChange} onChange={e => setConfig({ ...config, ptpGuardFaultOnMasterClockChange: e.target.checked })}>主时钟变更时触发故障</Checkbox>
+      </Space>
+      {saveRow}
+    </Space>
+  );
+
+  const syncTab = (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Checkbox disabled={locked} checked={config.synchronizationHealthGuardEnabled} onChange={e => setConfig({ ...config, synchronizationHealthGuardEnabled: e.target.checked })}>启用同步健康保护</Checkbox>
+      <Space wrap>
+        <span>统计窗口</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={5} max={500} value={config.synchronizationGuardWindowRuns} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardWindowRuns: Number(v ?? 20) })} />
+        <span>最少样本数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={config.synchronizationGuardWindowRuns} value={config.synchronizationGuardMinimumEvidenceRuns} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMinimumEvidenceRuns: Number(v ?? 5) })} />
+        <span>最大失败率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFailureRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumFailureRate: Number(v ?? 5) / 100 })} />
+        <span>最大帧超时率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} value={config.synchronizationGuardMaximumFrameTimeoutRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumFrameTimeoutRate: Number(v ?? 5) / 100 })} />
+        <span>连续失败阈值</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveFailures} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMaxConsecutiveFailures: Number(v ?? 2) })} />
+        <span>连续偏差阈值</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardMaxConsecutiveSkewViolations} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardMaxConsecutiveSkewViolations: Number(v ?? 3) })} />
+        <span>原生帧丢失率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.05} value={config.synchronizationGuardMaximumNativeFrameLossRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumNativeFrameLossRate: Number(v ?? 0.5) / 100 })} />
+        <span>最大缓冲区欠载</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumBufferUnderruns} onChange={v => setConfig({ ...config, synchronizationGuardMaximumBufferUnderruns: Number(v ?? 0) })} />
+        <span>最大重新同步次数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={1000000} value={config.synchronizationGuardMaximumResynchronizations} onChange={v => setConfig({ ...config, synchronizationGuardMaximumResynchronizations: Number(v ?? 0) })} />
+        <span>序号间隔回退率</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={0} max={50} step={0.1} value={config.synchronizationGuardMaximumSequenceGapRate * 100} addonAfter="%" onChange={v => setConfig({ ...config, synchronizationGuardMaximumSequenceGapRate: Number(v ?? 1) / 100 })} />
+        <span>检查周期</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={10000} value={config.synchronizationGuardCheckEveryCycles} addonAfter="周期" onChange={v => setConfig({ ...config, synchronizationGuardCheckEveryCycles: Number(v ?? 5) })} />
+        <span>触发故障连续检查数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardUnhealthyChecksToFault} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardUnhealthyChecksToFault: Number(v ?? 2) })} />
+        <span>恢复连续检查数</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1} max={100} value={config.synchronizationGuardHealthyChecksToRecover} addonAfter="次" onChange={v => setConfig({ ...config, synchronizationGuardHealthyChecksToRecover: Number(v ?? 3) })} />
+        <span>恢复超时</span><InputNumber disabled={locked || !config.synchronizationHealthGuardEnabled} min={1000} max={600000} step={1000} value={config.synchronizationGuardRecoveryTimeoutMs} addonAfter="毫秒" onChange={v => setConfig({ ...config, synchronizationGuardRecoveryTimeoutMs: Number(v ?? 30000) })} />
+      </Space>
+      {saveRow}
+    </Space>
+  );
+
+  const body = (
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      {contextHolder}
+      {hero}
+      {actions}
+      {state === 'Faulted' && (
+        <Alert
+          type="error"
+          showIcon
+          message={`生产已进入故障状态${status?.consecutiveFailures ? ` · 连续失败 ${status.consecutiveFailures} 次` : ''}`}
+          description={<>
+            <div>原因：{status?.lastError ?? '运行时未提供错误详情，请查看下方保护状态与告警记录。'}</div>
+            <div>下一步：检查设备与同步健康后点击“恢复”；若故障持续，先“停止”再重新“启动”。</div>
+          </>}
+        />
+      )}
+      {startError && (
+        <Alert type="warning" showIcon closable message="启动未成功" description={startError} onClose={() => setStartError(undefined)} />
+      )}
+      {status?.ptpGuard?.enabled && !status.ptpGuard.healthy && (
+        <Alert type="error" showIcon message="PTP 生产保护已阻止运行" description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组未就绪。`} />
+      )}
+      {status?.synchronizationGuard?.enabled && !status.synchronizationGuard.healthy && (
+        <Alert
+          type={status.synchronizationGuard.liveRecoverableOnly ? 'warning' : 'error'}
+          showIcon
+          message="同步健康保护降级"
+          description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组未达标。`}
+        />
+      )}
+      {activeAlarms.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`${activeAlarms.length} 条活动告警${criticalAlarms.length ? ` · ${criticalAlarms.length} 条严重` : ''}`}
+          description={latestAlarm ? `最近：${latestAlarm.message}` : undefined}
+        />
+      )}
+      <Tabs
+        defaultActiveKey="monitor"
+        items={[
+          { key: 'monitor', label: '运行监控', children: monitorTab },
+          { key: 'alarms', label: `告警${activeAlarms.length ? `（${activeAlarms.length}）` : ''}`, children: alarmsTab },
+          { key: 'config', label: '生产配置', children: configTab },
+          { key: 'ptp', label: 'PTP 保护', children: ptpTab },
+          { key: 'sync', label: '同步健康保护', children: syncTab }
         ]}
       />
     </Space>

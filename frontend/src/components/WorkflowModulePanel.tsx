@@ -18,9 +18,9 @@ export default function WorkflowModulePanel(props: Props) {
   const [modules, setModules] = useState<WorkflowModuleDescriptor[]>([]);
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [moduleId, setModuleId] = useState('locate-part');
-  const [name, setName] = useState('Locate Part');
-  const [description, setDescription] = useState('Reusable locating subflow');
-  const [note, setNote] = useState('Initial reusable module');
+  const [name, setName] = useState('定位工件');
+  const [description, setDescription] = useState('可复用定位子流程');
+  const [note, setNote] = useState('初始可复用模块');
   const [activeModuleId, setActiveModuleId] = useState<string>();
   const [activeVersion, setActiveVersion] = useState<number>();
   const [editingModuleId, setEditingModuleId] = useState<string>();
@@ -48,7 +48,7 @@ export default function WorkflowModulePanel(props: Props) {
   }, [props.currentWorkflow, props.selectedNodeId]);
 
   const extract = async () => {
-    if (!selectedNodes.length) return messageApi.warning('Select nodes to extract');
+    if (!selectedNodes.length) return messageApi.warning('请先选择要提取的节点');
     setSaving(true);
     try {
       const response = await fetch('/api/modules/extract', {
@@ -56,29 +56,29 @@ export default function WorkflowModulePanel(props: Props) {
         body: JSON.stringify({ workflow: props.currentWorkflow, selectedNodeIds: selectedNodes, id: moduleId, name, description, note })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail ?? data.error ?? 'Module extraction failed');
+      if (!response.ok) throw new Error(data.detail ?? data.error ?? '提取模块失败');
       const result = data as ExtractWorkflowModuleResult;
       props.onApplyWorkflow(result.replacementWorkflow);
       setActiveModuleId(result.module.id); setActiveVersion(result.version.version);
       await refresh();
-      messageApi.success(`Created ${result.module.name} V${result.version.version} and replaced selected nodes`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Module extraction failed'); }
+      messageApi.success(`已创建 ${result.module.name} V${result.version.version} 并替换所选节点`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '提取模块失败'); }
     finally { setSaving(false); }
   };
 
   const saveVersion = async () => {
-    if (!editingModuleId) return messageApi.warning('Load a module version into Designer first');
+    if (!editingModuleId) return messageApi.warning('请先从模块库将某个版本载入设计器');
     setSaving(true);
     try {
       const response = await fetch(`/api/modules/${encodeURIComponent(editingModuleId)}/versions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflow: props.currentWorkflow, note })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail ?? data.error ?? 'Save module version failed');
+      if (!response.ok) throw new Error(data.detail ?? data.error ?? '保存模块版本失败');
       await refresh();
       setActiveModuleId(editingModuleId); setActiveVersion(data.version);
-      messageApi.success(`Saved ${editingModuleId} V${data.version}`);
-    } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Save module version failed'); }
+      messageApi.success(`已保存 ${editingModuleId} V${data.version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '保存模块版本失败'); }
     finally { setSaving(false); }
   };
 
@@ -100,8 +100,8 @@ export default function WorkflowModulePanel(props: Props) {
           size="small" rowKey="id" pagination={false} dataSource={props.currentWorkflow.nodes}
           rowSelection={{ selectedRowKeys: selectedNodes, onChange: (keys) => setSelectedNodes(keys.map(String)) }}
           columns={[
-            { title: 'Node', dataIndex: 'name', render: (v: unknown, row: WorkflowPayload['nodes'][number]) => String(v ?? row.id) },
-            { title: 'Type', dataIndex: 'type', width: 190 },
+            { title: '节点', dataIndex: 'name', render: (v: unknown, row: WorkflowPayload['nodes'][number]) => String(v ?? row.id) },
+            { title: '类型', dataIndex: 'type', width: 190 },
           ]}
         />
         <Button type="primary" style={{ marginTop: 12 }} loading={saving} onClick={extract}>提取模块并替换所选节点</Button>
@@ -120,8 +120,8 @@ export default function WorkflowModulePanel(props: Props) {
             <code title={version.moduleHash}>{version.moduleHash.slice(0, 12)}…</code>
           </div>
           <Typography.Paragraph>{activeModule?.description || '—'}</Typography.Paragraph>
-          <Table size="small" pagination={false} rowKey="name" dataSource={version.inputs} columns={[{title:'Input',dataIndex:'name'},{title:'Type',dataIndex:'dataType',width:110},{title:'Maps to',render:(_,r)=>`${r.internalNodeId}.${r.internalPort}`}]} />
-          <Table size="small" pagination={false} rowKey="name" dataSource={version.outputs} columns={[{title:'Output',dataIndex:'name'},{title:'Type',dataIndex:'dataType',width:110},{title:'Maps from',render:(_,r)=>`${r.internalNodeId}.${r.internalPort}`}]} />
+          <Table size="small" pagination={false} rowKey="name" dataSource={version.inputs} columns={[{title:'输入',dataIndex:'name'},{title:'类型',dataIndex:'dataType',width:110},{title:'映射到',render:(_,r)=>`${r.internalNodeId}.${r.internalPort}`}]} />
+          <Table size="small" pagination={false} rowKey="name" dataSource={version.outputs} columns={[{title:'输出',dataIndex:'name'},{title:'类型',dataIndex:'dataType',width:110},{title:'映射自',render:(_,r)=>`${r.internalNodeId}.${r.internalPort}`}]} />
           <Space wrap style={{ marginTop: 12 }}>
             <Button type="primary" onClick={() => props.onInsertModule(version)}>插入 V{version.version}</Button>
             <Button onClick={() => { props.onLoadWorkflow(version.workflow); setEditingModuleId(version.moduleId); setNote(`从 V${version.version} 更新 ${version.moduleId}`); }}>在设计器中打开模块内部</Button>
@@ -131,7 +131,7 @@ export default function WorkflowModulePanel(props: Props) {
               onClick={() => props.onUpgradeSelected(version)}
             >将所选模块调用升级到 V{version.version}</Button>
           </Space>
-          <div className="module-immutability-note">Existing module calls remain pinned. Upgrade is an explicit edit and therefore changes the parent Workflow semantic hash.</div>
+          <div className="module-immutability-note">现有模块调用保持版本固定；升级是一次显式编辑，会改变父工作流的语义哈希。</div>
         </> : <Typography.Text type="secondary">暂无可复用模块。</Typography.Text>}
       </section>
     </div>

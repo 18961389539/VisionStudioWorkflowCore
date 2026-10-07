@@ -604,3 +604,52 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .flow-area[data-zoom-level='far'] .port-row > span { visibility: hidden; }
 .flow-area[data-zoom-level='far'] .vision-node-footer { color: transparent; }
 .flow-area[data-zoom-level='mid'] .port-row small { display: none; }
+
+/* ===== 生产运行 / 生产专用界面：首屏状态、操作区与操作员放大 ===== */
+.production-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; padding: 14px 16px; border: 1px solid var(--vs-border-frame); border-radius: 10px; background: var(--vs-bg-card); }
+.production-hero-state { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 190px; }
+.production-hero-state .ant-tag { margin: 0; padding: 2px 14px; font-size: 19px; font-weight: 700; line-height: 28px; }
+.production-hero-sub { font-size: 12px; color: var(--vs-text-4); }
+.production-hero-metrics { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.production-hero-metric { display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+.production-hero-metric b { max-width: 240px; overflow: hidden; font-size: 20px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.production-hero-metric span { font-size: 12px; color: var(--vs-text-4); }
+.production-hero-updated { margin-left: auto; font-size: 12px; color: var(--vs-text-5); }
+.production-hero-updated.stale { color: var(--vs-text-danger); font-weight: 600; }
+.production-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border: 1px dashed var(--vs-border-dashed); border-radius: 10px; }
+.production-actions-hint { font-size: 12px; color: var(--vs-warn-text); }
+
+/* 操作员专用界面：放大状态、指标与控制按钮，远距离可读 */
+.runtime-only-page .production-hero { padding: 18px 20px; }
+.runtime-only-page .production-hero-state .ant-tag { font-size: 22px; line-height: 34px; }
+.runtime-only-page .production-hero-metric b { font-size: 24px; }
+.runtime-only-page .production-actions .ant-btn { height: 44px; padding: 0 26px; font-size: 16px; }
+
+/* ===== 顶栏三段式 / 底部标签页 / 账号入口（2026-10-07 晚 UI 改版） ===== */
+
+/* 中段：模板 + 领域菜单 */
+.topbar-center { flex: none; display: flex; align-items: center; gap: 6px; }
+.topbar-select-label { color: var(--vs-text-4); font-size: 12px; }
+/* 账号按钮（fixed 融入顶栏右端）让出空间，避免盖住“运行” */
+.topbar-right { padding-right: 108px; }
+
+/* 工作流名称：Typography.Text editable 适配 */
+.workflow-name.workflow-name { color: var(--vs-text-1); font-size: 13px; font-weight: 700; }
+.workflow-rename-icon { font-size: 11px; color: var(--vs-text-5); }
+
+/* 账号入口：从右下角浮层改为顶栏右上角轻量按钮 */
+.security-badge { position: fixed; right: 10px; top: 6px; z-index: 1200; padding: 0; border: none; background: transparent; box-shadow: none; }
+.security-badge-trigger { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--vs-border-frame); border-radius: 13px; background: var(--vs-bg-card); color: var(--vs-text-2); font-size: 12px; cursor: pointer; }
+.security-badge-trigger:hover { color: var(--vs-text-1); border-color: #5d94d7; }
+.security-role-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--vs-text-4); }
+.security-role-dot.role-administrator { background: #e35d6a; }
+.security-role-dot.role-engineer { background: #5d94d7; }
+.security-role-dot.role-operator { background: #3f875d; }
+
+/* 底部统一标签页：运行结果 / 校验问题 / 运行观测 + 布局预设切换 */
+.bottom-panel { display: flex; flex-direction: column; }
+.bottom-tabs-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--vs-border-subtle); }
+.bottom-tabs-spacer { flex: 1; }
+.bottom-panel > .run-panel { flex: 1; min-height: 0; overflow: auto; }
+.bottom-issues { flex: 1; min-height: 0; overflow: auto; padding: 4px 10px; }
+.bottom-panel > .run-observability { flex: 1; min-height: 0; overflow: auto; }

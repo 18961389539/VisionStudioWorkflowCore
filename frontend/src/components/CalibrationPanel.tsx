@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tag } from 'antd';
+import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -194,6 +194,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
   const selectedAsset = assets.find((x) => x.id === selectedAssetId);
   const heatMax = Math.max(0.000001, ...(result?.heatmap.map((x) => x.error) ?? [0.000001]));
+  // 未计算时不显示 0 误差：改为“待计算”弱化文本，避免被误读为零误差
+  const pendingFormatter = result ? undefined : () => <Typography.Text type="secondary">待计算</Typography.Text>;
 
   const applyToNode = () => {
     onApplyToSelectedNode({
@@ -225,10 +227,10 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
       <div className="calibration-metrics">
         <Statistic title="标定点数" value={result?.usedPointCount ?? points.filter((x) => x.enabled).length} />
-        <Statistic title={`均方根误差 (${targetUnit})`} value={result?.rmse ?? 0} precision={4} />
-        <Statistic title={`最大误差 (${targetUnit})`} value={result?.maxError ?? 0} precision={4} />
-        <Statistic title={`验证均方根误差 (${targetUnit})`} value={result?.verificationRmse ?? 0} precision={4} />
-        <Statistic title={`验证最大误差 (${targetUnit})`} value={result?.verificationMaxError ?? 0} precision={4} />
+        <Statistic title={`均方根误差 (${targetUnit})`} value={result?.rmse ?? 0} precision={4} formatter={pendingFormatter} />
+        <Statistic title={`最大误差 (${targetUnit})`} value={result?.maxError ?? 0} precision={4} formatter={pendingFormatter} />
+        <Statistic title={`验证均方根误差 (${targetUnit})`} value={result?.verificationRmse ?? 0} precision={4} formatter={pendingFormatter} />
+        <Statistic title={`验证最大误差 (${targetUnit})`} value={result?.verificationMaxError ?? 0} precision={4} formatter={pendingFormatter} />
       </div>
 
       <div className="calibration-grid">

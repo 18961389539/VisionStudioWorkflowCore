@@ -11,6 +11,8 @@ type Props = {
   onSelectNode?: (nodeId: string) => void;
   /** 画布 payload 与提交时不一致：结果对应提交时的流程版本，提醒用户别把旧结果当成新参数的验证 */
   stale?: boolean;
+  /** 嵌入底部标签页时隐藏自带面板标题（外层已有 Tab 名） */
+  embedded?: boolean;
 };
 
 type FilterMode = 'all' | 'failed' | 'warmup';
@@ -36,21 +38,21 @@ function SummaryCell({ summary }: { summary?: Record<string, unknown> }) {
   );
 }
 
-export default function RunPanel({ result, nodeLabels = {}, onSelectNode, stale = false }: Props) {
+export default function RunPanel({ result, nodeLabels = {}, onSelectNode, stale = false, embedded = false }: Props) {
   if (!result) {
     return (
       <div className="run-panel">
-        <div className="panel-title">运行 / 调试结果</div>
+        {!embedded && <div className="panel-title">运行 / 调试结果</div>}
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击“运行”“运行节点”或“调试”来执行工作流" />
       </div>
     );
   }
-  return <RunPanelContent result={result} nodeLabels={nodeLabels} onSelectNode={onSelectNode} stale={stale} />;
+  return <RunPanelContent result={result} nodeLabels={nodeLabels} onSelectNode={onSelectNode} stale={stale} embedded={embedded} />;
 }
 
 type ReportRow = NodeRunReport & { key: string };
 
-function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false }: Props & { result: RunResult }) {
+function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false, embedded = false }: Props & { result: RunResult }) {
   const [filter, setFilter] = useState<FilterMode>('all');
   const [sort, setSort] = useState<SortMode>('sequence');
 
@@ -98,7 +100,7 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false 
 
   return (
     <div className="run-panel">
-      <div className="panel-title">运行 / 调试结果</div>
+      {!embedded && <div className="panel-title">运行 / 调试结果</div>}
       <Alert
         type={!result.success || result.qualityDisposition === 'NG' ? 'error' : (isPaused ? 'info' : 'success')}
         showIcon

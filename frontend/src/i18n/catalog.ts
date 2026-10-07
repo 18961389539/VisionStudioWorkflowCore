@@ -161,6 +161,7 @@ const statusNames: Record<string, string> = {
   Cancelled: '已取消', PENDING: '未完成',
   Healthy: '正常', Warning: '警告', Critical: '严重', Disconnected: '未连接', Connected: '已连接',
   Connecting: '连接中', Faulted: '故障', Ready: '就绪', Busy: '忙碌',
+  Starting: '启动中', Stopping: '停止中', Recovering: '恢复中',
   Administrator: '管理员', Engineer: '工程师', Operator: '操作员',
   OK: '合格', NG: '不合格', Unknown: '未知', Native: '原生', Fallback: '备用',
   Insufficient: '数据不足', Slow: '较慢', VerySlow: '很慢', Same: '无变化', Added: '新增', Missing: '缺失',

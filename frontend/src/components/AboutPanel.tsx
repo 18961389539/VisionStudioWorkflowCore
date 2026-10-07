@@ -1,4 +1,5 @@
 import { Modal, Tag, Typography } from 'antd';
+import { APP_VERSION } from '../version';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -22,7 +23,7 @@ export default function AboutPanel({ open, onClose }: Props) {
   return (
     <Modal open={open} onCancel={onClose} footer={null} width={820} title="关于 VisionStudio">
       <div className="about-intro">
-        <div className="about-title">VisionStudio Workflow Core <Tag color="blue">V0.63</Tag></div>
+        <div className="about-title">VisionStudio Workflow Core <Tag color="blue">V{APP_VERSION}</Tag></div>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
           面向工业视觉的工作流设计与运行平台：在画布上编排节点并编译为可执行的递归中间表示，覆盖图像采集、几何量测、标定、机器人引导、设备交互与生产追溯。
         </Typography.Paragraph>

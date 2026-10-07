@@ -16,10 +16,11 @@ import {
   type OnConnectEnd,
   type OnNodesChange
 } from '@xyflow/react';
-import { Alert, Button, Checkbox, Dropdown, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
+import { Alert, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
 import PropertyPanel from './components/PropertyPanel';
 import RunPanel from './components/RunPanel';
+import RunObservabilityPanel from './components/RunObservabilityPanel';
 import ImageViewer from './components/ImageViewer';
 import CameraPanel from './components/CameraPanel';
 import RobotPanel from './components/RobotPanel';
@@ -41,6 +42,7 @@ import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, 
 import VisionNode from './components/VisionNode';
 import { fallbackCatalog, fallbackCatalogHash, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
 import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
+import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
 import { demos, demoDescriptions, linearDemo, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
@@ -800,6 +802,10 @@ function Editor() {
   // 已保存 / 未保存：用「当前负载快照 vs 上次保存/加载快照」比对，避免在每个改动入口手动打脏标记
   const workflowSnapshot = useMemo(() => JSON.stringify(workflowPayload), [workflowPayload]);
   const [savedSnapshot, setSavedSnapshot] = useState<string>();
+  // 最近一次保存到后端的时间（仅保存成功时记录；批量加载/恢复草稿会清空）
+  const [lastSavedAt, setLastSavedAt] = useState<Date>();
+  // 底部标签页：运行结果 / 校验问题 / 运行观测（校验或运行完成后自动切换）
+  const [bottomTab, setBottomTab] = useState<'result' | 'issues' | 'observability'>('result');
   const [pendingGuard, setPendingGuard] = useState<{ label: string; run: () => void }>();
   const markCleanOnNextChange = useRef(false);
   const dirty = savedSnapshot !== undefined && workflowSnapshot !== savedSnapshot;
@@ -836,6 +842,7 @@ function Editor() {
     setPreviewUrl(undefined);
     setRunImageCatalog(undefined);
     setImageSource('preview');
+    setLastSavedAt(undefined);
     setValidationIssues([]);
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
@@ -901,6 +908,7 @@ function Editor() {
     }));
     if (data.previewAvailable) setPreviewUrl(`/api/runs/${data.runId}/preview?t=${Date.now()}`);
     void loadRunImageCatalog(data.runId);
+    setBottomTab('result');
   };
 
   const execute = async (url: string, body: unknown) => {
@@ -1148,6 +1156,9 @@ function Editor() {
     const issues = serverIssue ? [...clientIssues, serverIssue] : clientIssues;
     setValidationIssues(issues);
     setHighlightedEdgeId(undefined);
+    // 校验结果进入底部“校验问题”标签页并展开结果区，不再用画布浮层遮挡
+    setBottomTab('issues');
+    updateLayout({ bottomCollapsed: false });
     if (issues.length > 0) messageApi.warning(`发现 ${issues.length} 个校验问题，点击列表项可定位`);
     else if (okSummary) messageApi.success(okSummary);
   };
@@ -1209,6 +1220,7 @@ function Editor() {
     setPreviewUrl(undefined);
     setRunImageCatalog(undefined);
     setImageSource('preview');
+    setLastSavedAt(undefined); // 整块加载后旧保存时间不再代表当前文档
     setValidationIssues([]);
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
@@ -1257,6 +1269,7 @@ function Editor() {
     });
     if (response.ok) {
       setSavedSnapshot(workflowSnapshot);
+      setLastSavedAt(new Date());
       messageApi.success('工作流已保存为后端 JSON');
       return true;
     }
@@ -1477,6 +1490,10 @@ function Editor() {
   ];
 
   const toolMenuItems: MenuProps['items'] = [
+    // 目录/插件规模从顶栏收进菜单，降低顶栏视觉权重
+    { type: 'group', label: `节点目录 · ${catalogSource === 'runtime' ? '运行时' : '本地'} ${catalog.length}（schema ${catalogSchemaVersion}）` },
+    { type: 'group', label: `插件 ${plugins.filter((p) => p.loaded).length} 个已加载` },
+    { type: 'divider' },
     { key: 'undo', label: `撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !history.canUndo, onClick: undo },
     { key: 'redo', label: `重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !history.canRedo, onClick: redo },
     { type: 'divider' },
@@ -1514,28 +1531,43 @@ function Editor() {
       {contextHolder}
       <header className="topbar">
         <div className="topbar-left">
-          <div className="brand">VisionStudio <span>V0.63</span></div>
+          <div className="brand">VisionStudio <span>V{APP_VERSION}</span></div>
           <span className="topbar-divider" />
           <div className="workflow-identity" title={`${designerWorkflowName} · ${designerWorkflowId}`}>
-            <span className="workflow-name">{designerWorkflowName}</span>
-            <span className="workflow-id">{designerWorkflowId}</span>
+            {/* 名称可点击重命名；技术 ID 收进悬停详情，不再常驻占位 */}
+            <Typography.Text
+              className="workflow-name"
+              editable={{
+                onChange: (value) => {
+                  const name = value.trim();
+                  if (name && name !== designerWorkflowName) setDesignerWorkflowName(name);
+                },
+                tooltip: '点击重命名工作流',
+                icon: <span className="workflow-rename-icon">✎</span>
+              }}
+            >{designerWorkflowName}</Typography.Text>
             <Tag
               className="workflow-dirty"
               color={dirty ? 'gold' : 'default'}
-              title={dirty ? '有未保存的修改（Ctrl+S 保存）' : '自上次保存或加载以来没有修改'}
+              title={dirty
+                ? '有未保存的修改（Ctrl+S 保存）'
+                : lastSavedAt
+                  ? `已保存 · ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()))}`
+                  : '自上次保存或加载以来没有修改'}
             >
-              {dirty ? '未保存' : '已保存'}
+              {dirty ? '未保存' : lastSavedAt ? `已保存 ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()), { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
             </Tag>
           </div>
         </div>
-        <div className="topbar-right">
-          {/* 示例选择：下拉项附一句话用途说明，打开前就知道每个示例是干什么的 */}
+        {/* 中段：模板创建 + 领域菜单（低频，收敛于此）；目录/插件数量入“工具”菜单 */}
+        <div className="topbar-center">
+          <span className="topbar-select-label">模板</span>
           <Tooltip title={demoDescriptions[demoKey]} placement="bottomLeft">
             <Select<DemoKey>
               value={demoKey}
-              style={{ width: 124 }}
+              style={{ width: 118 }}
               popupMatchSelectWidth={false}
-              onChange={(key) => guardUnsaved('切换示例', () => applyDemo(key))}
+              onChange={(key) => guardUnsaved('切换模板', () => applyDemo(key))}
               optionRender={(option) => {
                 const desc = demoDescriptions[option.value as DemoKey];
                 return (
@@ -1565,10 +1597,7 @@ function Editor() {
             ]}
             />
           </Tooltip>
-          <Tag color={catalogSource === 'runtime' ? 'green' : 'gold'} title={`schema ${catalogSchemaVersion} · ${catalogHash}`}>
-            节点目录 · {catalogSource === 'runtime' ? '运行时' : '本地'} {catalog.length}
-          </Tag>
-          <Tag color="purple">插件 {plugins.filter((p) => p.loaded).length}</Tag>
+          <span className="topbar-divider" />
           <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
             <Button>调试 <span className="menu-caret">▾</span></Button>
           </Dropdown>
@@ -1593,6 +1622,9 @@ function Editor() {
           >
             <Button>工具 <span className="menu-caret">▾</span></Button>
           </Dropdown>
+        </div>
+        {/* 右侧固定：高频动作常驻，账号入口（security-badge）经 CSS 融入本段最右 */}
+        <div className="topbar-right">
           <Button onClick={validate}>校验</Button>
           <Button onClick={save}>保存</Button>
           <Button type="primary" onClick={run} loading={running} disabled={debugBusy}>运行</Button>
@@ -1634,34 +1666,7 @@ function Editor() {
                 />
               </div>
             )}
-            {validationIssues.length > 0 && (
-              <div className="validation-issues" style={{ position: 'absolute', top: 10, right: 10, zIndex: 45, width: 'min(380px, 46%)', maxHeight: '62%', overflow: 'auto', background: 'var(--vs-bg-card)', border: '1px solid var(--vs-border-frame)', borderRadius: 10, boxShadow: '0 6px 18px rgba(0, 0, 0, 0.18)', padding: '8px 10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Typography.Text strong style={{ fontSize: 12 }}>校验问题 · {validationIssues.length}</Typography.Text>
-                  <span style={{ flex: 1 }} />
-                  <Button size="small" type="text" onClick={() => { setValidationIssues([]); setHighlightedEdgeId(undefined); }}>关闭</Button>
-                </div>
-                {validationIssues.map((issue) => {
-                  const locatable = Boolean(issue.nodeId || issue.edgeId);
-                  return (
-                    <div
-                      key={issue.id}
-                      onClick={() => locateIssue(issue)}
-                      title={locatable ? '点击定位到节点/连线' : '该问题无法自动定位，请根据描述排查'}
-                      style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 6, cursor: locatable ? 'pointer' : 'default', fontSize: 12, lineHeight: 1.55 }}
-                    >
-                      <Tag color={issue.source === 'server' ? 'red' : 'orange'} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
-                        {issue.source === 'server' ? '编译器' : '预检'}
-                      </Tag>
-                      <span>
-                        {issue.message}
-                        {locatable && <small style={{ color: 'var(--vs-text-4)' }}>{issue.edgeId ? `（连线 ${issue.edgeId}）` : `（节点 ${issue.nodeId}）`}</small>}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* 校验问题列表已迁至底部“校验问题”标签页：不再用浮层遮挡画布 */}
             <div className="canvas-toolbar" style={{ position: 'absolute', top: 10, left: 10, zIndex: 44 }}>
               <div className="canvas-search">
                 <Input
@@ -1764,26 +1769,30 @@ function Editor() {
             </ReactFlow>
 
             <div className="debug-toolbar" style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 10, background: 'var(--vs-bg-card)', border: '1px solid var(--vs-border-frame)', boxShadow: '0 6px 18px rgba(0, 0, 0, 0.18)' }}>
-              <Tag color={debugStatus.color} style={{ marginInlineEnd: 0 }} title="会话基于启动时的流程快照">调试 · {debugStatus.text}</Tag>
+              {/* 普通状态只保留调试入口；进入会话后展示完整操作条，减少画布常驻浮层 */}
               {!debugSession ? (
                 <>
                   <Button
                     size="small"
-                    type="primary"
-                    disabled={anyBusy || breakpoints.length === 0 || hasModuleCalls}
-                    title={hasModuleCalls ? '含复用模块的流程暂不支持会话调试' : breakpoints.length === 0 ? '请先为至少一个节点设置断点' : '从起点运行到第一个断点并保留现场'}
+                    disabled={anyBusy || hasModuleCalls}
+                    title={hasModuleCalls
+                      ? '含复用模块的流程暂不支持会话调试'
+                      : breakpoints.length === 0
+                        ? '先为节点设置断点（右键节点 → 切换断点），再从起点运行到第一个断点并保留现场'
+                        : '从起点运行到第一个断点并保留现场'}
                     onClick={() => void startDebugSession()}
                   >
-                    开始调试
+                    调试
                   </Button>
                   {hasSideEffectNodes && (
-                    <span title="流程含 PLC 写入 / 机器人命令节点：勾选后才会以真实副作用启动会话">
-                      <Checkbox style={{ fontSize: 12 }} checked={allowSideEffects} onChange={(event) => setAllowSideEffects(event.target.checked)}>允许副作用</Checkbox>
+                    <span title="流程含 PLC 写入 / 机器人命令节点：勾选后调试会话才会真的写设备，否则这类节点将被跳过">
+                      <Checkbox style={{ fontSize: 12 }} checked={allowSideEffects} onChange={(event) => setAllowSideEffects(event.target.checked)}>允许真实设备写入</Checkbox>
                     </span>
                   )}
                 </>
               ) : (
                 <>
+                  <Tag color={debugStatus.color} style={{ marginInlineEnd: 0 }} title="会话基于启动时的流程快照">调试 · {debugStatus.text}</Tag>
                   <Button size="small" type="primary" disabled={anyBusy || debugSession.status !== 'halted'} onClick={() => void continueDebugSession()}>继续</Button>
                   <Button size="small" disabled={anyBusy || debugSession.status === 'faulted' || !selectedId} title={!selectedId ? '先在画布上选择一个节点' : '用会话缓存的输入执行选中节点，不重跑上游'} onClick={() => void runSelectedNodeInSession()}>运行选中节点</Button>
                   <Button size="small" danger disabled={anyBusy} onClick={() => void endDebugSession()}>结束会话</Button>
@@ -1819,17 +1828,18 @@ function Editor() {
             max={LAYOUT_LIMITS.image.max}
             scale={100 / centerHeight}
             invert
-            collapsed={false}
-            collapsible={false}
-            collapseGlyph=""
-            expandGlyph=""
+            collapsed={layout.imageCollapsed}
+            collapsible
+            collapseGlyph="▴"
+            expandGlyph="▾"
             preview={(value) => previewVar('--vs-image-height', `${value}%`)}
             commit={(value) => updateLayout({ image: value, preset: 'custom' })}
             reset={() => updateLayout({ image: presetSizes.image })}
-            onToggleCollapse={() => undefined}
+            onToggleCollapse={() => updateLayout({ imageCollapsed: !layout.imageCollapsed })}
           />
 
-          <div className="preview-area">
+          {/* 折叠时画布独占中央区域；分隔条上的 ▾ 按钮可重新展开 */}
+          <div className="preview-area" style={layout.imageCollapsed ? { display: 'none' } : undefined}>
             <div className="panel-title preview-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span>图像查看器 · 感兴趣区域 / 覆盖层</span>
               <Segmented
@@ -1899,7 +1909,63 @@ function Editor() {
         onToggleCollapse={() => updateLayout({ bottomCollapsed: !layout.bottomCollapsed })}
       />
 
-      <footer className="bottom-panel"><RunPanel result={result} nodeLabels={nodeLabels} onSelectNode={focusNode} stale={resultStale} /></footer>
+      <footer className="bottom-panel">
+        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；右侧为可见的布局预设切换 */}
+        <div className="bottom-tabs-bar">
+          <Segmented
+            size="small"
+            value={bottomTab}
+            onChange={(value) => setBottomTab(value as typeof bottomTab)}
+            options={[
+              { label: '运行结果', value: 'result' },
+              { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
+              { label: '运行观测', value: 'observability' }
+            ]}
+          />
+          <span className="bottom-tabs-spacer" />
+          <Segmented
+            size="small"
+            value={layout.preset}
+            onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
+            options={[
+              { label: '流程编辑', value: 'edit' },
+              { label: '图像调试', value: 'image' },
+              ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
+            ]}
+          />
+        </div>
+        {bottomTab === 'result' && (
+          <RunPanel result={result} nodeLabels={nodeLabels} onSelectNode={focusNode} stale={resultStale} embedded />
+        )}
+        {bottomTab === 'issues' && (
+          validationIssues.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击顶部“校验”检查流程；发现的问题将显示在这里，点击可定位到画布" />
+          ) : (
+            <div className="bottom-issues">
+              {validationIssues.map((issue) => {
+                const locatable = Boolean(issue.nodeId || issue.edgeId);
+                return (
+                  <div
+                    key={issue.id}
+                    onClick={() => locateIssue(issue)}
+                    title={locatable ? '点击定位到节点/连线' : '该问题无法自动定位，请根据描述排查'}
+                    style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 6, cursor: locatable ? 'pointer' : 'default', fontSize: 12, lineHeight: 1.55 }}
+                  >
+                    <Tag color={issue.source === 'server' ? 'red' : 'orange'} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
+                      {issue.source === 'server' ? '编译器' : '预检'}
+                    </Tag>
+                    <span>
+                      {issue.message}
+                      {locatable && <small style={{ color: 'var(--vs-text-4)' }}>{issue.edgeId ? `（连线 ${issue.edgeId}）` : `（节点 ${issue.nodeId}）`}</small>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+        {bottomTab === 'observability' && <RunObservabilityPanel runId={result?.runId} />}
+      </footer>
 
       <Modal
         open={compiledDsl !== undefined}

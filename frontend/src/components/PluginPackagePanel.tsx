@@ -3,6 +3,7 @@ import { Alert, Button, Divider, InputNumber, message, Modal, Select, Space, Tab
 import type { UploadFile } from 'antd/es/upload/interface';
 import type { PluginBenchmarkRun, PluginLoadInfo, PluginPackagePreflightResult, PluginPackageVersionInfo, PluginWorkerPerformanceProfile, PluginWorkerStatus, TrustedPluginPublisher, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { localizeStatus } from '../i18n';
+import { APP_VERSION } from '../version';
 
 type Props = { open: boolean; onClose: () => void; onCatalogRefresh: () => Promise<void> };
 
@@ -207,7 +208,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     finally { setBusy(false); }
   };
 
-  return <Modal open={open} title="插件包管理器 · V0.63" width={1280} footer={null} onCancel={onClose}>
+  return <Modal open={open} title={`插件包管理器 · V${APP_VERSION}`} width={1280} footer={null} onCancel={onClose}>
     {contextHolder}
     <Alert type="info" showIcon message="签名插件包与 CI 性能回归门禁" description="V0.59 保留可重复的 V0.58 进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
 

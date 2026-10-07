@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Popconfirm, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
 import type { SchemaMigrationStatus, StorageBackupDescriptor, StorageCapacityStatus, StorageRestoreResult } from '../types';
-import { localizeStatus } from '../i18n';
+import { getInitialLang, localizeStatus, translate, type MessageKey, type MessageParams } from '../i18n';
+
+// i18n Provider 尚未接线：按已存储的语言偏好静态解析词条（默认中文）
+const t = (key: MessageKey, params?: MessageParams) => translate(getInitialLang(), key, params);
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -34,7 +37,7 @@ export default function StoragePanel({ open, onClose }: Props) {
     ]);
     if (schemaResponse.ok) setSchema(await schemaResponse.json());
     if (backupResponse.ok) setBackups(await backupResponse.json());
-    else if (backupResponse.status === 403) setError('Administrator role is required for backup and restore operations.');
+    else if (backupResponse.status === 403) setError(t('storage.error.adminRequired'));
     else setError(await readProblem(backupResponse));
   };
 
@@ -48,9 +51,9 @@ export default function StoragePanel({ open, onClose }: Props) {
       });
       if (!response.ok) throw new Error(await readProblem(response));
       const data: StorageBackupDescriptor = await response.json();
-      messageApi.success(`Backup ${data.backupId} created`);
+      messageApi.success(t('storage.backupCreated', { id: data.backupId }));
       await refresh();
-    } catch (e) { messageApi.error(e instanceof Error ? e.message : 'Backup failed'); }
+    } catch (e) { messageApi.error(e instanceof Error ? e.message : t('storage.backupFailed')); }
     finally { setBusy(undefined); }
   };
 
@@ -59,17 +62,17 @@ export default function StoragePanel({ open, onClose }: Props) {
     try {
       const response = await fetch(`/api/storage/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error(await readProblem(response));
-      messageApi.success('Backup deleted');
+      messageApi.success(t('storage.backupDeleted'));
       await refresh();
-    } catch (e) { messageApi.error(e instanceof Error ? e.message : 'Delete failed'); }
+    } catch (e) { messageApi.error(e instanceof Error ? e.message : t('storage.deleteFailed')); }
     finally { setBusy(undefined); }
   };
 
   const restore = (backup: StorageBackupDescriptor) => {
     Modal.confirm({
-      title: `Restore ${backup.backupId}?`,
-      content: 'Production Runtime must be stopped. The API enters maintenance mode, restores SQLite with the Online Backup API, and optionally restores preview artifacts. Restart the host after a successful restore.',
-      okText: 'Restore backup', okButtonProps: { danger: true },
+      title: t('storage.restore.title', { id: backup.backupId }),
+      content: t('storage.restore.content'),
+      okText: t('storage.restore.ok'), okButtonProps: { danger: true },
       onOk: async () => {
         setBusy(`restore:${backup.backupId}`);
         try {
@@ -79,9 +82,9 @@ export default function StoragePanel({ open, onClose }: Props) {
           });
           if (!response.ok) throw new Error(await readProblem(response));
           const result: StorageRestoreResult = await response.json();
-          messageApi.success(`已还原备份 ${result.backupId}。建议重启程序。`);
+          messageApi.success(t('storage.restoreDone', { id: result.backupId }));
           await refresh();
-        } catch (e) { messageApi.error(e instanceof Error ? e.message : '还原失败'); }
+        } catch (e) { messageApi.error(e instanceof Error ? e.message : t('storage.restoreFailed')); }
         finally { setBusy(undefined); }
       }
     });

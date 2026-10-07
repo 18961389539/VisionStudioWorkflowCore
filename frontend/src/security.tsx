@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Alert, Button, Card, Input, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Dropdown, Input, Space, Spin, Tag, Typography } from 'antd';
 import { localizeStatus } from './i18n';
 
 type SecurityStatus = { enabled: boolean; bootstrapRequired: boolean; autoLogin: boolean };
@@ -127,12 +127,26 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
 
   return <>
     {children}
+    {/* 账号入口：收起为顶栏右上角的一个轻量按钮（角色色点+显示名），点击展开退出登录 */}
     <div className="security-badge">
-      {status?.enabled ? <Space size={6}>
-        <Tag color={user?.role === 'Administrator' ? 'red' : user?.role === 'Engineer' ? 'blue' : 'green'}>{localizeStatus(user?.role)}</Tag>
-        <span>{user?.displayName ?? user?.username}</span>
-        <Button size="small" loading={busy} onClick={() => void logout()}>退出登录</Button>
-      </Space> : <Tag color="orange">安全功能已关闭</Tag>}
+      {status?.enabled ? (
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'role', label: `角色：${localizeStatus(user?.role) ?? '未知'}`, disabled: true },
+              { key: 'name', label: `用户：${user?.displayName ?? user?.username ?? '未知'}`, disabled: true },
+              { type: 'divider' },
+              { key: 'logout', label: '退出登录', danger: true, onClick: () => void logout() }
+            ]
+          }}
+        >
+          <button type="button" className="security-badge-trigger" title="账号">
+            <span className={`security-role-dot role-${String(user?.role ?? 'operator').toLowerCase()}`} />
+            {user?.displayName ?? user?.username ?? '未登录'}
+          </button>
+        </Dropdown>
+      ) : <Tag color="orange">安全功能已关闭</Tag>}
     </div>
   </>;
 }

@@ -14,6 +14,8 @@ export type LayoutState = {
   rightCollapsed: boolean;
   bottomCollapsed: boolean;
   bottomMaximized: boolean;
+  /** 图像查看区折叠（折叠后画布独占中央区域，可经分隔条按钮展开） */
+  imageCollapsed: boolean;
 };
 
 export const LAYOUT_LIMITS = {
@@ -38,7 +40,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   leftCollapsed: false,
   rightCollapsed: false,
   bottomCollapsed: false,
-  bottomMaximized: false
+  bottomMaximized: false,
+  imageCollapsed: false
 };
 
 /** 中央区域的最小保留宽度/高度，避免分隔条把画布挤没 */
@@ -69,7 +72,8 @@ export function readLayout(): LayoutState {
       leftCollapsed: readFlag(parsed.leftCollapsed, false),
       rightCollapsed: readFlag(parsed.rightCollapsed, false),
       bottomCollapsed: readFlag(parsed.bottomCollapsed, false),
-      bottomMaximized: readFlag(parsed.bottomMaximized, false)
+      bottomMaximized: readFlag(parsed.bottomMaximized, false),
+      imageCollapsed: readFlag(parsed.imageCollapsed, false)
     };
   } catch {
     return DEFAULT_LAYOUT;
