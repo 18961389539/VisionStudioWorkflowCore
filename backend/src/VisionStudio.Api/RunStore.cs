@@ -20,9 +20,16 @@ public sealed class RunStore
 {
     private readonly int _maxRetainedRuns;
     private readonly long _maxTotalBytes;
-    private readonly ConcurrentDictionary<string, RunArtifact> _runs = new();
-    private readonly ConcurrentQueue<string> _order = new();
+    private readonly ConcurrentDictionary<string, Entry> _runs = new();
+    private readonly object _sync = new();
+    /// <summary>
+    /// 写入顺序的伪 LRU 链表（头部最旧），与缓存条目一一对应：覆盖同一 runId 时先摘除旧节点，
+    /// 链表长度恒等于缓存条数——反复覆盖也不会堆积过期项（普通 Queue 只在驱逐时清理，会无限增长）。
+    /// </summary>
+    private readonly LinkedList<string> _order = new();
     private long _totalBytes;
+
+    private sealed record Entry(RunArtifact Artifact, LinkedListNode<string> OrderNode);
 
     public RunStore(int maxRetainedRuns = 32, long maxTotalBytes = 256L * 1024 * 1024)
     {
@@ -44,24 +51,42 @@ public sealed class RunStore
             result.NodeImages ?? []);
         var bytes = EstimateBytes(artifact);
 
-        // 同 runId 重复 Put 时先扣掉旧工件的账，再记新账
-        _order.Enqueue(result.RunId);
-        if (_runs.TryRemove(result.RunId, out var replaced))
-            Interlocked.Add(ref _totalBytes, -EstimateBytes(replaced));
-        _runs[result.RunId] = artifact;
-        Interlocked.Add(ref _totalBytes, bytes);
-
-        // 超过条数或字节预算都从最旧的开始驱逐；_order 里可能残留已驱逐的过期 id，跳过即可。
-        // 若单条工件自身超预算，同样会被驱逐：宁可不缓存这一次，也不让内存被撑爆。
-        while (_runs.Count > _maxRetainedRuns || Interlocked.Read(ref _totalBytes) > _maxTotalBytes)
+        // 替换、记账、驱逐作为一个整体在同一临界区完成：并发 Put 不再互相覆盖字节账
+        // （此前计数读取与更新分离），覆盖同一 runId 时旧链表节点同步摘除，
+        // 也不会再出现"旧顺序项驱逐新版本"或队列项无限堆积的问题。
+        lock (_sync)
         {
-            if (!_order.TryDequeue(out var expired)) break;
-            if (_runs.TryRemove(expired, out var removed))
-                Interlocked.Add(ref _totalBytes, -EstimateBytes(removed));
+            if (_runs.TryGetValue(result.RunId, out var replaced))
+            {
+                _order.Remove(replaced.OrderNode);
+                _totalBytes -= EstimateBytes(replaced.Artifact);
+            }
+            var node = _order.AddLast(result.RunId);
+            _runs[result.RunId] = new Entry(artifact, node);
+            _totalBytes += bytes;
+
+            // 超过条数或字节预算都从最旧的开始驱逐；链表与字典在锁内保持一致，队首即最旧条目。
+            // 若单条工件自身超预算，同样会被驱逐：宁可不缓存这一次，也不让内存被撑爆。
+            while (_runs.Count > _maxRetainedRuns || _totalBytes > _maxTotalBytes)
+            {
+                if (_order.First is not { } oldest) break;
+                _order.RemoveFirst();
+                if (_runs.TryRemove(oldest.Value, out var removed))
+                    _totalBytes -= EstimateBytes(removed.Artifact);
+            }
         }
     }
 
-    public bool TryGet(string runId, out RunArtifact artifact) => _runs.TryGetValue(runId, out artifact!);
+    public bool TryGet(string runId, out RunArtifact artifact)
+    {
+        if (_runs.TryGetValue(runId, out var entry))
+        {
+            artifact = entry.Artifact;
+            return true;
+        }
+        artifact = null!;
+        return false;
+    }
 
     /// <summary>预算只计 JPEG 字节；overlay 为小型矢量数据，忽略不计。</summary>
     private static long EstimateBytes(RunArtifact artifact)

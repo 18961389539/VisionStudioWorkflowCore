@@ -12,7 +12,8 @@ public sealed class CameraFeatureProfileStoreTests
         using var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        Assert.Equal(16, db.CurrentSchemaVersion);
+        // 相机特征配置表自早期迁移引入：断言当前 schema 不低于该版本（版本持续演进，不再锁定具体快照）
+        Assert.True(db.CurrentSchemaVersion >= 16);
 
         await using var connection = await db.OpenConnectionAsync();
         await using var command = connection.CreateCommand();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Statistic, Switch, Table, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraOutputPixelFormat, CameraSettings, CameraTriggerMode, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
@@ -539,14 +539,40 @@ export default function CameraPanel({ open, onClose }: Props) {
           ]} />
 
           <div className="camera-command-row">
-            <Button disabled={!selected} loading={busy === `${selectedId}:open`} onClick={() => selected && command(selected.id, 'open')}>打开设备</Button>
-            <Button type="primary" disabled={!selected} loading={busy === `${selectedId}:start`} onClick={() => selected && command(selected.id, 'start')}>开始采集</Button>
-            <Button disabled={!selected} loading={busy === `${selectedId}:stop`} onClick={() => selected && command(selected.id, 'stop')}>停止采集</Button>
-            <Button disabled={!selected} loading={busy === `${selectedId}:close`} onClick={() => selected && command(selected.id, 'close')}>关闭设备</Button>
-            <Button disabled={!selected || !canTrigger} loading={busy === `${selectedId}:trigger`} onClick={() => selected && command(selected.id, 'trigger')}>触发采集</Button>
+            <Button disabled={!selected} title={!selected ? '请先在列表中选择一台相机' : undefined} loading={busy === `${selectedId}:open`} onClick={() => selected && command(selected.id, 'open')}>打开设备</Button>
+            <Button type="primary" disabled={!selected} title={!selected ? '请先在列表中选择一台相机' : undefined} loading={busy === `${selectedId}:start`} onClick={() => selected && command(selected.id, 'start')}>开始采集</Button>
+            <Button disabled={!selected} title={!selected ? '请先在列表中选择一台相机' : undefined} loading={busy === `${selectedId}:stop`} onClick={() => selected && command(selected.id, 'stop')}>停止采集</Button>
+            <Button disabled={!selected} title={!selected ? '请先在列表中选择一台相机' : undefined} loading={busy === `${selectedId}:close`} onClick={() => selected && command(selected.id, 'close')}>关闭设备</Button>
+            <Button
+              disabled={!selected || !canTrigger}
+              title={!selected ? '请先在列表中选择一台相机' : !canTrigger ? '连续采集模式下无需手动触发；如需手动触发请在“参数”中切换为软件触发或外部触发' : '立即触发一帧'}
+              loading={busy === `${selectedId}:trigger`}
+              onClick={() => selected && command(selected.id, 'trigger')}
+            >触发采集</Button>
+          </div>
+          <div className="camera-command-hint">
+            {!selected
+              ? '请先在列表中选择一台相机'
+              : !canTrigger
+                ? `当前为${selected.settings.triggerMode === 'Continuous' ? '连续采集' : '外部触发'}模式，无法手动触发`
+                : '操作按钮已按设备状态启用'}
           </div>
 
-          {selected && <>
+        </section>
+
+        {/* 右列：实时预览常驻 + 按任务分标签（采集 / 参数 / 同步 / 诊断 / 设备注册 / 媒体库） */}
+        <section className="camera-main-section">
+          <div className="camera-preview-panel">
+            <div className="camera-preview-title"><strong>{selected?.name ?? '未选择相机'}</strong><span>{selected?.id}</span></div>
+            {selected && selected.acquisition.acquisitionState !== 'Stopped' && selected.acquisition.acquisitionState !== 'Faulted' ? <img key={`${selectedId}-${previewTick}`} src={`/api/cameras/${encodeURIComponent(selectedId)}/preview?maxWidth=960&quality=78&t=${previewTick}`} alt={`${selectedId} 预览`} onError={(event) => { event.currentTarget.style.opacity = '0.25'; }} onLoad={(event) => { event.currentTarget.style.opacity = '1'; }} /> : <div className="camera-preview-empty">开始采集后即可预览</div>}
+            <Alert type="info" showIcon message="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
+          </div>
+          <Tabs
+            defaultActiveKey="acquisition"
+            items={[
+              { key: 'acquisition', label: '采集', children: (<>
+          {/* ── 采集：设置 + 关键指标（底层计数器见“诊断”） ── */}
+          {selected ? <>
             <Typography.Title level={5}>采集设置</Typography.Title>
             <Form form={settingsForm} layout="vertical" onFinish={saveSettings}><div className="camera-settings-grid">
               <Form.Item label="曝光时间（μs）" name="exposureUs"><InputNumber min={selected.capabilities.minExposureUs} max={selected.capabilities.maxExposureUs} disabled={!selected.capabilities.exposure} style={{ width: '100%' }} /></Form.Item>
@@ -556,31 +582,26 @@ export default function CameraPanel({ open, onClose }: Props) {
               <Form.Item label="主机输出格式" name="outputPixelFormat"><Select<CameraOutputPixelFormat> options={(selected.capabilities.outputPixelFormats ?? ['Auto', 'Mono8', 'Bgr8']).map((value) => ({ value, label: value === 'Bgr8' ? 'BGR8' : value }))} /></Form.Item>
               <Form.Item label="外部触发线路" name="externalTriggerSource"><Select options={['Line0', 'Line1', 'Line2', 'Line3'].map((value) => ({ value, label: value }))} disabled={editedTriggerMode !== 'External'} /></Form.Item>
             </div><Button htmlType="submit" loading={busy === `${selected.id}:settings`}>应用设置</Button></Form>
-            <div className="camera-stats-grid"><Statistic title="已发布帧数" value={selected.acquisition.framesPublished} /><Statistic title="环形缓冲区覆盖数" value={selected.acquisition.ringOverwrites} /><Statistic title="驱动丢帧数" value={selected.acquisition.driverDroppedFrames} /><Statistic title="超时次数" value={selected.acquisition.frameTimeouts} /><Statistic title="错误数" value={selected.acquisition.acquisitionErrors} /><Statistic title="重连次数" value={selected.acquisition.reconnectCount} /></div>
-            <Space wrap style={{ marginBottom: 8 }}><Tag>相机原生：{selected.acquisition.nativePixelFormat ?? '—'}</Tag><Tag>主机输出：{selected.settings.outputPixelFormat}</Tag></Space>
-            {selected.acquisition.transport && <>
-              <Typography.Title level={5}>厂商传输遥测</Typography.Title>
-              <Space wrap style={{ marginBottom: 8 }}>
-                <Tag color={selected.acquisition.transport.native ? 'green' : 'default'}>{selected.acquisition.transport.native ? 'SDK 原生计数器' : '不可用'}</Tag>
-                <Tag>{selected.acquisition.transport.source}</Tag>
-                {selected.acquisition.transport.throughputMbps != null && <Tag color="blue">{selected.acquisition.transport.throughputMbps.toFixed(1)} Mbit/s</Tag>}
-                {selected.acquisition.transport.receivedBytes != null && <Tag>{formatBytes(selected.acquisition.transport.receivedBytes)}</Tag>}
-                {selected.acquisition.transport.receivedFrames != null && <Tag>接收帧数 {selected.acquisition.transport.receivedFrames}</Tag>}
-                {selected.acquisition.transport.lostFrames != null && <Tag color={selected.acquisition.transport.lostFrames > 0 ? 'red' : 'green'}>丢失帧数 {selected.acquisition.transport.lostFrames}</Tag>}
-                {selected.acquisition.transport.failedFrames != null && <Tag color={selected.acquisition.transport.failedFrames > 0 ? 'red' : 'green'}>失败帧数 {selected.acquisition.transport.failedFrames}</Tag>}
-                {selected.acquisition.transport.bufferUnderruns != null && <Tag color={selected.acquisition.transport.bufferUnderruns > 0 ? 'red' : 'green'}>缓冲区欠载 {selected.acquisition.transport.bufferUnderruns}</Tag>}
-                {selected.acquisition.transport.lostPackets != null && <Tag color={selected.acquisition.transport.lostPackets > 0 ? 'orange' : 'green'}>丢包数 {selected.acquisition.transport.lostPackets}</Tag>}
-                {selected.acquisition.transport.failedPackets != null && <Tag color={selected.acquisition.transport.failedPackets > 0 ? 'orange' : 'green'}>失败包数 {selected.acquisition.transport.failedPackets}</Tag>}
-                {selected.acquisition.transport.resendRequests != null && <Tag>重发请求数 {selected.acquisition.transport.resendRequests}</Tag>}
-                {selected.acquisition.transport.resentPackets != null && <Tag>已重发包数 {selected.acquisition.transport.resentPackets}</Tag>}
-                {selected.acquisition.transport.resynchronizations != null && <Tag color={selected.acquisition.transport.resynchronizations > 0 ? 'red' : 'green'}>重新同步次数 {selected.acquisition.transport.resynchronizations}</Tag>}
-              </Space>
-              {selected.acquisition.transport.error && <Alert type="info" showIcon message={selected.acquisition.transport.error} style={{ marginBottom: 8 }} />}
-            </>}
-            {selected.acquisition.runtimeError && <Alert type="warning" showIcon message={selected.acquisition.runtimeError} />}
-          </>}
 
-          {selected && ['basler-pylon', 'hikrobot-mvs'].includes(selected.driver) && <>
+            <div className="camera-stats-grid">
+              <Statistic title="帧率" value={selected.acquisition.actualFps} precision={1} suffix="fps" />
+              <Statistic title="丢帧" value={selected.acquisition.ringOverwrites + selected.acquisition.driverDroppedFrames} />
+              <Statistic title="已发布帧数" value={selected.acquisition.framesPublished} />
+              <Statistic title="重连次数" value={selected.acquisition.reconnectCount} />
+            </div>
+            <Space wrap style={{ marginBottom: 8 }}>
+              <Tag color={stateColor[selected.state] ?? 'default'}>设备 {localizeStatus(selected.state)}</Tag>
+              <Tag color={acquisitionColor[selected.acquisition.acquisitionState] ?? 'default'}>采集 {localizeStatus(selected.acquisition.acquisitionState)}</Tag>
+              <Tag>相机原生：{selected.acquisition.nativePixelFormat ?? '—'}</Tag>
+              <Tag>主机输出：{selected.settings.outputPixelFormat}</Tag>
+            </Space>
+            {selected.acquisition.runtimeError && <Alert type="warning" showIcon message={selected.acquisition.runtimeError} style={{ marginBottom: 8 }} />}
+            {selected.acquisition.transport?.error && <Alert type="info" showIcon message={selected.acquisition.transport.error} style={{ marginBottom: 8 }} />}
+          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧选择一台相机" />}
+              </>) },
+              { key: 'parameters', label: '参数', children: (<>
+          {/* ── 参数：厂商调试配置（触发 / 闪光灯 / 功能浏览器） ── */}
+          {selected && ['basler-pylon', 'hikrobot-mvs'].includes(selected.driver) ? <>
             <Typography.Title level={5}>触发 / 闪光灯调试</Typography.Title>
             <Alert type="info" showIcon style={{ marginBottom: 10 }} message="修改传输或 I/O 功能前，请先停止采集" description="调试配置会适配 Basler/Hikrobot GenICam/MVS 的常见功能。对于不支持的功能，系统会跳过并报告，不会猜测配置值。" />
             {selected.state === 'Closed' ? <Alert type="warning" showIcon message="请先打开相机以读取调试功能" /> : commissioning && <>
@@ -633,8 +654,9 @@ export default function CameraPanel({ open, onClose }: Props) {
                 { title: '', width: 64, render: (_: unknown, row) => <Button size="small" disabled={!row.writable || !row.profileEligible || selected.state !== 'Open'} loading={busy === `feature:${row.key}`} onClick={() => setFeature(row)}>设置</Button> }
               ]} />
             </>}
-          </>}
-
+          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={selected ? '该相机驱动无厂商调试配置（仅 Basler / Hikrobot 支持）' : '请在左侧选择一台相机'} />}
+              </>) },
+              { key: 'sync', label: '同步', children: (<>
           <Typography.Title level={5}>多相机同步</Typography.Title>
           <Alert type="info" showIcon message="PTP + GigE Vision Action Command" description="创建使用相同驱动的同步组，为每台相机设置一致的 Action 密钥，将 TriggerSource 设为 Action1，然后发送立即或定时广播。系统优先使用设备 / PTP 时间戳计算偏差；设备时间戳不可用时才回退到主机接收时间。" style={{ marginBottom: 10 }} />
           <Space wrap style={{ marginBottom: 8 }}>
@@ -680,6 +702,37 @@ export default function CameraPanel({ open, onClose }: Props) {
               <Statistic title="耗时 P95" value={syncStatistics.p95DurationMs ?? 0} precision={1} suffix="毫秒" />
             </div>
             <Typography.Text type="secondary">PTP 计时：{syncStatistics.devicePtpRuns} 次 · 主机接收时间回退：{syncStatistics.hostArrivalRuns} 次 · 失败：{syncStatistics.failedRuns} 次 · 已取消：{syncStatistics.cancelledRuns} 次</Typography.Text>
+          </>}
+              </>) },
+              { key: 'diagnostics', label: '诊断', children: (<>
+          {/* 底层采集计数器与厂商传输遥测：属于高级诊断，从主区域收起 */}
+          {selected && <>
+            <div className="camera-stats-grid">
+              <Statistic title="已发布帧数" value={selected.acquisition.framesPublished} />
+              <Statistic title="环形缓冲区覆盖数" value={selected.acquisition.ringOverwrites} />
+              <Statistic title="驱动丢帧数" value={selected.acquisition.driverDroppedFrames} />
+              <Statistic title="帧超时次数" value={selected.acquisition.frameTimeouts} />
+              <Statistic title="采集错误数" value={selected.acquisition.acquisitionErrors} />
+              <Statistic title="重连次数" value={selected.acquisition.reconnectCount} />
+            </div>
+            {selected.acquisition.transport && <>
+              <Typography.Title level={5}>厂商传输遥测</Typography.Title>
+              <Space wrap style={{ marginBottom: 8 }}>
+                <Tag color={selected.acquisition.transport.native ? 'green' : 'default'}>{selected.acquisition.transport.native ? 'SDK 原生计数器' : '不可用'}</Tag>
+                <Tag>{selected.acquisition.transport.source}</Tag>
+                {selected.acquisition.transport.throughputMbps != null && <Tag color="blue">{selected.acquisition.transport.throughputMbps.toFixed(1)} Mbit/s</Tag>}
+                {selected.acquisition.transport.receivedBytes != null && <Tag>{formatBytes(selected.acquisition.transport.receivedBytes)}</Tag>}
+                {selected.acquisition.transport.receivedFrames != null && <Tag>接收帧数 {selected.acquisition.transport.receivedFrames}</Tag>}
+                {selected.acquisition.transport.lostFrames != null && <Tag color={selected.acquisition.transport.lostFrames > 0 ? 'red' : 'green'}>丢失帧数 {selected.acquisition.transport.lostFrames}</Tag>}
+                {selected.acquisition.transport.failedFrames != null && <Tag color={selected.acquisition.transport.failedFrames > 0 ? 'red' : 'green'}>失败帧数 {selected.acquisition.transport.failedFrames}</Tag>}
+                {selected.acquisition.transport.bufferUnderruns != null && <Tag color={selected.acquisition.transport.bufferUnderruns > 0 ? 'red' : 'green'}>缓冲区欠载 {selected.acquisition.transport.bufferUnderruns}</Tag>}
+                {selected.acquisition.transport.lostPackets != null && <Tag color={selected.acquisition.transport.lostPackets > 0 ? 'orange' : 'green'}>丢包数 {selected.acquisition.transport.lostPackets}</Tag>}
+                {selected.acquisition.transport.failedPackets != null && <Tag color={selected.acquisition.transport.failedPackets > 0 ? 'orange' : 'green'}>失败包数 {selected.acquisition.transport.failedPackets}</Tag>}
+                {selected.acquisition.transport.resendRequests != null && <Tag>重发请求数 {selected.acquisition.transport.resendRequests}</Tag>}
+                {selected.acquisition.transport.resentPackets != null && <Tag>已重发包数 {selected.acquisition.transport.resentPackets}</Tag>}
+                {selected.acquisition.transport.resynchronizations != null && <Tag color={selected.acquisition.transport.resynchronizations > 0 ? 'red' : 'green'}>重新同步次数 {selected.acquisition.transport.resynchronizations}</Tag>}
+              </Space>
+            </>}
           </>}
           <Space wrap style={{ marginTop: 10, marginBottom: 6 }}><Typography.Text strong>PTP 计时诊断</Typography.Text><Button size="small" onClick={() => refreshSyncPtpDiagnostics()} disabled={!selectedSyncId}>刷新 PTP</Button></Space>
           {syncPtpDiagnostics && <>
@@ -778,6 +831,8 @@ export default function CameraPanel({ open, onClose }: Props) {
             <Button htmlType="submit" loading={busy === 'sync-save'}>保存同步组</Button>
           </Form>
 
+              </>) },
+              { key: 'registration', label: '设备注册', children: (<>
           <Typography.Title level={5}>厂商相机</Typography.Title>
           <Alert type="info" showIcon message="运行时加载的 SDK 适配器" description="Basler pylon 和 Hikrobot MVS 将通过本机已安装的 SDK 进行发现。VisionStudio 不会重新分发厂商 DLL。" style={{ marginBottom: 10 }} />
           <Space wrap style={{ marginBottom: 8 }}>
@@ -807,6 +862,8 @@ export default function CameraPanel({ open, onClose }: Props) {
             <Button htmlType="submit" loading={busy === 'register'}>注册</Button>
           </Form>
 
+              </>) },
+              { key: 'media', label: '媒体库', children: (<>
           <Typography.Title level={5}>媒体库</Typography.Title>
           <Space wrap style={{ marginBottom: 8 }}>
             <Tag color="blue">{mediaStatus?.collectionCount ?? 0} 个集合</Tag><Tag>{mediaStatus?.itemCount ?? 0} 张图像</Tag><Tag color="red">{mediaStatus?.ngItemCount ?? 0} 个 NG</Tag><Tag>{formatBytes(mediaStatus?.totalBytes ?? 0)} / {formatBytes(mediaStatus?.maxLibraryBytes ?? 0)}</Tag>
@@ -830,15 +887,16 @@ export default function CameraPanel({ open, onClose }: Props) {
             { title: '图像', dataIndex: 'name', ellipsis: true }, { title: '集合', dataIndex: 'collection', width: 110 }, { title: '大小', width: 80, render: (_: unknown, row) => formatBytes(row.bytes) },
             { title: '', width: 70, render: (_: unknown, row) => <Popconfirm title="确定删除此媒体项吗？" okText="删除" cancelText="取消" onConfirm={() => deleteMedia(row)}><Button size="small" danger loading={busy === `delete:${row.relativePath}`}>删除</Button></Popconfirm> }
           ]} />
-        </section>
 
-        <section className="camera-preview-panel">
-          <div className="camera-preview-title"><strong>{selected?.name ?? '未选择相机'}</strong><span>{selected?.id}</span></div>
-          {selected && selected.acquisition.acquisitionState !== 'Stopped' && selected.acquisition.acquisitionState !== 'Faulted' ? <img key={`${selectedId}-${previewTick}`} src={`/api/cameras/${encodeURIComponent(selectedId)}/preview?maxWidth=960&quality=78&t=${previewTick}`} alt={`${selectedId} 预览`} onError={(event) => { event.currentTarget.style.opacity = '0.25'; }} onLoad={(event) => { event.currentTarget.style.opacity = '1'; }} /> : <div className="camera-preview-empty">开始采集后即可预览</div>}
-          <Alert type="info" showIcon message="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
-          <div className="media-preview-title"><strong>所选媒体</strong><span>{selectedMedia?.source ?? '—'}</span></div>
-          {selectedMedia ? <img className="media-preview-image" src={`/api/media/preview?path=${encodeURIComponent(selectedMedia.relativePath)}`} alt={selectedMedia.name} /> : <div className="media-preview-empty">选择最近样本或 NG 样本进行预览</div>}
-          {selectedMedia && <Space wrap><Tag color={labelColor[selectedMedia.label]}>{labelText[selectedMedia.label] ?? selectedMedia.label}</Tag><Button size="small" onClick={() => form.setFieldsValue({ source: selectedMedia.source })}>用作文件相机来源</Button></Space>}
+          {/* 所选媒体预览：与媒体库同属一个任务上下文 */}
+          <div className="media-preview-panel">
+            <div className="media-preview-title"><strong>所选媒体</strong><span>{selectedMedia?.source ?? '—'}</span></div>
+            {selectedMedia ? <img className="media-preview-image" src={`/api/media/preview?path=${encodeURIComponent(selectedMedia.relativePath)}`} alt={selectedMedia.name} /> : <div className="media-preview-empty">选择最近样本或 NG 样本进行预览</div>}
+            {selectedMedia && <Space wrap><Tag color={labelColor[selectedMedia.label]}>{labelText[selectedMedia.label] ?? selectedMedia.label}</Tag><Button size="small" onClick={() => form.setFieldsValue({ source: selectedMedia.source })}>用作文件相机来源</Button></Space>}
+          </div>
+              </>) }
+            ]}
+          />
         </section>
       </div>
     </Modal>

@@ -48,11 +48,37 @@ public sealed class WorkflowDebugSession : IDisposable
     public VisionRunOptions Options { get; }
     public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
     public DateTimeOffset LastActivityAt { get; private set; } = DateTimeOffset.UtcNow;
-    public bool Disposed { get; private set; }
+    public bool Disposed => _disposed;
 
     internal VisionWorkflowData Data { get; }
     internal WorkflowPlanCache.Lease PlanLease { get; }
     internal SemaphoreSlim Gate { get; } = new(1, 1);
+
+    private volatile bool _disposed;
+    private int _releaseStarted;
+    private volatile CancellationTokenSource? _activeExecution;
+
+    /// <summary>
+    /// 登记当前执行片段（continue / run-node），供 <see cref="ReleaseAsync"/> 取消并等待退出。
+    /// 必须在持有 <see cref="Gate"/> 时调用；dispose 的注册在释放时清空登记。
+    /// </summary>
+    internal ExecutionRegistration BeginExecution(CancellationToken ct)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _activeExecution = cts;
+        return new ExecutionRegistration(this, cts);
+    }
+
+    internal sealed class ExecutionRegistration(WorkflowDebugSession session, CancellationTokenSource cts) : IDisposable
+    {
+        public CancellationToken Token => cts.Token;
+
+        public void Dispose()
+        {
+            if (ReferenceEquals(session._activeExecution, cts)) session._activeExecution = null;
+            cts.Dispose();
+        }
+    }
 
     public void Touch() => LastActivityAt = DateTimeOffset.UtcNow;
 
@@ -76,14 +102,28 @@ public sealed class WorkflowDebugSession : IDisposable
             LastActivityAt);
     }
 
-    public void Dispose()
+    /// <summary>
+    /// 释放会话：先阻止新操作（Disposed 门），再取消并等待正在执行的 continue / run-node 退出，
+    /// 最后释放计划租约与原生图像资源。执行不再可能读到已释放的 Mat / 计划；
+    /// 执行收尾的 Gate.Release() 也不会撞上已销毁的信号量（本实现不销毁 Gate）。
+    /// </summary>
+    public async Task ReleaseAsync()
     {
-        if (Disposed) return;
-        Disposed = true;
-        Gate.Dispose();
-        PlanLease.Dispose();
-        Data.Dispose();
+        if (Interlocked.Exchange(ref _releaseStarted, 1) != 0) return;
+        _disposed = true;
+        try { _activeExecution?.Cancel(); }
+        catch (ObjectDisposedException) { /* 与执行收尾的登记释放竞争：等待其退出即可 */ }
+        await Gate.WaitAsync();
+        try
+        {
+            PlanLease.Dispose();
+            Data.Dispose();
+        }
+        finally { Gate.Release(); }
     }
+
+    /// <summary>同步桥（测试 / 非 async 调用点）：等待执行退出的语义与 ReleaseAsync 相同。</summary>
+    public void Dispose() => ReleaseAsync().GetAwaiter().GetResult();
 }
 
 /// <summary>
@@ -157,13 +197,16 @@ public sealed class WorkflowDebugSessionService(
         await session.Gate.WaitAsync(ct);
         try
         {
+            // 拿锁后复查：释放可能在排队等待期间开始——此时已不能触碰被释放的资源
+            EnsureAlive(session);
+            using var execution = session.BeginExecution(ct);
             if (session.Data.Error is not null)
                 throw new InvalidOperationException($"Debug session is faulted: {session.Data.Error}");
             if (!session.Data.Halted)
                 throw new InvalidOperationException("Debug session is not halted; there is nothing to continue.");
 
             session.Data.ResumeFromHalt();
-            return await RunSegmentAsync(session, resetTimeline: false, ct);
+            return await RunSegmentAsync(session, resetTimeline: false, execution.Token);
         }
         finally { session.Gate.Release(); }
     }
@@ -180,6 +223,9 @@ public sealed class WorkflowDebugSessionService(
         await session.Gate.WaitAsync(ct);
         try
         {
+            // 拿锁后复查：释放可能在排队等待期间开始——此时已不能触碰被释放的资源
+            EnsureAlive(session);
+            using var execution = session.BeginExecution(ct);
             session.Touch();
             var runId = Guid.NewGuid().ToString("N");
             var startedAt = DateTimeOffset.UtcNow;
@@ -188,7 +234,7 @@ public sealed class WorkflowDebugSessionService(
             try
             {
                 session.Data.ForceExecuteNode(node.Id);
-                var outcome = await nodeRuntime.ExecuteAsync(session.Data, node.Id, ct);
+                var outcome = await nodeRuntime.ExecuteAsync(session.Data, node.Id, execution.Token);
                 if (outcome != VisionNodeRuntimeOutcome.Executed)
                     error = $"Node '{node.Id}' was not executed ({outcome}).";
             }
@@ -202,6 +248,23 @@ public sealed class WorkflowDebugSessionService(
             }
             total.Stop();
             return BuildResult(runId, session.Data, success: error is null, total.Elapsed.TotalMilliseconds, startedAt, error);
+        }
+        finally { session.Gate.Release(); }
+    }
+
+    /// <summary>
+    /// 会话快照：与执行共享同一 Gate，避免在 continue / run-node 执行中或会话释放中
+    /// 读取正在变化/已释放的原生资源；执行期间调用会等待当前片段完成。
+    /// </summary>
+    public async Task<DebugSessionSnapshot> SnapshotAsync(WorkflowDebugSession session, CancellationToken ct = default)
+    {
+        EnsureAlive(session);
+        await session.Gate.WaitAsync(ct);
+        try
+        {
+            EnsureAlive(session);
+            session.Touch();
+            return session.Snapshot();
         }
         finally { session.Gate.Release(); }
     }

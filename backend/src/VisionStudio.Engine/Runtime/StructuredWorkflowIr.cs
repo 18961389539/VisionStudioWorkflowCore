@@ -62,6 +62,8 @@ internal sealed class StructuredWorkflowIrBuilder
 {
     private readonly StructuredControlGraph _graph;
     private readonly HashSet<string> _claimed = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>已配对的 If/Parallel Join：其块被处理后由外层序列直接消费，不再视为“意外 Join”。</summary>
+    private readonly HashSet<string> _pairedJoins = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _visualOrder = [];
     private readonly List<StructuredControlRegion> _regions = [];
 
@@ -95,7 +97,12 @@ internal sealed class StructuredWorkflowIrBuilder
                 return new StructuredSequenceIr(items);
 
             var node = _graph.Node(currentId);
-            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) && stopJoinId is not null)
+            // 分支内部的合法 Join 只有本层边界（stopJoinId，上一行已处理）与刚处理完的嵌套块
+            // 自己的配对 Join（_pairedJoins，下一轮循环会把它作为汇合点正常消费）。
+            // 其余任何 Join 都属于越界/共享结构，必须拒绝。
+            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase)
+                && stopJoinId is not null
+                && !_pairedJoins.Contains(node.Id))
                 throw new InvalidOperationException(
                     $"Structured branch '{ownerId}' reached unexpected Join '{node.Id}' before its paired Join '{stopJoinId}'.");
 
@@ -130,6 +137,9 @@ internal sealed class StructuredWorkflowIrBuilder
                         ["true"] = trueBranch.NodeIds,
                         ["false"] = falseBranch.NodeIds
                     }));
+                // 自己的 Join 已配对：下一轮循环直接消费它（嵌套块位于外层分支内时，
+                // 内层 Join 是合法路径点，而不是“意外 Join”）
+                _pairedJoins.Add(joinId);
                 currentId = joinId;
                 continue;
             }
@@ -162,6 +172,9 @@ internal sealed class StructuredWorkflowIrBuilder
                         ["branch1"] = branch1.NodeIds,
                         ["branch2"] = branch2.NodeIds
                     }));
+                // 自己的 Join 已配对：下一轮循环直接消费它（嵌套块位于外层分支内时，
+                // 内层 Join 是合法路径点，而不是“意外 Join”）
+                _pairedJoins.Add(joinId);
                 currentId = joinId;
                 continue;
             }

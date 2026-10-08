@@ -17,10 +17,11 @@ public sealed class StorageMaintenanceTests
         await db.EnsureInitializedAsync();
         var status = await db.GetSchemaStatusAsync();
 
-        Assert.Equal(15, status.CurrentVersion);
-        Assert.Equal(15, status.TargetVersion);
+        // schema 版本随迁移演进（当前 20）：断言跟随实现常量而非硬编码快照
+        Assert.Equal(db.CurrentSchemaVersion, status.CurrentVersion);
+        Assert.Equal(db.CurrentSchemaVersion, status.TargetVersion);
         Assert.True(status.UpToDate);
-        Assert.Equal(15, status.History.Count);
+        Assert.Equal(db.CurrentSchemaVersion, status.History.Count);
         Assert.All(status.History, item => Assert.False(item.Baselined));
         Assert.All(status.History, item => Assert.Equal(64, item.Checksum.Length));
     }
@@ -50,10 +51,11 @@ CREATE TABLE run_traces(run_id TEXT PRIMARY KEY,started_at TEXT NOT NULL DEFAULT
         await db.EnsureInitializedAsync();
         var status = await db.GetSchemaStatusAsync();
 
-        Assert.Equal(15, status.CurrentVersion);
+        // schema 版本随迁移演进（当前 20）：断言跟随实现常量而非硬编码快照
+        Assert.Equal(db.CurrentSchemaVersion, status.CurrentVersion);
         Assert.True(status.History.Where(x => x.Version <= 3).All(x => x.Baselined));
         Assert.All(status.History.Where(x => x.Version > 3), x => Assert.False(x.Baselined));
-        Assert.Equal(15, status.History.Max(x => x.Version));
+        Assert.Equal(db.CurrentSchemaVersion, status.History.Max(x => x.Version));
     }
 
     [Fact]

@@ -152,7 +152,8 @@ VALUES($run,$started,'Test','job-a',1,'wf','WF','hash','Complete',$disp,2.0,1,0,
         Assert.True(trace.HasReplayInput);
         Assert.Equal("n1", trace.ReplaySourceNodeId);
         Assert.NotNull(store.FindReplayInputPath("replay-artifact"));
-        Assert.Equal(17, (await db.GetSchemaStatusAsync()).CurrentVersion);
+        // schema 版本随迁移演进（当前 20）：断言跟随实现常量而非硬编码快照
+        Assert.Equal(db.CurrentSchemaVersion, (await db.GetSchemaStatusAsync()).CurrentVersion);
 
         await using var connection = await db.OpenConnectionAsync();
         Assert.Equal(1L, await ScalarLongAsync(connection, "SELECT has_replay_input FROM run_traces WHERE run_id='replay-artifact';"));

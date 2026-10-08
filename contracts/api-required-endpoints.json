@@ -506,15 +506,15 @@
       "method": "post"
     },
     {
-      "path": "/api/jobs/{id}/versions/{fromVersion:int}/diff/{toVersion:int}",
+      "path": "/api/jobs/{id}/versions/{fromVersion}/diff/{toVersion}",
       "method": "get"
     },
     {
-      "path": "/api/jobs/{id}/versions/{version:int}/validation-candidates",
+      "path": "/api/jobs/{id}/versions/{version}/validation-candidates",
       "method": "get"
     },
     {
-      "path": "/api/jobs/{id}/versions/{version:int}/validation",
+      "path": "/api/jobs/{id}/versions/{version}/validation",
       "method": "post"
     },
     {
@@ -538,7 +538,7 @@
       "method": "post"
     },
     {
-      "path": "/api/jobs/{id}/versions/{version:int}/parameterization",
+      "path": "/api/jobs/{id}/versions/{version}/parameterization",
       "method": "get"
     },
     {
@@ -554,7 +554,7 @@
       "method": "get"
     },
     {
-      "path": "/api/modules/{id}/versions/{version:int}",
+      "path": "/api/modules/{id}/versions/{version}",
       "method": "get"
     },
     {

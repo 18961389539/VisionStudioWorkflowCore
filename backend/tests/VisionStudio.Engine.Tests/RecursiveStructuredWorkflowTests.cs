@@ -21,8 +21,10 @@ public sealed class RecursiveStructuredWorkflowTests
         Assert.Equal("outer-join", outer.JoinNodeId);
         Assert.Equal(1, inner.Depth);
         Assert.Equal("inner-join", inner.JoinNodeId);
-        Assert.Contains("data.GetBranchCondition(\"outer-if\")", compiled.DslJson, StringComparison.Ordinal);
-        Assert.Contains("data.GetBranchCondition(\"inner-if\")", compiled.DslJson, StringComparison.Ordinal);
+        // DslJson 是 JSON 文本：条件表达式内的引号按 JSON 规则转义为 \"（C# 源码写作 \\\"），
+        // 解析后即 data.GetBranchCondition("outer-if") 表达式原文。
+        Assert.Contains("data.GetBranchCondition(\\\"outer-if\\\")", compiled.DslJson, StringComparison.Ordinal);
+        Assert.Contains("data.GetBranchCondition(\\\"inner-if\\\")", compiled.DslJson, StringComparison.Ordinal);
         Assert.DoesNotContain("data.BranchCondition == false", compiled.DslJson, StringComparison.Ordinal);
     }
 

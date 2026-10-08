@@ -84,7 +84,8 @@ public sealed class RecipeParameterBindingTests
         using var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         var status = await db.GetSchemaStatusAsync();
-        Assert.Equal(15, status.CurrentVersion);
+        // schema 版本随迁移演进（当前 20）：断言 status 与实现常量一致而非硬编码快照
+        Assert.Equal(db.CurrentSchemaVersion, status.CurrentVersion);
         await using var connection = await db.OpenConnectionAsync();
         foreach (var table in new[] { "product_parameter_values", "recipe_parameter_values" })
         {

@@ -15,13 +15,44 @@ export type WorkflowIssue = {
   parameter?: string;
 };
 
-/** 端口类型兼容规则（连线校验 / 连接中的端口高亮 / 边类型预检共用同一套）。 */
+/** 端口类型兼容规则（连线校验 / 连接中的端口高亮 / 边类型预检共用同一套）。
+ *  控制端口与数据端口严格隔离：Any 只通配数据端口，不再允许 Any ↔ Control。 */
 export function portsCompatible(sourceType?: string, targetType?: string): boolean {
   if (!sourceType || !targetType) return false;
+  const sourceControl = sourceType === 'Control';
+  const targetControl = targetType === 'Control';
+  if (sourceControl || targetControl) return sourceControl && targetControl;
   return sourceType === targetType
     || sourceType === 'Any'
     || targetType === 'Any'
     || (sourceType === 'Integer' && targetType === 'Double');
+}
+
+/** 连线裁决结果：allowed=false 时 reason 直接给用户看（高亮 tooltip / 拖放报错 / 预检问题共用同一句）。 */
+export type ConnectionVerdict = { allowed: boolean; reason?: string };
+
+/** 唯一的连线裁决入口：类型规则 + 控制/数据隔离 + 数据输入单一来源。
+ *  端口高亮、isValidConnection、onConnect、validateWorkflow 全部走这里，避免“界面允许、校验拒绝”。 */
+export function connectionVerdict(args: {
+  sourceType?: string;
+  targetType?: string;
+  sameNode?: boolean;
+  /** 目标数据输入上已有的数据连线数（控制端口不参与，允许多条入边） */
+  targetDataSources?: number;
+}): ConnectionVerdict {
+  const { sourceType, targetType, sameNode, targetDataSources = 0 } = args;
+  if (!sourceType || !targetType) return { allowed: false, reason: '端口类型未知' };
+  if (sameNode) return { allowed: false, reason: '不能连接节点自身' };
+  const sourceControl = sourceType === 'Control';
+  const targetControl = targetType === 'Control';
+  if (sourceControl !== targetControl)
+    return { allowed: false, reason: `控制端口与数据端口不能互连（${sourceType} → ${targetType}）` };
+  if (sourceControl) return { allowed: true };
+  if (targetDataSources > 0)
+    return { allowed: false, reason: '该数据输入已有来源（每个数据输入只允许 1 条连线）' };
+  if (!portsCompatible(sourceType, targetType))
+    return { allowed: false, reason: `类型不匹配：${sourceType} → ${targetType}` };
+  return { allowed: true };
 }
 
 function portsOf(node: Node | undefined, key: 'inputs' | 'outputs'): PortDescriptor[] {
@@ -69,6 +100,14 @@ export function validateWorkflow(nodes: Node[], catalog: NodeCatalogItem[], edge
   const byType = new Map(catalog.map((item) => [item.type.toLowerCase(), item]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const nodeLabel = (id: string) => String(byId.get(id)?.data.label ?? id);
+  // 边的种类：优先用建边时写入的 kind，缺失时按源端口类型回推（加载旧流程 / 手工 JSON 仍有正确语义）
+  const edgeKind = (edge: Edge): 'control' | 'data' => {
+    const declared = String(edge.data?.kind ?? '');
+    if (declared === 'control' || declared === 'data') return declared;
+    const sourcePort = portsOf(byId.get(edge.source), 'outputs').find((port) => port.name === edge.sourceHandle);
+    return sourcePort?.dataType === 'Control' ? 'control' : 'data';
+  };
+  const incomingOf = (nodeId: string) => edges.filter((edge) => edge.target === nodeId);
 
   for (const node of nodes) {
     const typeKey = String(node.data.typeKey ?? '');
@@ -100,18 +139,23 @@ export function validateWorkflow(nodes: Node[], catalog: NodeCatalogItem[], edge
       });
     }
 
-    const dataEdges = edges.filter((edge) => edge.target === node.id && edge.data?.kind === 'data');
+    // 必需语义按端口种类分别判定：控制必需口只认控制线，数据必需口只认数据线
+    // （与 VisionNode 的缺口提示、connectionVerdict 保持一致，避免“接了控制线仍报未连接”）
+    const incoming = incomingOf(node.id);
+    const controlEdges = incoming.filter((edge) => edgeKind(edge) === 'control');
+    const dataEdges = incoming.filter((edge) => edgeKind(edge) === 'data');
     for (const port of portsOf(node, 'inputs')) {
       if (!port.required) continue;
-      if (!dataEdges.some((edge) => edge.targetHandle === port.name)) {
-        issues.push({
-          id: `port-missing-${node.id}-${port.name}`,
-          severity: 'error',
-          source: 'client',
-          nodeId: node.id,
-          message: `节点「${nodeLabel(node.id)}」的必需输入 ${port.name}（${port.dataType}）未连接`
-        });
-      }
+      const isControl = port.dataType === 'Control';
+      const satisfied = (isControl ? controlEdges : dataEdges).some((edge) => edge.targetHandle === port.name);
+      if (satisfied) continue;
+      issues.push({
+        id: `port-missing-${node.id}-${port.name}`,
+        severity: 'error',
+        source: 'client',
+        nodeId: node.id,
+        message: `节点「${nodeLabel(node.id)}」的必需${isControl ? '控制' : '数据'}输入 ${port.name}（${port.dataType}）未连接`
+      });
     }
     const counts = new Map<string, number>();
     for (const edge of dataEdges) counts.set(edge.targetHandle ?? '', (counts.get(edge.targetHandle ?? '') ?? 0) + 1);
@@ -163,23 +207,19 @@ export function validateWorkflow(nodes: Node[], catalog: NodeCatalogItem[], edge
       });
       continue;
     }
-    const sourceIsControl = sourcePort.dataType === 'Control';
-    const targetIsControl = targetPort.dataType === 'Control';
-    if (sourceIsControl !== targetIsControl) {
+    // 与界面高亮 / 拖放裁决共用 connectionVerdict：重复数据源由上面的端口级问题单独报，这里只判连线本身
+    const verdict = connectionVerdict({
+      sourceType: sourcePort.dataType,
+      targetType: targetPort.dataType,
+      sameNode: edge.source === edge.target
+    });
+    if (!verdict.allowed) {
       issues.push({
-        id: `edge-kind-${edge.id}`,
+        id: `edge-invalid-${edge.id}`,
         severity: 'error',
         source: 'client',
         edgeId: edge.id,
-        message: `连线 ${edge.id} 混接控制与数据端口（${sourcePort.dataType} → ${targetPort.dataType}）`
-      });
-    } else if (!sourceIsControl && !portsCompatible(sourcePort.dataType, targetPort.dataType)) {
-      issues.push({
-        id: `edge-type-${edge.id}`,
-        severity: 'error',
-        source: 'client',
-        edgeId: edge.id,
-        message: `连线 ${edge.id} 类型不匹配：${sourcePort.dataType} → ${targetPort.dataType}`
+        message: `连线「${nodeLabel(edge.source)}.${sourcePort.name} → ${nodeLabel(edge.target)}.${targetPort.name}」非法：${verdict.reason}`
       });
     }
   }

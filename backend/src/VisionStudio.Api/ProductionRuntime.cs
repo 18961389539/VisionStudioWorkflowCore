@@ -303,10 +303,18 @@ public sealed class ProductionRuntimeService
 
     public async Task<ProductionRuntimeConfig> UpdateConfigAsync(ProductionRuntimeConfig config, CancellationToken ct)
     {
-        if (Status.ProductionLocked) throw new InvalidOperationException("Stop Production Runtime before changing production configuration.");
-        var saved = await _configStore.SaveAsync(config, ct);
-        lock (_stateSync) _config = saved;
-        return saved;
+        // 检查与写入必须在同一生命周期锁（_gate）内：否则并发 StartAsync 可以在检查通过之后、
+        // 保存完成之前拿到锁并完成启动，随后这里把新配置写进正在运行的 _config；
+        // 运行循环每周期读 _config（MaxCycleMs / 恢复策略 / guard 开关），运行中即被改动。
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Status.ProductionLocked) throw new InvalidOperationException("Stop Production Runtime before changing production configuration.");
+            var saved = await _configStore.SaveAsync(config, ct);
+            lock (_stateSync) _config = saved;
+            return saved;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<ProductionRuntimeStatus> StartAsync(string? jobId, CancellationToken ct)
@@ -315,7 +323,9 @@ public sealed class ProductionRuntimeService
         try
         {
             var current = Status.State;
-            if (current is ProductionRuntimeState.Starting or ProductionRuntimeState.Running or ProductionRuntimeState.Recovering)
+            // Stopping 同样拒绝：两段式停止的收尾（等待循环退出）可能持续到 StopTimeoutMs，
+            // 期间启动会与旧 Stop 的收尾交错——旧收尾即使做了循环身份核对，也不该给它创造窗口
+            if (current is ProductionRuntimeState.Starting or ProductionRuntimeState.Running or ProductionRuntimeState.Recovering or ProductionRuntimeState.Stopping)
                 return Status;
             if (_loopTask is { IsCompleted: false })
                 throw new InvalidOperationException("A previous Production Runtime loop is still alive. Stop must complete before starting another loop.");
@@ -439,6 +449,12 @@ public sealed class ProductionRuntimeService
         await _gate.WaitAsync(ct);
         try
         {
+            // 循环身份校验：等待“自己捕获的那个循环”退出期间，可能有另一个 Stop 完成了收尾、
+            // 随后新的 Start 建立了新循环。本次收尾只能清理自己捕获的那一代（循环引用仍是当前
+            // _loopTask 时才执行）；否则会把新循环的状态、CTS 和硬件租约一并清掉——对外显示
+            // Stopped / 未锁定，但新执行器仍在运行。
+            if (!ReferenceEquals(_loopTask, loop))
+                return Status;
             lock (_stateSync)
             {
                 _state = ProductionRuntimeState.Stopped;

@@ -47,9 +47,12 @@ import { useThemeMode } from './theme';
 import { demos, demoDescriptions, linearDemo, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, writeDraft, type WorkflowDraft } from './draft';
-import { portsCompatible, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
+import { connectionVerdict, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
+import { onShowNodeDetails } from './uiBridge';
+import { useRunController, type BottomTab } from './useRunController';
+import { useRunImages } from './useRunImages';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
-import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, RunResult, VisionRoi, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
+import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, VisionRoi, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 
 const nodeTypes = { vision: VisionNode };
 type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
@@ -135,22 +138,6 @@ function edgePresentation(kind: 'control' | 'data') {
     : { animated: false, data: { kind } };
 }
 
-/** /api/debug/sessions 系列端点的返回负载：与 RunResult 同形，附带会话标识与操作名（detail 兼容 ProblemDetails）。 */
-type DebugSessionPayload = RunResult & { sessionId?: string; operation?: string; detail?: string };
-
-/** 前端会话视图：运行中由 anyBusy 表达，这里只保留后端持久态。 */
-type DebugSessionView = {
-  sessionId: string;
-  status: 'halted' | 'completed' | 'faulted';
-  haltNodeId?: string;
-  error?: string;
-  disposition?: string;
-};
-
-/** 运行期逐节点图像清单条目（/api/runs/{runId}/images）。 */
-type RunImageEntry = { portName: string; width: number; height: number };
-type RunImageCatalog = { runId: string; images: Record<string, RunImageEntry> };
-
 const RECENT_NODES_KEY = 'visionstudio.recent-node-types';
 const RECENT_NODES_LIMIT = 6;
 // 双击添加时的占位尺寸与最小间距（流程坐标）；实际渲染尺寸在 measured 中回读
@@ -182,6 +169,8 @@ function Editor() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [selectedId, setSelectedId] = useState<string>('threshold-1');
+  // 定位选区信号：属性面板点击“定位选区”时递增，图像查看器据此把视图适配到 ROI 区域
+  const [roiFocusTick, setRoiFocusTick] = useState(0);
   const [recentNodeTypes, setRecentNodeTypes] = useState<string[]>(readRecentNodeTypes);
   const flowAreaRef = useRef<HTMLDivElement>(null);
   const [compactNodes, setCompactNodes] = useState(readNodeCompact);
@@ -197,9 +186,6 @@ function Editor() {
   const [demoKey, setDemoKey] = useState<DemoKey>('linear');
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<RunResult>();
-  const [previewUrl, setPreviewUrl] = useState<string>();
   const [compiledDsl, setCompiledDsl] = useState<string>();
 
   useEffect(() => {
@@ -259,36 +245,53 @@ function Editor() {
     };
   }, [connectionPicker]);
 
-  // 调试会话（后端有状态会话）：启动到断点 / 继续 / 用缓存输入运行单节点 / 结束会话。
-  // debugBusy 与 running 合成统一忙碌闸门 anyBusy：任何执行在飞时禁用全部运行/调试入口，防止重复提交。
-  const [debugSession, setDebugSession] = useState<DebugSessionView>();
-  const [debugBusy, setDebugBusy] = useState(false);
-  const [allowSideEffects, setAllowSideEffects] = useState(false);
-  const debugSessionRef = useRef<DebugSessionView | undefined>(undefined);
-  debugSessionRef.current = debugSession;
-  const anyBusy = running || debugBusy;
+  // —— 运行/调试/图像域的输入：集中派生，供下方抽出的控制模块使用（useRunController / useRunImages）——
+  const [bottomTab, setBottomTab] = useState<BottomTab>('result');
+  const nodeLabels = useMemo(
+    () => Object.fromEntries(nodes.map((node) => [node.id, String(node.data.label ?? node.id)])),
+    [nodes]);
+  const breakpoints = useMemo(
+    () => nodes.filter((n) => Boolean(n.data.breakpoint)).map((n) => n.id),
+    [nodes]
+  );
+  const workflowPayload = useMemo<WorkflowPayload>(() => ({
+    id: designerWorkflowId,
+    name: designerWorkflowName,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      type: String(node.data.typeKey),
+      name: String(node.data.label ?? node.id),
+      position: node.position,
+      parameters: (node.data.parameters ?? {}) as Record<string, unknown>
+    })),
+    edges: edges.map((edge) => {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      const sourcePort = getPorts(sourceNode, 'outputs').find((p) => p.name === edge.sourceHandle);
+      const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
+      return {
+        id: edge.id,
+        sourceNodeId: edge.source,
+        sourcePort: edge.sourceHandle ?? 'next',
+        targetNodeId: edge.target,
+        targetPort: edge.targetHandle ?? 'exec',
+        kind
+      };
+    })
+  }), [designerWorkflowId, designerWorkflowName, nodes, edges]);
 
-  // 含 PLC 写入 / 机器人命令（supportsRunNode=false）的流程：仅勾选“允许副作用”后才可启动会话
-  const hasSideEffectNodes = useMemo(() => nodes.some((node) => {
-    const item = catalog.find((x) => x.type === node.data.typeKey);
-    return item?.capabilities?.supportsRunNode === false;
-  }), [catalog, nodes]);
-  const hasModuleCalls = useMemo(() => nodes.some((node) => node.data.typeKey === 'module.call'), [nodes]);
+  // 运行 / 调试控制 + 图像资源管理（独立模块）：anyBusy 是全局唯一执行闸门；
+  // 结果与图像以 result.runId 为代际统一管理（详见 useRunController.ts / useRunImages.ts）
+  const {
+    running, result, clearResult, applyResult, resultStale,
+    run, runNode, runFromHere,
+    debugSession, debugBusy, allowSideEffects, setAllowSideEffects, anyBusy,
+    hasSideEffectNodes, hasModuleCalls,
+    startDebugSession, continueDebugSession, runSelectedNodeInSession, endDebugSession, debugStatus,
+    endDebugSessionSilently
+  } = useRunController({ workflowPayload, nodes, catalog, selectedId, nodeLabels, breakpoints, setNodes, setEdges, setBottomTab, messageApi });
 
-  // 批量加载 / 恢复草稿前静默结束后端会话，避免对旧快照误“继续”
-  const endDebugSessionSilently = () => {
-    const current = debugSessionRef.current;
-    if (!current) return;
-    debugSessionRef.current = undefined;
-    setDebugSession(undefined);
-    void fetch(`/api/debug/sessions/${current.sessionId}`, { method: 'DELETE' }).catch(() => undefined);
-  };
-
-  // 逐节点图像：运行响应带 runId 后拉取清单，供查看器按节点查看输入/输出中间结果
-  const [runImageCatalog, setRunImageCatalog] = useState<RunImageCatalog>();
-  const [imageSource, setImageSource] = useState<'preview' | 'output' | 'input'>('preview');
-  // 运行结果版本绑定：记录提交时的 payload 指纹，画布后续修改会让已显示结果“过期”（RunPanel 提示）
-  const submittedPayloadRef = useRef('');
+  const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable } =
+    useRunImages({ result, selectedId, nodes, edges, nodeLabels });
 
   // 校验问题列表 + 问题连线高亮（点击问题项定位节点或连线）
   const [validationIssues, setValidationIssues] = useState<WorkflowIssue[]>([]);
@@ -427,10 +430,18 @@ function Editor() {
   const selectedParameters = (selectedNode?.data.parameters ?? {}) as Record<string, unknown>;
   const selectedRoi = selectedParameters.roi as VisionRoi | undefined;
   const roiEnabled = selectedNode?.data.typeKey !== 'module.call' && Boolean(selectedCatalog?.inputs.some((p) => p.dataType === 'Image'));
-  const breakpoints = useMemo(
-    () => nodes.filter((n) => Boolean(n.data.breakpoint)).map((n) => n.id),
-    [nodes]
-  );
+
+  // 目标数据输入上已有的数据线数量（控制口可多入边；kind 缺失时按源端口类型回推）
+  const dataEdgeCount = useCallback((targetNodeId: string, targetHandle?: string | null) =>
+    edgesRef.current.filter((edge) => {
+      if (edge.target !== targetNodeId || edge.targetHandle !== targetHandle) return false;
+      const kind = String(edge.data?.kind ?? '');
+      if (kind === 'control') return false;
+      if (kind === 'data') return true;
+      const sourcePort = getPorts(nodesRef.current.find((node) => node.id === edge.source), 'outputs')
+        .find((port) => port.name === edge.sourceHandle);
+      return sourcePort?.dataType !== 'Control';
+    }).length, []);
 
   const onConnect = useCallback((connection: Connection) => {
     const sourceNode = nodes.find((n) => n.id === connection.source);
@@ -438,9 +449,15 @@ function Editor() {
     const sourcePort = getPorts(sourceNode, 'outputs').find((p) => p.name === connection.sourceHandle);
     const targetPort = getPorts(targetNode, 'inputs').find((p) => p.name === connection.targetHandle);
 
-    const compatible = sourcePort && targetPort && portsCompatible(sourcePort.dataType, targetPort.dataType);
-    if (sourcePort && targetPort && !compatible) {
-      messageApi.error(`端口类型不匹配: ${sourcePort.dataType} → ${targetPort.dataType}`);
+    // 与 isValidConnection / 端口高亮 / 校验问题共用同一裁决（含控制数据隔离与单一数据源）
+    const verdict = connectionVerdict({
+      sourceType: sourcePort?.dataType,
+      targetType: targetPort?.dataType,
+      sameNode: connection.source === connection.target,
+      targetDataSources: targetPort?.dataType === 'Control' ? 0 : dataEdgeCount(connection.target, connection.targetHandle)
+    });
+    if (!verdict.allowed) {
+      messageApi.error(verdict.reason ?? '不允许的连接');
       return;
     }
 
@@ -451,7 +468,7 @@ function Editor() {
       id: crypto.randomUUID(),
       ...edgePresentation(kind)
     }, eds));
-  }, [messageApi, nodes, pushHistory, setEdges]);
+  }, [dataEdgeCount, messageApi, nodes, pushHistory, setEdges]);
 
   // React Flow 自带的删除通道（备用入口）：整批变更里出现 remove 时先记一步撤销
   const handleNodesChange = useCallback<OnNodesChange>((changes) => {
@@ -464,16 +481,22 @@ function Editor() {
     onEdgesChange(changes);
   }, [onEdgesChange, pushHistory]);
 
-  // 连接过程中由 React Flow 统一裁决：不兼容的拖放不会建立连线（与端口高亮、预检同一套规则）
+  // 连接过程中由 React Flow 统一裁决：不允许的拖放不会建立连线
+  // （与端口高亮、onConnect 报错、validateWorkflow 共用 connectionVerdict，界面不会再“允许了又被校验拒”）
   const isValidConnection = useCallback((connection: Edge | Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return false;
+    if (!connection.source || !connection.target) return false;
     const sourceNode = nodes.find((node) => node.id === connection.source);
     const targetNode = nodes.find((node) => node.id === connection.target);
     if (!sourceNode || !targetNode) return false;
     const sourcePort = getPorts(sourceNode, 'outputs').find((port) => port.name === connection.sourceHandle);
     const targetPort = getPorts(targetNode, 'inputs').find((port) => port.name === connection.targetHandle);
-    return Boolean(sourcePort && targetPort) && portsCompatible(sourcePort?.dataType, targetPort?.dataType);
-  }, [nodes]);
+    return connectionVerdict({
+      sourceType: sourcePort?.dataType,
+      targetType: targetPort?.dataType,
+      sameNode: connection.source === connection.target,
+      targetDataSources: targetPort?.dataType === 'Control' ? 0 : dataEdgeCount(connection.target, connection.targetHandle)
+    }).allowed;
+  }, [dataEdgeCount, nodes]);
 
   const rememberRecentNode = useCallback((typeKey: string) => {
     setRecentNodeTypes((current) => {
@@ -646,10 +669,6 @@ function Editor() {
     }
   };
 
-  const nodeLabels = useMemo(
-    () => Object.fromEntries(nodes.map((node) => [node.id, String(node.data.label ?? node.id)])),
-    [nodes]);
-
   // 当前选中集合：优先取 React Flow 维护的 selected 标记（框选 / Ctrl 加选），兼容仅设置 selectedId 的情况
   const selectedNodeIds = useMemo(() => {
     const flagged = nodes.filter((node) => node.selected).map((node) => node.id);
@@ -705,59 +724,13 @@ function Editor() {
     }));
   }, [pushHistory, selectedNodeIds, setNodes]);
 
-  // 输入图像解析：选中节点的 Image 输入端所连的上游节点，其输出图像即本节点的输入
-  const imageInputSourceId = useMemo(() => {
-    const node = nodes.find((x) => x.id === selectedId);
-    if (!node) return undefined;
-    const imagePorts = new Set(getPorts(node, 'inputs').filter((port) => port.dataType === 'Image').map((port) => port.name));
-    if (imagePorts.size === 0) return undefined;
-    const edge = edges.find((item) => item.target === selectedId && item.targetHandle && imagePorts.has(item.targetHandle));
-    return edge?.source;
-  }, [edges, nodes, selectedId]);
-
-  const selectedOutputAvailable = Boolean(selectedId && runImageCatalog?.images[selectedId]);
-  const selectedInputAvailable = Boolean(imageInputSourceId && runImageCatalog?.images[imageInputSourceId]);
-
-  // 查看器图像来源解析：最终预览 / 选中节点输出 / 选中节点输入（不可用时回退预览并明示原因）
-  const imageViewerSource = useMemo(() => {
-    const catalog = runImageCatalog;
-    const label = (id: string) => nodeLabels[id] ?? id;
-    const nodeImage = (nodeId: string) => {
-      const entry = catalog?.images[nodeId];
-      return entry && catalog
-        ? { url: `/api/runs/${catalog.runId}/nodes/${nodeId}/image`, width: entry.width, height: entry.height }
-        : undefined;
-    };
-    if (imageSource === 'output' && selectedId) {
-      const resolved = nodeImage(selectedId);
-      if (resolved) return { ...resolved, label: `输出 · ${label(selectedId)}`, nodeId: selectedId as string | undefined };
-      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: `最终预览（${label(selectedId)} 无输出图像）`, nodeId: undefined as string | undefined };
-    }
-    if (imageSource === 'input') {
-      const resolved = imageInputSourceId ? nodeImage(imageInputSourceId) : undefined;
-      if (resolved && imageInputSourceId) return { ...resolved, label: `输入 ← ${label(imageInputSourceId)}`, nodeId: imageInputSourceId as string | undefined };
-      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: selectedId ? `最终预览（${label(selectedId)} 无输入图像）` : '最终预览', nodeId: undefined as string | undefined };
-    }
-    return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: '最终预览', nodeId: undefined as string | undefined };
-  }, [imageInputSourceId, imageSource, nodeLabels, previewUrl, result, runImageCatalog, selectedId]);
-
-  // 查看节点图像时只显示该节点自己的覆盖层，避免与上游/下游标注混淆
-  const viewerOverlays = useMemo(
-    () => (imageViewerSource.nodeId ? (result?.overlays ?? []).filter((overlay) => overlay.nodeId === imageViewerSource.nodeId) : (result?.overlays ?? [])),
-    [imageViewerSource.nodeId, result]);
-
-  // 点击节点即检查其中间结果：选中节点有输出图像时自动切到“输出”；“输入”模式在可解析时保留以便上下游对比
-  useEffect(() => {
-    if (!selectedId || !runImageCatalog?.images[selectedId]) return;
-    setImageSource((current) => (current === 'input' && imageInputSourceId ? 'input' : 'output'));
-  }, [imageInputSourceId, runImageCatalog, selectedId]);
-
   const updateParameter = (key: string, value: unknown) => {
     if (!selectedId) return;
     pushHistory('修改参数', `param:${selectedId}`);
+    // 参数改了：节点上残留的成功/失败与判定属于上一次运行 → 标过期，不再冒充当前结论
     setNodes((current) => current.map((node) =>
       node.id === selectedId
-        ? { ...node, data: { ...node.data, parameters: { ...(node.data.parameters as object), [key]: value } } }
+        ? { ...node, data: { ...node.data, stale: true, parameters: { ...(node.data.parameters as object), [key]: value } } }
         : node
     ));
   };
@@ -770,43 +743,22 @@ function Editor() {
       const parameters = { ...((node.data.parameters ?? {}) as Record<string, unknown>) };
       if (roi) parameters.roi = roi;
       else delete parameters.roi;
-      return { ...node, data: { ...node.data, parameters } };
+      return { ...node, data: { ...node.data, stale: true, parameters } };
     }));
   };
-
-  const workflowPayload = useMemo<WorkflowPayload>(() => ({
-    id: designerWorkflowId,
-    name: designerWorkflowName,
-    nodes: nodes.map((node) => ({
-      id: node.id,
-      type: String(node.data.typeKey),
-      name: String(node.data.label ?? node.id),
-      position: node.position,
-      parameters: (node.data.parameters ?? {}) as Record<string, unknown>
-    })),
-    edges: edges.map((edge) => {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      const sourcePort = getPorts(sourceNode, 'outputs').find((p) => p.name === edge.sourceHandle);
-      const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
-      return {
-        id: edge.id,
-        sourceNodeId: edge.source,
-        sourcePort: edge.sourceHandle ?? 'next',
-        targetNodeId: edge.target,
-        targetPort: edge.targetHandle ?? 'exec',
-        kind
-      };
-    })
-  }), [designerWorkflowId, designerWorkflowName, nodes, edges]);
 
   // 已保存 / 未保存：用「当前负载快照 vs 上次保存/加载快照」比对，避免在每个改动入口手动打脏标记
   const workflowSnapshot = useMemo(() => JSON.stringify(workflowPayload), [workflowPayload]);
   const [savedSnapshot, setSavedSnapshot] = useState<string>();
   // 最近一次保存到后端的时间（仅保存成功时记录；批量加载/恢复草稿会清空）
   const [lastSavedAt, setLastSavedAt] = useState<Date>();
-  // 底部标签页：运行结果 / 校验问题 / 运行观测（校验或运行完成后自动切换）
-  const [bottomTab, setBottomTab] = useState<'result' | 'issues' | 'observability'>('result');
   const [pendingGuard, setPendingGuard] = useState<{ label: string; run: () => void }>();
+  // 节点 footer 的“详情”：选中该节点并把底部面板切到运行结果（节点内部无法直接碰到外壳状态）
+  useEffect(() => onShowNodeDetails((nodeId) => {
+    setSelectedId(nodeId);
+    setBottomTab('result');
+    updateLayout({ bottomCollapsed: false });
+  }), [updateLayout]);
   const markCleanOnNextChange = useRef(false);
   const dirty = savedSnapshot !== undefined && workflowSnapshot !== savedSnapshot;
 
@@ -838,293 +790,15 @@ function Editor() {
     history.reset();
     setHistoryVersion((version) => version + 1);
     markCleanOnNextChange.current = true;
-    setResult(undefined);
-    setPreviewUrl(undefined);
-    setRunImageCatalog(undefined);
-    setImageSource('preview');
+    clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
     setLastSavedAt(undefined);
     setValidationIssues([]);
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
   };
 
-  // 运行结束后拉取逐节点图像清单（未捕获 / 已过期时为空表，查看器自动回退最终预览）
-  const loadRunImageCatalog = async (runId: string) => {
-    try {
-      const response = await fetch(`/api/runs/${runId}/images`);
-      if (!response.ok) { setRunImageCatalog({ runId, images: {} }); return; }
-      const data = await response.json();
-      const images: Record<string, RunImageEntry> = {};
-      for (const item of data.images ?? []) {
-        if (typeof item?.nodeId === 'string')
-          images[item.nodeId] = { portName: String(item.portName ?? 'image'), width: Number(item.width ?? 0), height: Number(item.height ?? 0) };
-      }
-      setRunImageCatalog({ runId, images });
-    } catch {
-      setRunImageCatalog({ runId, images: {} });
-    }
-  };
-
-  const applyResult = (data: RunResult) => {
-    setResult(data);
-    const byId = new Map(data.nodeReports.map((x) => [x.nodeId, x]));
-    setNodes((current) => current.map((node) => {
-      const report = byId.get(node.id);
-      const isHalt = data.haltNodeId === node.id;
-      // 准确状态：有报告 → 成功/失败（预热单独标注）；断点暂停 → 暂停；
-      // 断点会话里未执行的 → 等待（续跑会执行）；其余未执行（未走到的分支 / 一次性调试暂停点之后）→ 未走到
-      let status = data.debugState === 'Breakpoint' ? 'pending' : 'skipped';
-      if (report) status = report.success ? (report.phase === 'Warmup' ? 'warmup' : 'ok') : 'error';
-      if (isHalt && data.debugState === 'Breakpoint') status = 'breakpoint';
-      // 节点级判定（OK/NG）与执行状态分开：算法执行成功也可能判定不合格
-      const rawDisposition = (report?.summary as Record<string, unknown> | undefined)?.disposition;
-      return {
-        ...node,
-        data: {
-          ...node.data,
-          status,
-          durationMs: report?.durationMs,
-          summary: report?.summary,
-          error: report?.error ?? undefined,
-          disposition: rawDisposition === 'OK' || rawDisposition === 'NG' ? rawDisposition : undefined
-        }
-      };
-    }));
-    const decisions = new Map((data.controlFlowDecisions ?? []).map((x) => [x.nodeId, x]));
-    setEdges((current) => current.map((edge) => {
-      if (edge.data?.kind !== 'control') return edge;
-      const decision = decisions.get(edge.source);
-      if (!decision) {
-        const { className: _className, ...rest } = edge;
-        return rest;
-      }
-      const branch = edge.sourceHandle ?? '';
-      const active = decision.activeBranches.includes(branch);
-      return {
-        ...edge,
-        className: active ? 'branch-taken' : 'branch-skipped',
-        animated: active
-      };
-    }));
-    if (data.previewAvailable) setPreviewUrl(`/api/runs/${data.runId}/preview?t=${Date.now()}`);
-    void loadRunImageCatalog(data.runId);
-    setBottomTab('result');
-  };
-
-  const execute = async (url: string, body: unknown) => {
-    if (anyBusy) return;
-    let receivedRunResult = false;
-    setRunning(true);
-    // 记录提交时的 payload 指纹：结果返回后若画布已改动，RunPanel 提示“结果对应提交时的版本”
-    submittedPayloadRef.current = JSON.stringify(body);
-    // 提交后节点进入“等待”而不是“运行中”：执行顺序由引擎调度，前端不再假装所有节点同时执行
-    setNodes((current) => current.map((node) => ({
-      ...node,
-      data: { ...node.data, status: 'pending', durationMs: undefined, error: undefined, disposition: undefined }
-    })));
-    setEdges((current) => current.map((edge) => {
-      const { className: _className, ...rest } = edge;
-      return edge.data?.kind === 'control' ? { ...rest, animated: true } : rest;
-    }));
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data: RunResult & { detail?: string } = await response.json();
-      // 非 2xx（如硬件租约 409 的 ProblemDetails）不能进入 applyResult：没有 nodeReports 会抛错并吞掉冲突详情
-      if (!response.ok) throw new Error(data.error ?? data.detail ?? `运行失败 (${response.status})`);
-      receivedRunResult = true;
-      applyResult(data);
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '运行失败');
-      if (!receivedRunResult) {
-        setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'idle' } })));
-      }
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const run = () => execute('/api/run', workflowPayload);
-
-  const runNode = () => {
-    if (!selectedId) return messageApi.warning('先选择一个节点');
-    return execute('/api/debug/run', {
-      workflow: workflowPayload,
-      options: { mode: 'RunNode', targetNodeId: selectedId, breakpoints: [] }
-    });
-  };
-
-  const runFromHere = () => {
-    if (!selectedId) return messageApi.warning('先选择一个节点');
-    return execute('/api/debug/run', {
-      workflow: workflowPayload,
-      options: { mode: 'RunFromNode', targetNodeId: selectedId, breakpoints: [] }
-    });
-  };
-
-  // 调试会话：启动（跑到首个断点并保留现场）→ 继续 / 用缓存输入运行单节点 → 结束会话。
-  // 所有入口共用 anyBusy 闸门；会话在后端持有流程快照，界面编辑不影响进行中的会话。
-  const startDebugSession = async () => {
-    if (anyBusy) return;
-    if (hasModuleCalls) { messageApi.warning('含复用模块的流程暂不支持会话调试，请先在“可复用模块”中调试模块内部节点'); return; }
-    if (breakpoints.length === 0) { messageApi.warning('请先为至少一个节点设置断点'); return; }
-    endDebugSessionSilently(); // 重新开始：先释放旧会话，避免孤儿会话占资源
-    setDebugBusy(true);
-    // 会话从起点开跑：节点先进入“等待”，结束后再落实际状态
-    setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'pending', durationMs: undefined } })));
-    try {
-      const response = await fetch('/api/debug/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow: workflowPayload, options: { mode: 'Breakpoints', breakpoints, allowSideEffects } })
-      });
-      const data: DebugSessionPayload = await response.json();
-      if (!response.ok || !data.sessionId) {
-        // 会话可能已在后端建立但首段执行失败：保留会话视图以便“结束会话”释放资源，
-        // 同时用返回的报告落实际状态（已执行的节点给出成功/失败/未走到）
-        if (data.sessionId) {
-          setDebugSession({ sessionId: data.sessionId, status: 'faulted', error: data.error ?? undefined });
-          applyResult(data);
-        } else {
-          setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'idle' } })));
-        }
-        throw new Error(data.error ?? data.detail ?? `调试会话启动失败 (${response.status})`);
-      }
-      setDebugSession({
-        sessionId: data.sessionId,
-        status: data.debugState === 'Breakpoint' ? 'halted' : 'completed',
-        haltNodeId: data.haltNodeId ?? undefined,
-        disposition: data.qualityDisposition ?? undefined
-      });
-      applyResult(data);
-      if (data.debugState === 'Breakpoint') {
-        const label = data.haltNodeId ? (nodeLabels[data.haltNodeId] ?? data.haltNodeId) : '';
-        messageApi.success(`调试会话已启动，停在「${label}」`);
-      } else {
-        messageApi.success('调试会话已启动并执行完成');
-      }
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '调试会话启动失败');
-    } finally {
-      setDebugBusy(false);
-    }
-  };
-
-  const refreshDebugSession = async (sessionId: string) => {
-    try {
-      const response = await fetch(`/api/debug/sessions/${sessionId}`);
-      if (response.status === 404) { setDebugSession(undefined); return; }
-      if (!response.ok) return;
-      const snapshot = await response.json();
-      const status = snapshot.state === 'Halted' ? 'halted' : snapshot.state === 'Faulted' ? 'faulted' : 'completed';
-      setDebugSession({
-        sessionId,
-        status,
-        haltNodeId: snapshot.haltNodeId ?? undefined,
-        error: snapshot.error ?? undefined,
-        disposition: snapshot.qualityDisposition ?? undefined
-      });
-    } catch { /* 网络失败保留现有视图 */ }
-  };
-
-  const continueDebugSession = async () => {
-    const session = debugSession;
-    if (anyBusy || !session || session.status !== 'halted') return;
-    setDebugBusy(true);
-    try {
-      const response = await fetch(`/api/debug/sessions/${session.sessionId}/continue`, { method: 'POST' });
-      const data: DebugSessionPayload = await response.json();
-      if (!response.ok) {
-        if (response.status === 404) { setDebugSession(undefined); messageApi.warning('调试会话已过期，请重新开始'); return; }
-        await refreshDebugSession(session.sessionId);
-        throw new Error(data.error ?? data.detail ?? `继续执行失败 (${response.status})`);
-      }
-      setDebugSession({
-        sessionId: session.sessionId,
-        status: data.debugState === 'Breakpoint' ? 'halted' : 'completed',
-        haltNodeId: data.haltNodeId ?? undefined,
-        disposition: data.qualityDisposition ?? undefined
-      });
-      applyResult(data);
-      if (data.debugState === 'Breakpoint') {
-        const label = data.haltNodeId ? (nodeLabels[data.haltNodeId] ?? data.haltNodeId) : '';
-        messageApi.success(`已继续，停在「${label}」`);
-      } else {
-        messageApi.success(`调试会话执行完成${data.qualityDisposition ? ` · ${data.qualityDisposition}` : ''}`);
-      }
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '继续执行失败');
-    } finally {
-      setDebugBusy(false);
-    }
-  };
-
-  const runSelectedNodeInSession = async () => {
-    const session = debugSession;
-    if (anyBusy || !session) return;
-    if (session.status === 'faulted') { messageApi.warning('会话已中断，请先结束会话'); return; }
-    if (!selectedId) { messageApi.warning('先选择一个节点'); return; }
-    setDebugBusy(true);
-    // 单节点运行只会执行这一个节点：精确标“执行”（这是唯一能确定在执行的对象）
-    const targetNodeId = selectedId;
-    const previousStatus = String(nodes.find((node) => node.id === targetNodeId)?.data.status ?? 'idle');
-    const markTarget = (status: string) => setNodes((current) => current.map((node) =>
-      node.id === targetNodeId ? { ...node, data: { ...node.data, status } } : node));
-    markTarget('running');
-    try {
-      const response = await fetch(`/api/debug/sessions/${session.sessionId}/run-node`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodeId: targetNodeId })
-      });
-      const data: DebugSessionPayload = await response.json();
-      if (!response.ok) {
-        if (response.status === 404) { markTarget(previousStatus); setDebugSession(undefined); messageApi.warning('调试会话已过期，请重新开始'); return; }
-        throw new Error(data.error ?? data.detail ?? `运行节点失败 (${response.status})`);
-      }
-      applyResult(data);
-      messageApi.success(`已用缓存输入执行「${nodeLabels[targetNodeId] ?? targetNodeId}」`);
-    } catch (error) {
-      markTarget(previousStatus);
-      messageApi.error(error instanceof Error ? error.message : '运行节点失败');
-    } finally {
-      setDebugBusy(false);
-    }
-  };
-
-  const endDebugSession = async () => {
-    const session = debugSession;
-    if (anyBusy || !session) return;
-    setDebugBusy(true);
-    try {
-      const response = await fetch(`/api/debug/sessions/${session.sessionId}`, { method: 'DELETE' });
-      if (!response.ok && response.status !== 404) throw new Error(`结束会话失败 (${response.status})`);
-      messageApi.info('调试会话已结束，现场已释放');
-    } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '结束会话失败');
-    } finally {
-      setDebugSession(undefined);
-      setDebugBusy(false);
-    }
-  };
-
-  const debugStatus: { color: string; text: string } = debugBusy
-    ? { color: 'processing', text: '运行中…' }
-    : !debugSession
-      ? { color: 'default', text: '未开始调试' }
-      : debugSession.status === 'halted'
-        ? { color: 'gold', text: `断点暂停${debugSession.haltNodeId ? ` · ${nodeLabels[debugSession.haltNodeId] ?? debugSession.haltNodeId}` : ''}` }
-        : debugSession.status === 'completed'
-          ? { color: 'success', text: `完成${debugSession.disposition ? ` · ${debugSession.disposition}` : ''}` }
-          : { color: 'error', text: '已中断' };
-
-  // 结果过期判定：画布 payload 与提交时不一致 → RunPanel 提示“结果对应提交时的版本”，
-  // 避免“改了参数却看着旧结果以为已验证”的误导
-  const resultStale = Boolean(result) && submittedPayloadRef.current !== ''
-    && submittedPayloadRef.current !== JSON.stringify(workflowPayload);
+  // 结果应用（applyResult）、运行/调试执行（run / runNode / runFromHere / 调试会话）
+  // 与图像资产加载已迁至独立模块 useRunController / useRunImages；本组件只保留装配与输入派生。
 
   const toggleBreakpoint = () => {
     if (!selectedId) return messageApi.warning('先选择一个节点');
@@ -1216,10 +890,7 @@ function Editor() {
     history.reset();
     setHistoryVersion((version) => version + 1);
     if (options?.markClean !== false) markCleanOnNextChange.current = true;
-    setResult(undefined);
-    setPreviewUrl(undefined);
-    setRunImageCatalog(undefined);
-    setImageSource('preview');
+    clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
     setLastSavedAt(undefined); // 整块加载后旧保存时间不再代表当前文档
     setValidationIssues([]);
     setHighlightedEdgeId(undefined);
@@ -1743,8 +1414,15 @@ function Editor() {
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={onConnect}
-              onConnectStart={() => setConnectionPicker(undefined)}
-              onConnectEnd={onConnectEnd}
+              // 连线进行中：临时恢复端口名（远缩放下也能确认落点）。写 dataset 而不是 className，避免与 React 的 className 互相覆盖
+              onConnectStart={() => {
+                setConnectionPicker(undefined);
+                if (flowAreaRef.current) flowAreaRef.current.dataset.connecting = 'true';
+              }}
+              onConnectEnd={(event, state) => {
+                if (flowAreaRef.current) delete flowAreaRef.current.dataset.connecting;
+                onConnectEnd(event, state);
+              }}
               onMoveStart={() => setConnectionPicker(undefined)}
               onNodeDragStart={() => pushHistory('移动节点')}
               onNodeClick={(_, node) => setSelectedId(node.id)}
@@ -1864,6 +1542,8 @@ function Editor() {
               roiTargetLabel={roiEnabled ? String(selectedNode?.data.label ?? selectedNode?.id ?? '') : undefined}
               loading={anyBusy}
               onRoiChange={updateRoi}
+              nodeLabels={nodeLabels}
+              focusTick={roiFocusTick}
             />
           </div>
         </section>
@@ -1884,7 +1564,7 @@ function Editor() {
           onToggleCollapse={() => updateLayout({ rightCollapsed: !layout.rightCollapsed })}
         />
         <aside className="right-panel">
-          <PropertyPanel node={selectedNode} catalogItem={selectedCatalog} onChange={updateParameter} disabled={anyBusy} />
+          <PropertyPanel node={selectedNode} catalogItem={selectedCatalog} onChange={updateParameter} disabled={anyBusy} onLocateRoi={() => setRoiFocusTick((tick) => tick + 1)} />
         </aside>
       </main>
 

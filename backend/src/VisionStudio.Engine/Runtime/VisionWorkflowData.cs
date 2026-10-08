@@ -13,6 +13,8 @@ public sealed class VisionWorkflowData : IDisposable
 {
     private readonly object _resourceGate = new();
     private readonly object _debugGate = new();
+    /// <summary>序列化节点图像捕获的预算检查与记账：并行分支会并发捕获，读-判-写必须原子。</summary>
+    private readonly object _imageGate = new();
     private readonly List<IDisposable> _ownedResources = [];
     private readonly ConcurrentQueue<NodeRunReport> _nodeReports = new();
     private readonly ConcurrentQueue<VisionOverlay> _overlays = new();
@@ -256,25 +258,24 @@ public sealed class VisionWorkflowData : IDisposable
     public void CaptureNodeImage(string nodeId, IReadOnlyDictionary<string, VisionValue> outputs)
     {
         if (!CaptureNodeImages) return;
-        var replacing = _nodeImages.TryGetValue(nodeId, out var previous);
-        if (!replacing)
-        {
-            if (_nodeImages.Count >= MaxNodeImages) return;
-            if (Interlocked.Read(ref _nodeImageBytes) >= MaxNodeImagesTotalBytes) return;
-        }
         foreach (var (portName, value) in outputs)
         {
             if (value.Type != VisionDataType.Image || value.Value is not IVisionImage image || image.NativeImage is not Mat mat) continue;
             try
             {
                 Cv2.ImEncode(".jpg", mat, out var jpeg);
-                // 字节记账：重执行覆盖同节点旧图时先扣旧长度；预算用尽则放弃本次捕获（宁缺勿爆内存）。
-                var nextBytes = Interlocked.Read(ref _nodeImageBytes)
-                    - (replacing ? previous!.Jpeg.Length : 0)
-                    + jpeg.LongLength;
-                if (nextBytes > MaxNodeImagesTotalBytes) return;
-                _nodeImages[nodeId] = new RunNodeImage(nodeId, portName, jpeg, image.Width, image.Height);
-                Interlocked.Exchange(ref _nodeImageBytes, nextBytes);
+                // 张数上限、字节预算的读-判-写在同一临界区内完成：并行分支同时捕获时各自的
+                // 记账不会互相覆盖（原实现先读后 Exchange，会让预算记账丢失、上限失效）。
+                lock (_imageGate)
+                {
+                    var replacing = _nodeImages.TryGetValue(nodeId, out var previous);
+                    if (!replacing && _nodeImages.Count >= MaxNodeImages) return;
+                    // 字节记账：重执行覆盖同节点旧图时先扣旧长度；预算用尽则放弃本次捕获（宁缺勿爆内存）。
+                    var nextBytes = _nodeImageBytes - (replacing ? previous!.Jpeg.Length : 0) + jpeg.LongLength;
+                    if (nextBytes > MaxNodeImagesTotalBytes) return;
+                    _nodeImages[nodeId] = new RunNodeImage(nodeId, portName, jpeg, image.Width, image.Height);
+                    _nodeImageBytes = nextBytes;
+                }
             }
             catch { /* 图像捕获失败不应影响运行 */ }
             return;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Empty, Input, InputNumber, Select, Switch, Tag, Typography } from 'antd';
 import type { Node } from '@xyflow/react';
-import type { NodeCatalogItem, ParameterDescriptor } from '../types';
+import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
 import { validateParameterValues } from '../validation';
 
 type Props = {
@@ -10,6 +10,8 @@ type Props = {
   onChange: (key: string, value: unknown) => void;
   /** 运行/调试在飞时冻结参数编辑：结果对应提交时的流程，边跑边改会让人误以为新参数已被验证 */
   disabled?: boolean;
+  /** 在图像查看器中居中显示当前节点的 ROI */
+  onLocateRoi?: () => void;
 };
 
 const META_KEY = 'visionstudio.property-meta-expanded';
@@ -33,6 +35,49 @@ function sameValue(a: unknown, b: unknown) {
   return String(a) === String(b);
 }
 
+function isVisionRoi(value: unknown): value is VisionRoi {
+  if (!value || typeof value !== 'object') return false;
+  const type = (value as { type?: unknown }).type;
+  return type === 'Rectangle' || type === 'Circle' || type === 'Polygon';
+}
+
+/** ROI 结构化编辑：形状 + 位置/尺寸数值；数值与图像查看器中的拖动互为镜像 */
+function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boolean; onChange: (roi: VisionRoi) => void }) {
+  const field = (label: string, value: number, apply: (next: number) => void) => (
+    <label className="roi-field" key={label}>
+      <span>{label}</span>
+      <InputNumber size="small" disabled={disabled} value={Number(value.toFixed(2))} onChange={(next) => apply(Number(next ?? 0))} />
+    </label>
+  );
+  if (roi.type === 'Rectangle') {
+    return (
+      <div className="roi-grid">
+        <Tag color="red">矩形</Tag>
+        {field('X', roi.x, (v) => onChange({ ...roi, x: v }))}
+        {field('Y', roi.y, (v) => onChange({ ...roi, y: v }))}
+        {field('宽', roi.width, (v) => onChange({ ...roi, width: Math.max(0, v) }))}
+        {field('高', roi.height, (v) => onChange({ ...roi, height: Math.max(0, v) }))}
+      </div>
+    );
+  }
+  if (roi.type === 'Circle') {
+    return (
+      <div className="roi-grid">
+        <Tag color="red">圆形</Tag>
+        {field('X', roi.x, (v) => onChange({ ...roi, x: v }))}
+        {field('Y', roi.y, (v) => onChange({ ...roi, y: v }))}
+        {field('半径', roi.radius, (v) => onChange({ ...roi, radius: Math.max(0, v) }))}
+      </div>
+    );
+  }
+  return (
+    <div className="roi-grid">
+      <Tag color="red">多边形</Tag>
+      <span className="roi-polygon-note">{roi.points.length} 个顶点 · 可在图像查看器中拖动调整</span>
+    </div>
+  );
+}
+
 type Section = { title?: string; parameters: ParameterDescriptor[] };
 
 /** 只有出现 ≥2 个分组时才分区展示；组名沿用目录里的英文，未分组参数归入 General */
@@ -46,7 +91,7 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
   return sections;
 }
 
-export default function PropertyPanel({ node, catalogItem, onChange, disabled = false }: Props) {
+export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi }: Props) {
   const [metaOverride, setMetaOverride] = useState<boolean | undefined>(readMetaExpanded);
   const sections = useMemo(() => buildSections(catalogItem), [catalogItem]);
 
@@ -179,7 +224,10 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
 
   return (
     <div className="property-panel">
-      <div className="panel-title">属性</div>
+      <div className="panel-title">属性{disabled ? ' · 运行中已冻结' : ''}</div>
+      {disabled && (
+        <div className="property-frozen-note">运行/调试进行中：参数编辑已冻结，结果对应提交时的流程；结束后可继续编辑。</div>
+      )}
       <div className="property-heading">{catalogItem.displayName}</div>
       <div className="property-subtitle">
         {catalogItem.type}
@@ -211,9 +259,18 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       </div>
 
       <div className="property-list">
-        {parameters.roi && (
+        {isVisionRoi(parameters.roi) && (
           <div className="roi-property">
-            <div className="roi-property-title">感兴趣区域 · 在图像查看器中编辑</div>
+            <div className="roi-property-title">
+              <span>感兴趣区域</span>
+              {onLocateRoi && <button type="button" className="text-button" onClick={onLocateRoi} title="在图像查看器中居中显示该选区">定位选区</button>}
+            </div>
+            <RoiEditor roi={parameters.roi} disabled={disabled} onChange={(roi) => onChange('roi', roi)} />
+          </div>
+        )}
+        {parameters.roi !== undefined && !isVisionRoi(parameters.roi) && (
+          <div className="roi-property">
+            <div className="roi-property-title">感兴趣区域</div>
             <code>{JSON.stringify(parameters.roi)}</code>
           </div>
         )}

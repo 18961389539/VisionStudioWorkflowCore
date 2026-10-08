@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using VisionStudio.Engine.Diagnostics;
 
 namespace VisionStudio.Api.Tests;
@@ -12,7 +14,13 @@ public sealed class DiagnosticsTests : IClassFixture<VisionStudioApiFactory>
     [Fact]
     public async Task Diagnostics_Assets_NormalizeCameraDeviceAndRobotManagers()
     {
-        var assets = await _client.GetFromJsonAsync<List<AssetHealthSnapshot>>("/api/diagnostics/assets");
+        // 服务端将 AssetKind 等枚举序列化为字符串，客户端读取需使用同一枚举约定，
+        // 否则枚举字段反序列化会抛 JsonException（此前测试使用裸默认选项）。
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() }
+        };
+        var assets = await _client.GetFromJsonAsync<List<AssetHealthSnapshot>>("/api/diagnostics/assets", jsonOptions);
         Assert.NotNull(assets);
         Assert.Contains(assets!, x => x.Kind == AssetKind.Camera && x.Id == "virtual-1");
         Assert.Contains(assets!, x => x.Kind == AssetKind.Device && x.Id == "virtual-modbus-1");

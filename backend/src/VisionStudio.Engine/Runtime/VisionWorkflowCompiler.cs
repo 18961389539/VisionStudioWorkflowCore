@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace VisionStudio.Engine.Runtime;
@@ -15,6 +16,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     private readonly object _identityGate = new();
     private long _catalogRevision = -1;
     private string _catalogIdentity = string.Empty;
+    /// <summary>
+    /// DSL 是给人读、给 Workflow Core 解析的工件（非 HTML 场景）：默认编码器会把条件表达式里的
+    /// 引号转义成 \u0022，视图/日志里难以辨认；relaxed 编码输出标准的 \" 转义，两种形式解析等价。
+    /// </summary>
+    private static readonly JsonSerializerOptions DslJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public string GetPlanCacheKey(WorkflowDefinition workflow)
     {
@@ -76,7 +85,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             ["Version"] = 1,
             ["DataType"] = _dataType,
             ["Steps"] = compiled.Steps
-        });
+        }, DslJsonOptions);
 
         return new CompiledWorkflow(
             workflowCoreId,

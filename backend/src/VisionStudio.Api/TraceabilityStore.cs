@@ -263,7 +263,7 @@ ON CONFLICT(run_id) DO UPDATE SET
             await transaction.CommitAsync(ct);
         }
 
-        if (result.ReplayInput is { Png.Length: > 0 } replay && ShouldPersistReplayInput(result.RunId, disposition))
+        if (result.ReplayInput is { Png.Length: > 0 } replay && ShouldPersistReplayInput(result.RunId, disposition, record.Source))
             record = await PersistReplayInputAsync(record, replay, startedAt, ct);
 
         if (!wantsPreview || result.PreviewJpeg is not { Length: > 0 } jpeg) return record;
@@ -651,8 +651,13 @@ VALUES($run,$sequence,$node,$type,$phase,$success,$start,$end,$duration,$error);
     private bool ShouldPersistPreview(string runId, string disposition)
         => RunArtifactSampling.Include(runId, disposition, _retention.OkPreviewSampleEvery);
 
-    private bool ShouldPersistReplayInput(string runId, string disposition)
-        => RunArtifactSampling.Include(runId, disposition, _retention.OkReplaySampleEvery, replay: true);
+    private bool ShouldPersistReplayInput(string runId, string disposition, string source)
+        // 生产循环（ProductionRuntime）的 OK trace 按采样留存 replay 素材以控制磁盘占用；
+        // 交互式运行（ad-hoc / debug / 手动作业）是用户主动留下、供数据集素材与离线重放使用的
+        // 证据链，一律持久化——采样曾将其一并剔除，导致参数调优的数据集引用被 409 拒绝。
+        => source.Equals("ProductionRuntime", StringComparison.OrdinalIgnoreCase)
+            ? RunArtifactSampling.Include(runId, disposition, _retention.OkReplaySampleEvery, replay: true)
+            : true;
 
     public RunArtifactOptions GetArtifactOptions(long maxRawBytes)
         => new(DeferEncoding: true, PreviewSampleEvery: _retention.OkPreviewSampleEvery,

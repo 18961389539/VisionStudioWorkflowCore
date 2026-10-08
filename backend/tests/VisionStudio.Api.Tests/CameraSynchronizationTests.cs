@@ -28,7 +28,8 @@ public sealed class CameraSynchronizationTests
         using var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        Assert.Equal(16, db.CurrentSchemaVersion);
+        // 同步取证表自 V16 引入：断言当前 schema 不低于该版本（版本持续演进，不再锁定具体快照）
+        Assert.True(db.CurrentSchemaVersion >= 16);
         await using var connection = await db.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='camera_sync_groups';";

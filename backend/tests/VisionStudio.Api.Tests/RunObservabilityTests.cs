@@ -19,7 +19,8 @@ public sealed class RunObservabilityTests
         var service = new RunObservabilityService(db, traces);
         var snapshot = await service.GetAsync("timeline-run", ct: default);
 
-        Assert.Equal(17, (await db.GetSchemaStatusAsync()).CurrentVersion);
+        // schema 版本随迁移演进（当前 20）：断言 status 与实现常量一致而非硬编码快照
+        Assert.Equal(db.CurrentSchemaVersion, (await db.GetSchemaStatusAsync()).CurrentVersion);
         Assert.True(snapshot.TimelineAvailable);
         var node = Assert.Single(snapshot.Timeline);
         Assert.Equal(1L, node.ExecutionSequence);

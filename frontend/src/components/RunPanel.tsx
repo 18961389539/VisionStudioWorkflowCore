@@ -21,10 +21,11 @@ type SortMode = 'sequence' | 'duration';
 const INLINE_SCALARS = 3;
 
 /** 摘要单元格：标量压成一行（规则见 summaryText），完整 JSON 放在可展开的详情里 */
-function SummaryCell({ summary }: { summary?: Record<string, unknown> }) {
+function SummaryCell({ summary, typeKey }: { summary?: Record<string, unknown>; typeKey?: string }) {
   const [expanded, setExpanded] = useState(false);
   const entries = Object.entries(summary ?? {});
-  const line = summarizeScalars(summary, INLINE_SCALARS) || '—';
+  // 与节点 footer 同一套“主结果字段”排序（measure.blob 先出面积，而不是 x/y）
+  const line = summarizeScalars(summary, INLINE_SCALARS, undefined, typeKey) || '—';
   return (
     <div className="run-summary">
       <div className="run-summary-line" title={line}>{line}</div>
@@ -248,7 +249,7 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
             {
               title: '摘要',
               dataIndex: 'summary',
-              render: (summary: Record<string, unknown>) => <SummaryCell summary={summary} />
+              render: (summary: Record<string, unknown>, record) => <SummaryCell summary={summary} typeKey={record.nodeType} />
             }
           ]}
         />

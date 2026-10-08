@@ -51,4 +51,48 @@ public sealed class RunStoreTests
         Assert.True(store.TryGet("run-a", out _));
         Assert.True(store.TryGet("run-b", out _));
     }
+
+    [Fact]
+    public void Put_ReplacingSameRunId_DoesNotAccumulateOrderEntries()
+    {
+        var store = new RunStore(maxRetainedRuns: 8, maxTotalBytes: 1024L * 1024 * 1024);
+        for (var i = 0; i < 50; i++) store.Put(Result("run-a", 1024));
+
+        // 反复覆盖同一 runId：缓存 1 条，顺序队列必须同样只有 1 项（修复前只在驱逐时清队列，会堆积 50 项）
+        Assert.Equal(1, OrderEntryCount(store));
+        Assert.True(store.TryGet("run-a", out _));
+    }
+
+    [Fact]
+    public void Put_ReplacingSameRunId_MovesEntryToMostRecent()
+    {
+        var store = new RunStore(maxRetainedRuns: 2, maxTotalBytes: 1024L * 1024 * 1024);
+        store.Put(Result("run-a", 1024));
+        store.Put(Result("run-b", 1024));
+        store.Put(Result("run-a", 1024)); // 覆盖：run-a 应变为最新，而不是保留原来的最旧位置
+        store.Put(Result("run-c", 1024)); // 超限：驱逐最旧的 run-b
+
+        Assert.False(store.TryGet("run-b", out _));
+        Assert.True(store.TryGet("run-a", out _));
+        Assert.True(store.TryGet("run-c", out _));
+        Assert.Equal(2, OrderEntryCount(store));
+    }
+
+    [Fact]
+    public void Put_OversizedArtifact_EvictsItselfAndLeavesNoOrderEntry()
+    {
+        var store = new RunStore(maxRetainedRuns: 8, maxTotalBytes: 1024);
+        store.Put(Result("huge", 1024 * 1024));
+
+        // 单条工件自身超预算：整条被驱逐，顺序队列不得残留该条目
+        Assert.False(store.TryGet("huge", out _));
+        Assert.Equal(0, OrderEntryCount(store));
+    }
+
+    /// <summary>顺序队列长度（内部实现细节）：应恒等于缓存条数，覆盖/驱逐后不得有残留过期项。</summary>
+    private static int OrderEntryCount(RunStore store)
+    {
+        var field = typeof(RunStore).GetField("_order", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return ((LinkedList<string>)field!.GetValue(store)!).Count;
+    }
 }

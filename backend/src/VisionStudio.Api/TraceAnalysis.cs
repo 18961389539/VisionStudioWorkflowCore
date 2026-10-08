@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
@@ -72,7 +73,12 @@ public sealed class TraceAnalysisService(
     TraceabilityStore traces,
     RunObservabilityService observability)
 {
-    private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
+    // trace 工件由 TraceabilityStore 持久化（写入选项带 JsonStringEnumConverter，枚举写成字符串）。
+    // 读取必须使用同一配置，否则 NodeRunReport.phase 等枚举字段反序列化抛 JsonException。
+    private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly Regex GuidRegex = new(@"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex HexRegex = new(@"\b0x[0-9a-f]+\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex NumberRegex = new(@"\b\d+(?:\.\d+)?\b", RegexOptions.Compiled);

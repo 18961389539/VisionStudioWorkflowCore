@@ -29,7 +29,8 @@ public sealed class InvestigationCaseTests
         var tracked = await cases.TrackFromTraceAsync("case-error-two", new TrackInvestigationRequest(), default);
         var same = await cases.TrackFromTraceAsync("case-error-one", new TrackInvestigationRequest(), default);
 
-        Assert.Equal(19, (await db.GetSchemaStatusAsync()).CurrentVersion);
+        // 断言跟随实现常量：schema 随迁移演进（当前 20），避免每次迁移都需同步测试硬编码
+        Assert.Equal(db.CurrentSchemaVersion, (await db.GetSchemaStatusAsync()).CurrentVersion);
         Assert.Equal(tracked.Case.Id, same.Case.Id);
         Assert.Equal("Open", tracked.Case.Status);
         Assert.Equal("ExecutionFailure", tracked.Case.Category);

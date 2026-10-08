@@ -239,8 +239,10 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .property-row .ant-input-number, .property-row .ant-input { width: 100%; }
 @container (max-width: 250px) { .property-row { grid-template-columns: minmax(0, 1fr); } }
 
-.vision-node { --vs-port-base: 58px; --vs-port-step: 24px; min-width: 180px; border: 1px solid var(--vs-border-node); border-radius: 7px; background: var(--vs-bg-node); box-shadow: 0 5px 18px var(--vs-shadow); overflow: visible; }
-.vision-node.selected { box-shadow: 0 0 0 2px rgba(74,144,226,.35), 0 5px 18px var(--vs-shadow); border-color: #5d94d7; }
+/* --vs-port-inset：端口行左/右边缘到节点外边缘的距离（边框 1px + body 左右 padding），Handle 靠它锚回节点边缘 */
+.vision-node { --vs-port-inset: 11px; min-width: 180px; border: 1px solid var(--vs-border-node); border-radius: 7px; background: var(--vs-bg-node); box-shadow: 0 5px 18px var(--vs-shadow); overflow: visible; }
+/* 选中用独立 outline：不与执行状态（断点/暂停）的 box-shadow 抢同一层，两者可同时看清 */
+.vision-node.selected { outline: 2px solid rgba(74,144,226,.75); outline-offset: 2px; border-color: #5d94d7; }
 .vision-node.status-ok { border-color: #3f875d; }
 .vision-node.status-error { border-color: #a94c4c; }
 .vision-node.status-running { border-color: #b18a42; }
@@ -250,7 +252,20 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .port-column { display: flex; flex-direction: column; gap: 8px; }
 .output-column { align-items: flex-end; }
 .port-row { height: 16px; color: var(--vs-text-3); font-size: 11px; }
-.vision-node-footer { height: 25px; padding: 5px 9px; border-top: 1px solid var(--vs-border-node-title); color: var(--vs-text-6); font-size: 9px; }
+/* footer 两栏：左=关键结果/警告（单行省略），右=类型或模块版本（常驻，不再被摘要顶掉） */
+.vision-node-footer { height: 25px; display: flex; align-items: center; gap: 6px; padding: 0 9px; border-top: 1px solid var(--vs-border-node-title); color: var(--vs-text-6); font-size: 9px; }
+.footer-main { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; }
+/* 摘要与错误都单行省略（长错误不再撑破 footer），完整内容在 title 与“详情”里 */
+.footer-alert, .footer-summary { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.footer-alert { flex: 0 1 auto; color: var(--vs-text-danger); }
+.footer-summary { flex: 1 1 auto; }
+.footer-stale-mark { flex: none; color: #e3a04a; }
+.footer-meta { flex: none; opacity: .6; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.footer-detail { flex: none; padding: 0 3px; border: none; border-radius: 3px; background: transparent; color: var(--vs-text-brand); font: inherit; font-size: 9px; cursor: pointer; }
+.footer-detail:hover { text-decoration: underline; }
+.footer-detail:focus-visible { outline: 1px solid #4d7dbd; outline-offset: 1px; }
+.vision-node-footer.footer-warning .footer-alert { color: #e3a04a; }
+.vision-node-footer.footer-stale .footer-summary { opacity: .75; }
 .react-flow__handle { width: 8px; height: 8px; border: 1px solid var(--vs-handle-border); background: #71a8ee; }
 /* 端口命中区：端口列间距为 24px（行高 16 + 间隔 8），向外扩 6px（共 20px）不会侵占相邻端口 */
 .react-flow__handle::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
@@ -274,7 +289,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .react-flow__node.search-hit { outline: 2px solid #e4a84f; outline-offset: 2px; border-radius: 8px; }
 
 /* 紧凑模式：压缩标题 / 端口行距 / 页脚；handle 位置按 CSS 变量整体重算（端口间距 20px） */
-.flow-area.compact-nodes .vision-node { --vs-port-base: 46px; --vs-port-step: 20px; }
+.flow-area.compact-nodes .vision-node { --vs-port-inset: 9px; }
 .flow-area.compact-nodes .vision-node-title { height: 26px; font-size: 11px; }
 .flow-area.compact-nodes .vision-node-body { min-height: 40px; gap: 6px; padding: 6px 8px; }
 .flow-area.compact-nodes .port-column { gap: 6px; }
@@ -325,7 +340,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 /* V0.4 typed data + debug */
 .vision-node { position: relative; }
 .vision-node.status-warmup { border-color: #657386; opacity: .82; }
-.vision-node.status-breakpoint { border-color: #e35d6a; box-shadow: 0 0 0 2px rgba(227,93,106,.25), 0 5px 18px var(--vs-shadow); }
+/* 暂停/断点用内环 + 边框表达执行状态，外圈留给选中 outline */
+.vision-node.status-breakpoint { border-color: #e35d6a; box-shadow: inset 0 0 0 2px rgba(227,93,106,.35), 0 5px 18px var(--vs-shadow); }
 .vision-node.status-pending { border-color: #5b6b8c; opacity: .92; }
 .vision-node.status-skipped { border-color: #4a4b50; border-style: dashed; opacity: .55; }
 .breakpoint-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #e64b59; border: 2px solid #f7c4c9; top: -6px; left: -6px; z-index: 5; }
@@ -352,15 +368,21 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .roi-property code { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--vs-text-3); font-size: 9px; white-space: nowrap; }
 
 /* V0.6 camera runtime */
-.camera-runtime-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, .75fr); gap: 16px; min-height: 540px; }
+.camera-runtime-grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 16px; min-height: 540px; align-items: start; }
 .camera-device-list { min-width: 0; }
+/* 右列：常驻预览 + 任务标签页 */
+.camera-main-section { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+/* 不可用操作的说明（不点也知道为什么灰） */
+.camera-command-hint { margin: -10px 0 4px; color: var(--vs-text-5); font-size: 12px; }
+.media-preview-panel { margin-top: 12px; padding: 10px; border: 1px solid var(--vs-border-panel); border-radius: 6px; background: var(--vs-bg-card); }
 .camera-selected-row td { background: var(--vs-row-selected) !important; }
 .camera-command-row { display: flex; gap: 7px; margin: 12px 0 18px; }
 .camera-file-form { display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; }
 .camera-preview-panel { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--vs-border-panel); border-radius: 7px; background: var(--vs-bg-card); }
 .camera-preview-title { display: flex; justify-content: space-between; gap: 12px; color: var(--vs-text-2); }
 .camera-preview-title span { color: var(--vs-text-5); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.camera-preview-panel img { width: 100%; min-height: 260px; max-height: 420px; object-fit: contain; border: 1px solid var(--vs-border-input); border-radius: 4px; background: var(--vs-bg-image); transition: opacity .15s ease; }
+.camera-preview-panel img, .media-preview-panel img { width: 100%; object-fit: contain; border: 1px solid var(--vs-border-input); border-radius: 4px; background: var(--vs-bg-image); transition: opacity .15s ease; }
+.camera-preview-panel img { min-height: 260px; max-height: 420px; }
 .camera-preview-empty { min-height: 300px; display: grid; place-items: center; color: var(--vs-text-6); border: 1px dashed var(--vs-border-dashed); }
 @media (max-width: 900px) { .camera-runtime-grid { grid-template-columns: 1fr; } }
 
@@ -372,8 +394,29 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 @media (max-width: 1050px) { .camera-settings-grid, .camera-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* V0.7 Job / Recipe versions + traceability */
-.job-grid { display: grid; grid-template-columns: minmax(430px,.8fr) minmax(0,1.2fr); gap: 18px; min-height: 590px; }
+.job-grid { display: grid; grid-template-columns: minmax(280px, 330px) minmax(0, 1fr); gap: 18px; min-height: 590px; }
 .job-grid section { min-width: 0; }
+/* 左列：产品 → 配方 导航 */
+.job-nav-column { display: flex; flex-direction: column; gap: 8px; }
+.job-nav { border-inline-end: none !important; background: transparent; }
+.job-nav-product { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.job-nav-count { padding: 0 6px; border-radius: 8px; background: var(--vs-bg-toolbox); color: var(--vs-text-4); font-size: 11px; }
+.job-nav-recipe { display: inline-flex; align-items: center; gap: 6px; }
+.job-nav-recipe .ant-tag { margin-inline-end: 0; transform: scale(.85); transform-origin: left center; }
+.job-nav-empty { color: var(--vs-text-5); font-size: 12px; }
+.job-create-collapse .ant-collapse-header { padding-inline: 0 !important; }
+/* 参数草稿：表单化编辑 */
+.job-draft-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.job-draft-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.job-draft-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.job-draft-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr) auto; align-items: center; gap: 8px; }
+.job-draft-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--vs-text-2); }
+.job-draft-nested { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.job-draft-empty { color: var(--vs-text-5); font-size: 12px; }
+.job-draft-add { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; margin-top: 2px; }
+.job-draft-error { margin-top: 4px; color: var(--vs-text-danger); font-size: 11px; }
+.job-diff-pre { max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+@media (max-width: 1050px) { .job-draft-grid { grid-template-columns: 1fr; } }
 .job-selected-row td, .trace-selected-row td { background: var(--vs-row-selected) !important; }
 .job-create-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; }
 .job-create-grid > :nth-child(3) { grid-column: 1 / span 2; }
@@ -469,7 +512,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .media-filter-row { display: grid; grid-template-columns: 1fr 140px auto; gap: 8px; margin: 12px 0 8px; }
 .media-preview-title { display: flex; justify-content: space-between; gap: 10px; color: var(--vs-text-2); margin-top: 8px; }
 .media-preview-title span { color: var(--vs-text-5); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.camera-preview-panel img.media-preview-image { min-height: 180px; max-height: 300px; }
+.media-preview-panel img.media-preview-image { min-height: 180px; max-height: 300px; }
 .media-preview-empty { min-height: 160px; display: grid; place-items: center; color: var(--vs-text-6); border: 1px dashed var(--vs-border-dashed); border-radius: 4px; }
 @media (max-width: 900px) { .media-upload-grid, .media-filter-row { grid-template-columns: 1fr; } }
 
@@ -580,9 +623,18 @@ body.resizing-x, body.resizing-y { user-select: none; }
 /* 必需但未连接的输入：红色感叹号（悬停端口行有完整提示） */
 .port-required { color: #e35d6a; font-style: normal; font-weight: 700; margin-right: 3px; }
 
-/* 控制端口与数据端口的分区：虚线分隔用绝对定位画线，不改变行高（Handle top 由 CSS 变量独立计算，不能错位） */
+/* 控制端口与数据端口的分区：虚线分隔用绝对定位画线，不改变行高 */
 .port-row { position: relative; }
 .port-row.first-data::before { content: ''; position: absolute; left: 6px; right: 6px; top: -5px; border-top: 1px dashed var(--vs-border-node); }
+
+/* Handle 定位：相对端口行垂直居中（top:50% + translateY），水平按 --vs-port-inset 反推回节点左右边缘。
+ * 之前按“节点顶部 + index*步长”算 top，而 .port-row 已是定位父级 → 双重偏移，端口多了会落到节点外。 */
+.port-row > .react-flow__handle { top: 50%; }
+.port-row > .react-flow__handle.react-flow__handle-left { left: calc(-1 * var(--vs-port-inset, 11px)); transform: translate(-50%, -50%); }
+.port-row > .react-flow__handle.react-flow__handle-right { right: calc(-1 * var(--vs-port-inset, 11px)); left: auto; transform: translate(50%, -50%); }
+/* 菱形控制端口：在平移之后再旋转，圆心仍落在节点边缘 */
+.port-row > .react-flow__handle.control-handle.react-flow__handle-left { border-radius: 2px; transform: translate(-50%, -50%) rotate(45deg); }
+.port-row > .react-flow__handle.control-handle.react-flow__handle-right { border-radius: 2px; transform: translate(50%, -50%) rotate(45deg); }
 
 /* 扩大连接触摸/命中区（默认 6px 偏小；菱形为旋转 45° 的方块） */
 .flow-area .react-flow__handle { width: 11px; height: 11px; }
@@ -593,17 +645,32 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .node-disposition.ok { background: #3f875d; }
 .node-disposition.ng { background: #c04a4a; }
 
-/* 断点开关：悬停/选中时出现，避免常驻干扰；已设断点时常亮 */
-.node-breakpoint-toggle { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border: 1px solid var(--vs-border-frame); border-radius: 50%; background: var(--vs-bg-title); color: var(--vs-text-5); font-size: 7px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s ease; }
+/* 断点开关：18px 点击区（内含 8px 圆点），nodrag 防止误拖节点；触屏无 hover 时常驻 */
+.node-breakpoint-toggle { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--vs-text-5); font-size: 8px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s ease; }
+.node-breakpoint-toggle::before { content: ''; width: 8px; height: 8px; border: 1px solid var(--vs-border-frame); border-radius: 50%; background: var(--vs-bg-title); }
 .vision-node:hover .node-breakpoint-toggle, .vision-node.selected .node-breakpoint-toggle, .node-breakpoint-toggle.active { opacity: 1; }
-.node-breakpoint-toggle.active { color: #e64b59; border-color: #e64b59; }
+.node-breakpoint-toggle.active { color: #e64b59; }
+.node-breakpoint-toggle.active::before { border-color: #e64b59; background: #e64b59; box-shadow: 0 0 0 2px rgba(230,75,89,.22); }
+.node-breakpoint-toggle:hover { border-color: var(--vs-border-frame); }
+.node-breakpoint-toggle:focus-visible { opacity: 1; outline: 2px solid #4d7dbd; outline-offset: 1px; }
+@media (hover: none) { .node-breakpoint-toggle { opacity: 1; } }
+/* 结果已过期：标题右侧徽标，避免把旧 OK/NG 当成当前结论 */
+.node-stale { padding: 1px 3px; border-radius: 3px; background: rgba(227,160,74,.18); color: #e3a04a; font-size: 9px; font-weight: 700; line-height: 1.4; }
 
-/* 缩放分级：far 只留图标/名称/状态/连接点（Handle 恒在，连线落点不受影响）；
+/* 缩放分级：far 只隐藏“普通文字”（端口名/类型/摘要/类型标签），
+   错误摘要、必需缺口、判定徽标与过期徽标照旧显示——这些是缩小时最不能丢的信息；
    mid 显示端口名称、隐藏类型；near 全量（类型、摘要、耗时）。
-   visibility/color 保持布局占位，Handle 位置不漂移。 */
-.flow-area[data-zoom-level='far'] .port-row > span { visibility: hidden; }
-.flow-area[data-zoom-level='far'] .vision-node-footer { color: transparent; }
+   一律用 visibility 保持布局占位，Handle 与节点尺寸不漂移。 */
+.flow-area[data-zoom-level='far'] .port-row .port-label,
+.flow-area[data-zoom-level='far'] .footer-summary,
+.flow-area[data-zoom-level='far'] .footer-meta,
+.flow-area[data-zoom-level='far'] .footer-detail { visibility: hidden; }
 .flow-area[data-zoom-level='mid'] .port-row small { display: none; }
+/* 选中或正在连线时临时恢复端口名/摘要：既能确认落点，也不必放大 */
+.flow-area[data-zoom-level='far'] .vision-node.selected .port-label,
+.flow-area[data-zoom-level='far'] .vision-node.selected .footer-summary,
+.flow-area[data-zoom-level='far'] .vision-node.selected .footer-meta,
+.flow-area[data-connecting='true'] .port-row .port-label { visibility: visible; }
 
 /* ===== 生产运行 / 生产专用界面：首屏状态、操作区与操作员放大 ===== */
 .production-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; padding: 14px 16px; border: 1px solid var(--vs-border-frame); border-radius: 10px; background: var(--vs-bg-card); }
@@ -637,8 +704,8 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .workflow-name.workflow-name { color: var(--vs-text-1); font-size: 13px; font-weight: 700; }
 .workflow-rename-icon { font-size: 11px; color: var(--vs-text-5); }
 
-/* 账号入口：从右下角浮层改为顶栏右上角轻量按钮 */
-.security-badge { position: fixed; right: 10px; top: 6px; z-index: 1200; padding: 0; border: none; background: transparent; box-shadow: none; }
+/* 账号入口：从右下角浮层改为顶栏右上角轻量按钮（bottom:auto 覆盖旧规则的 bottom:10px，否则 top+bottom 会把浮层拉伸成整列高并遮挡右侧面板） */
+.security-badge { position: fixed; right: 10px; top: 6px; bottom: auto; z-index: 1200; padding: 0; border: none; background: transparent; box-shadow: none; }
 .security-badge-trigger { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--vs-border-frame); border-radius: 13px; background: var(--vs-bg-card); color: var(--vs-text-2); font-size: 12px; cursor: pointer; }
 .security-badge-trigger:hover { color: var(--vs-text-1); border-color: #5d94d7; }
 .security-role-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--vs-text-4); }
@@ -653,3 +720,21 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .bottom-panel > .run-panel { flex: 1; min-height: 0; overflow: auto; }
 .bottom-issues { flex: 1; min-height: 0; overflow: auto; padding: 4px 10px; }
 .bottom-panel > .run-observability { flex: 1; min-height: 0; overflow: auto; }
+
+/* ===== 画布 / 属性 / 图像查看器：缺口提示、ROI 编辑与查看器分组（批次 2） ===== */
+/* 必需输入未连接：footer 以警示色提示缺口，优先于摘要 */
+.vision-node-footer.footer-warning { color: var(--vs-warn-text); font-weight: 600; }
+
+/* 运行中冻结原因的固定提示条 */
+.property-frozen-note { margin: 0 10px 6px; padding: 5px 8px; border-radius: 4px; background: var(--vs-warn-bg); color: var(--vs-warn-text); font-size: 11px; line-height: 1.5; }
+
+/* ROI 结构化编辑：标题行带“定位选区”，数值行按形状排布 */
+.roi-property-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.roi-grid { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.roi-field { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--vs-text-3); }
+.roi-field .ant-input-number { width: 74px; }
+.roi-polygon-note { font-size: 11px; color: var(--vs-text-4); }
+
+/* 图像查看器：工具栏分组分隔与加载失败态 */
+.viewer-toolbar-divider { width: 1px; height: 16px; align-self: center; background: var(--vs-border-toolbar); }
+.image-placeholder.error { color: var(--vs-text-danger); }

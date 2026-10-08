@@ -45,11 +45,12 @@ public static class DebugSessionEndpoints
             return MapSessionRun(sessionId, "run-node", result, store);
         }).RequireEngineer("workflow.debug.session.run-node", "workflow");
 
-        app.MapGet("/api/debug/sessions/{sessionId}", (
+        app.MapGet("/api/debug/sessions/{sessionId}", async (
             string sessionId,
-            DebugSessionService sessions) =>
+            DebugSessionService sessions,
+            CancellationToken ct) =>
         {
-            var snapshot = sessions.Snapshot(sessionId);
+            var snapshot = await sessions.SnapshotAsync(sessionId, ct);
             return Results.Ok(new
             {
                 snapshot.SessionId,
@@ -69,10 +70,10 @@ public static class DebugSessionEndpoints
             });
         }).RequireEngineer("workflow.debug.session.read", "workflow");
 
-        app.MapDelete("/api/debug/sessions/{sessionId}", (
+        app.MapDelete("/api/debug/sessions/{sessionId}", async (
             string sessionId,
             DebugSessionService sessions) =>
-            sessions.Delete(sessionId) ? Results.NoContent() : Results.NotFound())
+            await sessions.DeleteAsync(sessionId) ? Results.NoContent() : Results.NotFound())
             .RequireEngineer("workflow.debug.session.delete", "workflow");
 
         return app;

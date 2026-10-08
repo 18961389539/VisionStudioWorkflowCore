@@ -11,7 +11,8 @@ public sealed class PluginSdkV2Tests
     [Fact]
     public void V053ManifestPackage_LoadsWithSdk2ToolIdentityAndPerNodeLifetime()
     {
-        using var fixture = PluginFixture.Create(version: "0.54.0");
+        // 清单版本必须与插件描述符一致：描述符是版本单一事实源，避免样例升级后 fixture 再次漂移
+        using var fixture = PluginFixture.Create(version: new SampleMathPlugin().Descriptor.Version);
         using var registry = new VisionNodeRegistry();
         using var manager = new PluginManager(registry, NullLogger<PluginManager>.Instance);
 
@@ -47,7 +48,8 @@ public sealed class PluginSdkV2Tests
     [Fact]
     public void V053Rescan_ChangedActiveManifestRequiresRestartInsteadOfHotReplacement()
     {
-        using var fixture = PluginFixture.Create(version: "0.54.0");
+        // 清单版本必须与插件描述符一致：描述符是版本单一事实源，避免样例升级后 fixture 再次漂移
+        using var fixture = PluginFixture.Create(version: new SampleMathPlugin().Descriptor.Version);
         using var registry = new VisionNodeRegistry();
         using var manager = new PluginManager(registry, NullLogger<PluginManager>.Instance);
         manager.LoadAll(fixture.Root);

@@ -15,7 +15,7 @@ public sealed record DebugSessionRunNodeRequest(string NodeId);
 /// that native vision resources (Mats, plan leases) and hardware leases are released on delete,
 /// eviction, idle expiry or host shutdown.
 /// </summary>
-public sealed class DebugSessionService : IDisposable
+public sealed class DebugSessionService : IDisposable, IAsyncDisposable
 {
     private sealed class Entry(WorkflowDebugSession session, DeviceLease lease)
     {
@@ -31,7 +31,8 @@ public sealed class DebugSessionService : IDisposable
     private readonly TimeSpan _idleTimeout;
     private readonly ILogger<DebugSessionService> _logger;
     private readonly Timer _sweeper;
-    private bool _disposed;
+    private int _disposed;
+    private int _sweeping;
 
     public DebugSessionService(
         WorkflowDebugSessionService engine,
@@ -46,7 +47,7 @@ public sealed class DebugSessionService : IDisposable
         _maxSessions = Math.Clamp(configuration.GetValue("DebugSessions:MaxSessions", 4), 1, 32);
         _idleTimeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("DebugSessions:IdleTimeoutSeconds", 300), 30, 3600));
         _logger = logger;
-        _sweeper = new Timer(_ => SweepIdle(), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        _sweeper = new Timer(_ => { _ = SweepIdleAsync(); }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     public async Task<(string SessionId, WorkflowRunResult Result)> CreateAsync(
@@ -54,8 +55,8 @@ public sealed class DebugSessionService : IDisposable
         VisionRunOptions options,
         CancellationToken ct)
     {
-        SweepIdle();
-        EvictIfFull();
+        await SweepIdleAsync();
+        await EvictIfFullAsync();
 
         // The lease must cover the engine's initial run to the first breakpoint (it can already touch
         // hardware), so the id is reserved here and the lease owner matches the session for its lifetime.
@@ -130,17 +131,24 @@ public sealed class DebugSessionService : IDisposable
         }
     }
 
-    public DebugSessionSnapshot Snapshot(string sessionId)
+    public async Task<DebugSessionSnapshot> SnapshotAsync(string sessionId, CancellationToken ct = default)
     {
         var entry = Require(sessionId);
-        entry.Session.Touch();
-        return entry.Session.Snapshot();
+        try
+        {
+            // 会话快照与执行共享 Gate：执行中会等待当前片段完成，释放中会被拒绝，不会读到已释放资源
+            return await _engine.SnapshotAsync(entry.Session, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ApiConflictException(ex.Message, ex);
+        }
     }
 
-    public bool Delete(string sessionId)
+    public async Task<bool> DeleteAsync(string sessionId)
     {
         if (!_sessions.TryRemove(sessionId, out var entry)) return false;
-        Release(entry, "deleted");
+        await ReleaseAsync(entry, "deleted");
         return true;
     }
 
@@ -163,36 +171,46 @@ public sealed class DebugSessionService : IDisposable
             $"Debug session '{entry.Session.SessionId}' no longer holds its hardware lease; the '{operation}' request was blocked. Delete the session and start a new one.");
     }
 
-    private void EvictIfFull()
+    private async Task EvictIfFullAsync()
     {
         while (_sessions.Count >= _maxSessions)
         {
             var oldest = _sessions.Values.OrderBy(x => x.Session.LastActivityAt).FirstOrDefault();
             if (oldest is null) return;
             if (_sessions.TryRemove(oldest.Session.SessionId, out var evicted))
-                Release(evicted, "evicted (capacity)");
+                await ReleaseAsync(evicted, "evicted (capacity)");
         }
     }
 
-    private void SweepIdle()
+    private async Task SweepIdleAsync()
     {
-        if (_disposed) return;
-        var now = DateTimeOffset.UtcNow;
-        foreach (var entry in _sessions.Values)
+        if (Volatile.Read(ref _disposed) != 0) return;
+        // 释放现在需要等待执行退出，耗时可能超过扫描间隔：重入直接跳过本轮
+        if (Interlocked.Exchange(ref _sweeping, 1) != 0) return;
+        try
         {
-            if (now - entry.Session.LastActivityAt <= _idleTimeout) continue;
-            if (_sessions.TryRemove(entry.Session.SessionId, out var expired))
-                Release(expired, "expired (idle)");
+            var now = DateTimeOffset.UtcNow;
+            foreach (var entry in _sessions.Values)
+            {
+                if (now - entry.Session.LastActivityAt <= _idleTimeout) continue;
+                if (_sessions.TryRemove(entry.Session.SessionId, out var expired))
+                    await ReleaseAsync(expired, "expired (idle)");
+            }
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Debug session idle sweep failed.");
+        }
+        finally { Interlocked.Exchange(ref _sweeping, 0); }
     }
 
-    private void Release(Entry entry, string reason)
+    private async Task ReleaseAsync(Entry entry, string reason)
     {
         try
         {
-            // Release native vision resources before the hardware lease so the next owner cannot start
-            // using an asset that is still being torn down here.
-            entry.Session.Dispose();
+            // 先阻止新操作并等待正在执行的 continue / run-node 退出（必要时取消它），再释放原生
+            // 视觉资源与硬件租约——释放不再发生在执行使用资源的中途，执行收尾的 Gate 也不再撞上已销毁的信号量。
+            await entry.Session.ReleaseAsync();
             _logger.LogInformation("Debug session {SessionId} released: {Reason}.", entry.Session.SessionId, reason);
         }
         catch (Exception ex)
@@ -207,10 +225,22 @@ public sealed class DebugSessionService : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _sweeper.Dispose();
-        foreach (var entry in _sessions.Values) Release(entry, "host shutdown");
+        // 同步桥：等待每个会话的执行退出后再释放（语义与 DisposeAsync 相同，供同步调用点使用）
+        ReleaseAllAsync("host shutdown").GetAwaiter().GetResult();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _sweeper.Dispose();
+        await ReleaseAllAsync("host shutdown");
+    }
+
+    private async Task ReleaseAllAsync(string reason)
+    {
+        foreach (var entry in _sessions.Values) await ReleaseAsync(entry, reason);
         _sessions.Clear();
     }
 }
