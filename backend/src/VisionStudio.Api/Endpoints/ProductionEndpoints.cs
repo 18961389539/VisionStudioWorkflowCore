@@ -33,17 +33,59 @@ public static class ProductionEndpoints
         app.MapPost("/api/production/recover", async (ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.RecoverAsync(ct))).RequireOperator("production.recover", "production");
 
-        app.MapPost("/api/production/device-actions/resolve", async (DeviceActionResolutionRequest request, HttpContext http, ProductionRuntimeService production, CancellationToken ct) =>
+        app.MapPost("/api/production/device-actions/resolve", async (DeviceActionResolutionRequest request, HttpContext http,
+            ProductionRuntimeService production, DeviceActionAuthorizationService authorization, CancellationToken ct) =>
         {
             var operatorName = http.User.Identity?.Name;
+            // F03：手动/临时运行动作意图的核对路径——与生产意图共用同一端点，但按意图 ID 精确清除。
+            // 证据必填（否则核对不可追溯），清除动作写入审计（AuditContext 目标 = 意图 ID）。
+            if (!string.IsNullOrWhiteSpace(request.ManualIntentId))
+            {
+                if (string.IsNullOrWhiteSpace(request.Evidence) || string.IsNullOrWhiteSpace(request.DeviceIdentityEvidence))
+                    throw new ApiValidationException(
+                        "Reconciling a manual action requires both on-site evidence and device identity evidence (auditable record).");
+                AuditContext.SetTarget(http, request.ManualIntentId);
+                authorization.ResolveManualIntent(request.ManualIntentId);
+                return Results.Ok(production.Status);
+            }
+
+            AuditContext.SetTarget(http, request.RunId);
             await production.ResolveUnknownDeviceActionsAsync(request, operatorName ?? string.Empty, ct);
             return Results.Ok(production.Status);
-        }).RequireAdministrator("production.device-actions.resolve", "production");
+        }).RequireAdministrator("production.device-actions.resolve", "production").WithAudit("production.device-actions.resolve", "production");
 
-        app.MapGet("/api/production/device-actions/pending", (ProductionRuntimeService production) =>
+        app.MapGet("/api/production/device-actions/pending", (ProductionRuntimeService production, DeviceActionAuthorizationService authorization) =>
         {
+            // F03：未闭合意图的**单一事实源**——生产状态 + 手动/临时/调试/作业运行登记的意图
+            // （此前 pending 只认识生产意图，导致遗留手动意图能锁死系统却没有核对入口）。
             var state = production.DeviceActionResolutionState;
-            return state is null ? Results.NoContent() : Results.Ok(state);
+            var manual = authorization.UnresolvedManualIntents()
+                .Select(x => new
+                {
+                    x.RunId,
+                    x.Action,
+                    x.DeviceIds,
+                    x.RobotIds,
+                    x.CameraIds,
+                    x.SetAt,
+                    State = x.State.ToString(),
+                    x.ClosedReason
+                })
+                .ToArray();
+            if (state is null && manual.Length == 0) return Results.NoContent();
+            return Results.Ok(new
+            {
+                state?.RunId,
+                state?.ManifestHash,
+                state?.DeviceIds,
+                state?.RobotIds,
+                state?.DeviceFingerprints,
+                state?.Phase,
+                state?.SetAt,
+                state?.Reason,
+                state?.Unreadable,
+                ManualIntents = manual
+            });
         }).RequireAdministrator("production.device-actions.read", "production");
 
         app.MapGet("/api/alarms", async (bool? activeOnly, AlarmStore alarms, CancellationToken ct) =>

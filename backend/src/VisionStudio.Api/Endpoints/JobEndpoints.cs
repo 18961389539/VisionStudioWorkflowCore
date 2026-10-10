@@ -102,6 +102,7 @@ public static class JobEndpoints
             RunTraceRecorder recorder,
             RuntimeDependencyManifestService dependencies,
             ProductionRuntimeService production,
+            DeviceActionAuthorizationService auth,
             CancellationToken ct) =>
         {
             var snapshot = await jobs.GetPublishedSnapshotAsync(id, ct);
@@ -110,10 +111,17 @@ public static class JobEndpoints
             var runId = RunTraceRecorder.NewRunId();
             // 运行期硬件租约：与 ad-hoc/debug 运行一致，执行结束（含失败/取消）即释放
             using var lease = await production.AcquireRunLeaseAsync(runId, snapshot.Workflow, $"Cannot run job '{id}'", ct);
-            await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, snapshot.Workflow, context);
+            // F01：手动触发的已发布作业运行同样受统一动作授权约束，并在执行前耐久登记意图；
+            // 含副作用流程的起始证据写失败绝不盲跑（与 /api/run 同一契约）。
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.publishedJob", snapshot.Workflow, ct);
+            if (DeviceSideEffectClassifier.HasDeviceSideEffects(snapshot.Workflow))
+                await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, snapshot.Workflow, context);
+            else
+                await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, snapshot.Workflow, context);
             // 手动触发的作业运行同样支持按节点图像检查（自动化的 Production Runtime 不走此端点）
             var result = await runner.RunAsync(snapshot.Workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
             await recorder.FinalizeAsync(result, snapshot.Workflow, context);
+            if (result.Success) actionIntent.Complete();
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireOperator("job.run", "job");
 

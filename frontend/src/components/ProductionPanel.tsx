@@ -9,17 +9,19 @@ const PRODUCTION_POLL_TIMEOUT_MS = 5000;
 
 type JobItem = { id: string; name: string; productId?: string | null; recipeCode?: string | null; publishedVersion?: number | null };
 
-/// R05：待核对的设备动作（管理员核对入口的数据契约，与后端 ProductionDeviceActionPendingState 对齐）。
+/// R05/F03：待核对的设备动作（管理员核对入口的数据契约，与后端 pending 端点对齐）。
 export type DeviceActionPendingState = {
   runId?: string | null;
   manifestHash?: string | null;
-  deviceIds: string[];
-  robotIds: string[];
+  deviceIds?: string[];
+  robotIds?: string[];
   deviceFingerprints?: Record<string, string>;
   phase?: string;
   setAt?: string | null;
   reason?: string | null;
   unreadable?: boolean;
+  /// F03：手动/临时/调试/作业运行登记的未闭合动作意图（与生产状态同一事实源）。
+  manualIntents?: { runId: string; action: string; deviceIds: string[]; robotIds: string[]; cameraIds: string[]; setAt: string; state: string; closedReason?: string | null }[];
 };
 
 type Props = { open: boolean; onClose: () => void; embedded?: boolean };
@@ -73,40 +75,35 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   // "数据更新于当前时间"的假象上（503/401/500 必须显式标记陈旧并给出原因）。
   const refreshGeneration = useRef(0);
   const refreshAbort = useRef<AbortController | null>(null);
+  const refreshInFlight = useRef(false);
   // R05：待核对设备动作——管理员必须在产品内看到清单并提交核对证据（此前后端具备能力但界面缺失）。
   const [pendingActions, setPendingActions] = useState<DeviceActionPendingState>();
   const [resolveOpen, setResolveOpen] = useState(false);
+  // F03：核对目标——生产意图（manifest 匹配）或具体的未闭合动作意图（按 runId 精确清除）。
+  const [resolveTarget, setResolveTarget] = useState<{ kind: 'production' } | { kind: 'manual'; runId: string; action: string }>({ kind: 'production' });
   const [resolveForm] = Form.useForm<{ evidence: string; identityEvidence: string; reason?: string }>();
 
   const refresh = useCallback(async () => {
+    // F04：单次刷新完成前跳过本轮 tick——绝不取消上一次仍在进行的请求。1 秒轮询 + 5 秒超时
+    // 若每次都 abort 旧请求，会让"慢但健康"的接口被反复取消，界面永远拿不到快照。
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     const generation = ++refreshGeneration.current;
-    refreshAbort.current?.abort();
     const controller = new AbortController();
     refreshAbort.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), PRODUCTION_POLL_TIMEOUT_MS);
     try {
-      const [statusRes, configRes, jobsRes, alarmsRes] = await Promise.all([
-        fetch('/api/production/status', { signal: controller.signal }),
-        fetch('/api/production/config', { signal: controller.signal }),
-        fetch('/api/jobs', { signal: controller.signal }),
-        fetch('/api/alarms?activeOnly=false', { signal: controller.signal })
-      ]);
+      // 关键快照：单独请求、独立判定新鲜度（F04：不与辅助数据共享全有或全无等待）。
+      const statusRes = await fetch('/api/production/status', { signal: controller.signal });
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃，不覆盖更新的结果
-      // 只有**关键生产快照**真正取到才算刷新成功——可选数据（配置/配方/报警）失败只降级显示。
       if (!statusRes.ok)
         throw new Error(await responseErrorMessage(statusRes, `生产状态读取失败（HTTP ${statusRes.status}）`));
       setStatus(await statusRes.json());
-      if (configRes.ok) setConfig(await configRes.json());
-      if (jobsRes.ok) setJobs(await jobsRes.json());
-      if (alarmsRes.ok) setAlarms(await alarmsRes.json());
-      try {
-        const pendingRes = await fetch('/api/production/device-actions/pending', { signal: controller.signal });
-        if (generation === refreshGeneration.current)
-          setPendingActions(pendingRes.ok && pendingRes.status !== 204 ? await pendingRes.json() : undefined);
-      } catch { /* 待核对清单是辅助信息：读取失败不影响主快照的新鲜度判定 */ }
       setLastUpdatedAt(new Date());
       setStaleConnection(false);
       setRefreshError(undefined);
+      // 辅助数据：各自独立、失败只降级显示；每个异步边界后核对代次。
+      void loadAuxiliary(generation, controller.signal);
     } catch (error) {
       if (generation !== refreshGeneration.current) return;
       // keep the operator screen alive while the host restarts — but never present stale data as current
@@ -115,8 +112,27 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     } finally {
       window.clearTimeout(timeout);
       if (refreshAbort.current === controller) refreshAbort.current = null;
+      refreshInFlight.current = false;
     }
   }, []);
+
+  const loadAuxiliary = async (generation: number, signal: AbortSignal) => {
+    const settled = await Promise.allSettled([
+      fetch('/api/production/config', { signal }),
+      fetch('/api/jobs', { signal }),
+      fetch('/api/alarms?activeOnly=false', { signal }),
+      fetch('/api/production/device-actions/pending', { signal })
+    ]);
+    if (generation !== refreshGeneration.current) return; // 旧 body 不得覆盖新状态
+    try {
+      const [configRes, jobsRes, alarmsRes, pendingRes] = settled;
+      if (configRes.status === 'fulfilled' && configRes.value.ok) setConfig(await configRes.value.json());
+      if (jobsRes.status === 'fulfilled' && jobsRes.value.ok) setJobs(await jobsRes.value.json());
+      if (alarmsRes.status === 'fulfilled' && alarmsRes.value.ok) setAlarms(await alarmsRes.value.json());
+      if (pendingRes.status === 'fulfilled')
+        setPendingActions(pendingRes.value.ok && pendingRes.value.status !== 204 ? await pendingRes.value.json() : undefined);
+    } catch { /* 辅助数据读取失败不影响主快照的新鲜度判定 */ }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -401,10 +417,21 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
             <Space direction="vertical" size={4}>
               <span>原因：{pendingActions.reason ?? '上一周期的设备动作结果未确认'}{pendingActions.unreadable ? '（安全状态文件不可读，需人工处理）' : ''}</span>
               {pendingActions.runId && <span>运行：{pendingActions.runId}</span>}
-              {pendingActions.deviceIds.length > 0 && <span>涉及设备：{pendingActions.deviceIds.join('、')}</span>}
-              {pendingActions.robotIds.length > 0 && <span>涉及机器人：{pendingActions.robotIds.join('、')}</span>}
+              {(pendingActions.deviceIds?.length ?? 0) > 0 && <span>涉及设备：{(pendingActions.deviceIds ?? []).join('、')}</span>}
+              {(pendingActions.robotIds?.length ?? 0) > 0 && <span>涉及机器人：{(pendingActions.robotIds ?? []).join('、')}</span>}
+              {(pendingActions.manualIntents ?? []).map((intent) => (
+                <span key={intent.runId}>
+                  未闭合动作：<b>{intent.action}</b>（{intent.state}{intent.closedReason ? ` · ${intent.closedReason}` : ''}）
+                  {intent.deviceIds.length > 0 ? ` · 设备 ${intent.deviceIds.join('、')}` : ''}
+                  {intent.robotIds.length > 0 ? ` · 机器人 ${intent.robotIds.join('、')}` : ''}
+                  {' '}
+                  <Button danger size="small" onClick={() => { setResolveTarget({ kind: 'manual', runId: intent.runId, action: intent.action }); setResolveOpen(true); }}>
+                    核对这条动作
+                  </Button>
+                </span>
+              ))}
               <span>步骤：现场核对设备物理状态与身份 → 提交核对证据（写入审计）→ 生产/手动动作恢复可用。</span>
-              <Button danger size="small" onClick={() => setResolveOpen(true)}>提交核对证据</Button>
+              <Button danger size="small" onClick={() => { setResolveTarget({ kind: 'production' }); setResolveOpen(true); }}>提交核对证据</Button>
             </Space>
           }
         />
@@ -412,7 +439,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       <Modal
         open={resolveOpen}
         onCancel={() => setResolveOpen(false)}
-        title="提交设备动作核对证据"
+        title={resolveTarget.kind === 'manual' ? `核对动作：${resolveTarget.action}` : '提交设备动作核对证据'}
         okText="提交核对"
         okButtonProps={{ danger: true }}
         onOk={async () => {
@@ -423,13 +450,14 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                runId: pendingActions?.runId ?? '',
-                manifestHash: pendingActions?.manifestHash ?? '',
-                deviceIds: pendingActions?.deviceIds ?? [],
-                robotIds: pendingActions?.robotIds ?? [],
+                runId: resolveTarget.kind === 'production' ? (pendingActions?.runId ?? '') : '',
+                manifestHash: resolveTarget.kind === 'production' ? (pendingActions?.manifestHash ?? '') : '',
+                deviceIds: resolveTarget.kind === 'production' ? (pendingActions?.deviceIds ?? []) : [],
+                robotIds: resolveTarget.kind === 'production' ? (pendingActions?.robotIds ?? []) : [],
                 reason: values.reason ?? 'manual reconciliation',
                 evidence: values.evidence,
-                deviceIdentityEvidence: values.identityEvidence
+                deviceIdentityEvidence: values.identityEvidence,
+                manualIntentId: resolveTarget.kind === 'manual' ? resolveTarget.runId : null
               })
             });
             if (!response.ok) throw new Error(await responseErrorMessage(response, `核对提交失败（HTTP ${response.status}）`));

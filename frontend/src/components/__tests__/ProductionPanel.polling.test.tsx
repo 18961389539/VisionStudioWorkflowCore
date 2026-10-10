@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductionPanel from '../ProductionPanel';
 
@@ -35,6 +35,8 @@ describe('ProductionPanel polling (R04)', () => {
     });
   });
   afterEach(() => {
+    // 显式卸载：同一文件内多次 render 时 body 断言不能被上一个测试的 DOM 污染。
+    cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -69,6 +71,34 @@ describe('ProductionPanel polling (R04)', () => {
     expect(header).toContain('数据已过期');
     expect(header).toContain('最后成功更新');
     expect(statusCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps a healthy slow response alive instead of cancelling it every tick (F04)', async () => {
+    vi.useFakeTimers();
+    let resolveFirst: ((response: Response) => void) | undefined;
+    let statusCalls = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('/api/production/status')) {
+        statusCalls++;
+        if (statusCalls === 1) return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+        return Promise.resolve(okResponse(statusBody));
+      }
+      if (url.includes('/api/jobs') || url.includes('/api/alarms')) return Promise.resolve(okResponse([]));
+      return Promise.resolve(okResponse({}));
+    }));
+
+    render(<ProductionPanel open onClose={() => undefined} embedded />);
+    // 慢但健康的响应（3 秒 > 1 秒轮询间隔）：在途期间跳过 tick，绝不取消上一次请求。
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(statusCalls).toBe(1);
+
+    await act(async () => { resolveFirst?.(okResponse(statusBody)); await Promise.resolve(); });
+    await flush();
+    expect(document.body.textContent).toContain('数据更新于'); // 慢响应最终显示为新鲜数据
+
+    await act(async () => { vi.advanceTimersByTime(1100); });
+    await flush();
+    expect(statusCalls).toBeGreaterThanOrEqual(2); // 完成后下一轮正常开始
   });
 
   it('never claims fresh data while the very first status request is failing', async () => {

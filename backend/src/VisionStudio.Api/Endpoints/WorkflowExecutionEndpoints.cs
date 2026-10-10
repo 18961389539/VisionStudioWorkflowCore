@@ -86,6 +86,8 @@ public static class WorkflowExecutionEndpoints
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
             var result = await runner.RunAsync(workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
             await recorder.FinalizeAsync(result, workflow, context);
+            // F02：成功且追溯证据（Finalize）已提交才解除意图；失败/取消保留为 Unknown。
+            if (result.Success) actionIntent.Complete();
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.adhoc", "workflow");
 
@@ -111,6 +113,7 @@ public static class WorkflowExecutionEndpoints
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             var result = await runner.RunAsync(request.Workflow, options, runId, ct);
             await recorder.FinalizeAsync(result, request.Workflow, context);
+            if (result.Success) actionIntent.Complete();
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.debug", "workflow");
 

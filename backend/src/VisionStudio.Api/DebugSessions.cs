@@ -27,6 +27,8 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
     private readonly WorkflowDebugSessionService _engine;
     private readonly RuntimeDependencyManifestService _dependencies;
     private readonly DeviceLeaseRegistry _leases;
+    /// <summary>F01：调试会话的每次执行都受统一设备动作授权约束（允许副作用 ≠ 上一动作已核对）。</summary>
+    private readonly DeviceActionAuthorizationService _authorization;
     private readonly int _maxSessions;
     private readonly TimeSpan _idleTimeout;
     private readonly ILogger<DebugSessionService> _logger;
@@ -38,12 +40,14 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         WorkflowDebugSessionService engine,
         RuntimeDependencyManifestService dependencies,
         DeviceLeaseRegistry leases,
+        DeviceActionAuthorizationService authorization,
         IConfiguration configuration,
         ILogger<DebugSessionService> logger)
     {
         _engine = engine;
         _dependencies = dependencies;
         _leases = leases;
+        _authorization = authorization;
         _maxSessions = Math.Clamp(configuration.GetValue("DebugSessions:MaxSessions", 4), 1, 32);
         _idleTimeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("DebugSessions:IdleTimeoutSeconds", 300), 30, 3600));
         _logger = logger;
@@ -58,6 +62,27 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         await SweepIdleAsync();
         await EvictIfFullAsync();
 
+        // F01：含副作用的调试会话在首次运行（到达断点前可能已执行副作用节点——探针已确认
+        // "write 在 breakpoint 之前执行"）前必须通过统一动作授权闸门，并耐久登记意图。
+        // AllowSideEffects 只代表用户同意执行副作用，不代表上一动作已经安全核对。
+        DeviceActionHandle? guard = null;
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
+            guard = _authorization.BeginManualIntent("debug.session.create", [], [], []);
+        try
+        {
+            var started = await CreateCoreAsync(workflow, options, ct);
+            // 成功到达断点且报告成功才解除意图；失败/取消保留为 Unknown。
+            if (guard is not null && started.Result.Success) guard.Complete();
+            return started;
+        }
+        finally { guard?.Dispose(); }
+    }
+
+    private async Task<(string SessionId, WorkflowRunResult Result)> CreateCoreAsync(
+        WorkflowDefinition workflow,
+        VisionRunOptions options,
+        CancellationToken ct)
+    {
         // The lease must cover the engine's initial run to the first breakpoint (it can already touch
         // hardware), so the id is reserved here and the lease owner matches the session for its lifetime.
         var sessionId = Guid.NewGuid().ToString("N");
@@ -104,14 +129,22 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
     {
         var entry = Require(sessionId);
         EnsureLeaseHeld(entry, "continue");
+        // F01：每次继续执行都必须重新通过授权闸门——运行期间产生安全故障（未闭合意图）后，
+        // 已有会话也不能继续下发动作。
+        DeviceActionHandle? guard = null;
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
+            guard = _authorization.BeginManualIntent("debug.session.continue", [], [], []);
         try
         {
-            return await _engine.ContinueAsync(entry.Session, ct);
+            var result = await _engine.ContinueAsync(entry.Session, ct);
+            if (guard is not null && result.Success) guard.Complete();
+            return result;
         }
         catch (InvalidOperationException ex)
         {
             throw new ApiConflictException(ex.Message, ex);
         }
+        finally { guard?.Dispose(); }
     }
 
     public async Task<WorkflowRunResult> RunNodeAsync(string sessionId, string nodeId, CancellationToken ct)
@@ -121,14 +154,21 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
             !entry.Session.Workflow.Nodes.Any(n => n.Id.Equals(nodeId, StringComparison.OrdinalIgnoreCase)))
             throw new ApiNotFoundException($"Node '{nodeId}' is not part of debug session '{sessionId}'.");
         EnsureLeaseHeld(entry, "run-node");
+        // F01：单节点执行与"继续"同一契约——未闭合意图存在时不得再下发任何动作。
+        DeviceActionHandle? guard = null;
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
+            guard = _authorization.BeginManualIntent("debug.session.run-node", [], [], []);
         try
         {
-            return await _engine.RunNodeWithCachedInputsAsync(entry.Session, nodeId, ct);
+            var result = await _engine.RunNodeWithCachedInputsAsync(entry.Session, nodeId, ct);
+            if (guard is not null && result.Success) guard.Complete();
+            return result;
         }
         catch (InvalidOperationException ex)
         {
             throw new ApiConflictException(ex.Message, ex);
         }
+        finally { guard?.Dispose(); }
     }
 
     public async Task<DebugSessionSnapshot> SnapshotAsync(string sessionId, CancellationToken ct = default)

@@ -108,6 +108,8 @@ public static class CameraEndpoints
             // R01：统一动作授权——触发会产出真实帧，属设备动作入口。
             using var intent = auth.BeginManualIntent("camera.trigger", [], [], [id]);
             cameras.Trigger(id);
+            // F02：触发是"下发即完成"的同步动作（无后续运动/写入），确认成功即解除意图。
+            intent.Complete();
             return Results.Ok(cameras.Get(id));
         }).RequireOperator("camera.trigger", "camera");
 

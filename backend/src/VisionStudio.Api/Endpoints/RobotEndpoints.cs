@@ -65,13 +65,21 @@ public static class RobotEndpoints
                     AutoConnect: true,
                     WaitForComplete: request.WaitForInPosition,
                     AutoAck: request.AutoAck), ct);
+                // 握手协议包含完成/错误确认：成功后才可以解除意图。
+                intent.Complete();
                 return Results.Ok(new { result, robot = robots.Get(id) });
             }
 
             RobotCommandReceipt receipt;
             if (request.Action.Equals("SendTarget", StringComparison.OrdinalIgnoreCase))
+            {
                 receipt = await robots.SendTargetAsync(id, target, autoConnect: true, ct: ct);
+                // F02：仅下发（未等待完成）是异步命令——"指令已被接受"不等于"动作已完成"。
+                // 意图保留为 Unknown，直到完成/停止确认或管理员核对。
+                intent.MarkUnknown("robot target was accepted without a completion confirmation");
+            }
             else
+            {
                 receipt = await robots.MoveAsync(
                     id,
                     target,
@@ -79,6 +87,9 @@ public static class RobotEndpoints
                     waitForInPosition: request.WaitForInPosition,
                     timeout: TimeSpan.FromMilliseconds(Math.Clamp(request.TimeoutMs, 50, 120000)),
                     ct: ct);
+                if (request.WaitForInPosition) intent.Complete();
+                else intent.MarkUnknown("robot move was issued without waiting for an in-position confirmation");
+            }
 
             return Results.Ok(new { receipt, robot = robots.Get(id) });
         }).RequireEngineer("robot.target.execute", "robot");

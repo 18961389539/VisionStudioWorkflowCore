@@ -85,7 +85,9 @@ public sealed record DeviceActionResolutionRequest(
     IReadOnlyList<string> RobotIds,
     string Reason,
     string Evidence,
-    string DeviceIdentityEvidence);
+    string DeviceIdentityEvidence,
+    /// <summary>F03：要核对的手动/临时运行动作意图（runId）——与生产意图二选一。</summary>
+    string? ManualIntentId = null);
 public sealed record ProductionDeviceActionPendingState(
     string? RunId,
     string? ManifestHash,

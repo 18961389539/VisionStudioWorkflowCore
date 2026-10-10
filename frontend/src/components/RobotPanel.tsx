@@ -43,10 +43,13 @@ export default function RobotPanel({ open, onClose }: Props) {
   // R04：轮询代次 + 取消 + 超时——旧响应绝不覆盖新结果，挂起请求可被显式中断。
   const refreshGeneration = useRef(0);
   const refreshAbort = useRef<AbortController | null>(null);
+  const refreshInFlight = useRef(false);
 
   const refresh = async (quiet = false) => {
+    // F04：单次刷新完成前跳过本轮 tick——不取消仍在进行的请求（否则慢但健康的接口永远拿不到结果）。
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     const generation = ++refreshGeneration.current;
-    refreshAbort.current?.abort();
     const controller = new AbortController();
     refreshAbort.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), ROBOT_POLL_TIMEOUT_MS);
@@ -67,6 +70,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     } finally {
       window.clearTimeout(timeout);
       if (refreshAbort.current === controller) refreshAbort.current = null;
+      refreshInFlight.current = false;
     }
   };
 

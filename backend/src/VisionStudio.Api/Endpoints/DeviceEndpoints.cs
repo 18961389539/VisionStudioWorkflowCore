@@ -67,6 +67,8 @@ public static class DeviceEndpoints
             // R01：统一动作授权——未闭合的安全意图阻断所有设备动作入口，并在动作前耐久登记本次意图。
             using var intent = auth.BeginManualIntent("device.writeTags", [id], []);
             await devices.WriteManyAsync(id, request.Values, autoConnect: true, cancellationToken: ct);
+            // F02：写入确认成功才解除意图；抛异常/取消时由 Dispose 保留为 Unknown（阻断后续动作）。
+            intent.Complete();
             return Results.Ok(devices.Get(id));
         }).RequireEngineer("device.tags.write", "device");
 
@@ -119,7 +121,10 @@ public static class DeviceEndpoints
             using var lease = leases.AcquireManualOrThrow("device", id, $"Cannot write device '{id}'");
             using var intent = auth.BeginManualIntent("device.writeTag", [id], []);
             await devices.WriteTagAsync(id, tagId, request.Value, autoConnect: true, ct);
-            return Results.Ok(await devices.ReadTagAsync(id, tagId, fresh: true, autoConnect: true, cancellationToken: ct));
+            // F02：写入确认成功才解除意图（读回验证通过后再 Complete）。
+            var readBack = await devices.ReadTagAsync(id, tagId, fresh: true, autoConnect: true, cancellationToken: ct);
+            intent.Complete();
+            return Results.Ok(readBack);
         }).RequireEngineer("device.tag.write", "device");
 
         return app;

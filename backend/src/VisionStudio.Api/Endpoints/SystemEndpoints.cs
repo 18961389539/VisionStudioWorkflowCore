@@ -33,6 +33,17 @@ public static class SystemEndpoints
             var productionBlockers = new List<string>();
             if (authorization.UnresolvedProductionState() is { } pending)
                 productionBlockers.Add($"unresolved device-action intent ({pending.Phase}): {pending.Reason}");
+            // F03：手动/临时/调试/作业运行的未闭合意图同样必须表达为"生产动作未就绪"，
+            // 否则会出现"动作被拒但 productionReady=true"的不一致（探针已确认该反例）。
+            try
+            {
+                foreach (var intent in authorization.UnresolvedManualIntents())
+                    productionBlockers.Add($"unresolved manual device action ({intent.Action}): {intent.ClosedReason ?? "awaiting reconciliation"}");
+            }
+            catch (Exception ex)
+            {
+                productionBlockers.Add($"manual action intent file could not be read: {ex.Message}");
+            }
             if (maintenance.IsMaintenanceActive) productionBlockers.Add("storage maintenance is active");
             if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");
             var productionStatus = production.Status;
