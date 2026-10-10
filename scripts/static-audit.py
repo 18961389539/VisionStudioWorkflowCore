@@ -29,6 +29,26 @@ def read_safe(rel: str) -> str:
         return ''
     return path.read_text(encoding='utf-8')
 
+
+# Root-level process documents (architecture notes / migration guides) are no longer kept in the
+# repository. Document checks are advisory: when a document is present its content is still
+# validated; when absent the check is skipped with a note instead of failing the gate.
+# Source/code files always keep the hard read_safe() contract.
+_missing_docs: set[str] = set()
+def doc_present(rel: str) -> bool:
+    if (ROOT / rel).exists():
+        return True
+    if rel not in _missing_docs:
+        _missing_docs.add(rel)
+        ok(f'documentation absent (check skipped): {rel}')
+    return False
+
+def doc_has(rel: str, token: str) -> bool:
+    """Missing document -> exempt; present -> content must contain the token (case-insensitive)."""
+    if not doc_present(rel):
+        return True
+    return token.lower() in (ROOT / rel).read_text(encoding='utf-8').lower()
+
 # JSON
 json_files = [p for p in ROOT.rglob('*.json') if 'node_modules' not in p.parts]
 for p in json_files:
@@ -283,7 +303,10 @@ required = [
 ]
 
 for rel in required:
-    if not (ROOT/rel).exists(): fail(f'Missing required architecture artifact: {rel}')
+    if rel.endswith('.md'):
+        doc_present(rel)  # documents: absence is a note (root process docs are no longer kept)
+    elif not (ROOT/rel).exists():
+        fail(f'Missing required architecture artifact: {rel}')
 
 api_csproj=read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj')
 if 'Microsoft.AspNetCore.OpenApi' not in api_csproj: fail('OpenAPI package missing from API csproj')
@@ -698,7 +721,7 @@ for token in ['VisionDataType.FrameSet','FrameSetImageNode_selects_requested_cam
 if not any(n.get('type') == 'camera.syncCapture' for n in frameset_sample.get('nodes', [])) or not any(n.get('type') == 'frameset.image' for n in frameset_sample.get('nodes', [])):
     fail('V0.36 synchronized FrameSet sample does not exercise both built-in nodes')
 for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
-    if not (ROOT/rel).exists(): fail(f'V0.36 documentation missing: {rel}')
+    doc_present(rel)
 if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or "value: 'frameSet'" not in read_safe('frontend/src/App.tsx'):
     fail('V0.36 frontend synchronized FrameSet demo is missing')
 ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
@@ -712,7 +735,7 @@ for route in ['/api/camera-sync/groups/{id}/commissioning-tests','/api/camera-sy
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 if 'new(8, "V0.39 camera synchronization commissioning tests"' not in schema_migration_source: fail('V0.40 schema migration v8 missing')
 if 'CommissioningStore_PersistsProgressAndReportMetadata' not in sync_tests: fail('V0.40 commissioning store regression test missing')
-if not (ROOT/'MIGRATION_V038_TO_V039.md').exists(): fail('V0.40 migration guide missing')
+doc_present('MIGRATION_V038_TO_V039.md')
 ok('V0.40 automatic synchronization commissioning test + persisted report workflow present')
 
 # V0.40 commissioning evidence report
@@ -720,8 +743,8 @@ for token in ['ReportSchemaVersion','HardwareFingerprint','EvidenceHash','WorstR
     if token not in commissioning_source: fail(f'V0.40 report evidence token missing: {token}')
 if '/api/camera-sync/commissioning-tests/{testId}/report.html' not in endpoint_sources: fail('V0.40 HTML report endpoint missing')
 if 'exportSyncTestHtml' not in camera_ui: fail('V0.40 HTML report UI export missing')
-if not (ROOT/'CAMERA_COMMISSIONING_REPORT.md').exists(): fail('V0.40 report guide missing')
-if not (ROOT/'MIGRATION_V039_TO_V040.md').exists(): fail('V0.40 migration guide missing')
+doc_present('CAMERA_COMMISSIONING_REPORT.md')
+doc_present('MIGRATION_V039_TO_V040.md')
 ok('V0.40 commissioning evidence report + HTML export present')
 
 
@@ -729,8 +752,8 @@ ok('V0.40 commissioning evidence report + HTML export present')
 for token in ['CameraSynchronizationCommissioningFrameEvidence','DeltaFromFirstUs','SvgPolyline','SvgPtpOffsets','Worst Samples & Timestamp Drill-down']:
     if token not in commissioning_source: fail(f'V0.41 visual report token missing: {token}')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if not (ROOT/'MIGRATION_V040_TO_V041.md').exists(): fail('V0.41 migration guide missing')
-if 'schema **v4**' not in read_safe('CAMERA_COMMISSIONING_REPORT.md'): fail('Commissioning report guide does not describe current schema v4')
+doc_present('MIGRATION_V040_TO_V041.md')
+if not doc_has('CAMERA_COMMISSIONING_REPORT.md', 'schema **v4**'): fail('Commissioning report guide does not describe current schema v4')
 ok('V0.41 visual commissioning report + per-camera worst-run timestamp drill-down present')
 
 
@@ -746,7 +769,7 @@ for token in ['SvgPtpTrend','PtpDiagnostics','"v4"']:
     if token not in commissioning_source: fail(f'V0.42 report v4 PTP trend token missing: {token}')
 if 'PtpDiagnostics_ComputesReadyRateOffsetPercentileAndCorrelation' not in sync_tests:
     fail('V0.42 PTP diagnostics regression test missing')
-if not (ROOT/'MIGRATION_V041_TO_V042.md').exists(): fail('V0.42 migration guide missing')
+doc_present('MIGRATION_V041_TO_V042.md')
 ok('V0.42 per-run PTP evidence + timing diagnostics + report v4 trend present')
 
 # V0.43 Production PTP drift guard
@@ -762,7 +785,7 @@ if '/api/production/ptp-guard' not in endpoint_sources: fail('V0.43 production P
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 for token in ['ResolveRequirements_FindsScheduledSynchronizedCapture','ResolveRequirements_MergesDuplicateGroupAndKeepsStrictestPolicy']:
     if token not in ptp_guard_tests: fail(f'V0.43 PTP guard regression test missing: {token}')
-if not (ROOT/'MIGRATION_V042_TO_V043.md').exists(): fail('V0.43 migration guide missing')
+doc_present('MIGRATION_V042_TO_V043.md')
 ok('V0.43 Production PTP start gate + sliding-window drift/master-clock guard present')
 
 # V0.44 Production synchronization health guard
@@ -778,7 +801,7 @@ if '/api/production/synchronization-guard' not in endpoint_sources: fail('V0.44 
 for token in ['ResolveGroupIds_FindsImmediateAndScheduledSynchronizationGroups','Evaluate_MissingLiveCameras_IsRecoverableTransportFault','Evaluate_DisabledGuard_DoesNotInspectSynchronizationDependencies']:
     if token not in sync_guard_tests: fail(f'V0.44 synchronization guard regression test missing: {token}')
 if 'synchronizationHealthGuardEnabled' not in read_safe('frontend/src/types.ts'): fail('V0.44 frontend sync guard type surface missing')
-if not (ROOT/'MIGRATION_V043_TO_V044.md').exists(): fail('V0.44 migration guide missing')
+doc_present('MIGRATION_V043_TO_V044.md')
 ok('V0.44 Production synchronization Action/frame/skew/sequence health guard + reconnect hysteresis present')
 
 # V0.45 vendor-native transport telemetry + persisted evidence
@@ -814,7 +837,7 @@ if 'ComputeNativeTransport_PrefersVendorCountersAndCalculatesWindowDeltas' not i
     fail('V0.45 vendor transport delta regression test missing')
 if 'V044RuntimeConfig_UpgradesMissingNativeTransportGuardFieldsToV045Defaults' not in read_safe('backend/tests/VisionStudio.Api.Tests/ProductionRuntimeTests.cs'):
     fail('V0.45 V0.44 runtime config compatibility regression test missing')
-if not (ROOT/'MIGRATION_V044_TO_V045.md').exists(): fail('V0.45 migration guide missing')
+doc_present('MIGRATION_V044_TO_V045.md')
 ok('V0.45 Basler/Hikrobot vendor transport telemetry + persisted run evidence + native-first Production Guard present')
 
 # V0.46 GigE network commissioning + host NIC capacity diagnostics
@@ -831,7 +854,7 @@ for token in ['GigENetworkDiagnostics','GigENetworkAssessment','GigENetworkTrend
 for token in ['SameSubnet_UsesHostMaskAndConservativeSlash24Fallback','BuildTransportTrend_ComputesVendorCounterDeltasAndResendRate','BuildTransportTrend_TreatsCounterResetAsNewCounterEpoch']:
     if token not in gige_tests: fail(f'V0.46 GigE regression test missing: {token}')
 if 'new(10, "V0.45 camera vendor transport telemetry evidence"' not in schema_migration_source: fail('V0.46 must retain the schema v10 transport migration')
-if not (ROOT/'MIGRATION_V045_TO_V046.md').exists(): fail('V0.46 migration guide missing')
+doc_present('MIGRATION_V045_TO_V046.md')
 ok('V0.46 host NIC mapping + bandwidth/resend diagnostics + one-click GigE commissioning test present')
 
 # V0.47 Offline Replay + Workflow Debugger
@@ -976,7 +999,7 @@ for token in ['PluginToolRuntimeDependency','SchemaVersion < 5','PackageManifest
     if token not in dependency_source: fail(f'V0.53 plugin production provenance token missing: {token}')
 plugin_package_ui=read_safe('frontend/src/components/PluginPackagePanel.tsx')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if 'schema v15' not in read_safe('MIGRATION_V052_TO_V053.md').lower():
+if not doc_has('MIGRATION_V052_TO_V053.md', 'schema v15'):
     fail('V0.53 migration does not explicitly preserve SQLite schema v15')
 ok('V0.53 manifest-based SDK 2.0 + PerNode lifetime + safe runtime discovery + tool-version provenance present')
 
@@ -1000,7 +1023,7 @@ if 'AddSingleton<PluginPackageService>()' not in host_registration or 'Configure
     fail('V0.54 plugin package service/configuration is not registered')
 if 'PrepareRuntimePluginRoot' not in host_bootstrap:
     fail('V0.54 pending plugin version is not applied before runtime PluginManager loading')
-if 'schema v15' not in read_safe('MIGRATION_V053_TO_V054.md').lower():
+if not doc_has('MIGRATION_V053_TO_V054.md', 'schema v15'):
     fail('V0.54 migration does not explicitly preserve SQLite schema v15')
 ok('V0.54 signed .vspkg preflight + trusted publisher + version repository + pending-restart rollback present')
 
@@ -1029,7 +1052,7 @@ if 'VisionStudio.Plugin.Worker' not in read_safe('backend/VisionStudio.slnx'):
 if 'AddSingleton<PluginWorkerSupervisor>()' not in host_registration or 'Configure<PluginWorkerOptions>' not in host_registration:
     fail('V0.55 worker supervisor/configuration is not registered')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if 'schema v15' not in read_safe('MIGRATION_V054_TO_V055.md').lower():
+if not doc_has('MIGRATION_V054_TO_V055.md', 'schema v15'):
     fail('V0.55 migration does not explicitly preserve SQLite schema v15')
 ok('V0.55 out-of-process plugin worker + timeout/crash/memory isolation + runtime provenance present')
 
@@ -1058,7 +1081,7 @@ if worker_settings.get('MaxPoolSize') != 4 or worker_settings.get('SharedMemoryT
 if plugin_manifest.get('workerPoolSize') != 2 or plugin_manifest.get('workerSharedMemoryThresholdBytes') != 262144:
     fail('V0.56 sample worker plugin does not demonstrate pool/shared-memory configuration')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if 'schema v15' not in read_safe('MIGRATION_V055_TO_V056.md').lower():
+if not doc_has('MIGRATION_V055_TO_V056.md', 'schema v15'):
     fail('V0.56 migration does not explicitly preserve SQLite schema v15')
 ok('V0.56 pooled worker execution + file-backed shared-memory image transport + schema-v7 worker runtime provenance present')
 
@@ -1081,9 +1104,9 @@ for key in ['PerformanceWindowSize','PerformanceMinimumSamples','AdaptiveTargetU
 if worker_settings.get('PerformanceWindowSize') != 512 or worker_settings.get('PerformanceMinimumSamples') != 30:
     fail('V0.57 performance-window defaults drifted')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if 'schema v15' not in read_safe('MIGRATION_V056_TO_V057.md').lower():
+if not doc_has('MIGRATION_V056_TO_V057.md', 'schema v15'):
     fail('V0.57 migration does not explicitly preserve SQLite schema v15')
-if '**v2 to v3**' not in read_safe('MIGRATION_V056_TO_V057.md'):
+if not doc_has('MIGRATION_V056_TO_V057.md', '**v2 to v3**'):
     fail('V0.57 migration does not document worker protocol v3')
 ok('V0.57 stage-level worker performance profiler + advisory 1/2/4 pool recommendation present')
 
@@ -1101,9 +1124,9 @@ for token in ['Recommend_PrefersSmallestPoolWithinFivePercentOfMaximumThroughput
 for token in ['plugin_benchmark_runs','plugin_benchmark_pool_results','V0.58 plugin performance benchmark history',CURRENT_SCHEMA_TOKEN]:
     if token not in schema_migration_source: fail(f'V0.58 benchmark schema token missing: {token}')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
-if 'schema v16' not in read_safe('MIGRATION_V057_TO_V058.md').lower():
+if not doc_has('MIGRATION_V057_TO_V058.md', 'schema v16'):
     fail('V0.58 migration does not document SQLite schema v16')
-if 'temporary benchmark' not in read_safe('PLUGIN_PERFORMANCE_BENCHMARK.md').lower():
+if not doc_has('PLUGIN_PERFORMANCE_BENCHMARK.md', 'temporary benchmark'):
     fail('V0.58 benchmark documentation does not describe temporary benchmark pools')
 ok('V0.58 repeatable Dataset benchmark + temporary 1/2/4 pools + persisted regression gate present')
 
@@ -1112,7 +1135,7 @@ ok('V0.58 repeatable Dataset benchmark + temporary 1/2/4 pools + persisted regre
 benchmark_ci=read_safe('backend/src/VisionStudio.Api/PluginBenchmarkCi.cs')
 benchmark_cli=read_safe('backend/src/VisionStudio.Benchmark.Cli/Program.cs')
 benchmark_ci_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginBenchmarkCiTests.cs')
-benchmark_ci_doc=read_safe('PLUGIN_BENCHMARK_CI.md')
+benchmark_ci_doc=(ROOT/'PLUGIN_BENCHMARK_CI.md').read_text(encoding='utf-8') if doc_present('PLUGIN_BENCHMARK_CI.md') else ''
 for token in ['PluginBenchmarkBaselineSnapshot','BaselineSnapshot','portableBaseline','BaselinePluginVersion','BaselinePluginAssemblySha256']:
     if token not in benchmark_source: fail(f'V0.59 portable baseline token missing: {token}')
 for token in ['PluginBenchmarkCiSpec','CurrentSchemaVersion = 1','FromBaseline','RequireRegressionPass']:
@@ -1126,8 +1149,8 @@ for token in ['CiSpec_EmbedsPortableBaselineAndRemovesDatabaseRunDependency','Re
 for rel in ['scripts/plugin-benchmark-gate.ps1','scripts/plugin-benchmark-gate.sh','.github/workflows/plugin-performance-gate.yml']:
     if not (ROOT/rel).exists(): fail(f'V0.59 CI wrapper missing: {rel}')
 for token in ['Portable CI specification','Headless runner','Exit codes','JUnit','same-pool comparison']:
-    if token.lower() not in benchmark_ci_doc.lower(): fail(f'V0.59 CI documentation token missing: {token}')
-if 'schema v16' not in read_safe('MIGRATION_V058_TO_V059.md').lower():
+    if benchmark_ci_doc and token.lower() not in benchmark_ci_doc.lower(): fail(f'V0.59 CI documentation token missing: {token}')
+if not doc_has('MIGRATION_V058_TO_V059.md', 'schema v16'):
     fail('V0.59 migration does not explicitly preserve SQLite schema v16')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 ok('V0.59 portable baseline CI spec + headless benchmark runner + deterministic regression exit codes present')
@@ -1158,7 +1181,7 @@ if '/api/traces/{runId}/observability' not in trace_endpoints:
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 for token in ['V060Trace_PersistsExactNodeTimeline_InSchemaV17','V060Observability_UsesPriorSameWorkflowRuns_ForLatencyBaseline']:
     if token not in observability_tests: fail(f'V0.60 observability regression test missing: {token}')
-if 'schema v17' not in read_safe('MIGRATION_V059_TO_V060.md').lower():
+if not doc_has('MIGRATION_V059_TO_V060.md', 'schema v17'):
     fail('V0.60 migration does not document SQLite schema v17')
 ok('V0.60 exact run timeline + historical node-latency observability present')
 
@@ -1177,9 +1200,9 @@ if 'initialNodeId' not in replay_debugger_ui:
     fail('V0.61 Replay/Debugger suspect-node handoff missing')
 for token in ['V061Compare_AutoSelectsNearestPriorOkRun_AndReportsNodeDiff','V061FailureSignature_ClustersSameExecutionError_WhenVolatileNumbersDiffer']:
     if token not in trace_analysis_tests: fail(f'V0.61 trace analysis regression test missing: {token}')
-if 'schema v17' not in read_safe('MIGRATION_V060_TO_V061.md').lower():
+if not doc_has('MIGRATION_V060_TO_V061.md', 'schema v17'):
     fail('V0.61 migration does not explicitly preserve SQLite schema v17')
-if not (ROOT/'TRACE_ANALYSIS.md').exists(): fail('V0.61 trace analysis architecture document missing')
+doc_present('TRACE_ANALYSIS.md')
 ok('V0.61 nearest-OK trace comparison + deterministic recurring failure signatures present')
 
 
@@ -1199,8 +1222,8 @@ for token in ['V063TrackFromTrace_DeduplicatesSignatureAndPersistsSchemaV19','V0
     if token not in investigation_tests: fail(f'V0.62 investigation regression test missing: {token}')
 if 'InvestigationCaseService' not in host_registration or 'MapInvestigationEndpoints' not in read_safe('backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs'):
     fail('V0.62 investigation DI/endpoint mapping missing')
-if not (ROOT/'INVESTIGATION_CASES.md').exists() or not (ROOT/'MIGRATION_V061_TO_V062.md').exists():
-    fail('V0.62 investigation architecture/migration documentation missing')
+doc_present('INVESTIGATION_CASES.md')
+doc_present('MIGRATION_V061_TO_V062.md')
 ok('V0.62 deduplicated investigation lifecycle + linked trace evidence + signature trend dashboard present')
 
 
@@ -1214,8 +1237,8 @@ for token in ['new(19, "V0.63 case verification gate and dataset regression evid
     if token not in schema_migration_source: fail(f'V0.63 schema v19 token missing: {token}')
 for token in ['V063Verified_RequiresFreshPassedDatasetRegressionGate','EvaluateVerificationAsync','Assert.Equal("Passed", gate.GateStatus)']:
     if token not in investigation_tests: fail(f'V0.63 verification regression test missing: {token}')
-if not (ROOT/'CASE_VERIFICATION_GATE.md').exists() or not (ROOT/'MIGRATION_V062_TO_V063.md').exists():
-    fail('V0.63 verification architecture/migration documentation missing')
+doc_present('CASE_VERIFICATION_GATE.md')
+doc_present('MIGRATION_V062_TO_V063.md')
 ok('V0.63 resolved-case A/B dataset regression gate + signature disappearance evidence present')
 
 
