@@ -111,6 +111,22 @@ public sealed class SqliteMetadataDatabase
         finally { _snapshotGate.Release(); }
     }
 
+    /// <summary>Migrate an extracted backup in isolation before hashing or touching the live database.</summary>
+    public async Task<(bool Ok, string Result, int SchemaVersion)> PrepareSnapshotForRestoreAsync(string snapshotPath, CancellationToken ct = default)
+    {
+        await using var connection = new SqliteConnection(BuildConnectionString(snapshotPath, SqliteOpenMode.ReadWrite, pooling: false));
+        await connection.OpenAsync(ct);
+        await ConfigureConnectionAsync(connection, ct);
+        await _migrations.MigrateAsync(connection, ct);
+        await using var integrity = connection.CreateCommand();
+        integrity.CommandText = "PRAGMA integrity_check;";
+        var result = Convert.ToString(await integrity.ExecuteScalarAsync(ct)) ?? "unknown";
+        await using var schema = connection.CreateCommand();
+        schema.CommandText = "SELECT version FROM schema_info WHERE id=1;";
+        var version = Convert.ToInt32(await schema.ExecuteScalarAsync(ct));
+        return (string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase), result, version);
+    }
+
     public static async Task<(bool Ok, string Result, int SchemaVersion)> ValidateSnapshotAsync(string snapshotPath, CancellationToken ct = default)
     {
         await using var connection = new SqliteConnection(BuildConnectionString(snapshotPath, SqliteOpenMode.ReadOnly, pooling: false));

@@ -78,6 +78,24 @@ public sealed record ProductionRuntimeStatus(
     bool HasDeviceSideEffects = false);
 
 public sealed record ProductionStartRequest(string? JobId = null);
+public sealed record DeviceActionResolutionRequest(
+    string RunId,
+    string ManifestHash,
+    IReadOnlyList<string> DeviceIds,
+    IReadOnlyList<string> RobotIds,
+    string Reason,
+    string Evidence,
+    string DeviceIdentityEvidence);
+public sealed record ProductionDeviceActionPendingState(
+    string? RunId,
+    string? ManifestHash,
+    IReadOnlyList<string> DeviceIds,
+    IReadOnlyList<string> RobotIds,
+    IReadOnlyDictionary<string, string> DeviceFingerprints,
+    DeviceActionSafetyPhase Phase,
+    DateTimeOffset? SetAt,
+    string? Reason,
+    bool Unreadable);
 
 public sealed class ProductionRuntimeConfigStore
 {
@@ -217,6 +235,9 @@ public sealed class ProductionRuntimeService
     private readonly ILogger<ProductionRuntimeService> _logger;
     private readonly ProductionTraceOptions _traceOptions;
     private readonly DeviceActionSafetyStore? _safetyStore;
+    /// <summary>R01：统一动作授权——生产启动必须同时检查其它入口（手动/临时运行）登记的意图。</summary>
+    private readonly DeviceActionAuthorizationService? _authorization;
+    private readonly WorkflowModuleExpander? _moduleExpander;
     private ProductionTraceWriter? _traceWriter;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
@@ -242,16 +263,21 @@ public sealed class ProductionRuntimeService
     /// <summary>锁定快照的工作流是否含设备（PLC/机器人）副作用：含副作用时禁止自动恢复重跑。</summary>
     private bool _hasDeviceSideEffects;
     /// <summary>
-    /// 副作用故障后保留的"设备动作未知"标记：一旦副作用流程失败即置位，只有经过设备状态核对
-    /// 且核对通过才清除。该标记独立于 Faulted 状态与循环生命周期——Stop 不会清除它，因此
+    /// 副作用流程运行期间保留的动作意图：只有动作完成被协议确认且对应追溯已持久提交，或管理员
+    /// 提交可审计的现场核对证据后才清除。该标记独立于 Faulted 状态与循环生命周期——Stop 不会清除它，因此
     /// "Stop → Start" 无法绕过核对，重启后的自动启动同样受其约束。
     /// </summary>
     private bool _deviceActionStateUnknown;
     /// <summary>置位未知标记时锁定的依赖清单哈希，用于重启后仍能核对同一批设备。</summary>
     private string? _unknownActionManifestHash;
+    private string? _unknownActionRunId;
+    private DeviceActionSafetyPhase _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
     /// <summary>F02：故障时锁定的设备/机器人 ID 清单——核对必须针对它，而不是新发布流程的清单。</summary>
     private string[] _unknownActionDeviceIds = [];
     private string[] _unknownActionRobotIds = [];
+    /// <summary>Q02：登记动作时的设备身份指纹（driver|protocol|endpoint），核对时检测设备替换漂移。</summary>
+    private IReadOnlyDictionary<string, string> _unknownActionDeviceFingerprints =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     /// <summary>F01：持久化状态不可读（损坏）——无法核对，必须人工处理后才能启动。</summary>
     private bool _unknownActionUnverifiable;
     private ProductionPtpGuardSnapshot _ptpGuardStatus = ProductionPtpGuardSnapshot.Disabled;
@@ -273,7 +299,9 @@ public sealed class ProductionRuntimeService
         DeviceLeaseRegistry leases,
         ILogger<ProductionRuntimeService> logger,
         Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null,
-        DeviceActionSafetyStore? safetyStore = null)
+        DeviceActionSafetyStore? safetyStore = null,
+        WorkflowModuleExpander? moduleExpander = null,
+        DeviceActionAuthorizationService? authorization = null)
     {
         _jobs = jobs;
         _runner = runner;
@@ -289,6 +317,8 @@ public sealed class ProductionRuntimeService
         _logger = logger;
         _traceOptions = traceOptions?.Value ?? new ProductionTraceOptions();
         _safetyStore = safetyStore;
+        _authorization = authorization;
+        _moduleExpander = moduleExpander;
 
         // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
         // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
@@ -296,12 +326,16 @@ public sealed class ProductionRuntimeService
         {
             _deviceActionStateUnknown = true;
             _unknownActionManifestHash = persisted.ManifestHash;
+            _unknownActionRunId = persisted.RunId;
+            _unknownActionPhase = persisted.Phase;
             _unknownActionDeviceIds = persisted.DeviceIds.ToArray();
             _unknownActionRobotIds = persisted.RobotIds.ToArray();
+            _unknownActionDeviceFingerprints = persisted.DeviceFingerprints ??
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _unknownActionUnverifiable = persisted.Unreadable;
             _logger.LogWarning(
-                "Persisted device-action safety state loaded (set {SetAt}, unreadable={Unreadable}): {Reason}. Production start requires device verification.",
-                persisted.SetAt, persisted.Unreadable, persisted.Reason);
+                "Persisted device-action safety state loaded (set {SetAt}, phase {Phase}, unreadable={Unreadable}): {Reason}. Production start requires device verification.",
+                persisted.SetAt, persisted.Phase, persisted.Unreadable, persisted.Reason);
         }
     }
 
@@ -341,6 +375,28 @@ public sealed class ProductionRuntimeService
     }
 
     public Task<ProductionRuntimeConfig> GetConfigAsync(CancellationToken ct) => _configStore.GetAsync(ct);
+
+    public ProductionDeviceActionPendingState? DeviceActionResolutionState
+    {
+        get
+        {
+            lock (_stateSync)
+            {
+                if (!_deviceActionStateUnknown) return null;
+                var persisted = _safetyStore?.Load();
+                return new ProductionDeviceActionPendingState(
+                    _unknownActionRunId,
+                    _unknownActionManifestHash,
+                    _unknownActionDeviceIds,
+                    _unknownActionRobotIds,
+                    _unknownActionDeviceFingerprints,
+                    _unknownActionPhase,
+                    persisted?.SetAt,
+                    persisted?.Reason,
+                    _unknownActionUnverifiable || persisted?.Unreadable == true);
+            }
+        }
+    }
 
     public async Task<ProductionRuntimeConfig> UpdateConfigAsync(ProductionRuntimeConfig config, CancellationToken ct)
     {
@@ -383,9 +439,24 @@ public sealed class ProductionRuntimeService
 
             await _storageCapacity.EnsureProductionStartAllowedAsync(ct);
             var snapshot = await _jobs.GetPublishedSnapshotAsync(selectedJob, ct);
-            await _dependencies.ValidateOrThrowAsync(snapshot.DependencyManifest, snapshot.Workflow, ct);
+            await _dependencies.ValidateOrThrowAsync(snapshot.DependencyManifest, snapshot.VersionSnapshot.Workflow, ct);
+            if (_moduleExpander is not null)
+            {
+                var expanded = await _moduleExpander.ExpandAsync(snapshot.VersionSnapshot.Workflow, ct);
+                var expectedModules = (snapshot.DependencyManifest.Modules ?? [])
+                    .OrderBy(module => module.ModuleId, StringComparer.OrdinalIgnoreCase).ThenBy(module => module.Version).ToArray();
+                var actualModules = expanded.Dependencies
+                    .Select(module => new WorkflowModuleRuntimeDependency(module.ModuleId, module.Version, module.ModuleHash))
+                    .DistinctBy(module => (module.ModuleId, module.Version, module.ModuleHash))
+                    .OrderBy(module => module.ModuleId, StringComparer.OrdinalIgnoreCase).ThenBy(module => module.Version).ToArray();
+                if (!expectedModules.SequenceEqual(actualModules))
+                    throw new ApiConflictException("Published workflow module versions or hashes differ from the locked dependency manifest.");
+                snapshot = snapshot with { ExpandedWorkflow = expanded.Workflow };
+            }
             await _alarms.RecoverAsync("PROD-DEPENDENCY-DRIFT", "ProductionRuntime", ct);
 
+            // R01：手动/临时运行登记的动作意图（含本进程正在进行的动作）同样阻断生产启动。
+            _authorization?.EnsureProductionStartAllowed();
             // 统一安全闸门：只要上一次副作用故障留下的"设备动作未知"标记仍在，任何启动路径
             // （人工 Start、/api/production/recover、重启后的自动启动）都必须先通过设备状态核对。
             // 该标记独立于 Stop、持久化到磁盘（F01），因此 Stop、重启与切换流程都无法绕过；
@@ -428,7 +499,7 @@ public sealed class ProductionRuntimeService
                 _consecutiveFailures = 0;
                 _recoveryAttempts = 0;
                 // 设备（PLC）/机器人引用 = 副作用：含副作用的流程失败后不允许自动重跑（见 LoopCoreAsync）
-                _hasDeviceSideEffects = snapshot.DependencyManifest.Devices.Count > 0 || snapshot.DependencyManifest.Robots.Count > 0;
+                _hasDeviceSideEffects = snapshot.Workflow.Nodes.Any(IsDeviceSideEffectNode);
                 _synchronizationGuardUnhealthyChecks = 0;
                 _synchronizationGuardHealthyChecks = 0;
                 _lastDurationMs = 0;
@@ -524,9 +595,8 @@ public sealed class ProductionRuntimeService
     }
 
     /// <summary>
-    /// 统一设备安全闸门：若存在未核对的"设备动作未知"标记，则对**故障时锁定的**设备/机器人
-    /// 清单（F02：持久化清单，而不是当前流程的清单）执行设备状态核对；核对通过才清除标记并
-    /// 放行启动，不通过则抛 409 并保持标记（同时写入日志形成记录）。
+    /// 统一设备安全闸门：若存在未核对的动作意图，则对**动作时锁定的**设备/机器人清单执行快照检查
+    /// 作为诊断信息，但连接/新鲜读数不能证明上一动作完成。因此始终保持标记并要求管理员提交现场证据。
     /// Start / Recover / 自动启动共用此闸门，杜绝任何绕过路径。
     /// </summary>
     private Task EnsureNoUnknownDeviceActionsAsync()
@@ -536,6 +606,9 @@ public sealed class ProductionRuntimeService
         string[] deviceIds;
         string[] robotIds;
         bool unverifiable;
+        IReadOnlyDictionary<string, string> fingerprints;
+        string? runId;
+        DeviceActionSafetyPhase phase;
         lock (_stateSync)
         {
             unknown = _deviceActionStateUnknown;
@@ -543,6 +616,23 @@ public sealed class ProductionRuntimeService
             deviceIds = _unknownActionDeviceIds;
             robotIds = _unknownActionRobotIds;
             unverifiable = _unknownActionUnverifiable;
+            fingerprints = _unknownActionDeviceFingerprints;
+            runId = _unknownActionRunId;
+            phase = _unknownActionPhase;
+        }
+
+        // R01：持久化状态是跨组件事实源——除生产自己的内存标记外，还必须覆盖"上一个进程崩溃
+        // 遗留"与其它入口（手动写入/机器人指令/相机触发/临时运行）登记的未闭合意图。
+        if (_safetyStore?.Load() is { } persisted && DeviceActionSafetyStore.IsUnresolved(persisted))
+        {
+            unknown = true;
+            unknownHash = persisted.ManifestHash;
+            deviceIds = persisted.DeviceIds.ToArray();
+            robotIds = persisted.RobotIds.ToArray();
+            unverifiable = persisted.Unreadable;
+            fingerprints = persisted.DeviceFingerprints ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            runId = persisted.RunId;
+            phase = persisted.Phase;
         }
         if (!unknown) return Task.CompletedTask;
 
@@ -558,64 +648,221 @@ public sealed class ProductionRuntimeService
 
         // F02：核对必须针对故障时锁定的清单——否则切换到无设备的新流程时，空清单必然通过核对，
         // 原故障设备从未被检查（旧实现传入的是本次启动所选流程的 manifest，存在此绕过路径）。
-        var verification = _dependencies.VerifyLockedDevices(deviceIds, robotIds);
-        if (!verification.Ok)
-        {
-            _logger.LogError(
-                "Production start blocked: unresolved device actions from a previous side-effect failure (manifest {ManifestHash}): {Issues}",
-                unknownHash, verification.Summary);
-            throw new ApiConflictException(
-                $"Device state verification failed after a side-effect failure: {verification.Summary}. " +
-                "The previous cycle's device actions are unconfirmed; resolve the device state before starting (the verification failure is recorded).");
-        }
-
-        ClearDeviceActionUnknownState();
-        _logger.LogInformation(
-            "Device state verification cleared the unknown-action marker: {Devices} device(s), {Robots} robot(s) verified.",
-            deviceIds.Length, robotIds.Length);
-        return Task.CompletedTask;
+        // Q02：连同登记时的设备指纹一起核对（检测设备替换），并检查机器人是否有未返回的停止调用。
+        var verification = _dependencies.VerifyLockedDevices(deviceIds, robotIds, fingerprints);
+        _logger.LogWarning(
+            "Production start blocked: run {RunId} has unresolved {Phase} device action intent (manifest {ManifestHash}); live snapshot verification={Verification}. Automatic recovery cannot prove command completion.",
+            runId, phase, unknownHash, verification.Summary);
+        throw new ApiConflictException(
+            $"Device actions from run '{runId ?? "unknown"}' remain unconfirmed (manifest {unknownHash}). " +
+            $"Current live-state checks: {verification.Summary}. Connection and fresh samples do not prove that the previous command completed. " +
+            "Stop Production Runtime and use the administrator device-action reconciliation endpoint with recorded physical evidence.");
     }
 
     /// <summary>
-    /// F01：置位"设备动作不确定"标记并立即持久化（含故障时锁定的设备/机器人清单）。
-    /// 持久化失败时内存标记仍生效；但重启会丢失——必须留下错误记录。
+    /// F01：置位"设备动作不确定"标记并立即持久化（含故障时锁定的设备/机器人清单与设备身份指纹）。
+    /// Q01：持久化失败必须**阻止继续批准动作**——调用方在副作用失败路径上已停止循环；
+    /// 若此写入失败，剩余防线是"周期开始前登记的意图"（RecordDeviceActionIntent），
+    /// 它仍在磁盘上，重启后同样触发核对。
     /// </summary>
-    private void SetDeviceActionUnknownState(RuntimeDependencyManifest manifest, string reason)
+    private void SetDeviceActionUnknownState(RuntimeDependencyManifest manifest, string reason, string? runId = null)
     {
         string[] deviceIds;
         string[] robotIds;
+        Dictionary<string, string> fingerprints;
         lock (_stateSync)
         {
             _deviceActionStateUnknown = true;
             _unknownActionManifestHash = manifest.ManifestHash;
+            _unknownActionRunId = runId;
+            _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
             _unknownActionDeviceIds = deviceIds = manifest.Devices.Select(x => x.Id).ToArray();
             _unknownActionRobotIds = robotIds = manifest.Robots.Select(x => x.Id).ToArray();
+            _unknownActionDeviceFingerprints = fingerprints = CaptureDeviceFingerprints(manifest);
             _unknownActionUnverifiable = false;
         }
         try
         {
-            _safetyStore?.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow, reason));
+            if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured.");
+            _safetyStore.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow, reason,
+                Phase: DeviceActionSafetyPhase.Unknown, RunId: runId, DeviceFingerprints: fingerprints,
+                ProcessId: DeviceActionSafetyStore.CurrentProcessId));
+            lock (_stateSync) _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Failed to persist the device-action safety state (manifest {ManifestHash}); the in-memory marker stays in force but a restart would lose it.",
+                "Failed to persist the device-action safety state (manifest {ManifestHash}); the in-memory marker stays in force, " +
+                "and the pre-cycle intent record remains on disk so a restart still requires verification.",
                 manifest.ManifestHash);
         }
+    }
+
+    /// <summary>
+    /// Q01：副作用周期**开始前**耐久登记意图（RunId + 锁定设备清单 + 身份指纹 + IntentRecorded）。
+    /// 进程被杀/断电/追溯队列故障都不会跳过这一步——启动加载见 IntentRecorded 即要求核对。
+    /// 返回 false 表示安全状态无法持久化：调用方必须放弃执行设备动作（宁可不跑，不可无记录地跑）。
+    /// </summary>
+    private bool RecordDeviceActionIntent(RuntimeDependencyManifest manifest, string runId)
+    {
+        string[] deviceIds;
+        string[] robotIds;
+        Dictionary<string, string> fingerprints;
+        lock (_stateSync)
+        {
+            _deviceActionStateUnknown = true;
+            _unknownActionManifestHash = manifest.ManifestHash;
+            _unknownActionRunId = runId;
+            _unknownActionPhase = DeviceActionSafetyPhase.IntentRecorded;
+            _unknownActionDeviceIds = deviceIds = manifest.Devices.Select(x => x.Id).ToArray();
+            _unknownActionRobotIds = robotIds = manifest.Robots.Select(x => x.Id).ToArray();
+            _unknownActionDeviceFingerprints = fingerprints = CaptureDeviceFingerprints(manifest);
+            _unknownActionUnverifiable = false;
+        }
+        try
+        {
+            if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured.");
+            _safetyStore.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow,
+                $"side-effect cycle {runId} started; the intent was registered before any device action executed",
+                Phase: DeviceActionSafetyPhase.IntentRecorded, RunId: runId, DeviceFingerprints: fingerprints,
+                ProcessId: DeviceActionSafetyStore.CurrentProcessId));
+            lock (_stateSync) { _unknownActionRunId = runId; _unknownActionPhase = DeviceActionSafetyPhase.IntentRecorded; }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to persist the device-action intent before starting cycle {RunId} (manifest {ManifestHash}); refusing to execute device side effects.",
+                runId, manifest.ManifestHash);
+            return false;
+        }
+    }
+
+    /// <summary>Q02：捕获登记时刻的设备身份（driver|protocol|endpoint）。设备不可解析时跳过该项。</summary>
+    private Dictionary<string, string> CaptureDeviceFingerprints(RuntimeDependencyManifest manifest)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var device in manifest.Devices)
+        {
+            if (_dependencies.TryGetDeviceFingerprint(device.Id) is { } fingerprint)
+                result[device.Id] = fingerprint;
+        }
+        return result;
     }
 
     /// <summary>F01：核对通过（或人工解决）后清除未知动作标记（内存 + 持久化）。</summary>
     private void ClearDeviceActionUnknownState()
     {
+        if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured; refusing to clear the in-memory gate.");
+        _safetyStore.Clear();
         lock (_stateSync)
         {
             _deviceActionStateUnknown = false;
             _unknownActionManifestHash = null;
+            _unknownActionRunId = null;
+            _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
             _unknownActionDeviceIds = [];
             _unknownActionRobotIds = [];
+            _unknownActionDeviceFingerprints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _unknownActionUnverifiable = false;
         }
-        _safetyStore?.Clear();
+    }
+
+    public async Task ResolveUnknownDeviceActionsAsync(DeviceActionResolutionRequest request, string operatorName, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(operatorName)) throw new ApiValidationException("Authenticated administrator identity is required.");
+        if (string.IsNullOrWhiteSpace(request.Reason) || string.IsNullOrWhiteSpace(request.Evidence) || string.IsNullOrWhiteSpace(request.DeviceIdentityEvidence))
+            throw new ApiValidationException("Reason, physical action evidence, and verified device identity evidence are required.");
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Status.State != ProductionRuntimeState.Stopped || _loopTask is { IsCompleted: false })
+                throw new ApiConflictException("Stop Production Runtime and wait for its execution loop to finish before reconciling device actions.");
+            _traceWriter?.ThrowIfFaulted();
+            if (_traceWriter is { PendingCount: > 0 })
+                throw new ApiConflictException("Wait for all accepted production trace records to persist before reconciling device actions.");
+
+            string? runId;
+            string? manifestHash;
+            string[] deviceIds;
+            string[] robotIds;
+            bool unverifiable;
+            lock (_stateSync)
+            {
+                if (!_deviceActionStateUnknown) throw new ApiConflictException("There is no unresolved device-action state to reconcile.");
+                runId = _unknownActionRunId;
+                manifestHash = _unknownActionManifestHash;
+                deviceIds = _unknownActionDeviceIds;
+                robotIds = _unknownActionRobotIds;
+                unverifiable = _unknownActionUnverifiable;
+            }
+            if (unverifiable || string.IsNullOrWhiteSpace(manifestHash))
+                throw new ApiConflictException("The persisted safety file is unreadable; this endpoint cannot verify its original manifest and device list. Preserve the file and have an administrator perform a separately audited, offline recovery procedure.");
+            // Legacy safety records predate RunId. Permit explicit reconciliation only when the request uses
+            // the fixed legacy sentinel and still matches the exact persisted manifest and asset lists.
+            var expectedRunId = string.IsNullOrWhiteSpace(runId) ? "legacy" : runId;
+            if (!string.Equals(request.RunId, expectedRunId, StringComparison.Ordinal) || !string.Equals(request.ManifestHash, manifestHash, StringComparison.Ordinal) ||
+                !deviceIds.Order(StringComparer.Ordinal).SequenceEqual((request.DeviceIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal) ||
+                !robotIds.Order(StringComparer.Ordinal).SequenceEqual((request.RobotIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                throw new ApiConflictException("Resolution must identify the exact original run, manifest, devices, and robots recorded in the safety state.");
+
+            var pendingRobots = _dependencies.VerifyNoPendingRobotOperations(robotIds);
+            if (!pendingRobots.Ok)
+                throw new ApiConflictException($"Cannot reconcile while robot operations remain active: {pendingRobots.Summary}");
+
+            var resolution = new DeviceActionSafetyResolution(expectedRunId, manifestHash, deviceIds, robotIds, operatorName,
+                request.Reason.Trim(), request.Evidence.Trim(), request.DeviceIdentityEvidence.Trim(), DateTimeOffset.UtcNow);
+            if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured.");
+            _safetyStore.SaveResolution(resolution);
+            ClearDeviceActionUnknownState();
+            _logger.LogWarning("Administrator {Operator} manually reconciled device action run {RunId} with physical evidence: {Reason}", operatorName, expectedRunId, request.Reason);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private static bool IsDeviceSideEffectNode(NodeDefinition node)
+    {
+        if (node.Type is "device.writeTag" or "device.writeVisionResult" or "robot.executeTarget") return true;
+        return false;
+    }
+
+    private static bool RequiresManualActionReconciliation(WorkflowDefinition workflow, WorkflowRunResult result)
+    {
+        var nodes = workflow.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+        var runReports = result.NodeReports.Where(report => report.Phase == NodeExecutionPhase.Run).ToArray();
+        var robotReports = runReports.Where(report => report.NodeType.Equals("robot.executeTarget", StringComparison.OrdinalIgnoreCase)).ToArray();
+        // An empty/incomplete report set (common in test doubles and interrupted runners) cannot
+        // prove that an async command was skipped. Real skipped branches still have run reports
+        // for their control-flow nodes, while the skipped robot node itself has no report.
+        if (robotReports.Length == 0 && runReports.Length == 0 && workflow.Nodes.Any(node => node.Type == "robot.executeTarget"))
+            return true;
+        foreach (var report in robotReports.Where(report => report.Success))
+        {
+            if (!nodes.TryGetValue(report.NodeId, out var node)) continue;
+            var action = node.GetString("action", "Handshake");
+            if (action.Equals("SendTarget", StringComparison.OrdinalIgnoreCase) || !node.GetBool("waitForInPosition", true))
+                return true;
+
+            // A successful runner result only proves that the node returned. Require the robot
+            // node's own protocol snapshot to confirm completion before clearing the durable intent.
+            if (!TryGetOutput(report, "inPosition", out var inPosition) || inPosition is not true ||
+                !TryGetOutput(report, "state", out var state) ||
+                !string.Equals(state as string, "InPosition", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool TryGetOutput(NodeRunReport report, string name, out object? value)
+    {
+        value = null;
+        if (report.Outputs is null) return false;
+        var pair = report.Outputs.FirstOrDefault(item => item.Key.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (pair.Key is null) return false;
+        value = pair.Value.Value;
+        return true;
     }
 
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
@@ -624,13 +871,15 @@ public sealed class ProductionRuntimeService
         if (_loopTask is { IsCompleted: false })
             throw new InvalidOperationException("Cannot recover while the previous execution loop is still alive. Stop/terminate the blocked operation first.");
 
-        // F02：先跑统一安全闸门——存在未知动作标记时，核对持久化的**故障时锁定清单**并在
-        // 通过后清除标记；这样即使失败后重新发布/切换了流程，恢复也不会绕过原故障设备的核对。
+        // R01：手动/临时运行的未闭合意图同样阻断恢复启动。
+        _authorization?.EnsureProductionStartAllowed();
+        // Q02：先跑统一安全闸门——持久化的动作清单用于诊断，普通恢复绝不清除它；
+        // 只有管理员提交实际核对证据后，后续 Start/Recover 才能继续。
         await EnsureNoUnknownDeviceActionsAsync();
 
         // 副作用故障的恢复闸门：在清理现场前核对锁定清单中设备/机器人的当前状态。
-        // 核对不通过（设备不可解析或 Faulted）时保持 Faulted——设备状态未知时绝不重启自动周期；
-        // 通过与失败的核对结果均写入日志，形成可追溯记录。
+        // 当前连接快照可用于诊断，但没有设备协议确认上一动作的执行结果；未知动作必须由管理员
+        // 提交实际核对证据解除，不能因普通 Recover 看到 Connected 就自动放行。
         PublishedJobSnapshot? locked;
         lock (_stateSync) locked = _lockedSnapshot;
         if (locked is not null && (locked.DependencyManifest.Devices.Count > 0 || locked.DependencyManifest.Robots.Count > 0))
@@ -646,8 +895,6 @@ public sealed class ProductionRuntimeService
             _logger.LogInformation(
                 "Device state verification passed before production recovery: {Devices} device(s), {Robots} robot(s).",
                 locked.DependencyManifest.Devices.Count, locked.DependencyManifest.Robots.Count);
-            // 核对通过：清除未知标记（StartAsync 的闸门因此放行）。
-            ClearDeviceActionUnknownState();
         }
 
         await StopAsync(ct); // cleans completed loop/CTS without loading a new version yet.
@@ -821,38 +1068,95 @@ public sealed class ProductionRuntimeService
             }
             else
             {
-                try
+                // Q01：副作用流程在**执行任何设备动作之前**耐久登记意图（RunId + 锁定清单 + 指纹）。
+                // 进程被杀/断电/追溯队列故障都不会跳过这一步；意图未清除时启动会被闸门阻断，
+                // 因此"设备已执行而软件无结果"不可能被当成可开始的新周期。
+                bool sideEffectsAtStart;
+                lock (_stateSync) sideEffectsAtStart = _hasDeviceSideEffects;
+                var intentRecorded = true;
+                if (sideEffectsAtStart) intentRecorded = RecordDeviceActionIntent(locked.DependencyManifest, runId);
+
+                if (!intentRecorded)
                 {
-                    result = await _runner.RunAsync(
-                        locked.Workflow,
-                        new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
-                        runId: runId,
-                        cancellationToken: ct);
-                }
-                catch (Exception ex)
-                {
-                    result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null, ex.Message, "Error")
+                    // 安全状态无法持久化 ⇒ 绝不执行设备动作（宁可不跑，不可无记录地跑）。
+                    result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null,
+                        "Refused to execute device side effects: the device-action intent could not be persisted. " +
+                        "Resolve the storage problem before resuming production.", "Error")
                     {
-                        ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                        ErrorCode = VisionRunErrorCodes.RuntimeError
                     };
+                }
+                else
+                {
+                    try
+                    {
+                        result = await _runner.RunAsync(
+                            locked.Workflow,
+                            new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
+                            runId: runId,
+                            cancellationToken: ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null, ex.Message, "Error")
+                        {
+                            ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                        };
+                    }
                 }
             }
 
-            // Preserve completed/current cycle evidence even if stop was requested during execution.
-            await writer.EnqueueAsync(result, locked.Workflow, traceContext);
+            // Q01：安全判定与置位必须发生在追溯证据落地之前——追溯 writer 故障（队列满/磁盘问题）
+            // 绝不能阻断"设备动作不确定"的标记；此前的顺序让 EnqueueAsync 先抛错时置位被整体跳过，
+            // 设备动作从此无人核对。
+            bool sideEffects;
+            lock (_stateSync) sideEffects = _hasDeviceSideEffects;
+            var needsManualReconciliation = result.Success && RequiresManualActionReconciliation(locked.Workflow, result);
+            var clearIntentAfterTrace = sideEffects && result.Success && !needsManualReconciliation;
+            if (needsManualReconciliation)
+            {
+                const string message = "The workflow accepted an asynchronous robot command without confirming completion; administrator reconciliation is required before another cycle.";
+                result = result with { Success = false, Error = message, ErrorCode = VisionRunErrorCodes.RuntimeError, QualityDisposition = "ERROR" };
+            }
+            if (sideEffects && !clearIntentAfterTrace)
+            {
+                SetDeviceActionUnknownState(locked.DependencyManifest,
+                    needsManualReconciliation
+                        ? "robot command was accepted without confirmed completion; actual motion state requires administrator reconciliation"
+                        : ct.IsCancellationRequested
+                            ? "cycle was cancelled while executing a side-effect workflow; device actions may have been partially applied"
+                            : "side-effect workflow failed; device actions from the failed cycle are indeterminate",
+                    result.RunId);
+            }
+
+            // 生产使用等待式写入：Task 完成只在 TraceabilityStore 的持久化步骤成功后返回。
+            // 未确认动作、动作失败或 trace 写入失败时意图一直保留；只有同步动作成功且 trace 已提交，
+            // 才删除意图记录。取消/进程终止也不会走到清除分支。
+            var tracePersisted = false;
+            try
+            {
+                await writer.EnqueueAndPersistAsync(result, locked.Workflow, traceContext);
+                tracePersisted = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Production trace evidence for run {RunId} could not be durably committed; the device-action intent remains in force.", result.RunId);
+                if (sideEffects && clearIntentAfterTrace)
+                    result = result with { Success = false, Error = $"Trace evidence was not committed: {ex.Message}", ErrorCode = VisionRunErrorCodes.RuntimeError, QualityDisposition = "ERROR" };
+            }
+            if (clearIntentAfterTrace && tracePersisted)
+            {
+                try { ClearDeviceActionUnknownState(); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Run {RunId} trace was committed, but clearing its safety intent failed; the runtime remains gated.", result.RunId);
+                    result = result with { Success = false, Error = $"Device-action safety state could not be cleared: {ex.Message}", ErrorCode = VisionRunErrorCodes.RuntimeError, QualityDisposition = "ERROR" };
+                }
+            }
             if (ct.IsCancellationRequested)
             {
-                // F01：取消可能发生在设备动作执行中途——含副作用的流程被取消且本轮失败时，必须走
-                // 与"失败锁定"相同的安全语义（置未知标记并持久化），否则 Stop/重启后可直接重跑，
-                // 上一轮的物理动作结果从未被核对。
-                if (!result.Success)
-                {
-                    bool hasSideEffects;
-                    lock (_stateSync) hasSideEffects = _hasDeviceSideEffects;
-                    if (hasSideEffects)
-                        SetDeviceActionUnknownState(locked.DependencyManifest,
-                            "cycle was cancelled while executing a side-effect workflow; device actions may have been partially applied");
-                }
+                // F01：取消可能发生在设备动作执行中途——安全置位已在上方统一处理（与追溯队列无关），
+                // 此处只需停止循环。
                 break;
             }
 
@@ -911,9 +1215,8 @@ public sealed class ProductionRuntimeService
                         _state = ProductionRuntimeState.Faulted;
                         _lastError = reason;
                     }
-                    // F01：未知动作标记与故障时锁定清单持久化——Stop 不清除，重启后仍要求核对。
-                    SetDeviceActionUnknownState(locked.DependencyManifest,
-                        "side-effect workflow failed; device actions from the failed cycle are indeterminate");
+                    // F01/Q01：未知动作标记已在上方（追溯落地之前）统一置位并持久化——此处不再重复写入，
+                    // 保证"副作用失败"与"置位"之间不存在任何可被队列故障插入的间隙。
                     await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", reason, result.RunId, CancellationToken.None);
                     return;
                 }

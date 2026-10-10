@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, Upload, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraOutputPixelFormat, CameraSettings, CameraTriggerMode, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
+import { responseErrorMessage } from '../apiErrors';
+
+// R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
+const CAMERA_POLL_TIMEOUT_MS = 5000;
 
 type Props = { open: boolean; onClose: () => void };
 
 const stateColor: Record<string, string> = { Closed: 'default', Open: 'blue', Streaming: 'green', Faulted: 'red' };
-const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Stopping: 'processing', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
+const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Stopping: 'processing', StopUnconfirmed: 'red', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
 const labelColor: Record<string, string> = { Unlabeled: 'default', OK: 'green', NG: 'red', Review: 'gold' };
 const labelText: Record<string, string> = { Unlabeled: '未标注', OK: '合格', NG: '不合格', Review: '待复核' };
 const formatBytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;
@@ -66,15 +70,29 @@ export default function CameraPanel({ open, onClose }: Props) {
 
   const selected = useMemo(() => cameras.find((camera) => camera.id === selectedId), [cameras, selectedId]);
 
+  // R04：轮询代次 + 取消 + 超时——旧响应绝不覆盖新结果，挂起请求可被显式中断。
+  const refreshGeneration = useRef(0);
+  const refreshAbort = useRef<AbortController | null>(null);
+
   const refresh = async (quiet = false) => {
+    const generation = ++refreshGeneration.current;
+    refreshAbort.current?.abort();
+    const controller = new AbortController();
+    refreshAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), CAMERA_POLL_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/cameras');
-      if (!response.ok) throw new Error(await responseError(response, '相机接口不可用'));
+      const response = await fetch('/api/cameras', { signal: controller.signal });
+      if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '相机接口不可用'));
       const data: CameraDescriptor[] = await response.json();
       setCameras(data);
       if (!data.some((x) => x.id === selectedId) && data.length > 0) setSelectedId(data[0].id);
     } catch (error) {
+      if (generation !== refreshGeneration.current) return;
       if (!quiet) messageApi.error(error instanceof Error ? error.message : '相机接口不可用');
+    } finally {
+      window.clearTimeout(timeout);
+      if (refreshAbort.current === controller) refreshAbort.current = null;
     }
   };
 

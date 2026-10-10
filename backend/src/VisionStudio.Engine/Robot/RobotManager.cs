@@ -19,6 +19,19 @@ public sealed class RobotManager : IAsyncDisposable
     /// 防止迟到的旧停止任务作用于新批准的动作。
     /// </summary>
     private readonly ConcurrentDictionary<string, string> _stopUnconfirmed = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Q04：未完成的底层停止调用登记。TryStopAsync 在宽限期内等不到厂商 StopAsync 返回时，
+    /// 该调用成为孤儿任务（仅观察异常）；这里把它登记为"机器人级未完成操作"，使复位/核对/新运动
+    /// 都有据可查——否则 ResetFaultAsync 会在旧停止仍可能迟到的情况下解除隔离。
+    /// </summary>
+    private sealed class StopCoordination
+    {
+        public object Sync { get; } = new();
+        public HashSet<Task> Pending { get; } = [];
+        public long Revision { get; set; }
+        public bool ResetInProgress { get; set; }
+    }
+    private readonly ConcurrentDictionary<string, StopCoordination> _stopCalls = new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<IRobotCommandObserver> _observers;
 
     public RobotManager(IEnumerable<IRobotCommandObserver>? observers = null)
@@ -41,17 +54,140 @@ public sealed class RobotManager : IAsyncDisposable
         ? robot
         : throw new KeyNotFoundException($"Robot '{id}' is not registered.");
 
+    /// <summary>R02：该机器人当前是否有在途命令（命令门被占用）——租约接管的空闲判定依据。</summary>
+    public bool IsCommandInFlight(string id) => CommandGate(id).CurrentCount == 0;
+
     public RobotDescriptor Get(string id) => Require(id).Snapshot();
     public Task ConnectAsync(string id, CancellationToken ct = default) => Require(id).ConnectAsync(ct);
     public Task DisconnectAsync(string id, CancellationToken ct = default) => Require(id).DisconnectAsync(ct);
-    public Task StopAsync(string id, CancellationToken ct = default) => Require(id).StopAsync(ct);
+    public async Task StopAsync(string id, CancellationToken ct = default)
+    {
+        var adapter = Require(id);
+        var stop = StartStopCall(id, () => adapter.StopAsync(ct));
+        try
+        {
+            await stop.ConfigureAwait(false);
+            if (adapter.Snapshot().Busy) MarkStopUnconfirmed(id, "robot still reports Busy after stop");
+            else ClearStopUnconfirmed(id);
+        }
+        catch (Exception ex)
+        {
+            MarkStopUnconfirmed(id, $"stop attempt failed: {ex.Message}");
+            throw;
+        }
+    }
     /// <summary>
     /// 重置适配器故障。同时解除 F04 的"停止未确认"隔离——人工复位表示已核对设备实际状态。
+    /// Q04：但若仍有**未返回的底层停止调用**，复位不得解除隔离——迟到的旧 Stop 可能在新命令
+    /// 之后到达并停止/改变新动作，瞬时人工检查无法排除未来迟到调用。有界等待旧调用结束；
+    /// 仍未返回则拒绝复位（需先重试停止或重建控制会话）。
     /// </summary>
     public async Task ResetFaultAsync(string id, CancellationToken ct = default)
     {
-        await Require(id).ResetFaultAsync(ct);
-        _stopUnconfirmed.TryRemove(id, out _);
+        var adapter = Require(id);
+        var coordination = StopCalls(id);
+        Task[] pending;
+        long revision;
+        lock (coordination.Sync)
+        {
+            if (coordination.ResetInProgress)
+                throw new InvalidOperationException($"Robot '{id}' already has a fault reset in progress.");
+            coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+            pending = coordination.Pending.ToArray();
+            revision = coordination.Revision;
+        }
+        if (pending.Length > 0)
+        {
+            var allStops = Task.WhenAll(pending);
+            try { await allStops.WaitAsync(StopCleanupGrace, ct).ConfigureAwait(false); }
+            catch (TimeoutException)
+            {
+                throw PendingStopResetException(id);
+            }
+        }
+
+        lock (coordination.Sync)
+        {
+            coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+            if (coordination.Revision != revision || coordination.Pending.Any(static task => !task.IsCompleted))
+                throw PendingStopResetException(id);
+            coordination.ResetInProgress = true;
+        }
+
+        try
+        {
+            await adapter.ResetFaultAsync(ct).ConfigureAwait(false);
+            lock (coordination.Sync)
+            {
+                coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+                if (coordination.Revision != revision || coordination.Pending.Any(static task => !task.IsCompleted))
+                    throw PendingStopResetException(id);
+                _stopUnconfirmed.TryRemove(id, out _);
+            }
+        }
+        finally
+        {
+            lock (coordination.Sync) coordination.ResetInProgress = false;
+        }
+    }
+
+    private static InvalidOperationException PendingStopResetException(string id) => new(
+        $"Robot '{id}' has an outstanding stop call that has not returned; the robot state cannot be reconciled yet. " +
+        "Retry stop until it is confirmed, or rebuild/restart the control session before resetting the fault.");
+
+    /// <summary>
+    /// Q02：是否存在未完成的底层停止调用——设备状态核对（恢复闸门）据此拒绝放行。
+    /// </summary>
+    public bool HasPendingStop(string id)
+    {
+        if (!_stopCalls.TryGetValue(id, out var coordination)) return false;
+        lock (coordination.Sync)
+        {
+            coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+            return coordination.Pending.Count > 0;
+        }
+    }
+
+    private StopCoordination StopCalls(string id) => _stopCalls.GetOrAdd(id, static _ => new StopCoordination());
+
+    private Task StartStopCall(string id, Func<Task> start)
+    {
+        var coordination = StopCalls(id);
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (coordination.Sync)
+        {
+            coordination.Revision++;
+            coordination.Pending.Add(completion.Task);
+            MarkStopUnconfirmed(id, "a stop call is in progress");
+            // Invoke the adapter while holding only the short coordination lock. This linearizes
+            // stop registration against motion admission and the adapter's synchronous call entry;
+            // the returned task is awaited after releasing the lock.
+            try
+            {
+                var call = start();
+                _ = CompleteStopCallAsync(() => call, completion, coordination);
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+                coordination.Pending.Remove(completion.Task);
+            }
+        }
+        return completion.Task;
+    }
+
+    private static async Task CompleteStopCallAsync(Func<Task> start, TaskCompletionSource completion, StopCoordination coordination)
+    {
+        try
+        {
+            await start().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception ex) { completion.TrySetException(ex); }
+        finally
+        {
+            lock (coordination.Sync) coordination.Pending.Remove(completion.Task);
+        }
     }
     public Task ApplySettingsAsync(string id, RobotRuntimeSettings settings, CancellationToken ct = default) => Require(id).ApplySettingsAsync(settings, ct);
     public Task AcknowledgeAsync(string id, long commandId, CancellationToken ct = default) => Require(id).AcknowledgeAsync(commandId, ct);
@@ -68,8 +204,8 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
-            EnsureNoUnconfirmedStop(id);
-            return await adapter.SendTargetAsync(target, ct);
+            var call = StartMotionCall(id, () => adapter.SendTargetAsync(target, ct));
+            return await call;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -95,8 +231,7 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
-            EnsureNoUnconfirmedStop(id);
-            var receipt = await adapter.MoveToAsync(target, ct);
+            var receipt = await StartMotionCall(id, () => adapter.MoveToAsync(target, ct));
             if (waitForInPosition)
                 await WaitForInPositionAsync(id, receipt.CommandId, timeout, ct);
             return receipt;
@@ -131,7 +266,6 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
-            EnsureNoUnconfirmedStop(id);
             return await ExecuteHandshakeCoreAsync(id, adapter, target, policy, ct);
         }
         finally { gate.Release(); }
@@ -163,11 +297,11 @@ public sealed class RobotManager : IAsyncDisposable
                 {
                     await EmitAsync(traceId, id, 0, attempt, "Attempt", $"Handshake attempt {attempt} started.", adapter.Snapshot().Handshake, target, null, ct);
 
-                    lastReceipt = await adapter.SendTargetAsync(target, ct);
+                    lastReceipt = await StartMotionCall(id, () => adapter.SendTargetAsync(target, ct));
                     var accepted = adapter.Snapshot();
                     await EmitAsync(traceId, id, lastReceipt.CommandId, attempt, "TargetReady", "Target payload accepted and TargetReady asserted.", accepted.Handshake, target, null, ct);
 
-                    lastReceipt = await adapter.MoveToAsync(target, ct);
+                    lastReceipt = await StartMotionCall(id, () => adapter.MoveToAsync(target, ct));
                     var executing = adapter.Snapshot();
                     await EmitAsync(traceId, id, lastReceipt.CommandId, attempt, "Execute", "Execute requested.", executing.Handshake, target, null, ct);
 
@@ -255,13 +389,13 @@ public sealed class RobotManager : IAsyncDisposable
         using var cleanup = new CancellationTokenSource(StopCleanupGrace);
         try
         {
-            var stopTask = adapter.StopAsync(cleanup.Token);
+            var stopTask = StartStopCall(id, () => adapter.StopAsync(cleanup.Token));
             var completed = await Task.WhenAny(stopTask, Task.Delay(StopCleanupGrace)).ConfigureAwait(false);
             if (completed != stopTask)
             {
                 // 厂商调用在宽限期内没有返回：不能无限等待，按"停止未确认"处理。
-                // 观察孤儿任务，避免其后续异常成为未处理任务异常。
-                _ = stopTask.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+                // Q04：登记为机器人级未完成操作——复位/核对在此之前必须继续把它视为"旧调用仍在飞行"，
+                // 否则迟到的 Stop 可能在新批准的运动之后到达。调用真正结束才移除登记。
                 MarkStopUnconfirmed(id, "stop did not return within the cleanup grace period");
                 await EmitAsync(traceId, id, adapter.Snapshot().LastCommandId, attempt, stage,
                     $"Stop was issued but did not return within {StopCleanupGrace.TotalSeconds:0}s; the robot call is unresponsive and stop is UNCONFIRMED.",
@@ -289,7 +423,16 @@ public sealed class RobotManager : IAsyncDisposable
 
     // F04：停止未确认的机器人隔离——置位/清除/检查。
     private void MarkStopUnconfirmed(string id, string reason) => _stopUnconfirmed[id] = reason;
-    private void ClearStopUnconfirmed(string id) => _stopUnconfirmed.TryRemove(id, out _);
+    private void ClearStopUnconfirmed(string id)
+    {
+        var coordination = StopCalls(id);
+        lock (coordination.Sync)
+        {
+            coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+            if (!coordination.ResetInProgress && coordination.Pending.Count == 0)
+                _stopUnconfirmed.TryRemove(id, out _);
+        }
+    }
 
     /// <summary>
     /// F04：停止未确认的机器人拒绝一切新运动命令，直到停止被确认或人工重置故障——
@@ -297,9 +440,44 @@ public sealed class RobotManager : IAsyncDisposable
     /// </summary>
     private void EnsureNoUnconfirmedStop(string id)
     {
+        var coordination = StopCalls(id);
+        lock (coordination.Sync)
+        {
+            if (coordination.ResetInProgress)
+                throw new InvalidOperationException($"Robot '{id}' fault reset is still in progress; motion commands remain blocked until the reset is reconciled.");
+        }
         if (_stopUnconfirmed.TryGetValue(id, out var reason))
             throw new InvalidOperationException(
                 $"Robot '{id}' has an unconfirmed stop ({reason}); motion commands are blocked until the stop is confirmed or the fault is explicitly reset after verifying the device state.");
+        // Q04：即使隔离标记已被某次成功停止清除，只要仍有未返回的底层停止调用在飞行，
+        // 就不能批准新运动——迟到的旧 Stop 可能落在新动作之后。
+        if (HasPendingStop(id))
+            throw new InvalidOperationException(
+                $"Robot '{id}' has an outstanding stop call that has not returned; motion commands are blocked until the call ends (retry stop to re-check).");
+    }
+
+    private Task<T> StartMotionCall<T>(string id, Func<Task<T>> start)
+    {
+        var coordination = StopCalls(id);
+        lock (coordination.Sync)
+        {
+            EnsureNoUnconfirmedStopLocked(id, coordination);
+            // Calling the adapter is the linearization point. Do not await under this lock.
+            return start();
+        }
+    }
+
+    private void EnsureNoUnconfirmedStopLocked(string id, StopCoordination coordination)
+    {
+        if (coordination.ResetInProgress)
+            throw new InvalidOperationException($"Robot '{id}' fault reset is still in progress; motion commands remain blocked until the reset is reconciled.");
+        if (_stopUnconfirmed.TryGetValue(id, out var reason))
+            throw new InvalidOperationException(
+                $"Robot '{id}' has an unconfirmed stop ({reason}); motion commands are blocked until the stop is confirmed or the fault is explicitly reset after verifying the device state.");
+        coordination.Pending.RemoveWhere(static task => task.IsCompleted);
+        if (coordination.Pending.Count > 0)
+            throw new InvalidOperationException(
+                $"Robot '{id}' has an outstanding stop call that has not returned; motion commands are blocked until the call ends (retry stop to re-check).");
     }
 
     public async Task<RobotDescriptor> WaitForInPositionAsync(

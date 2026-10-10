@@ -31,6 +31,23 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
     }
 
     [Fact]
+    public async Task DeviceActionResolutionEndpoint_IsAdministratorAudited()
+    {
+        var response = await _client.PostAsJsonAsync("/api/production/device-actions/resolve", new
+        {
+            runId = "legacy", manifestHash = "no-pending-state", deviceIds = Array.Empty<string>(), robotIds = Array.Empty<string>(),
+            reason = "checked", evidence = "controller readback", deviceIdentityEvidence = "serial ABC"
+        });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode); // route is active and refuses a nonmatching safety record.
+
+        var audit = await _client.GetFromJsonAsync<JsonElement>("/api/audit?action=production.device-actions.resolve");
+        var item = audit.EnumerateArray().First(x => x.GetProperty("path").GetString() == "/api/production/device-actions/resolve");
+        Assert.Equal("production.device-actions.resolve", item.GetProperty("action").GetString());
+        Assert.Equal("Security Disabled", item.GetProperty("username").GetString()); // authenticated system principal in this test host.
+        Assert.False(item.GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
     public async Task Catalog_AndVirtualDevice_AreExposedAfterHostedBootstrap()
     {
         var catalogResponse = await _client.GetAsync("/api/catalog");

@@ -47,6 +47,12 @@ public sealed class DeviceManager : IAsyncDisposable
         => _entries.Values.Select(Snapshot).OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase).ToArray();
 
     public DeviceDescriptor Get(string id) => Snapshot(RequireEntry(id));
+
+    /// <summary>
+    /// R02：该设备当前是否有在途命令（命令门被占用）——租约接管的空闲判定依据。
+    /// 租约 TTL 到期只说明持有者可能失联，不能作为"设备可用"的证据。
+    /// </summary>
+    public bool IsCommandInFlight(string id) => RequireEntry(id).CommandGate.CurrentCount == 0;
     public IDeviceDriver Require(string id) => RequireEntry(id).Driver;
 
     public async Task<bool> RemoveAsync(string id, CancellationToken cancellationToken = default)

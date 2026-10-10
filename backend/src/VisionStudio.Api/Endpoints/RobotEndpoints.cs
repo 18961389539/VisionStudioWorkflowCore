@@ -46,10 +46,13 @@ public static class RobotEndpoints
             RobotPanelTargetRequest request,
             RobotManager robots,
             DeviceLeaseRegistry leases,
+            DeviceActionAuthorizationService auth,
             CancellationToken ct) =>
         {
             // 请求期硬件租约：指令执行期间独占该机器人（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("robot", id, $"Cannot command robot '{id}'");
+            // R01：统一动作授权 + 动作前耐久登记（命令可能被取消/中断，意图必须可追溯）。
+            using var intent = auth.BeginManualIntent("robot.command", [], [id]);
             var target = new VisionRobotTarget2D(
                 request.X, request.Y, request.RDeg, request.Frame, request.Unit, request.Robot, request.GuidanceMode);
 

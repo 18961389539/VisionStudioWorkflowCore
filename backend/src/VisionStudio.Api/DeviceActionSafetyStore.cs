@@ -21,7 +21,7 @@ namespace VisionStudio.Api;
 /// - 文件损坏 ⇒ 视为"无法核对"（保守拒绝启动），绝不能当作"无未知动作"；
 /// - 核对必须针对持久化清单本身（见 ProductionRuntime.EnsureNoUnknownDeviceActionsAsync）。
 /// </summary>
-public sealed class DeviceActionSafetyStore
+public class DeviceActionSafetyStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly string _path;
@@ -36,12 +36,46 @@ public sealed class DeviceActionSafetyStore
         _logger = logger;
     }
 
-    public string StatePath => _path;
+    public DeviceActionSafetyStore(string path, ILogger<DeviceActionSafetyStore> logger)
+    {
+        _path = Path.GetFullPath(path);
+        _logger = logger;
+    }
 
-    public DeviceActionSafetyState? Load()
+    public string StatePath => _path;
+    public string ResolutionDirectory => _path + ".resolutions";
+
+    /// <summary>
+    /// R01：当前进程标识。用来区分"本进程仍在进行中的意图"与"上一个进程崩溃遗留的意图"——
+    /// 后者必须阻断所有新的设备动作入口（重启后无核对不得重发）。
+    /// </summary>
+    public static readonly string CurrentProcessId = Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// R01：判定持久化状态是否仍"未闭合"。
+    /// · Unknown（副作用失败后保留）→ 一律未闭合；
+    /// · IntentRecorded 且 ProcessId 与当前进程不同（含旧格式缺字段）→ 崩溃遗留 → 未闭合；
+    /// · IntentRecorded 且属于当前进程 → 本进程活跃意图，不是跨进程残留（并发由租约仲裁）。
+    /// </summary>
+    public static bool IsUnresolved(DeviceActionSafetyState state)
+        => state.Phase != DeviceActionSafetyPhase.IntentRecorded ||
+           !string.Equals(state.ProcessId, CurrentProcessId, StringComparison.Ordinal);
+
+    /// <summary>R01：仅当持久化状态仍属于指定 RunId 时清除——绝不误删另一个组件登记的意图。</summary>
+    public bool ClearIfOwned(string runId)
+    {
+        var current = Load();
+        if (current is null) return true;
+        if (!string.Equals(current.RunId, runId, StringComparison.Ordinal)) return false;
+        Clear();
+        return true;
+    }
+
+    public virtual DeviceActionSafetyState? Load()
     {
         try
         {
+            if (Directory.Exists(_path)) throw new IOException("Safety-state path is a directory, not a state file.");
             if (!File.Exists(_path)) return null;
             var state = JsonSerializer.Deserialize<DeviceActionSafetyState>(File.ReadAllText(_path), Json);
             if (state is null)
@@ -62,31 +96,50 @@ public sealed class DeviceActionSafetyStore
     }
 
     /// <summary>原子写入（temp + move）：绝不让半写文件被下一次启动读到。</summary>
-    public void Save(DeviceActionSafetyState state)
+    public virtual void Save(DeviceActionSafetyState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(state, Json));
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(state, Json);
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            stream.Write(bytes);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, _path, true);
     }
 
-    public void Clear()
+    public virtual void Clear()
     {
-        try
+        if (Directory.Exists(_path)) throw new IOException("Safety-state path is a directory, not a state file.");
+        if (File.Exists(_path)) File.Delete(_path);
+    }
+
+    /// <summary>Durably retain who reconciled an unknown action and the evidence used before clearing its gate.</summary>
+    public virtual void SaveResolution(DeviceActionSafetyResolution resolution)
+    {
+        var directory = ResolutionDirectory;
+        Directory.CreateDirectory(directory);
+        var safeRunId = new string(resolution.RunId.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
+        if (string.IsNullOrWhiteSpace(safeRunId)) safeRunId = "legacy";
+        var path = Path.Combine(directory, $"{safeRunId}-{resolution.ResolvedAt:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}.json");
+        var temp = path + ".tmp";
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
         {
-            if (File.Exists(_path)) File.Delete(_path);
+            JsonSerializer.Serialize(stream, resolution, Json);
+            stream.Flush(flushToDisk: true);
         }
-        catch (Exception ex)
-        {
-            // 删除失败会让下次启动仍然要求核对（保守方向）；记录以便运维手动清理。
-            _logger.LogWarning(ex, "Device-action safety state at {Path} could not be deleted; the verification gate stays engaged after a restart.", _path);
-        }
+        File.Move(temp, path, true);
     }
 }
 
 /// <summary>
 /// F01/F02 持久化载荷：未知动作标记 + 故障时锁定的设备/机器人 ID 清单 + 原因与时间。
 /// 核对必须针对该清单（而不是新发布流程的清单）——切换流程不能成为绕过核对的路径。
+/// Q01：Phase 区分"副作用周期进行中已完成意图登记"（IntentRecorded，进程被杀也阻断）与
+/// "动作结果未知"（Unknown）。旧格式文件缺省反序列化为 Unknown（保守方向）。
+/// Q02：DeviceFingerprints 记录执行动作时的设备身份（driver|protocol|endpoint），
+/// 核对时检测"换成另一台设备"的漂移。
 /// </summary>
 public sealed record DeviceActionSafetyState(
     string ManifestHash,
@@ -94,4 +147,27 @@ public sealed record DeviceActionSafetyState(
     IReadOnlyList<string> RobotIds,
     DateTimeOffset SetAt,
     string Reason,
-    bool Unreadable = false);
+    bool Unreadable = false,
+    DeviceActionSafetyPhase Phase = DeviceActionSafetyPhase.Unknown,
+    string? RunId = null,
+    IReadOnlyDictionary<string, string>? DeviceFingerprints = null,
+    string? ProcessId = null);
+
+public enum DeviceActionSafetyPhase
+{
+    /// <summary>默认（含旧格式文件）：动作结果未知，必须核对。</summary>
+    Unknown = 0,
+    /// <summary>Q01：副作用周期开始前登记的耐久意图——周期未正常收尾前一直有效。</summary>
+    IntentRecorded = 1
+}
+
+public sealed record DeviceActionSafetyResolution(
+    string RunId,
+    string ManifestHash,
+    IReadOnlyList<string> DeviceIds,
+    IReadOnlyList<string> RobotIds,
+    string Operator,
+    string Reason,
+    string Evidence,
+    string DeviceIdentityEvidence,
+    DateTimeOffset ResolvedAt);

@@ -33,7 +33,13 @@ public enum CameraAcquisitionState
     Running,
     WaitingTrigger,
     Reconnecting,
-    Faulted
+    Faulted,
+    /// <summary>
+    /// Q03：停止未确认——宽限期结束时旧采集调用仍未返回（厂商 GrabAsync 忽略取消/卡死）。
+    /// 句柄保留、隔离持续、新 Start 被拒；只有旧循环真正结束（下一次 Stop 重试确认）才解除。
+    /// （置于末尾：即使存在按数值序列化的消费方，也不改变既有成员的值。）
+    /// </summary>
+    StopUnconfirmed
 }
 
 public sealed record CameraSettings(

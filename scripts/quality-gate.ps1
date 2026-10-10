@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $results = Join-Path $root 'artifacts/test-results'
-$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '20' }
+$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '60' }
 
 # Native commands (python / dotnet / npm) do not raise terminating errors through
 # ErrorActionPreference: every native step must check its exit code and abort with a non-zero
@@ -41,6 +41,17 @@ Assert-LastExitCode 'publish data separation'
 & "$root/scripts/test-data-migration.ps1"
 Assert-LastExitCode 'data migration staging'
 
+# Q09: the Bash publish path (staging + in-package data migration + atomic swap + rollback) carries
+# the same safety contract as the Windows script and ships its own regression suite. Run it when a
+# bash shell is available (Git Bash on windows-latest runners); skip with an explicit message otherwise.
+$bash = Get-Command bash -ErrorAction SilentlyContinue
+if ($bash) {
+    & bash "$root/scripts/test-publish-runtime.sh"
+    Assert-LastExitCode 'bash publish regression'
+} else {
+    Write-Host 'Skipping bash publish regression: bash is unavailable on this host.'
+}
+
 Push-Location "$root/backend"
 try {
     dotnet restore VisionStudio.slnx
@@ -65,8 +76,8 @@ Assert-LastExitCode 'coverage gate'
 
 Push-Location "$root/frontend"
 try {
-    npm install --no-audit --no-fund
-    Assert-LastExitCode 'npm install'
+    npm ci --no-audit --no-fund
+    Assert-LastExitCode 'npm ci'
 
     npm test
     Assert-LastExitCode 'frontend tests'

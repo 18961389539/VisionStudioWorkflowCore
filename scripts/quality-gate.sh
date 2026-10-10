@@ -2,11 +2,22 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESULTS="$ROOT/artifacts/test-results"
-MIN_LINE_COVERAGE="${MIN_LINE_COVERAGE:-20}"
+MIN_LINE_COVERAGE="${MIN_LINE_COVERAGE:-60}"
 rm -rf "$RESULTS"
 mkdir -p "$RESULTS"
 echo "== VisionStudio V0.63 Quality Gate =="
 python3 "$ROOT/scripts/static-audit.py"
+# The data migration regression tests are PowerShell scripts. Run them where pwsh is
+# available; Bash environments without PowerShell cannot execute these Windows CI checks.
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -File "$ROOT/scripts/test-publish-data-separation.ps1"
+  pwsh -NoProfile -File "$ROOT/scripts/test-data-migration.ps1"
+else
+  echo "Skipping PowerShell data migration tests: pwsh is unavailable (Windows CI runs both)." >&2
+fi
+# Q09: the Bash publish path shares the same safety contract (staging, data migration, atomic swap,
+# rollback) and has its own regression suite; it must run wherever the Bash gate runs.
+bash "$ROOT/scripts/test-publish-runtime.sh"
 (
   cd "$ROOT/backend"
   dotnet restore VisionStudio.slnx
@@ -22,7 +33,8 @@ python3 "$ROOT/scripts/static-audit.py"
 python3 "$ROOT/scripts/check-coverage.py" "$RESULTS" --min-line "$MIN_LINE_COVERAGE"
 (
   cd "$ROOT/frontend"
-  npm install --no-audit --no-fund
+  npm ci --no-audit --no-fund
+  npm test
   npm run build
 )
 echo "Quality Gate PASSED"

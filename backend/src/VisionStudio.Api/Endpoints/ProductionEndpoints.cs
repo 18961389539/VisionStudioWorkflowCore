@@ -33,6 +33,19 @@ public static class ProductionEndpoints
         app.MapPost("/api/production/recover", async (ProductionRuntimeService production, CancellationToken ct) =>
             Results.Ok(await production.RecoverAsync(ct))).RequireOperator("production.recover", "production");
 
+        app.MapPost("/api/production/device-actions/resolve", async (DeviceActionResolutionRequest request, HttpContext http, ProductionRuntimeService production, CancellationToken ct) =>
+        {
+            var operatorName = http.User.Identity?.Name;
+            await production.ResolveUnknownDeviceActionsAsync(request, operatorName ?? string.Empty, ct);
+            return Results.Ok(production.Status);
+        }).RequireAdministrator("production.device-actions.resolve", "production");
+
+        app.MapGet("/api/production/device-actions/pending", (ProductionRuntimeService production) =>
+        {
+            var state = production.DeviceActionResolutionState;
+            return state is null ? Results.NoContent() : Results.Ok(state);
+        }).RequireAdministrator("production.device-actions.read", "production");
+
         app.MapGet("/api/alarms", async (bool? activeOnly, AlarmStore alarms, CancellationToken ct) =>
             Results.Ok(await alarms.ListAsync(activeOnly ?? false, ct)));
 

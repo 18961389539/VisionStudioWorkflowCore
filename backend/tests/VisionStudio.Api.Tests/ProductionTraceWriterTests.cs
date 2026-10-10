@@ -64,6 +64,44 @@ public sealed class ProductionTraceWriterTests
     }
 
     [Fact]
+    public async Task EnqueueAndPersist_WaitsForCommitAndSurfacesPersistenceFailure()
+    {
+        var entered = Signal();
+        var release = Signal();
+        var fail = false;
+        var writer = new ProductionTraceWriter(async (_, _, _, _) =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+            if (fail) throw new IOException("commit failed");
+        }, new RunStore(), new(), NullLogger.Instance);
+        try
+        {
+            var pending = writer.EnqueueAndPersistAsync(Result("commit-wait"), Workflow, Context);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(pending.IsCompleted); // queue acceptance alone does not satisfy the production safety gate.
+            release.SetResult();
+            await pending.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally { await writer.DisposeAsync(); }
+
+        var enteredFailure = Signal();
+        var releaseFailure = Signal();
+        var failedWriter = new ProductionTraceWriter(async (_, _, _, _) =>
+        {
+            enteredFailure.TrySetResult();
+            await releaseFailure.Task;
+            throw new IOException("commit failed");
+        }, new RunStore(), new(), NullLogger.Instance);
+        var failed = failedWriter.EnqueueAndPersistAsync(Result("commit-failed"), Workflow, Context);
+        await enteredFailure.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(failed.IsCompleted);
+        releaseFailure.SetResult();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failed);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failedWriter.DisposeAsync().AsTask());
+    }
+
+    [Fact]
     public async Task BackgroundEncodingPersistsImagesAndKeepsOriginalStartTime()
     {
         using var env = new TempWebHostEnvironment();

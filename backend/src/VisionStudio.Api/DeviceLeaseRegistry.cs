@@ -43,7 +43,20 @@ public sealed record DeviceLeaseResource(string Kind, string Id)
 }
 
 /// <summary>One asset already held by another owner, with the remaining hold time for TTL leases.</summary>
-public sealed record DeviceLeaseConflict(string ResourceKind, string ResourceId, DeviceLeaseOwner Owner, TimeSpan? Remaining);
+/// <param name="Abandoned">
+/// R02：该租约的 TTL 已过但未被释放——持有者可能仍在执行操作。Abandoned 不是"设备可用"的证据；
+/// 只有在设备活动探针确认资源空闲时才允许接管。
+/// </param>
+public sealed record DeviceLeaseConflict(string ResourceKind, string ResourceId, DeviceLeaseOwner Owner, TimeSpan? Remaining, bool Abandoned = false);
+
+/// <summary>
+/// R02：设备活动探针——租约接管前的"资源当前是否仍在执行"判定。
+/// TTL 到期只说明持有者可能失联；底层调用是否结束必须直接问设备层。
+/// </summary>
+public interface IDeviceActivityProbe
+{
+    bool IsResourceBusy(string resourceKind, string resourceId);
+}
 
 /// <summary>
 /// Process-wide hardware arbitration for Production Runtime, debug sessions, workflow runs and manual
@@ -54,7 +67,11 @@ public sealed record DeviceLeaseConflict(string ResourceKind, string ResourceId,
 /// </summary>
 public sealed class DeviceLeaseRegistry
 {
-    private sealed record LeaseEntry(DeviceLeaseOwner Owner, long Token, DateTimeOffset? ExpiresAt);
+    private sealed record LeaseEntry(DeviceLeaseOwner Owner, long Token, DateTimeOffset? ExpiresAt)
+    {
+        /// <summary>R02：TTL 已过但未释放——保留条目，等待探针确认空闲后才允许接管。</summary>
+        public bool Abandoned { get; init; }
+    }
 
     private sealed class ResourceKeyComparer : IEqualityComparer<(string Kind, string Id)>
     {
@@ -71,9 +88,17 @@ public sealed class DeviceLeaseRegistry
     private readonly ConcurrentDictionary<(string Kind, string Id), LeaseEntry> _leases = new(KeyComparer);
     private readonly TimeProvider _time;
     private readonly object _gate = new();
+    private readonly IDeviceActivityProbe? _probe;
     private long _nextToken;
 
-    public DeviceLeaseRegistry(TimeProvider? timeProvider = null) => _time = timeProvider ?? TimeProvider.System;
+    /// <param name="probe">
+    /// R02：可选的活动探针。为 null 时 Abandoned 租约不允许被接管（最保守）。
+    /// </param>
+    public DeviceLeaseRegistry(TimeProvider? timeProvider = null, IDeviceActivityProbe? probe = null)
+    {
+        _time = timeProvider ?? TimeProvider.System;
+        _probe = probe;
+    }
 
     /// <summary>Number of assets currently leased (expired TTL entries are swept first).</summary>
     public int ActiveLeaseCount
@@ -111,7 +136,20 @@ public sealed class DeviceLeaseRegistry
             SweepExpiredLocked(now);
             var normalized = Normalize(resources);
             conflicts = CollectConflictsLocked(normalized, owner, now);
-            if (conflicts.Count > 0) return null;
+            if (conflicts.Count > 0)
+            {
+                // R02：接管规则——只有"全部冲突都是 Abandoned"且"活动探针确认每个资源空闲"时
+                // 才回收陈旧条目并授予新代次（token 递增；旧句柄的 Release 因 token 不匹配而失效）。
+                // 任何一项仍在忙碌（机器人 120 秒等待、忽略取消的驱动调用）都必须继续拒绝。
+                if (_probe is null ||
+                    conflicts.Any(x => !x.Abandoned) ||
+                    conflicts.Any(x => _probe.IsResourceBusy(x.ResourceKind, x.ResourceId)))
+                {
+                    return null;
+                }
+                foreach (var conflict in conflicts)
+                    _leases.TryRemove((conflict.ResourceKind, conflict.ResourceId), out _);
+            }
 
             var token = ++_nextToken;
             foreach (var resource in normalized)
@@ -204,9 +242,11 @@ public sealed class DeviceLeaseRegistry
         => string.Join("; ", conflicts.Select(conflict =>
         {
             var holder = string.IsNullOrWhiteSpace(conflict.Owner.Description) ? conflict.Owner.Kind : conflict.Owner.Description;
-            var suffix = conflict.Remaining is { } remaining
-                ? $"auto-release in {Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds))}s"
-                : "until released";
+            var suffix = conflict.Abandoned
+                ? "lease TTL elapsed but the holder never released it — takeover requires the device to report idle"
+                : conflict.Remaining is { } remaining
+                    ? $"auto-release in {Math.Max(0, (int)Math.Ceiling(remaining.TotalSeconds))}s"
+                    : "until released";
             return $"{conflict.ResourceKind} '{conflict.ResourceId}' is held by {holder} '{conflict.Owner.Id}' ({suffix})";
         }));
 
@@ -238,17 +278,20 @@ public sealed class DeviceLeaseRegistry
                 resource.Kind,
                 resource.Id,
                 entry.Owner,
-                entry.ExpiresAt is { } expires ? expires - now : null));
+                entry.ExpiresAt is { } expires ? expires - now : null,
+                entry.Abandoned));
         }
         return conflicts;
     }
 
     private void SweepExpiredLocked(DateTimeOffset now)
     {
+        // R02：TTL 到期不再直接删除租约——那只证明"持有者可能失联"，不证明"底层操作已结束"。
+        // 过期的条目转为 Abandoned：仍算冲突，只有获取路径结合活动探针确认资源空闲后才接管。
         foreach (var entry in _leases)
         {
             if (entry.Value.ExpiresAt is { } expires && expires <= now)
-                _leases.TryRemove(entry.Key, out _);
+                _leases[entry.Key] = entry.Value with { ExpiresAt = null, Abandoned = true };
         }
     }
 

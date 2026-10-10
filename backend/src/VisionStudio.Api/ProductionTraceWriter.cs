@@ -15,7 +15,7 @@ public sealed class ProductionTraceOptions
 /// </summary>
 public sealed class ProductionTraceWriter : IAsyncDisposable
 {
-    private sealed record Item(WorkflowRunResult Result, WorkflowDefinition Workflow, RunTraceContext Context);
+    private sealed record Item(WorkflowRunResult Result, WorkflowDefinition Workflow, RunTraceContext Context, TaskCompletionSource Persisted);
     private readonly Channel<Item> _queue;
     private readonly Func<WorkflowRunResult, WorkflowDefinition, RunTraceContext, CancellationToken, Task> _persist;
     private readonly RunStore _runs;
@@ -59,18 +59,32 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
 
     // Always transfers ownership, including rejection/cancellation: callers must not dispose accepted artifacts.
     public async Task EnqueueAsync(WorkflowRunResult result, WorkflowDefinition workflow, RunTraceContext context, CancellationToken ct = default)
+        => await EnqueueCoreAsync(result, workflow, context, waitForPersistence: false, ct);
+
+    /// <summary>Enqueue a production run and wait until its trace transaction has committed.</summary>
+    public async Task EnqueueAndPersistAsync(WorkflowRunResult result, WorkflowDefinition workflow, RunTraceContext context, CancellationToken ct = default)
+        => await EnqueueCoreAsync(result, workflow, context, waitForPersistence: true, ct);
+
+    private async Task EnqueueCoreAsync(WorkflowRunResult result, WorkflowDefinition workflow, RunTraceContext context, bool waitForPersistence, CancellationToken ct)
     {
         Interlocked.Increment(ref _pending);
+        var item = new Item(result, workflow, context, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        var accepted = false;
         try
         {
             ThrowIfFaulted();
-            await _queue.Writer.WriteAsync(new(result, workflow, context), ct);
+            await _queue.Writer.WriteAsync(item, ct);
+            accepted = true;
+            if (waitForPersistence) await item.Persisted.Task.WaitAsync(ct);
         }
         catch (Exception ex)
         {
-            Interlocked.Decrement(ref _pending);
-            result.DeferredArtifacts?.Dispose();
-            _logger.LogError(ex, "Run {RunId} could not be accepted by the production trace queue", result.RunId);
+            if (!accepted)
+            {
+                Interlocked.Decrement(ref _pending);
+                result.DeferredArtifacts?.Dispose();
+                _logger.LogError(ex, "Run {RunId} could not be accepted by the production trace queue", result.RunId);
+            }
             throw;
         }
     }
@@ -101,10 +115,13 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
                 }
                 _runs.Put(result);
                 await _persist(result, item.Workflow, context, CancellationToken.None);
+                item.Persisted.TrySetResult();
             }
             catch (Exception ex)
             {
                 Interlocked.CompareExchange(ref _failure, ex, null);
+                item.Persisted.TrySetException(new InvalidOperationException($"Run {item.Result.RunId} trace persistence failed.", ex));
+                _ = item.Persisted.Task.Exception; // callers using EnqueueAsync do not await the commit task.
                 _queue.Writer.TryComplete();
                 _logger.LogError(ex, "Run {RunId} trace persistence failed; stopping production and draining accepted records", item.Result.RunId);
             }

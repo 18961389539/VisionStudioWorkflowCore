@@ -96,8 +96,9 @@ public static class TraceEndpoints
         }).RequireAdministrator("storage.restore", "storage");
 
         // F03：受控恢复入口——失败锁激活时唯一受认证 + 审计的解锁路径（中间件豁免使其在维护激活时
-        // 仍可达）。先做状态检查（数据库可读、附件根存在），通过才清除持久化失败锁；否则保持锁定
-        // 并给出问题清单（把"盲目解锁放行写入"变成"核对后解锁"）。
+        // 仍可达）。Q07：解锁条件从"数据库能打开、目录存在"强化为**可证明的资产自洽**：
+        // schema 版本有效、SQLite 完整性、关键表存在，且抽样核对追溯记录的附件引用在磁盘上真实存在。
+        // 任一项不通过 ⇒ 保持锁定并返回问题清单（"核对后解锁"，而不是"盲目放行写入"）。
         app.MapPost("/api/storage/maintenance/recover", async (StorageMaintenanceCoordinator coordinator, SqliteMetadataDatabase database,
             IWebHostEnvironment env, HttpContext http, CancellationToken ct) =>
         {
@@ -106,28 +107,116 @@ public static class TraceEndpoints
                 return Results.Ok(new { recovered = false, maintenanceActive = coordinator.IsMaintenanceActive, reason = coordinator.Reason });
 
             var dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
+            var artifactsRoot = Path.Combine(dataRoot, "artifacts");
             var problems = new List<string>();
+            var databaseReadable = false;
+
             try
             {
                 await using var connection = await database.OpenConnectionAsync(ct);
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT version FROM schema_info WHERE id=1;";
-                await command.ExecuteScalarAsync(ct);
+                databaseReadable = true;
+
+                // 1) schema 版本必须存在且有效（旧实现丢弃了查询返回值——空表/异常值同样算"可读"）。
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT version FROM schema_info WHERE id=1;";
+                    var value = await command.ExecuteScalarAsync(ct);
+                    var text = value is null or DBNull ? null : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+                    if (text is null || !long.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var version) || version < 1 || version > database.CurrentSchemaVersion)
+                        problems.Add($"schema_info.version is missing or invalid ('{text ?? "null"}'); the database is not a usable metadata database");
+                }
+
+                // 2) SQLite 页级完整性（quick_check；"ok" 之外的任何结果都不放行）。
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "PRAGMA quick_check;";
+                    var result = Convert.ToString(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture);
+                    if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+                        problems.Add($"SQLite quick_check reported '{result}'");
+                }
+
+                // 3) 关键表必须存在（空库/被截断的恢复不是"可解锁"状态）。
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_info','run_traces');";
+                    var tables = Convert.ToInt64(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture);
+                    if (tables < 2) problems.Add("required metadata tables (schema_info, run_traces) are missing");
+                }
             }
             catch (Exception ex)
             {
                 problems.Add($"database is not readable: {ex.Message}");
             }
-            var artifactsRoot = Path.Combine(dataRoot, "artifacts");
+
             if (!Directory.Exists(artifactsRoot))
+            {
                 problems.Add($"artifacts root '{artifactsRoot}' is missing; restore it from the preserved copies before clearing the lock");
+            }
+            else if (databaseReadable && problems.Count == 0)
+            {
+                // 4) 附件引用一致性抽样：恢复后的追溯记录若指向缺失文件，说明 DB 与资产不是同一份
+                //    恢复版本（典型混合状态），绝不解锁。
+                try
+                {
+                    await using var connection = await database.OpenConnectionAsync(ct);
+                    await using var command = connection.CreateCommand();
+                    command.CommandText =
+                        "SELECT artifact FROM (" +
+                        "SELECT preview_relative_path AS artifact FROM run_traces WHERE has_preview=1 AND preview_relative_path IS NOT NULL " +
+                        "UNION ALL SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_relative_path IS NOT NULL) " +
+                        "ORDER BY artifact;";
+                    var checkedCount = 0;
+                    var missing = new List<string>();
+                    await using var reader = await command.ExecuteReaderAsync(ct);
+                    while (await reader.ReadAsync(ct))
+                    {
+                        var relative = reader.GetString(0);
+                        checkedCount++;
+                        var normalized = relative.Replace('\\', '/');
+                        if (Path.IsPathRooted(normalized) || normalized.Split('/').Any(part => part is ".." or "."))
+                        {
+                            missing.Add(relative);
+                            continue;
+                        }
+                        var candidate = Path.GetFullPath(Path.Combine(artifactsRoot,
+                            normalized.Replace('/', Path.DirectorySeparatorChar)));
+                        if (!candidate.StartsWith(Path.GetFullPath(artifactsRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        {
+                            missing.Add(relative);
+                            continue;
+                        }
+                        if (!File.Exists(candidate)) missing.Add(relative);
+                    }
+                    if (missing.Count > 0)
+                        problems.Add($"{missing.Count} of {checkedCount} artifact references point to files that do not exist " +
+                                     $"(e.g. '{missing[0]}'); the database and on-disk assets are not the same restored generation");
+                }
+                catch (Exception ex)
+                {
+                    problems.Add($"artifact reference verification failed: {ex.Message}");
+                }
+            }
 
             if (problems.Count > 0)
                 throw new ApiConflictException(
                     "Storage recovery checks failed; the failure lock stays engaged: " + string.Join("; ", problems) + ".");
 
-            coordinator.ClearFailureLock();
-            return Results.Ok(new { recovered = true, maintenanceActive = coordinator.IsMaintenanceActive });
+            var transaction = coordinator.ReadTransaction();
+            if (coordinator.HasRestoreTransactionMarker && transaction is null)
+                throw new ApiConflictException("The restore transaction marker exists but cannot be read; preserve it and use the full administrator restore path to recover from a verified backup.");
+            if (transaction is not null)
+            {
+                // Presence/readability cannot prove which generation was installed. An unresolved
+                // transaction can only be retired by a new full restore from a hash-verified backup;
+                // this endpoint must never turn an operator click into evidence.
+                throw new ApiConflictException("An unresolved restore transaction is present " +
+                    $"(backup '{transaction.BackupId}', stage '{transaction.Stage}'). Use the administrator full-restore endpoint " +
+                    "to restore a hash-verified backup; this verification endpoint will not discard transaction evidence.");
+            }
+            // With no durable restore intent there is no trusted generation manifest to compare the
+            // system assets against. Readability and a populated artifact tree cannot prove rollback.
+            throw new ApiConflictException("Storage checks passed, but there is no hash-verified restore manifest proving a complete database and system-asset generation. " +
+                "Use the administrator full-restore endpoint; this endpoint never clears a failure lock without transaction evidence.");
         }).RequireAdministrator("storage.maintenance.recover", "storage");
 
         return app;

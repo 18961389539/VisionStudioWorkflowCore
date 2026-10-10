@@ -48,16 +48,32 @@ public static class VisionStudioSiteConfig
         };
 
         var sources = configuration.Sources;
-        var envIndex = -1;
+
+        // Q05：必须插到**应用级**（无前缀）环境变量源之前——默认宿主已带前缀的源
+        // （DOTNET_/ASPNETCORE_）排在任何 appsettings 文件之前；若按"第一个环境变量源"插入，
+        // site-config 会落到 appsettings*.json 之前，被包内默认值静默覆盖（优先级与注释相反）。
+        var insertIndex = -1;
         for (var i = 0; i < sources.Count; i++)
         {
-            if (sources[i] is EnvironmentVariablesConfigurationSource)
+            if (sources[i] is EnvironmentVariablesConfigurationSource { Prefix: null or "" })
             {
-                envIndex = i;
+                insertIndex = i;
                 break;
             }
         }
-        if (envIndex >= 0) sources.Insert(envIndex, source);
+        if (insertIndex < 0)
+        {
+            // 回退（自定义 builder / 无环境变量源）：放到所有文件源之后，仍在命令行语义之前。
+            for (var i = sources.Count - 1; i >= 0; i--)
+            {
+                if (sources[i] is FileConfigurationSource)
+                {
+                    insertIndex = i + 1;
+                    break;
+                }
+            }
+        }
+        if (insertIndex >= 0) sources.Insert(insertIndex, source);
         else sources.Add(source);
     }
 }

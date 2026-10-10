@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Form, InputNumber, message, Modal, Select, Space, Statistic, Switch, Table, Tag, Typography } from 'antd';
 import type { RobotCommandTraceRecord, RobotDescriptor, RobotRuntimeSettings } from '../types';
 import { localizeStatus } from '../i18n';
+import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
+
+// R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
+const ROBOT_POLL_TIMEOUT_MS = 5000;
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -36,19 +40,33 @@ export default function RobotPanel({ open, onClose }: Props) {
 
   const selected = useMemo(() => robots.find((x) => x.id === selectedId) ?? robots[0], [robots, selectedId]);
 
+  // R04：轮询代次 + 取消 + 超时——旧响应绝不覆盖新结果，挂起请求可被显式中断。
+  const refreshGeneration = useRef(0);
+  const refreshAbort = useRef<AbortController | null>(null);
+
   const refresh = async (quiet = false) => {
+    const generation = ++refreshGeneration.current;
+    refreshAbort.current?.abort();
+    const controller = new AbortController();
+    refreshAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), ROBOT_POLL_TIMEOUT_MS);
     try {
       const [robotResponse, traceResponse] = await Promise.all([
-        fetch('/api/robots'),
-        fetch(`/api/robot-traces?take=20${selectedId ? `&robotId=${encodeURIComponent(selectedId)}` : ''}`)
+        fetch('/api/robots', { signal: controller.signal }),
+        fetch(`/api/robot-traces?take=20${selectedId ? `&robotId=${encodeURIComponent(selectedId)}` : ''}`, { signal: controller.signal })
       ]);
-      if (!robotResponse.ok) throw new Error('Robot runtime unavailable');
+      if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
+      if (!robotResponse.ok) throw new Error(await responseErrorMessage(robotResponse, '机器人接口不可用'));
       const data: RobotDescriptor[] = await robotResponse.json();
       setRobots(data);
       if (traceResponse.ok) setTraces(await traceResponse.json());
       if (!data.some((x) => x.id === selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (error) {
+      if (generation !== refreshGeneration.current) return;
       if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Robot refresh failed');
+    } finally {
+      window.clearTimeout(timeout);
+      if (refreshAbort.current === controller) refreshAbort.current = null;
     }
   };
 
@@ -80,7 +98,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     try {
       const response = await fetch(`/api/robots/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? `${localizeStatus(action)}失败`);
+      if (!response.ok) throw new Error(apiErrorMessage(data, `${localizeStatus(action)}失败`));
       await refresh(true);
       messageApi.success(`${localizeStatus(action)}成功`);
     } catch (error) {
@@ -94,7 +112,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     try {
       const response = await fetch(`/api/robots/${encodeURIComponent(selected.id)}/ack/${selected.lastCommandId}`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? '确认失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '确认失败'));
       await refresh(true);
       messageApi.success('握手已确认');
     } catch (error) {
@@ -110,7 +128,7 @@ export default function RobotPanel({ open, onClose }: Props) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? '应用设置失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '应用设置失败'));
       await refresh(true);
       messageApi.success('机器人设置已应用');
     } catch (error) {
@@ -134,7 +152,7 @@ export default function RobotPanel({ open, onClose }: Props) {
         })
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? '机器人目标指令失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '机器人目标指令失败'));
       await refresh(true);
       messageApi.success(values.action === 'Handshake' ? '工业握手已完成' : '机器人指令已接受');
     } catch (error) {

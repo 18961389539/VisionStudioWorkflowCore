@@ -25,6 +25,8 @@ export default function StoragePanel({ open, onClose }: Props) {
   const [includeArtifacts, setIncludeArtifacts] = useState(true);
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
+  // R05：恢复成功后的"待重启"结果——主机在重启前会对业务请求返回 503（restart_required）。
+  const [restartNotice, setRestartNotice] = useState<string>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const refresh = async () => {
@@ -82,7 +84,15 @@ export default function StoragePanel({ open, onClose }: Props) {
           });
           if (!response.ok) throw new Error(await readProblem(response));
           const result: StorageRestoreResult = await response.json();
-          messageApi.success(t('storage.restoreDone', { id: result.backupId }));
+          if (result.restartRecommended) {
+            // R05：恢复成功后主机进入"待重启"门——业务请求会保持 503（restart_required），
+            // 必须明确告知操作者并保留结果，而不是让面板在 503 上反复刷新却看不出原因。
+            setRestartNotice(`已从备份 ${result.backupId} 恢复（schema v${result.sourceSchemaVersion} → v${result.currentSchemaVersion}）。` +
+              '请立即重启服务以重新加载设备/插件/配置；重启前业务请求将保持 503（restart_required）。');
+            messageApi.warning('恢复完成，需要重启服务');
+          } else {
+            messageApi.success(t('storage.restoreDone', { id: result.backupId }));
+          }
           await refresh();
         } catch (e) { messageApi.error(e instanceof Error ? e.message : t('storage.restoreFailed')); }
         finally { setBusy(undefined); }
@@ -94,6 +104,17 @@ export default function StoragePanel({ open, onClose }: Props) {
   return <Modal open={open} onCancel={onClose} footer={null} width={1120} title="存储维护 · 架构 / 容量 / 备份 / 还原" destroyOnHidden>
     {contextHolder}
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {restartNotice && (
+        <Alert
+          type="error"
+          showIcon
+          message="恢复已完成，等待服务重启"
+          description={<Space direction="vertical" size={4}>
+            <span>{restartNotice}</span>
+            <span>重启后本页面应恢复正常；若仍需恢复，请先确认服务和数据根已重新加载。</span>
+          </Space>}
+        />
+      )}
       {error && <Alert type="warning" showIcon message={error} />}
       {capacity && <>
         <Alert type={capacity.level === 'Critical' ? 'error' : capacity.level === 'Warning' ? 'warning' : 'success'} showIcon

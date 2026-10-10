@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api.Infrastructure;
 
@@ -19,7 +20,8 @@ public sealed record StorageBackupManifest(
     /// <summary>媒体库/设备与来源配置/生产运行配置/插件仓库等运行依赖是否随包（可恢复系统备份）。</summary>
     bool IncludesSystemAssets = false,
     int SystemAssetCount = 0,
-    long SystemAssetBytes = 0);
+    long SystemAssetBytes = 0,
+    IReadOnlyDictionary<string, string>? AssetSha256 = null);
 
 public sealed record StorageBackupDescriptor(
     string BackupId,
@@ -63,6 +65,7 @@ public sealed class StorageBackupService
     /// <summary>可恢复系统备份的资产根：媒体库、设备/来源配置、生产运行配置、插件仓库（含信任与活动指针）。</summary>
     private readonly (string Prefix, string Root)[] _systemSections;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ILogger<StorageBackupService>? _logger;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     /// <summary>
@@ -78,8 +81,10 @@ public sealed class StorageBackupService
         ProductionRuntimeService production,
         IWebHostEnvironment env,
         IConfiguration configuration,
-        IOptions<StorageMaintenanceOptions> options)
+        IOptions<StorageMaintenanceOptions> options,
+        ILogger<StorageBackupService>? logger = null)
     {
+        _logger = logger;
         _database = database;
         _capacity = capacity;
         _maintenance = maintenance;
@@ -203,10 +208,15 @@ public sealed class StorageBackupService
                 ? Directory.EnumerateFiles(_artifactRoot, "*", SearchOption.AllDirectories).ToArray()
                 : [];
             var artifactBytes = artifactFiles.Sum(path => new FileInfo(path).Length);
+            var assetSha256 = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var artifact in artifactFiles)
+                assetSha256[$"artifacts/{Path.GetRelativePath(_artifactRoot, artifact).Replace('\\', '/')}"] = ComputeFileSha256(artifact);
+            foreach (var (zipPath, file) in systemFiles)
+                assetSha256[zipPath] = ComputeFileSha256(file);
             var manifest = new StorageBackupManifest(
                 BackupFormatVersion, id, DateTimeOffset.UtcNow, VisionStudioVersion(), validation.SchemaVersion,
                 await Sha256FileAsync(dbSnapshot, ct), include, artifactFiles.Length, artifactBytes,
-                systemFiles.Count > 0, systemFiles.Count, systemBytes);
+                true, systemFiles.Count, systemBytes, assetSha256);
 
             await using (var output = File.Create(tempArchive))
             using (var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: false))
@@ -223,6 +233,8 @@ public sealed class StorageBackupService
                     ct.ThrowIfCancellationRequested();
                     zip.CreateEntryFromFile(file, zipPath, CompressionLevel.Optimal);
                 }
+                foreach (var (prefix, _) in _systemSections)
+                    zip.CreateEntry($"system/{prefix}/"); // includes empty roots in the recovery manifest
                 var manifestEntry = zip.CreateEntry("manifest.json", CompressionLevel.Optimal);
                 await using var manifestStream = manifestEntry.Open();
                 await JsonSerializer.SerializeAsync(manifestStream, manifest, _json, ct);
@@ -281,7 +293,9 @@ public sealed class StorageBackupService
 
         // Do not hold the backup gate while waiting for in-flight API requests to drain: an
         // already-running backup/delete request may legitimately be waiting for that same gate.
-        await using var maintenance = await _maintenance.BeginExclusiveAsync("storage restore", ct);
+        // Restore remains available to an authenticated administrator while failure-locked; it is
+        // the practical rollback/retry path for unresolved transactions. Ordinary maintenance stays blocked.
+        await using var maintenance = await _maintenance.BeginExclusiveAsync("storage restore", ct, allowFailureLockedRestore: true);
         if (_production.Status.State != ProductionRuntimeState.Stopped)
             throw new ApiConflictException("Production Runtime changed state while storage restore was waiting for maintenance mode.");
 
@@ -299,6 +313,7 @@ public sealed class StorageBackupService
             var stagedArtifacts = Path.Combine(workspace, "artifacts");
             var stagedSystem = Path.Combine(workspace, "system");
             StorageBackupManifest manifest;
+            var extractedAssetHashes = new Dictionary<string, string>(StringComparer.Ordinal);
 
             await using (var input = File.OpenRead(archivePath))
             using (var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false))
@@ -312,7 +327,7 @@ public sealed class StorageBackupService
                 if (!string.Equals(actualHash, manifest.DatabaseSha256, StringComparison.OrdinalIgnoreCase))
                     throw new ApiValidationException("Backup database SHA-256 does not match manifest.");
 
-                if (request.RestoreArtifacts && manifest.IncludesArtifacts)
+                if (manifest.IncludesArtifacts)
                 {
                     Directory.CreateDirectory(stagedArtifacts);
                     foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("artifacts/", StringComparison.Ordinal) && !string.IsNullOrEmpty(x.Name)))
@@ -320,10 +335,11 @@ public sealed class StorageBackupService
                         var relative = entry.FullName["artifacts/".Length..].Replace('/', Path.DirectorySeparatorChar);
                         var destination = SafeChildPath(stagedArtifacts, relative);
                         await ExtractEntryAsync(entry, destination, ct);
+                        extractedAssetHashes[$"artifacts/{relative.Replace('\\', '/')}"] = ComputeFileSha256(destination);
                     }
                 }
 
-                if (request.RestoreSystemAssets && manifest.IncludesSystemAssets)
+                if (manifest.IncludesSystemAssets)
                 {
                     Directory.CreateDirectory(stagedSystem);
                     foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("system/", StringComparison.Ordinal) && !string.IsNullOrEmpty(x.Name)))
@@ -331,30 +347,90 @@ public sealed class StorageBackupService
                         var relative = entry.FullName["system/".Length..].Replace('/', Path.DirectorySeparatorChar);
                         var destination = SafeChildPath(stagedSystem, relative);
                         await ExtractEntryAsync(entry, destination, ct);
+                        extractedAssetHashes[$"system/{relative.Replace('\\', '/')}"] = ComputeFileSha256(destination);
+                    }
+                    foreach (var entry in zip.Entries.Where(x => x.FullName.StartsWith("system/", StringComparison.Ordinal) && string.IsNullOrEmpty(x.Name)))
+                    {
+                        var relative = entry.FullName["system/".Length..].TrimEnd('/').Replace('/', Path.DirectorySeparatorChar);
+                        Directory.CreateDirectory(SafeChildPath(stagedSystem, relative));
                     }
                 }
+            }
+
+            if (manifest.AssetSha256 is not null && (manifest.AssetSha256.Count != extractedAssetHashes.Count || manifest.AssetSha256.Any(pair =>
+                    !extractedAssetHashes.TryGetValue(pair.Key, out var actual) ||
+                    !string.Equals(actual, pair.Value, StringComparison.OrdinalIgnoreCase))))
+                throw new ApiValidationException("Backup artifact/system-asset manifest does not match the extracted file set and SHA-256 hashes.");
+
+            if (_maintenance.IsFailureLocked || _maintenance.HasRestoreTransactionMarker)
+            {
+                if (!request.RestoreArtifacts || !manifest.IncludesArtifacts ||
+                    !request.RestoreSystemAssets || !manifest.IncludesSystemAssets ||
+                    manifest.AssetSha256 is null ||
+                    _systemSections.Any(section => !Directory.Exists(Path.Combine(stagedSystem, section.Prefix))))
+                    throw new ApiConflictException("A failure-locked or unresolved restore requires a complete backup with database, artifacts, and every system-asset root.");
             }
 
             var validation = await SqliteMetadataDatabase.ValidateSnapshotAsync(incomingDb, ct);
             if (!validation.Ok) throw new ApiValidationException($"Backup database integrity check failed: {validation.Result}");
             if (validation.SchemaVersion > _database.CurrentSchemaVersion)
                 throw new ApiConflictException($"Backup schema v{validation.SchemaVersion} is newer than this host supports (v{_database.CurrentSchemaVersion}).");
+            var sourceDatabaseHash = ComputeFileSha256(incomingDb);
+            var sourceSchemaVersion = validation.SchemaVersion;
+            var prepared = await _database.PrepareSnapshotForRestoreAsync(incomingDb, ct);
+            if (!prepared.Ok || prepared.SchemaVersion != _database.CurrentSchemaVersion)
+                throw new ApiValidationException($"Migrated backup snapshot failed validation: integrity={prepared.Result}, schema={prepared.SchemaVersion}.");
+            var preparedDatabaseHash = ComputeFileSha256(incomingDb);
+            await ValidateArtifactReferencesAsync(incomingDb,
+                request.RestoreArtifacts && manifest.IncludesArtifacts ? stagedArtifacts : _artifactRoot, ct);
 
+            // Q08：进入实际改动（DB/目录切换）之前耐久登记恢复事务意图——进程若在"数据库已替换、
+            // 目录未全部切换"的中途被终止，启动检查会读到该文件并进入失败锁（见协调器构造函数），
+            // 不必依赖 catch/finally 是否来得及执行。校验全部通过后才登记：此前的失败没有改动任何东西。
             var safetyDb = Path.Combine(workspace, "pre-restore.db");
             await _database.CreateSnapshotAsync(safetyDb, ct);
+            var previousTransaction = _maintenance.ReadTransaction();
             var oldArtifacts = Path.Combine(_tempRoot, $"artifacts-pre-restore-{Guid.NewGuid():N}");
+            var systemSwaps = _systemSections.Select(section => new SystemSwap(
+                section.Root, Path.Combine(_tempRoot, $"{section.Prefix}-pre-restore-{Guid.NewGuid():N}"))).ToArray();
+            var protectedAssets = new List<StorageMaintenanceCoordinator.RestoreProtectionAsset>();
+            if (request.RestoreArtifacts && manifest.IncludesArtifacts)
+                protectedAssets.Add(new(_artifactRoot, oldArtifacts, Directory.Exists(_artifactRoot), Directory.Exists(_artifactRoot) ? ComputeDirectorySha256(_artifactRoot) : null));
+            if (request.RestoreSystemAssets && manifest.IncludesSystemAssets)
+            for (var i = 0; i < _systemSections.Length; i++)
+            {
+                var root = _systemSections[i].Root;
+                var exists = Directory.Exists(root);
+                protectedAssets.Add(new(root, systemSwaps[i].Old, exists, exists ? ComputeDirectorySha256(root) : null));
+            }
+            var expectedAssets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (request.RestoreArtifacts && manifest.IncludesArtifacts) expectedAssets[_artifactRoot] = ComputeDirectorySha256(stagedArtifacts);
+            if (request.RestoreSystemAssets && manifest.IncludesSystemAssets)
+                foreach (var (prefix, root) in _systemSections)
+                {
+                    var stagedRoot = Path.Combine(stagedSystem, prefix);
+                    if (Directory.Exists(stagedRoot)) expectedAssets[root] = ComputeDirectorySha256(stagedRoot);
+                }
+            // Intent must be durable before the first live database or asset replacement. A failed write
+            // aborts here; the safety snapshot is still in the disposable workspace.
+            _maintenance.BeginRestoreTransaction(manifest.BackupId,
+                ["database-replaced", "artifacts-installed", "system-assets-installed", "committed"], safetyDb,
+                ComputeFileSha256(safetyDb), sourceDatabaseHash, sourceSchemaVersion,
+                preparedDatabaseHash, expectedAssets, protectedAssets);
             var movedOldArtifacts = false;
             var installedArtifacts = false;
-            var systemSwaps = new List<SystemSwap>();
             var rollbackFailed = false;
+            var restoreAttemptFailed = false;
             try
             {
                 await _database.RestoreSnapshotAsync(incomingDb, ct);
+                _maintenance.AdvanceRestoreTransaction("database-replaced");
                 if (request.RestoreArtifacts && manifest.IncludesArtifacts)
                 {
                     if (Directory.Exists(_artifactRoot)) { Directory.Move(_artifactRoot, oldArtifacts); movedOldArtifacts = true; }
                     Directory.Move(stagedArtifacts, _artifactRoot);
                     installedArtifacts = true;
+                    _maintenance.AdvanceRestoreTransaction("artifacts-installed");
                 }
 
                 // 系统资产（媒体库/设备与来源配置/生产配置/插件仓库）：与 artifacts 相同的
@@ -368,23 +444,48 @@ public sealed class StorageBackupService
                     {
                         var staged = Path.Combine(stagedSystem, prefix);
                         if (!Directory.Exists(staged)) continue;
-                        var old = Path.Combine(_tempRoot, $"{prefix}-pre-restore-{Guid.NewGuid():N}");
-                        var swap = new SystemSwap(root, old);
-                        systemSwaps.Add(swap); // 先登记，后移动：任何一步失败都在回滚范围内
+                        var swap = systemSwaps.First(x => string.Equals(x.Target, root, StringComparison.OrdinalIgnoreCase));
                         if (Directory.Exists(root))
                         {
-                            Directory.Move(root, old);
+                            Directory.Move(root, swap.Old);
                             swap.OldMoved = true;
                         }
                         Directory.Move(staged, root);
                         swap.Installed = true;
                     }
+                    _maintenance.AdvanceRestoreTransaction("system-assets-installed");
+                }
+                // Commit only after the installed generation matches the hashes captured in the
+                // durable intent. This makes the transaction record evidence, not just a list of paths.
+                // Q08：SQLite Backup API 产生的是**语义等价、字节不同**的文件（页布局/头部字段/空闲页），
+                // 直接比较两份快照的文件哈希会误报——必须先把双方 VACUUM 规范化再比较逻辑内容。
+                var installedSnapshot = Path.Combine(workspace, "post-restore-verified.db");
+                await _database.CreateSnapshotAsync(installedSnapshot, ct);
+                if (!string.Equals(await ComputeSnapshotContentSha256Async(installedSnapshot, ct),
+                        await ComputeSnapshotContentSha256Async(incomingDb, ct), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Installed metadata database does not match the isolated migrated snapshot (content mismatch).");
+                await ValidateArtifactReferencesAsync(installedSnapshot, _artifactRoot, ct);
+                foreach (var (assetRoot, expectedHash) in expectedAssets)
+                    if (!Directory.Exists(assetRoot) || !string.Equals(ComputeDirectorySha256(assetRoot), expectedHash, StringComparison.OrdinalIgnoreCase))
+                        throw new IOException($"Installed asset root '{assetRoot}' does not match its staged manifest hash.");
+                foreach (var protectedAsset in protectedAssets)
+                {
+                    if (protectedAsset.Existed && (!Directory.Exists(protectedAsset.PreservedPath) ||
+                        !string.Equals(ComputeDirectorySha256(protectedAsset.PreservedPath), protectedAsset.Sha256, StringComparison.OrdinalIgnoreCase)))
+                        throw new IOException($"Protected rollback asset '{protectedAsset.Target}' does not match its pre-restore hash.");
+                    if (!protectedAsset.Existed && Directory.Exists(protectedAsset.PreservedPath))
+                        throw new IOException($"Unexpected rollback copy exists for previously absent asset '{protectedAsset.Target}'.");
                 }
                 // 测试夹具：在提交前注入故障（生产为 null，不产生任何行为变化）。
                 if (RestoreCommitFaultInjector is { } fault) await fault();
+
+                // R03：提交点——耐久记录"恢复已提交"。此后的任何清理失败（保护副本删除、
+                // 事务文件退役）都不再触发回滚或失败锁：恢复结果已定，残留由启动清理兜底。
+                _maintenance.AdvanceRestoreTransaction("committed");
             }
             catch (Exception restoreError)
             {
+                restoreAttemptFailed = true;
                 // 回滚：数据库、附件与系统资产各自尝试；任何一步失败都必须保留对应的保护副本。
                 try { await _database.RestoreSnapshotAsync(safetyDb, CancellationToken.None); }
                 catch { rollbackFailed = true; }
@@ -395,7 +496,7 @@ public sealed class StorageBackupService
                 }
                 catch { rollbackFailed = true; }
 
-                for (var i = systemSwaps.Count - 1; i >= 0; i--)
+                for (var i = systemSwaps.Length - 1; i >= 0; i--)
                 {
                     var swap = systemSwaps[i];
                     try
@@ -438,10 +539,33 @@ public sealed class StorageBackupService
                 // 只有提交成功或回滚成功后才允许清理保护副本；回滚失败时全部保留。
                 if (!rollbackFailed)
                 {
-                    try { if (Directory.Exists(oldArtifacts)) Directory.Delete(oldArtifacts, true); } catch { }
-                    foreach (var swap in systemSwaps)
+                    if (restoreAttemptFailed && previousTransaction is not null)
                     {
-                        try { if (Directory.Exists(swap.Old)) Directory.Delete(swap.Old, true); } catch { }
+                        // A failed retry returned to an already-locked mixed generation. Keep this
+                        // retry's safety DB and all moved asset copies; its transaction nests the
+                        // prior verified protection group. Do not retire the marker or delete paths it names.
+                        preserveSafetyCopies = true;
+                        _maintenance.AdvanceRestoreTransaction("retry-rolled-back-to-previously-locked-generation");
+                    }
+                    else
+                    {
+                        // R03：保护副本的清理顺序——先把事务推进到 committed（已在提交点完成），
+                        // 再删除旧附件/系统资产副本，最后退役事务文件。事务文件退役失败**不再**
+                        // 进入失败锁、也不再抛异常（旧实现把它升级为"副本已删 + 重试被拒"的
+                        // 不可恢复状态）：committed 事务在下次启动时只做剩余清理，主机可继续服务。
+                        try { if (Directory.Exists(oldArtifacts)) Directory.Delete(oldArtifacts, true); } catch { }
+                        foreach (var swap in systemSwaps)
+                        {
+                            try { if (Directory.Exists(swap.Old)) Directory.Delete(swap.Old, true); } catch { }
+                        }
+                        try { _maintenance.CompleteRestoreTransaction(); }
+                        catch (Exception transactionError)
+                        {
+                            // 保留工作区（含 pre-restore.db 安全快照），让启动清理/人工核对仍有完整锚点。
+                            preserveSafetyCopies = true;
+                            _logger.LogWarning(transactionError,
+                                "The committed restore transaction marker could not be removed; startup will retry the cleanup (the restore itself succeeded).");
+                        }
                     }
                 }
             }
@@ -449,6 +573,11 @@ public sealed class StorageBackupService
             // R04：恢复正常完成（可能覆盖了之前一次失败的失败锁）后，解除协调器失败锁，
             // 让主机重新接受常规变更与生产启动。
             _maintenance.ClearFailureLock();
+            // Q08：恢复成功不是"继续服务"的许可——磁盘资产已替换，而设备适配器/插件/配置绑定
+            // 仍是恢复前的内存实例。置"待重启"门：除认证/健康外一律 503（restart_required），
+            // 仅进程重启后由协调器构造函数自动解除（届时全部依赖随启动重新加载并校验）。
+            _maintenance.MarkRestartPending(
+                $"storage restore from backup '{manifest.BackupId}' completed; restart the host to reload device, plugin and configuration state");
 
             try { await _capacity.RefreshAsync(ct); } catch { /* restore already committed; telemetry refresh is best-effort */ }
             return new StorageRestoreResult(manifest.BackupId, validation.SchemaVersion, _database.CurrentSchemaVersion,
@@ -505,5 +634,101 @@ public sealed class StorageBackupService
         await using var stream = File.OpenRead(path);
         var hash = await SHA256.HashDataAsync(stream, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    internal static string ComputeFileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    /// <summary>
+    /// Q08：快照的**逻辑内容**指纹——按名称遍历所有用户表、按 rowid 逐行累积哈希。
+    /// 与文件字节无关：SQLite 备份输出的页布局/头字段/空闲页差异不影响结果，只有真实的数据
+    /// 差异才会导致不一致（此前用文件哈希比较两个独立备份，属于必然误报的比较）。
+    /// </summary>
+    internal static async Task<string> ComputeSnapshotContentSha256Async(string snapshotPath, CancellationToken ct)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = snapshotPath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync(ct);
+
+        var tables = new List<string>();
+        await using (var list = connection.CreateCommand())
+        {
+            list.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;";
+            await using var reader = await list.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) tables.Add(reader.GetString(0));
+        }
+
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var table in tables)
+        {
+            hash.AppendData(System.Text.Encoding.UTF8.GetBytes(table));
+            hash.AppendData([0]);
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT * FROM \"{table}\" ORDER BY rowid;";
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    var value = reader.IsDBNull(i)
+                        ? "<null>"
+                        : Convert.ToString(reader.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
+                    hash.AppendData(System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty));
+                    hash.AppendData([0]);
+                }
+            }
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    internal static string ComputeDirectorySha256(string path)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            var relative = Path.GetRelativePath(path, file).Replace('\\', '/');
+            var relativeBytes = System.Text.Encoding.UTF8.GetBytes(relative);
+            hash.AppendData(BitConverter.GetBytes(relativeBytes.Length));
+            hash.AppendData(relativeBytes);
+            using var stream = File.OpenRead(file);
+            hash.AppendData(BitConverter.GetBytes(stream.Length));
+            var buffer = new byte[64 * 1024];
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0) hash.AppendData(buffer, 0, read);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static async Task ValidateArtifactReferencesAsync(string databasePath, string artifactsRoot, CancellationToken ct)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT artifact FROM (" +
+            "SELECT preview_relative_path AS artifact FROM run_traces WHERE has_preview=1 AND preview_relative_path IS NOT NULL " +
+            "UNION ALL SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_relative_path IS NOT NULL);";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var root = Path.GetFullPath(artifactsRoot);
+        while (await reader.ReadAsync(ct))
+        {
+            var relative = reader.GetString(0).Replace('\\', '/');
+            if (Path.IsPathRooted(relative) || relative.Split('/').Any(part => part is ".." or "."))
+                throw new ApiValidationException($"Backup contains unsafe artifact reference '{relative}'.");
+            var candidate = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+            if (!candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate))
+                throw new ApiValidationException($"Database artifact reference '{relative}' has no file in the restored asset set.");
+        }
     }
 }

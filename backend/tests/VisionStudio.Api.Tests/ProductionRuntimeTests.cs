@@ -231,7 +231,7 @@ public sealed class ProductionRuntimeTests
         // 默认阈值 3 + 自动恢复开启：旧实现会完整重跑至第 3 次失败才锁定，导致设备写入被执行 3 次。
         // 用"先真实写 PLC、再报告失败"的运行器模拟"写入成功→后续节点失败"的真实副作用场景。
         var runner = new DeviceWriteThenFailRunner(devices);
-        var service = Service(env, jobs, runner, dependencies);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: SafetyStore(env));
         await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-sidefx", false, 1, 100, 3, true, 1), default);
         await service.StartAsync(null, default);
         await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
@@ -265,7 +265,7 @@ public sealed class ProductionRuntimeTests
 
         // MaxConsecutiveFailures 缺省 = 3：阈值无关，副作用流程仍必须首轮锁定。
         var runner = new DeviceWriteThenFailRunner(devices);
-        var service = Service(env, jobs, runner, dependencies);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: SafetyStore(env));
         await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-sidefx-default"), default);
         var config = await service.GetConfigAsync(default);
         Assert.Equal(3, config.MaxConsecutiveFailures);
@@ -336,7 +336,7 @@ public sealed class ProductionRuntimeTests
         await PublishAsync(jobs, dependencies, "prod-bypass", 1, workflow);
 
         var runner = new DeviceWriteThenFailRunner(devices);
-        var service = Service(env, jobs, runner, dependencies);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: SafetyStore(env));
         await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-bypass", false, 1, 100, 3, true, 1), default);
         await service.StartAsync(null, default);
         await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
@@ -405,11 +405,156 @@ public sealed class ProductionRuntimeTests
         var statePath = Path.Combine(env.ContentRootPath, "data", "production", "device-action-safety.json");
         Assert.True(File.Exists(statePath), "safety state must be persisted to disk");
 
-        // "重启"：新实例 + 设备掉线 → 未核对前启动被拒。
-        await devices.DisconnectAsync("virtual-modbus-1", default);
+        // "重启"：即使设备仍连接，连接状态也不能证明上一动作已经完成；普通 Start 必须要求管理员核对。
         var restarted = Service(env, jobs, new DeviceWriteThenFailRunner(devices), dependencies, safetyStore: SafetyStore(env));
         var rejected = await Assert.ThrowsAsync<ApiConflictException>(() => restarted.StartAsync(null, default));
         Assert.Contains("device", rejected.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConfirmedSynchronousDeviceWrites_KeepRunningAndClearOnlyAfterTraceCommit()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = DeviceWriteWorkflow();
+        await jobs.CreateAsync(new CreateJobRequest("prod-sync-ok", "Sync OK", null, workflow, "initial"), default);
+        var counting = new CountingPlcDriver();
+        var dependencies = Dependencies(env, counting, out var devices);
+        await PublishAsync(jobs, dependencies, "prod-sync-ok", 1, workflow);
+        var safety = SafetyStore(env);
+        var service = Service(env, jobs, new DeviceWriteSuccessRunner(devices), dependencies, safetyStore: safety);
+
+        // R06：语义一（成功且已持久提交的周期清意图）。用 3 秒周期间隔制造确定性窗口——
+        // 旧版本"等待 null 后立即 Stop"，Stop 可能取消刚好开始的下一周期（安全策略保留意图），
+        // 让断言随调度抖动；这里让断言全部落在"周期已收尾、下一周期未开始"的间隙内。
+        // 语义二（周期间受控停止）与语义三（执行中取消保留意图，见
+        // CancelledSideEffectCycle_AlsoMarksDeviceActionsUnknown）分别独立验证。
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-sync-ok", false, 3000, 100, 3, true, 1), default);
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => service.Status.CycleCount >= 1, TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => safety.Load() is null, TimeSpan.FromSeconds(5));
+        Assert.Null(safety.Load()); // 每个成功周期在 trace 提交后才清除意图，可重复继续。
+
+        // 语义二：在间隙内停止——不取消在途周期，停止后也不应留下新意图。
+        await service.StopAsync(default);
+        Assert.Equal(ProductionRuntimeState.Stopped, service.Status.State);
+        Assert.Null(safety.Load());
+        Assert.True(counting.WriteCount >= 1);
+    }
+
+    [Fact]
+    public async Task SafetyStateClearFailure_KeepsInMemoryAndRestartGateEngaged()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = DeviceWriteWorkflow();
+        await jobs.CreateAsync(new CreateJobRequest("prod-clear-fail", "Clear Fail", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out var devices);
+        await PublishAsync(jobs, dependencies, "prod-clear-fail", 1, workflow);
+        var statePath = Path.Combine(env.ContentRootPath, "data", "production", "device-action-safety.json");
+        var safety = new ClearFailsSafetyStore(statePath);
+        var service = Service(env, jobs, new DeviceWriteSuccessRunner(devices), dependencies, safetyStore: safety);
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-clear-fail", false, 1, 100, 3, true, 1), default);
+
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+
+        Assert.NotNull(safety.Load()); // Clear threw before memory was reset; the durable intent survives restart.
+        var restarted = Service(env, jobs, new DeviceWriteSuccessRunner(devices), dependencies, safetyStore: SafetyStore(env));
+        await Assert.ThrowsAsync<ApiConflictException>(() => restarted.StartAsync(null, default));
+    }
+
+    [Fact]
+    public async Task ManualResolutionRequiresExactAssetsEvidenceAndAuthenticatedActor_AndRetainsHistory()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = DeviceWriteWorkflow();
+        await jobs.CreateAsync(new CreateJobRequest("prod-manual-resolve", "Manual Resolve", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out var devices);
+        await PublishAsync(jobs, dependencies, "prod-manual-resolve", 1, workflow);
+        var safety = SafetyStore(env);
+        var runner = new DeviceWriteThenFailRunner(devices);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: safety);
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-manual-resolve", false, 1, 100, 3, true, 1), default);
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+
+        var state = safety.Load()!;
+        var wrong = new DeviceActionResolutionRequest(state.RunId!, state.ManifestHash, ["unrelated"], [], "checked", "physical read", "PLC S/N ABC");
+        await Assert.ThrowsAsync<ApiConflictException>(() => service.ResolveUnknownDeviceActionsAsync(wrong, "alice", default));
+        var missingEvidence = new DeviceActionResolutionRequest(state.RunId!, state.ManifestHash, state.DeviceIds, state.RobotIds, "checked", "", "PLC S/N ABC");
+        await Assert.ThrowsAsync<ApiValidationException>(() => service.ResolveUnknownDeviceActionsAsync(missingEvidence, "alice", default));
+
+        var request = new DeviceActionResolutionRequest(state.RunId!, state.ManifestHash, state.DeviceIds, state.RobotIds,
+            "Controller value verified and motion complete", "Readback statusText=Vision OK; controller event 8172", "virtual-modbus-1 at 127.0.0.1:502; PLC serial ABC");
+        await service.ResolveUnknownDeviceActionsAsync(request, "alice", default);
+        Assert.Null(safety.Load());
+        var files = Directory.GetFiles(safety.ResolutionDirectory, "*.json");
+        Assert.Single(files);
+        var saved = await File.ReadAllTextAsync(files[0]);
+        Assert.Contains("alice", saved);
+        Assert.Contains("controller event 8172", saved);
+
+        // A later run and reconciliation must append a second durable record instead of replacing the first.
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => runner.Cycles >= 2 && service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+        var secondState = safety.Load()!;
+        await service.ResolveUnknownDeviceActionsAsync(new DeviceActionResolutionRequest(
+            secondState.RunId!, secondState.ManifestHash, secondState.DeviceIds, secondState.RobotIds,
+            "Second physical check", "Controller event 8180", "same PLC serial ABC"), "alice", default);
+        Assert.Equal(2, Directory.GetFiles(safety.ResolutionDirectory, "*.json").Length);
+    }
+
+    [Fact]
+    public async Task RobotSendTargetOnly_SuccessDoesNotConfirmMotion_AndRemainsGated()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = RobotTargetWorkflow("SendTarget", waitForInPosition: true);
+        await jobs.CreateAsync(new CreateJobRequest("prod-async-target", "Async Target", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out _, out var robots);
+        await PublishAsync(jobs, dependencies, "prod-async-target", 1, workflow);
+        var safety = SafetyStore(env);
+        var service = Service(env, jobs, new RobotSendTargetRunner(robots), dependencies, safetyStore: safety);
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-async-target", false, 1, 100, 3, true, 1), default);
+
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+
+        Assert.False(string.IsNullOrWhiteSpace(safety.Load()?.RunId));
+        await Assert.ThrowsAsync<ApiConflictException>(() => service.StartAsync(null, default));
+    }
+
+    [Fact]
+    public async Task SkippedAsyncRobotNode_DoesNotGateSuccessfulProductionCycles()
+    {
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = RobotTargetWorkflow("SendTarget", waitForInPosition: true) with
+        {
+            Nodes = [.. RobotTargetWorkflow("SendTarget", waitForInPosition: true).Nodes,
+                new NodeDefinition("branch", "flow.if", "Branch", null, new Dictionary<string, JsonElement>())]
+        };
+        await jobs.CreateAsync(new CreateJobRequest("prod-skipped-async", "Skipped Async", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out _, out _);
+        await PublishAsync(jobs, dependencies, "prod-skipped-async", 1, workflow);
+        var runner = new SkippedRobotRunner();
+        var safety = SafetyStore(env);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: safety);
+        // R06：3 秒周期间隔——断言落在"周期已收尾、下一周期未开始"的确定性窗口内。
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-skipped-async", false, 3000, 100, 3, true, 1), default);
+
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => runner.Cycles >= 1, TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => safety.Load() is null, TimeSpan.FromSeconds(5));
+        Assert.Equal(ProductionRuntimeState.Running, service.Status.State);
+        Assert.Null(safety.Load());
+        await service.StopAsync(default);
     }
 
     [Fact]
@@ -442,6 +587,93 @@ public sealed class ProductionRuntimeTests
         Assert.Contains("device", rejected.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task SideEffectCycle_RecordsDurableIntentBeforeAnyDeviceAction()
+    {
+        // Q01 回归：副作用流程在**执行任何设备动作之前**必须已耐久登记意图（Phase=IntentRecorded +
+        // RunId）。旧实现只在执行结果返回后才写安全状态——进程被杀/追溯队列故障会让"设备已执行而
+        // 软件无结果"变成可以不经核对直接重跑的新周期。
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = DeviceWriteWorkflow();
+        await jobs.CreateAsync(new CreateJobRequest("prod-intent", "Intent", null, workflow, "initial"), default);
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out _);
+        await PublishAsync(jobs, dependencies, "prod-intent", 1, workflow);
+
+        var statePath = Path.Combine(env.ContentRootPath, "data", "production", "device-action-safety.json");
+        var runner = new IntentObservingRunner(statePath);
+        var service = Service(env, jobs, runner, dependencies, safetyStore: SafetyStore(env));
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-intent", false, 1, 100, 3, true, 1), default);
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => runner.Observed is not null, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+
+        Assert.NotNull(runner.Observed);
+        // 安全状态文件按 Web 默认（camelCase）序列化——必须用同一约定反序列化，否则枚举回落默认值。
+        var state = JsonSerializer.Deserialize<DeviceActionSafetyState>(runner.Observed!,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(DeviceActionSafetyPhase.IntentRecorded, state.Phase);
+        Assert.False(string.IsNullOrWhiteSpace(state.RunId), "the intent must carry the run id of the executing cycle");
+        Assert.Contains("virtual-modbus-1", state.DeviceIds);
+    }
+
+    [Fact]
+    public async Task SideEffectCycle_RefusesToRun_WhenIntentCannotBePersisted()
+    {
+        // Q01 回归：安全状态无法持久化时必须**拒绝执行设备副作用**（宁可不跑，不可无记录地跑）。
+        // 注入：安全状态读取为空，但任何 Save 都失败；副作用 runner 不能被调用。
+        using var env = new TempWebHostEnvironment();
+        var jobs = new JobStore(env);
+        var workflow = DeviceWriteWorkflow();
+        await jobs.CreateAsync(new CreateJobRequest("prod-intent-fail", "IntentFail", null, workflow, "initial"), default);
+        var counting = new CountingPlcDriver();
+        var dependencies = Dependencies(env, counting, out var devices);
+        await PublishAsync(jobs, dependencies, "prod-intent-fail", 1, workflow);
+
+        var runner = new DeviceWriteThenFailRunner(devices);
+        var failingStore = new FailSaveSafetyStore(Path.Combine(env.ContentRootPath, "data", "production", "device-action-safety.json"));
+        var service = Service(env, jobs, runner, dependencies, safetyStore: failingStore);
+        await service.UpdateConfigAsync(new ProductionRuntimeConfig("prod-intent-fail", false, 1, 100, 3, true, 1), default);
+        await service.StartAsync(null, default);
+        await WaitUntilAsync(() => service.Status.State == ProductionRuntimeState.Faulted, TimeSpan.FromSeconds(5));
+        await service.StopAsync(default);
+
+        Assert.Equal(0, runner.Cycles);           // 周期体从未执行
+        Assert.Equal(0, counting.WriteCount);    // 设备动作绝无发生
+    }
+
+    [Fact]
+    public async Task DeviceVerification_RejectsStaleFeedback_AndDriftedDeviceIdentity()
+    {
+        // Q02 回归：Connected ≠ 动作结果证据——过期反馈与设备身份漂移都必须继续阻断恢复闸门
+        // （旧的"只看 ConnectionState=Connected"会在设备反馈半死或换成另一台设备时放行）。
+        using var env = new TempWebHostEnvironment();
+        var dependencies = Dependencies(env, new VirtualModbusPlcDriver(), out var devices);
+        await devices.ReadAllFreshAsync("virtual-modbus-1", true, default);
+
+        var fresh = dependencies.VerifyLockedDevices(["virtual-modbus-1"], [], null, TimeSpan.FromMinutes(5));
+        Assert.True(fresh.Ok, fresh.Summary);
+
+        // 反馈过期（阈值 0：任何既有采样都不再算"新鲜"）→ 拒绝。
+        var stale = dependencies.VerifyLockedDevices(["virtual-modbus-1"], [], null, TimeSpan.Zero);
+        Assert.False(stale.Ok);
+        Assert.Contains("fresh", stale.Summary, StringComparison.OrdinalIgnoreCase);
+
+        // 设备身份漂移（登记时的 driver|protocol|endpoint 与现状不符）→ 拒绝。
+        var drifted = dependencies.VerifyLockedDevices(["virtual-modbus-1"], [],
+            new Dictionary<string, string> { ["virtual-modbus-1"] = "other-driver|other-protocol|other-endpoint" },
+            TimeSpan.FromMinutes(5));
+        Assert.False(drifted.Ok);
+        Assert.Contains("identity drifted", drifted.Summary, StringComparison.OrdinalIgnoreCase);
+
+        // 指纹一致时通过（把实际指纹作为期望值）。
+        var actual = dependencies.TryGetDeviceFingerprint("virtual-modbus-1");
+        Assert.False(string.IsNullOrWhiteSpace(actual));
+        var matched = dependencies.VerifyLockedDevices(["virtual-modbus-1"], [],
+            new Dictionary<string, string> { ["virtual-modbus-1"] = actual! }, TimeSpan.FromMinutes(5));
+        Assert.True(matched.Ok, matched.Summary);
+    }
+
     private static WorkflowDefinition DeviceWorkflow()
         => new(
             "production-device-test",
@@ -467,6 +699,22 @@ public sealed class ProductionRuntimeTests
             })],
             []);
 
+    private static WorkflowDefinition RobotTargetWorkflow(string action, bool waitForInPosition)
+        => new(
+            "production-robot-target-test",
+            "Robot Target Test",
+            [new NodeDefinition("robot", "robot.executeTarget", "Send Target", null, new Dictionary<string, JsonElement>
+            {
+                ["robotId"] = JsonSerializer.SerializeToElement("virtual-abb-1"),
+                ["action"] = JsonSerializer.SerializeToElement(action),
+                ["autoConnect"] = JsonSerializer.SerializeToElement(true),
+                ["waitForInPosition"] = JsonSerializer.SerializeToElement(waitForInPosition),
+                ["timeoutMs"] = JsonSerializer.SerializeToElement(1000),
+                ["maxRetries"] = JsonSerializer.SerializeToElement(0),
+                ["autoAck"] = JsonSerializer.SerializeToElement(true)
+            })],
+            []);
+
     private static RuntimeDependencyManifestService Dependencies(TempWebHostEnvironment env)
         => Dependencies(env, new VirtualModbusPlcDriver(), out _);
 
@@ -474,6 +722,9 @@ public sealed class ProductionRuntimeTests
         => Dependencies(env, driver, out _);
 
     private static RuntimeDependencyManifestService Dependencies(TempWebHostEnvironment env, IDeviceDriver driver, out DeviceManager deviceManager)
+        => Dependencies(env, driver, out deviceManager, out _);
+
+    private static RuntimeDependencyManifestService Dependencies(TempWebHostEnvironment env, IDeviceDriver driver, out DeviceManager deviceManager, out RobotManager robotManager)
     {
         var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("image.synthetic"), new SyntheticImageNode(), "builtin");
@@ -486,6 +737,12 @@ public sealed class ProductionRuntimeTests
         registry.Register(BuiltInNodeCatalog.Require("device.readTag"), new DeviceReadTagNode(devices), "builtin");
         registry.Register(BuiltInNodeCatalog.Require("device.writeTag"), new DeviceWriteTagNode(devices), "builtin");
         var robots = new RobotManager();
+        robots.Register(new VirtualAbbRobotAdapter());
+        registry.Register(BuiltInNodeCatalog.Require("robot.executeTarget"), new RobotExecuteTargetNode(robots), "builtin");
+        // 控制流节点：依赖清单捕获会对 workflow 中**每个**节点 Require 注册信息——
+        // 测试工作流用 flow.if 构造被跳过的分支，必须注册（否则 CaptureAsync 抛"未注册"）。
+        registry.Register(BuiltInNodeCatalog.Require("flow.if"), new IfConditionNode(), "builtin");
+        robotManager = robots;
         var hardware = new HardwareProvenanceService(
             new HardwareProvenanceStore(Path.Combine(env.ContentRootPath, "data", "provenance")), cameras, devices, robots, new VendorProvenanceProbeRegistry());
         return new RuntimeDependencyManifestService(
@@ -606,6 +863,19 @@ public sealed class ProductionRuntimeTests
     /// 模拟"设备写入成功 → 后续节点失败"的副作用周期：每个周期真实执行一次 device.writeTag
     /// （产生物理写入），随后报告失败。用于验证副作用流程首轮即锁定、设备动作不被自动重放。
     /// </summary>
+    /// <summary>Q01：在执行开始时读取安全状态文件——验证"意图先于设备动作登记在磁盘上"。</summary>
+    private sealed class IntentObservingRunner(string statePath) : IVisionWorkflowRunner
+    {
+        public string? Observed { get; private set; }
+
+        public Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow, VisionRunOptions? options = null, string? runId = null, CancellationToken cancellationToken = default)
+        {
+            try { Observed = File.Exists(statePath) ? File.ReadAllText(statePath) : null; }
+            catch { Observed = null; }
+            return Task.FromResult(new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, 1.2, false, 0, 0, [], [], null, QualityDisposition: "OK"));
+        }
+    }
+
     private sealed class DeviceWriteThenFailRunner(DeviceManager devices) : IVisionWorkflowRunner
     {
         public int Cycles { get; private set; }
@@ -628,6 +898,55 @@ public sealed class ProductionRuntimeTests
             }
             // 写入已完成，随后节点失败：结果不确定，绝不能自动重放。
             return new WorkflowRunResult(effectiveRunId, false, 5, false, 0, 0, [], [], null, "post-write downstream node failed.", "Error");
+        }
+    }
+
+    private sealed class DeviceWriteSuccessRunner(DeviceManager devices) : IVisionWorkflowRunner
+    {
+        public async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow, VisionRunOptions? options = null, string? runId = null, CancellationToken cancellationToken = default)
+        {
+            var node = workflow.Nodes.Single(n => n.Type == "device.writeTag");
+            await new DeviceWriteTagNode(devices).ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, cancellationToken);
+            return new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, 1, false, 0, 0, [], [], null, QualityDisposition: "OK");
+        }
+    }
+
+    private sealed class ClearFailsSafetyStore(string path)
+        : DeviceActionSafetyStore(path, NullLogger<DeviceActionSafetyStore>.Instance)
+    {
+        public override void Clear() => throw new IOException("injected safety clear failure");
+    }
+
+    private sealed class FailSaveSafetyStore(string path)
+        : DeviceActionSafetyStore(path, NullLogger<DeviceActionSafetyStore>.Instance)
+    {
+        public override void Save(DeviceActionSafetyState state) => throw new IOException("injected safety save failure");
+    }
+
+    private sealed class RobotSendTargetRunner(RobotManager robots) : IVisionWorkflowRunner
+    {
+        public async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow, VisionRunOptions? options = null, string? runId = null, CancellationToken cancellationToken = default)
+        {
+            var target = new VisionRobotTarget2D(520, 240, 28, "RobotBase", "mm", "ABB", "Manual");
+            var inputs = new Dictionary<string, VisionValue> { ["target"] = VisionValue.RobotTarget(target) };
+            var node = workflow.Nodes.Single(n => n.Type == "robot.executeTarget");
+            await new RobotExecuteTargetNode(robots).ExecuteAsync(new NodeExecutionContext(inputs), node, cancellationToken);
+            return new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, 1, false, 0, 0, [], [], null, QualityDisposition: "OK");
+        }
+    }
+
+    private sealed class SkippedRobotRunner : IVisionWorkflowRunner
+    {
+        public int Cycles { get; private set; }
+
+        public Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow, VisionRunOptions? options = null, string? runId = null, CancellationToken cancellationToken = default)
+        {
+            Cycles++;
+            // A control-flow node ran, but there is no robot report: its branch skipped the robot action.
+            return Task.FromResult(new WorkflowRunResult(runId ?? Guid.NewGuid().ToString("N"), true, 1,
+                false, 0, 0,
+                [new NodeRunReport("branch", "flow.if", true, 1, new Dictionary<string, object?>())], [], null,
+                QualityDisposition: "OK"));
         }
     }
 

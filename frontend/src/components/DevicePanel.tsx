@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { DeviceDescriptor, DeviceRuntimeSettings, DeviceTagDefinition } from '../types';
 import { localizeStatus } from '../i18n';
+import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 
 type Props = { open: boolean; onClose: () => void };
 type WriteForm = { tagId: string; value: string };
@@ -14,6 +15,10 @@ const connectionColor: Record<string, string> = {
   Connected: 'green', Connecting: 'blue', Reconnecting: 'gold', Disconnected: 'default', Faulted: 'red'
 };
 const qualityColor: Record<string, string> = { Good: 'green', Uncertain: 'gold', Bad: 'red', Disconnected: 'default' };
+
+// Q11：轮询节拍、单请求超时与数据 TTL（500ms 轮询的 6 倍）。超过 TTL 没有新的成功刷新即标记陈旧。
+const DEVICE_POLL_TIMEOUT_MS = 5000;
+const DEVICE_STALE_TTL_MS = 3000;
 
 const modbusTags: DeviceTagDefinition[] = [
   { id: 'ready', name: 'PLC Ready', address: 'C:0', dataType: 'Boolean', writable: false },
@@ -66,28 +71,71 @@ export default function DevicePanel({ open, onClose }: Props) {
   const selected = useMemo(() => devices.find((x) => x.id === selectedId) ?? devices[0], [devices, selectedId]);
   const selectedTag = useMemo(() => selected?.tags.find((x) => x.id === selectedTagId), [selected, selectedTagId]);
 
+  // Q11：轮询的代次与超时控制。
+  // - 每次刷新取消上一请求（串行化），旧响应绝不覆盖新结果；
+  // - 请求显式超时（AbortController）——否则请求一直 pending 时 catch 不触发、stale 永远不会置位；
+  // - TTL 判定与请求解耦：超时阈值内没有新的成功刷新即视为陈旧（数据新鲜度 ≠ HTTP 完成时间）。
+  const refreshGeneration = useRef(0);
+  const refreshAbort = useRef<AbortController | null>(null);
+  const lastSuccessRef = useRef<number | null>(null);
+  const openedAtRef = useRef<number | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const refreshInFlight = useRef(false);
+
   const refresh = async (quiet = false) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    const generation = ++refreshGeneration.current;
+    refreshAbort.current?.abort();
+    const controller = new AbortController();
+    refreshAbort.current = controller;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, DEVICE_POLL_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/devices');
-      if (!response.ok) throw new Error('Device runtime unavailable');
+      const response = await fetch('/api/devices', { signal: controller.signal });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, `Device runtime unavailable (HTTP ${response.status})`));
       const data: DeviceDescriptor[] = await response.json();
+      if (generation !== refreshGeneration.current || (controller.signal.aborted && !timedOut)) return; // 旧响应/已取消请求不得提交
       setDevices(data);
+      lastSuccessRef.current = Date.now();
       setLastSuccessAt(Date.now());
       setStale(false);
-      if (!data.some((x) => x.id === selectedId) && data[0]) setSelectedId(data[0].id);
+      if (!data.some((x) => x.id === selectedIdRef.current) && data[0]) setSelectedId(data[0].id);
     } catch (error) {
-      // F11：无论手动还是静默轮询，失败都标记陈旧；已有数据保留但显示"可能已过期"。
+      if (generation !== refreshGeneration.current || (controller.signal.aborted && !timedOut)) return;
+      // F11：无论手动还是静默轮询，失败/超时都标记陈旧；已有数据保留但显示"可能已过期"。
       setStale(true);
       if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Device refresh failed');
+    } finally {
+      window.clearTimeout(timeout);
+      // A closed/reopened panel may already own a newer request. Its state must never be
+      // released by this request's late finally block.
+      if (generation === refreshGeneration.current && refreshAbort.current === controller) {
+        refreshAbort.current = null;
+        refreshInFlight.current = false;
+      }
     }
   };
 
   useEffect(() => {
     if (!open) return;
+    openedAtRef.current = Date.now();
     refresh();
-    const timer = window.setInterval(() => refresh(true), 500);
-    return () => window.clearInterval(timer);
-  }, [open, selectedId]);
+    const timer = window.setInterval(() => {
+      // Q11：TTL 判定独立于请求结果——pending 的请求不会触发 catch，但仍必须进入 stale。
+      const freshnessAnchor = lastSuccessRef.current ?? openedAtRef.current;
+      if (freshnessAnchor != null && Date.now() - freshnessAnchor > DEVICE_STALE_TTL_MS) setStale(true);
+      void refresh(true);
+    }, 500);
+    return () => {
+      window.clearInterval(timer);
+      refreshGeneration.current++;
+      refreshAbort.current?.abort();
+      refreshAbort.current = null;
+      refreshInFlight.current = false;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!selected) return;
@@ -107,7 +155,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     try {
       const response = await fetch(`/api/devices/${encodeURIComponent(selected.id)}/${action}`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? `${action} failed`);
+      if (!response.ok) throw new Error(apiErrorMessage(data, `${action} failed`));
       await refresh(true);
       messageApi.success(`${action} OK`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : `${action} failed`); }
@@ -120,7 +168,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     try {
       const response = await fetch(`/api/devices/${encodeURIComponent(selected.id)}/read-all`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Batch read failed');
+      if (!response.ok) throw new Error(apiErrorMessage(data, 'Batch read failed'));
       await refresh(true);
       messageApi.success(`Fresh read OK · ${Array.isArray(data) ? data.length : 0} tags`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Batch read failed'); }
@@ -135,7 +183,7 @@ export default function DevicePanel({ open, onClose }: Props) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Settings failed');
+      if (!response.ok) throw new Error(apiErrorMessage(data, 'Settings failed'));
       await refresh(true);
       messageApi.success('Device settings applied');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Settings failed'); }
@@ -158,7 +206,7 @@ export default function DevicePanel({ open, onClose }: Props) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: parseValue(selectedTag, values.value) })
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Tag write failed');
+      if (!response.ok) throw new Error(apiErrorMessage(data, 'Tag write failed'));
       await refresh(true);
       messageApi.success(`${values.tagId} written`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Tag write failed'); }
@@ -185,7 +233,7 @@ export default function DevicePanel({ open, onClose }: Props) {
         : { id: values.id, name: values.name, host: values.host, port: values.port, cpuType: values.cpuType ?? 'S71500', rack: values.rack ?? 0, slot: values.slot ?? 0, timeoutMs: values.timeoutMs, tags };
       const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Device registration failed');
+      if (!response.ok) throw new Error(apiErrorMessage(data, 'Device registration failed'));
       setRegisterOpen(false);
       setSelectedId(values.id);
       await refresh(true);
@@ -201,7 +249,7 @@ export default function DevicePanel({ open, onClose }: Props) {
       const response = await fetch(`/api/devices/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? '移除失败');
+        throw new Error(apiErrorMessage(data, '移除失败'));
       }
       setSelectedId('virtual-modbus-1');
       await refresh(true);

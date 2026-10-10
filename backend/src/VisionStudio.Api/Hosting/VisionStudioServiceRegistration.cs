@@ -25,6 +25,14 @@ namespace VisionStudio.Api.Hosting;
 
 public static class VisionStudioServiceRegistration
 {
+    /// <summary>R08：loopback 判定（含 IPv6 字面量与 localhost 通配）。</summary>
+    private static bool IsLoopbackHost(string host)
+        => host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+           host.Equals("127.0.0.1", StringComparison.Ordinal) ||
+           host.Equals("::1", StringComparison.Ordinal) ||
+           host.Equals("[::1]", StringComparison.Ordinal) ||
+           host.Equals("*.localhost", StringComparison.OrdinalIgnoreCase);
+
     public static IServiceCollection AddVisionStudioHost(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -39,6 +47,28 @@ public static class VisionStudioServiceRegistration
             throw new InvalidOperationException(
                 "Security:AutoLoginAdmin=true is not allowed in the Production environment. " +
                 "Disable it in appsettings.Production.json, or run local development with ASPNETCORE_ENVIRONMENT=Development.");
+        }
+
+        // R08：网络交付边界。默认监听 loopback；把控制端口暴露到网络必须使用 HTTPS——
+        // 明文 HTTP 会同时泄露账户口令与会话 cookie（Secure 无法在 HTTP 上生效）。
+        // 隔离测试网络如需明文，可显式设置 Security:AllowInsecureRemoteTransport=true。
+        if (environment.IsProduction() && securityOptions.Enabled && !securityOptions.AllowInsecureRemoteTransport)
+        {
+            var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"] ?? string.Empty;
+            var insecure = urls.Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Trim())
+                .Where(x => Uri.TryCreate(x, UriKind.Absolute, out var uri) &&
+                            uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) &&
+                            !IsLoopbackHost(uri.Host))
+                .ToArray();
+            if (insecure.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to start: plaintext HTTP is bound to a non-loopback address ({string.Join(", ", insecure)}). " +
+                    "Account passwords and session cookies would travel unprotected (a Secure cookie cannot be set over HTTP). " +
+                    "Bind to loopback (http://127.0.0.1:5080) or terminate TLS in front of the host (HTTPS endpoint / trusted reverse proxy), " +
+                    "or set Security:AllowInsecureRemoteTransport=true for an isolated test network.");
+            }
         }
 
         services.ConfigureHttpJsonOptions(options =>
@@ -111,9 +141,14 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<LegacyStorageMigrationService>();
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
+        // Q08：同一目录下另存两个标记——restore-transaction.json（恢复中途被终止 → 启动即锁）
+        // 与 restart-pending.json（恢复成功但未重启 → 业务 503 直到重启）。
+        var maintenanceDir = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), ".storage-maintenance");
         services.AddSingleton(sp => new StorageMaintenanceCoordinator(
-            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), ".storage-maintenance", "failure-lock.json"),
-            sp.GetRequiredService<ILogger<StorageMaintenanceCoordinator>>()));
+            Path.Combine(maintenanceDir, "failure-lock.json"),
+            sp.GetRequiredService<ILogger<StorageMaintenanceCoordinator>>(),
+            Path.Combine(maintenanceDir, "restart-pending.json"),
+            Path.Combine(maintenanceDir, "restore-transaction.json")));
         services.AddSingleton<StorageCapacityService>();
 
         services.AddSingleton<VisionNodeRegistry>();
@@ -176,7 +211,11 @@ public static class VisionStudioServiceRegistration
         services.AddTransient<IVisionWorkflowRunner>(sp => sp.GetRequiredService<ModuleAwareVisionWorkflowRunner>());
         services.AddSingleton<WorkflowDebugSessionService>();
         services.AddSingleton<DebugSessionService>();
-        services.AddSingleton(_ => new DeviceLeaseRegistry());
+        // R02：租约接管必须由设备层活动状态判定（TTL 到期不是"设备可用"的证据）。
+        services.AddSingleton<IDeviceActivityProbe, DeviceActivityProbe>();
+        services.AddSingleton(sp => new DeviceLeaseRegistry(
+            timeProvider: null,
+            probe: sp.GetRequiredService<IDeviceActivityProbe>()));
 
         services.AddSingleton<RunStore>();
         services.AddSingleton<WorkflowStore>();
@@ -204,6 +243,9 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ProductionSynchronizationHealthGuardService>();
         // F01/F02：设备动作安全状态的持久化（副作用故障标记 + 锁定清单跨重启保留）。
         services.AddSingleton<DeviceActionSafetyStore>();
+        // R01：手动/临时运行的动作意图（独立文件）与统一动作授权闸门。
+        services.AddSingleton<ManualActionIntentStore>();
+        services.AddSingleton<DeviceActionAuthorizationService>();
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();

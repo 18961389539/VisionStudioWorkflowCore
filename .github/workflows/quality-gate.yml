@@ -9,7 +9,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     env:
-      MIN_LINE_COVERAGE: '20'
+      MIN_LINE_COVERAGE: '60'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

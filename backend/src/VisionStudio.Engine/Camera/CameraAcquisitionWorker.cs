@@ -18,6 +18,13 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     private Task? _loop;
     /// <summary>F08：停止收尾进行中——期间的 Start 被拒绝，防止新采集任务被旧 Stop 误清或失去控制句柄。</summary>
     private bool _stopping;
+    private long _stopInvocationSequence;
+    /// <summary>
+    /// Q03：停止未确认隔离。宽限期结束时旧采集调用仍未返回（厂商 GrabAsync 忽略取消/卡死）——
+    /// 此时绝不能清句柄/解除隔离，否则下一次 Start 会与仍在执行的旧 Grab 并发调用同一设备。
+    /// 仅在旧循环真正结束（下次 Stop 的收尾核对通过）后解除。
+    /// </summary>
+    private volatile bool _stopUnconfirmed;
     private readonly TimeSpan _stopDrainGrace;
     private CameraAcquisitionState _state = CameraAcquisitionState.Stopped;
     private long _framesPublished;
@@ -25,9 +32,18 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     private long _reconnects;
     private long _timeouts;
     private long _lastSequence;
+    /// <summary>
+    /// Q03：采集代次。每次 Start 递增，进入"停止未确认"隔离时也递增（作废旧循环的状态与帧写入权）。
+    /// 旧循环是孤儿任务时，它的状态更新与迟到帧都因代次不匹配被丢弃，不会覆盖隔离/新循环状态。
+    /// </summary>
+    private long _generation;
     private double _actualFps;
     private DateTimeOffset? _lastFrameAt;
     private string? _runtimeError;
+
+    // Internal scheduling seam used only by lifecycle race tests. It runs after drain and before
+    // identity reconciliation, outside the lifecycle lock and without changing stop semantics.
+    internal Func<long, Task>? BeforeStopFinalizeAsync { get; set; }
 
     public CameraAcquisitionWorker(ICameraDevice device, CameraFrameHub hub, TimeSpan? stopDrainGrace = null)
     {
@@ -38,6 +54,7 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     }
 
     public bool IsRunning => _loop is { IsCompleted: false };
+    public bool IsStopUnconfirmed => _stopUnconfirmed;
 
     public CameraAcquisitionStats Snapshot()
     {
@@ -68,6 +85,13 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         await _lifecycle.WaitAsync(cancellationToken);
         try
         {
+            // Q03：停止未确认时绝不允许新采集——旧 GrabAsync 仍在对同一设备执行（隔离中），
+            // 新循环会造成两条采集链并发调用厂商 SDK。必须显式失败而不是静默返回，
+            // 否则调用方会把"未启动"当成"已启动"。
+            if (_stopUnconfirmed)
+                throw new InvalidOperationException(
+                    "The previous stop could not be confirmed within the drain grace period; an acquisition call is still in flight " +
+                    "on this device. Retry stop until it is confirmed (or restart the host) before starting acquisition again.");
             // F08：停止收尾进行中同样拒绝 Start——旧循环未收尾时创建新任务会被旧 Stop 的清理误伤。
             if (_stopping || IsRunning) return;
             SetState(CameraAcquisitionState.Starting, null);
@@ -75,7 +99,8 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             await _device.StartAsync(cancellationToken);
             DrainTrigger();
             _cts = new CancellationTokenSource();
-            _loop = Task.Run(() => LoopAsync(_cts.Token), CancellationToken.None);
+            var generation = NextGeneration();
+            _loop = Task.Run(() => LoopAsync(_cts.Token, generation), CancellationToken.None);
         }
         finally { _lifecycle.Release(); }
     }
@@ -84,13 +109,16 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     {
         CancellationTokenSource? cts;
         Task? loop;
+        long stopInvocation;
         await _lifecycle.WaitAsync(cancellationToken);
         try
         {
+            stopInvocation = ++_stopInvocationSequence;
             cts = _cts;
             loop = _loop;
             if (cts is null && loop is null)
             {
+                _stopUnconfirmed = false;
                 SetState(CameraAcquisitionState.Stopped, null);
                 return;
             }
@@ -112,18 +140,40 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             catch { /* loop 自身异常不得阻断收尾清理：控制句柄必须被一致地归还 */ }
         }
 
+        if (BeforeStopFinalizeAsync is { } beforeFinalize)
+            await beforeFinalize(stopInvocation).ConfigureAwait(false);
+
         // F08：清理必须完成（不可取消）——状态残留会让后续 Start/Stop 语义错乱。
         await _lifecycle.WaitAsync(CancellationToken.None);
         try
         {
-            // F08：身份核对（与 _stopping 双保险）——只清理由本次 Stop 捕获的实例，绝不误清新任务。
-            if (ReferenceEquals(_cts, cts))
+            // Another Stop for this generation may have completed first, followed by a fresh Start.
+            // A stale continuation must never clear or overwrite the newer generation's handles/state.
+            if (!ReferenceEquals(_cts, cts) || !ReferenceEquals(_loop, loop))
+                return;
+            // Q03：旧循环仍未结束（宽限期已过，或调用方在收尾完成前取消了等待）⇒ 停止未确认。
+            // 句柄、_cts 与隔离位全部保留：下一次 Start 会被显式拒绝，直到旧调用真正返回。
+            // 取消"软件等待"不等于底层调用已终止——清理完成同样不等于。
+            if (loop is { IsCompleted: false })
             {
-                _cts?.Dispose();
-                _cts = null;
+                _stopUnconfirmed = true;
+                // 作废旧循环的写入权：它若在隔离期间继续循环，状态更新与迟到帧都因代次不匹配被丢弃，
+                // 不会把界面/接口从 StopUnconfirmed 覆盖回 Running。
+                NextGeneration();
+                var why = drainTimedOut
+                    ? "the drain grace period elapsed"
+                    : "the stop request was cancelled before the acquisition loop finished";
+                SetState(CameraAcquisitionState.StopUnconfirmed,
+                    $"Stop was not confirmed ({why}); the in-flight acquisition call blocks new starts until it returns. Retry stop to re-check.");
+                return;
             }
-            if (ReferenceEquals(_loop, loop)) _loop = null;
+
+            // F08：身份核对（与 _stopping 双保险）——只清理由本次 Stop 捕获的实例，绝不误清新任务。
+            _cts?.Dispose();
+            _cts = null;
+            _loop = null;
             _stopping = false;
+            _stopUnconfirmed = false;
             DrainTrigger();
             SetState(CameraAcquisitionState.Stopped,
                 drainTimedOut ? "Stop drainage exceeded the grace period; the acquisition loop is finishing in the background." : null);
@@ -156,23 +206,23 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         while (_trigger.Wait(0)) { }
     }
 
-    private async Task LoopAsync(CancellationToken cancellationToken)
+    private async Task LoopAsync(CancellationToken cancellationToken, long generation)
     {
-        SetState(CameraAcquisitionState.Running, null);
+        SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
         while (!cancellationToken.IsCancellationRequested)
         {
             var settings = _device.Settings.Normalize();
             var hostGatedExternal = settings.TriggerMode == CameraTriggerMode.External && _device.Capabilities.HostSimulatedExternalTrigger;
             if (settings.TriggerMode == CameraTriggerMode.Software || hostGatedExternal)
             {
-                SetState(CameraAcquisitionState.WaitingTrigger, null);
+                SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
                 await _trigger.WaitAsync(cancellationToken);
-                SetState(CameraAcquisitionState.Running, null);
+                SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
             }
             else if (settings.TriggerMode == CameraTriggerMode.External)
             {
                 // A real vendor adapter blocks in GrabAsync until the hardware line produces a frame.
-                SetState(CameraAcquisitionState.WaitingTrigger, null);
+                SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
             }
 
             var sw = Stopwatch.StartNew();
@@ -182,10 +232,9 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
                     await _device.ExecuteSoftwareTriggerAsync(cancellationToken);
 
                 using var frame = await _device.GrabAsync(TimeSpan.FromSeconds(2), cancellationToken);
-                var sequence = frame.Sequence;
-                var timestamp = frame.Timestamp;
-                _hub.Publish(frame);
-                PublishStats(sequence, timestamp);
+                // Q03：迟到帧丢弃——若本代次已被作废（停止未确认隔离/新循环接管），
+                // 这把旧帧不得进入帧环、也不得更新统计。
+                if (!TryPublishFrame(generation, frame)) return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -200,8 +249,8 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             catch (Exception ex)
             {
                 Interlocked.Increment(ref _errors);
-                SetState(CameraAcquisitionState.Reconnecting, ex.Message);
-                await ReconnectAsync(cancellationToken);
+                SetStateIfCurrent(generation, CameraAcquisitionState.Reconnecting, ex.Message);
+                await ReconnectAsync(generation, cancellationToken);
                 continue;
             }
 
@@ -213,10 +262,10 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
                     await Task.Delay(remaining, cancellationToken);
             }
         }
-        SetState(CameraAcquisitionState.Stopped, null);
+        SetStateIfCurrent(generation, CameraAcquisitionState.Stopped, null);
     }
 
-    private async Task ReconnectAsync(CancellationToken cancellationToken)
+    private async Task ReconnectAsync(long generation, CancellationToken cancellationToken)
     {
         var attempt = 0;
         while (!cancellationToken.IsCancellationRequested)
@@ -231,20 +280,26 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
                 await _device.OpenAsync(cancellationToken);
                 await _device.StartAsync(cancellationToken);
                 Interlocked.Increment(ref _reconnects);
-                SetState(CameraAcquisitionState.Running, null);
+                SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
                 return;
             }
             catch (Exception ex)
             {
-                SetState(CameraAcquisitionState.Reconnecting, ex.Message);
+                SetStateIfCurrent(generation, CameraAcquisitionState.Reconnecting, ex.Message);
             }
         }
     }
 
-    private void PublishStats(long sequence, DateTimeOffset timestamp)
+    private bool TryPublishFrame(long generation, VisionFrame frame)
     {
         lock (_statsGate)
         {
+            // Q03：代次核对与帧发布处于同一临界区；一旦 Stop 作废此代次，迟到帧不能
+            // 穿过检查/发布之间的竞态进入共享 FrameHub。
+            if (_generation != generation) return false;
+            _hub.Publish(frame);
+            var sequence = frame.Sequence;
+            var timestamp = frame.Timestamp;
             if (_lastFrameAt is { } previous)
             {
                 var seconds = (timestamp - previous).TotalSeconds;
@@ -260,8 +315,25 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             _state = _device.Settings.TriggerMode is CameraTriggerMode.Software or CameraTriggerMode.External
                 ? CameraAcquisitionState.WaitingTrigger
                 : CameraAcquisitionState.Running;
+            Interlocked.Increment(ref _framesPublished);
+            return true;
         }
-        Interlocked.Increment(ref _framesPublished);
+    }
+
+    private long NextGeneration()
+    {
+        lock (_statsGate) return ++_generation;
+    }
+
+    /// <summary>Q03：仅当调用方仍是当前代次时才写入状态——孤儿循环不得覆盖隔离/新循环状态。</summary>
+    private void SetStateIfCurrent(long generation, CameraAcquisitionState state, string? error)
+    {
+        lock (_statsGate)
+        {
+            if (_generation != generation) return;
+            _state = state;
+            _runtimeError = error;
+        }
     }
 
     private void SetState(CameraAcquisitionState state, string? error)
@@ -273,9 +345,27 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         }
     }
 
+    /// <summary>Waits without a deadline for an unconfirmed grab to return, then reconciles its stop.</summary>
+    internal async Task WaitForStopConfirmationAsync()
+    {
+        while (_stopUnconfirmed)
+        {
+            var loop = _loop;
+            if (loop is not null)
+            {
+                try { await loop.ConfigureAwait(false); } catch { }
+            }
+            await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         try { await StopAsync(); } catch { }
+        // Q03：旧采集调用仍未返回（停止未确认）时，释放同步原语会让仍在运行的孤儿循环抛
+        // ObjectDisposedException，而底层问题（厂商调用卡死）不会因此消失。保留资源交由进程回收，
+        // 绝不制造"已清理"的假象。
+        if (_stopUnconfirmed) return;
         _trigger.Dispose();
         _lifecycle.Dispose();
     }

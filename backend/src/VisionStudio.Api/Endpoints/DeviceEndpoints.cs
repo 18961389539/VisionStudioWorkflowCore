@@ -60,10 +60,12 @@ public static class DeviceEndpoints
         app.MapPost("/api/devices/{id}/read-all", async (string id, DeviceManager devices, CancellationToken ct) =>
             Results.Ok(await devices.ReadAllFreshAsync(id, autoConnect: true, cancellationToken: ct))).RequireAuthorization(SecurityPolicies.Operator);
 
-        app.MapPut("/api/devices/{id}/tags", async (string id, DeviceBatchWriteRequest request, DeviceManager devices, DeviceLeaseRegistry leases, CancellationToken ct) =>
+        app.MapPut("/api/devices/{id}/tags", async (string id, DeviceBatchWriteRequest request, DeviceManager devices, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
             // 请求期硬件租约：写操作执行期间独占该设备（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("device", id, $"Cannot write device '{id}'");
+            // R01：统一动作授权——未闭合的安全意图阻断所有设备动作入口，并在动作前耐久登记本次意图。
+            using var intent = auth.BeginManualIntent("device.writeTags", [id], []);
             await devices.WriteManyAsync(id, request.Values, autoConnect: true, cancellationToken: ct);
             return Results.Ok(devices.Get(id));
         }).RequireEngineer("device.tags.write", "device");
@@ -111,9 +113,11 @@ public static class DeviceEndpoints
             DeviceTagWriteRequest request,
             DeviceManager devices,
             DeviceLeaseRegistry leases,
+            DeviceActionAuthorizationService auth,
             CancellationToken ct) =>
         {
             using var lease = leases.AcquireManualOrThrow("device", id, $"Cannot write device '{id}'");
+            using var intent = auth.BeginManualIntent("device.writeTag", [id], []);
             await devices.WriteTagAsync(id, tagId, request.Value, autoConnect: true, ct);
             return Results.Ok(await devices.ReadTagAsync(id, tagId, fresh: true, autoConnect: true, cancellationToken: ct));
         }).RequireEngineer("device.tag.write", "device");

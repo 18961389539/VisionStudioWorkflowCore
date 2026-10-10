@@ -2,7 +2,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $root 'artifacts/runtime-publish'
 $env:ASPNETCORE_ENVIRONMENT = 'Production'
-if (-not $env:ASPNETCORE_URLS) { $env:ASPNETCORE_URLS = 'http://0.0.0.0:5080' }
+# R08: default to loopback only. Exposing the control port to the network requires TLS
+# (HTTPS endpoint or a trusted reverse proxy) - plaintext HTTP leaks passwords and session
+# cookies. The host refuses to start on a non-loopback http:// binding unless
+# Security:AllowInsecureRemoteTransport=true (isolated test networks only).
+if (-not $env:ASPNETCORE_URLS) { $env:ASPNETCORE_URLS = 'http://127.0.0.1:5080' }
 # Production data must live outside the versioned publish directory, so upgrading to a new publish
 # folder never migrates or recreates the database (publish-runtime.ps1 creates and migrates it):
 #   $env:VISIONSTUDIO_DATA_ROOT = 'D:\VisionStudioData'

@@ -5,6 +5,16 @@ namespace VisionStudio.Engine.Tests;
 
 public sealed class RobotHandshakeTests
 {
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (!predicate())
+        {
+            if (DateTime.UtcNow >= deadline) throw new TimeoutException("Condition was not reached by the test deadline.");
+            await Task.Delay(10);
+        }
+    }
+
     [Fact]
     public async Task VirtualAbb_CompletesStandardHandshakeAndEmitsTraceStages()
     {
@@ -44,6 +54,61 @@ public sealed class RobotHandshakeTests
         Assert.All(results, result => Assert.True(result.Acknowledged));
         Assert.True(results[0].Receipt.CommandId < results[1].Receipt.CommandId,
             $"Handshakes were not serialized: command ids {results[0].Receipt.CommandId} and {results[1].Receipt.CommandId}.");
+    }
+
+    [Fact]
+    public async Task PublicStop_RemainsAvailableWhileHandshakeOwnsMotionGate()
+    {
+        var observer = new RecordingObserver();
+        await using var manager = new RobotManager([observer]);
+        var adapter = new HangingStopRobotAdapter();
+        manager.Register(adapter);
+        var policy = new RobotCommandPolicy(TimeoutMs: 250, MaxRetries: 0, RetryDelayMs: 0,
+            AutoConnect: true, WaitForComplete: true, AutoAck: true);
+        var handshake = manager.ExecuteHandshakeAsync(adapter.Id,
+            new VisionRobotTarget2D(1, 2, 0, "RobotBase", "mm", "Test", "motion-gate"), policy);
+        await WaitUntilAsync(() => observer.Events.Any(x => x.Stage == "Busy"));
+
+        var stop = manager.StopAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.StopCalls == 1);
+        adapter.ReleaseStop();
+        await stop;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => handshake);
+        Assert.True(adapter.StopCalls >= 2, "the bounded handshake cleanup may issue its own final stop");
+    }
+
+    [Fact]
+    public async Task MotionAdapterInvocation_IsAtomicWithStopAdmission_AndAsyncMotionDoesNotHoldStopLock()
+    {
+        await using var manager = new RobotManager();
+        var adapter = new HangingStopRobotAdapter();
+        var sendEntered = new ManualResetEventSlim();
+        var releaseSendInvocation = new ManualResetEventSlim();
+        adapter.SendInvocationHook = () =>
+        {
+            sendEntered.Set();
+            if (!releaseSendInvocation.Wait(TimeSpan.FromSeconds(3)))
+                throw new TimeoutException("test did not release synchronous SDK invocation");
+        };
+        adapter.HoldTargetUntilReleased = true;
+        manager.Register(adapter);
+
+        var send = Task.Run(async () => await manager.SendTargetAsync(adapter.Id,
+            new VisionRobotTarget2D(1, 2, 0, "RobotBase", "mm", "Test", "launch"), autoConnect: true));
+        Assert.True(sendEntered.Wait(TimeSpan.FromSeconds(2)), "adapter's synchronous call entry was not reached");
+
+        var stop = Task.Run(() => manager.StopAsync(adapter.Id));
+        await Task.Delay(50);
+        Assert.Equal(0, adapter.StopCalls); // stop cannot linearize before the already-entered SDK call
+        releaseSendInvocation.Set();
+        await WaitUntilAsync(() => adapter.StopCalls == 1);
+        Assert.False(send.IsCompleted); // the adapter Task remains pending while stop is issued
+
+        adapter.ReleaseStop(0);
+        await stop;
+        adapter.ReleaseTarget();
+        await send;
     }
 
     [Fact]
@@ -121,6 +186,111 @@ public sealed class RobotHandshakeTests
         Assert.Equal(1, adapter.StopCalls);
         Assert.Contains(observer.Events, x => x.Stage == "FinalStop");
         Assert.Contains(observer.Events, x => x.Stage == "FinalStop" && x.Error == "stop_timeout");
+    }
+
+    [Fact]
+    public async Task HangingStop_PendingStop_BlocksResetFaultUntilCallReturns()
+    {
+        // Q04 回归（独立探针反例转正）：停止调用在宽限期内未返回时，它必须被登记为"机器人级
+        // 未完成操作"——ResetFault 在有界等待后仍未见其结束必须**拒绝**，隔离不得解除；
+        // 只有旧调用真正返回后，复位（人工核对）才能成功。
+        var observer = new RecordingObserver();
+        await using var manager = new RobotManager([observer]);
+        var adapter = new HangingStopRobotAdapter();
+        manager.Register(adapter);
+        var policy = new RobotCommandPolicy(TimeoutMs: 200, MaxRetries: 0, RetryDelayMs: 0, AutoConnect: true, WaitForComplete: true, AutoAck: true);
+        var target = new VisionRobotTarget2D(7, 8, 0, "RobotBase", "mm", "Test", "hang");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            manager.ExecuteHandshakeAsync(adapter.Id, target, policy));
+
+        Assert.True(manager.HasPendingStop(adapter.Id), "an unreturned stop call must stay registered as a pending operation");
+
+        // 复位绝不能解除隔离：旧 Stop 仍在飞行，迟到的停止可能落在新动作之后。
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.ResetFaultAsync(adapter.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.SendTargetAsync(adapter.Id, target, autoConnect: true));
+
+        // 旧调用返回（迟到调用结束）→ 复位成功，运动恢复可用。
+        adapter.ReleaseStop();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        while (manager.HasPendingStop(adapter.Id) && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.False(manager.HasPendingStop(adapter.Id), "the pending stop registration must clear once the call returns");
+
+        await manager.ResetFaultAsync(adapter.Id);
+        var receipt = await manager.SendTargetAsync(adapter.Id, target, autoConnect: true);
+        Assert.Equal(adapter.Id, receipt.RobotId);
+    }
+
+    [Fact]
+    public async Task ConcurrentStops_StayRegisteredUntilEachCallReturnsOutOfOrder()
+    {
+        await using var manager = new RobotManager();
+        var adapter = new HangingStopRobotAdapter();
+        manager.Register(adapter);
+
+        var first = manager.StopAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.StopCalls == 1);
+        var second = manager.StopAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.StopCalls == 2);
+        Assert.True(manager.HasPendingStop(adapter.Id));
+
+        adapter.ReleaseStop(1);
+        await second;
+        Assert.True(manager.HasPendingStop(adapter.Id), "the first stop must remain registered after the second finishes first");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.ResetFaultAsync(adapter.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.SendTargetAsync(adapter.Id,
+            new VisionRobotTarget2D(1, 2, 0, "RobotBase", "mm", "Test", "pending-stop"), autoConnect: true));
+
+        adapter.ReleaseStop(0);
+        await first;
+        Assert.False(manager.HasPendingStop(adapter.Id));
+        await manager.ResetFaultAsync(adapter.Id);
+    }
+
+    [Fact]
+    public async Task StopIssuedDuringReset_InvalidatesResetAndRemainsAvailable()
+    {
+        await using var manager = new RobotManager();
+        var adapter = new HangingStopRobotAdapter { BlockNextReset = true };
+        manager.Register(adapter);
+
+        var reset = manager.ResetFaultAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.ResetCalls == 1);
+        var stop = manager.StopAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.StopCalls == 1);
+        Assert.True(manager.HasPendingStop(adapter.Id));
+        adapter.ReleaseStop(0);
+        await stop;
+        Assert.False(manager.HasPendingStop(adapter.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.SendTargetAsync(adapter.Id,
+            new VisionRobotTarget2D(1, 2, 0, "RobotBase", "mm", "Test", "reset-in-progress"), autoConnect: true));
+
+        adapter.ReleaseReset();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reset);
+        await manager.ResetFaultAsync(adapter.Id);
+    }
+
+    [Fact]
+    public async Task PublicStop_RemainsRegisteredUntilLateCallReturns()
+    {
+        await using var manager = new RobotManager();
+        var adapter = new HangingStopRobotAdapter();
+        manager.Register(adapter);
+
+        var stop = manager.StopAsync(adapter.Id);
+        await WaitUntilAsync(() => adapter.StopCalls == 1);
+        Assert.True(manager.HasPendingStop(adapter.Id));
+        var sendsBefore = adapter.TargetSendCalls;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.SendTargetAsync(adapter.Id,
+            new VisionRobotTarget2D(1, 2, 0, "RobotBase", "mm", "Test", "pending-stop"), autoConnect: true));
+        Assert.Equal(sendsBefore, adapter.TargetSendCalls);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.ResetFaultAsync(adapter.Id));
+        Assert.True(manager.HasPendingStop(adapter.Id), "a rejected reset must preserve the public stop registration");
+
+        adapter.ReleaseStop(0);
+        await stop;
+        Assert.False(manager.HasPendingStop(adapter.Id));
+        await manager.ResetFaultAsync(adapter.Id);
     }
 
     [Fact]
@@ -285,7 +455,19 @@ public sealed class RobotHandshakeTests
         public string Unit => "mm";
         public RobotCapabilities Capabilities { get; } = new(MaxLinearSpeedMmPerSec: 100, MaxAngularSpeedDegPerSec: 90);
 
-        public int StopCalls { get; private set; }
+        private int _stopCalls;
+        private int _resetCalls;
+        private bool _releaseAllStops;
+        private readonly TaskCompletionSource<RobotCommandReceipt> _targetRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int StopCalls => Volatile.Read(ref _stopCalls);
+        public int ResetCalls => Volatile.Read(ref _resetCalls);
+        public int TargetSendCalls { get; private set; }
+        public bool BlockNextReset { get; init; }
+        public bool HoldTargetUntilReleased { get; set; }
+        public Action? SendInvocationHook { get; set; }
+        private readonly List<TaskCompletionSource> _stopReleases = [];
+        private readonly TaskCompletionSource _resetStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _resetRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public RobotDescriptor Snapshot()
         {
@@ -294,7 +476,7 @@ public sealed class RobotHandshakeTests
                 return new RobotDescriptor(
                     Id, Name, Vendor, Model, Driver, BaseFrame, Unit, _connection,
                     _connection == RobotConnectionState.Connected ? RobotHandshakeState.Ready : RobotHandshakeState.Disconnected,
-                    RobotHandshakeSignals.Empty with { CommandId = _commandId, UpdatedAt = DateTimeOffset.UtcNow },
+                    RobotHandshakeSignals.Empty with { CommandId = _commandId, Busy = true, UpdatedAt = DateTimeOffset.UtcNow },
                     new VisionCoordinatePose2D(0, 0, 0, BaseFrame, Unit), null, _commandId,
                     Busy: true, InPosition: false, Error: null, new RobotRuntimeSettings(), Capabilities, DateTimeOffset.UtcNow);
             }
@@ -304,18 +486,59 @@ public sealed class RobotHandshakeTests
         public Task DisconnectAsync(CancellationToken cancellationToken = default) { lock (_gate) _connection = RobotConnectionState.Disconnected; return Task.CompletedTask; }
         public Task ApplySettingsAsync(RobotRuntimeSettings settings, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<RobotCommandReceipt> SendTargetAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default)
-        { lock (_gate) _commandId++; return Task.FromResult(new RobotCommandReceipt(_commandId, Id, target, RobotHandshakeState.Ready, DateTimeOffset.UtcNow)); }
+        {
+            SendInvocationHook?.Invoke();
+            TargetSendCalls++;
+            lock (_gate) _commandId++;
+            return HoldTargetUntilReleased
+                ? _targetRelease.Task
+                : Task.FromResult(new RobotCommandReceipt(_commandId, Id, target, RobotHandshakeState.Ready, DateTimeOffset.UtcNow));
+        }
         public Task<RobotCommandReceipt> MoveToAsync(VisionRobotTarget2D target, CancellationToken cancellationToken = default) => SendTargetAsync(target, cancellationToken);
         public Task AcknowledgeAsync(long commandId, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
-            StopCalls++;
-            // 永不完成：模拟卡死的厂商调用（忽略 token）。
-            return new TaskCompletionSource().Task;
+            Interlocked.Increment(ref _stopCalls);
+            // 每次停止有独立完成源，验证多个旧停止乱序完成也各自保持登记。
+            lock (_stopReleases)
+            {
+                if (_releaseAllStops) return Task.CompletedTask;
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _stopReleases.Add(release);
+                return release.Task;
+            }
         }
 
-        public Task ResetFaultAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        /// <summary>Q04 测试：让挂起的停止调用真正返回（迟到调用场景）。</summary>
+        public void ReleaseStop()
+        {
+            lock (_stopReleases)
+            {
+                _releaseAllStops = true;
+                foreach (var release in _stopReleases) release.TrySetResult();
+            }
+        }
+
+        public void ReleaseStop(int index)
+        {
+            lock (_stopReleases) _stopReleases[index].TrySetResult();
+        }
+
+        public void ReleaseTarget() => _targetRelease.TrySetResult(new RobotCommandReceipt(_commandId, Id,
+            new VisionRobotTarget2D(0, 0, 0, BaseFrame, Unit, Vendor, "released"), RobotHandshakeState.Ready, DateTimeOffset.UtcNow));
+
+        public async Task ResetFaultAsync(CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _resetCalls);
+            if (BlockNextReset)
+            {
+                _resetStarted.TrySetResult();
+                await _resetRelease.Task.WaitAsync(cancellationToken);
+            }
+        }
+
+        public void ReleaseReset() => _resetRelease.TrySetResult();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

@@ -336,7 +336,7 @@ export type CameraTransportTelemetry = {
 };
 
 export type CameraAcquisitionStats = {
-  acquisitionState: 'Stopped' | 'Starting' | 'Stopping' | 'Running' | 'WaitingTrigger' | 'Reconnecting' | 'Faulted';
+  acquisitionState: 'Stopped' | 'Starting' | 'Stopping' | 'StopUnconfirmed' | 'Running' | 'WaitingTrigger' | 'Reconnecting' | 'Faulted';
   framesPublished: number;
   ringOverwrites: number;
   acquisitionErrors: number;

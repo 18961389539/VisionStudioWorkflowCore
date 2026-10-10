@@ -69,13 +69,20 @@ public static class WorkflowExecutionEndpoints
             RunStore store,
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
+            DeviceActionAuthorizationService auth,
             CancellationToken ct) =>
         {
             var context = new RunTraceContext("AdHoc");
             var runId = RunTraceRecorder.NewRunId();
             // 运行期硬件租约：覆盖整段执行（含计时收尾），完成/取消/异常时经 using 统一释放
             using var lease = await production.AcquireRunLeaseAsync(runId, workflow, $"Cannot run workflow '{workflow.Id}'", ct);
-            await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
+            // R01：临时运行同样受统一动作授权约束，并在执行前耐久登记意图；含副作用流程的
+            // 起始证据写失败时绝不盲跑设备动作（best-effort 起始记录只适用于纯计算流程）。
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", workflow, ct);
+            if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
+                await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, workflow, context);
+            else
+                await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
             var result = await runner.RunAsync(workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
             await recorder.FinalizeAsync(result, workflow, context);
@@ -88,6 +95,7 @@ public static class WorkflowExecutionEndpoints
             RunStore store,
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
+            DeviceActionAuthorizationService auth,
             CancellationToken ct) =>
         {
             // 交互式调试：捕获逐节点图像以支持按节点检查中间结果
@@ -95,7 +103,12 @@ public static class WorkflowExecutionEndpoints
             var context = new RunTraceContext("Debug", DebugMode: options.Mode.ToString());
             var runId = RunTraceRecorder.NewRunId();
             using var lease = await production.AcquireRunLeaseAsync(runId, request.Workflow, $"Cannot debug-run workflow '{request.Workflow.Id}'", ct);
-            await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
+            // R01：调试运行与生产/临时运行共用同一动作授权与意图登记契约。
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.debug", request.Workflow, ct);
+            if (DeviceSideEffectClassifier.HasDeviceSideEffects(request.Workflow))
+                await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
+            else
+                await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             var result = await runner.RunAsync(request.Workflow, options, runId, ct);
             await recorder.FinalizeAsync(result, request.Workflow, context);
             return EndpointResults.StoreAndMapRunResult(result, store);

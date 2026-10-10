@@ -55,7 +55,9 @@ public sealed record PublishedJobSnapshot(
     public string JobId => VersionSnapshot.JobId;
     public int Version => VersionSnapshot.Version;
     public string WorkflowHash => VersionSnapshot.WorkflowHash;
-    public WorkflowDefinition Workflow => VersionSnapshot.Workflow;
+    /// <summary>Immutable expanded execution graph captured when production starts (module versions are pinned by the manifest).</summary>
+    public WorkflowDefinition? ExpandedWorkflow { get; init; }
+    public WorkflowDefinition Workflow => ExpandedWorkflow ?? VersionSnapshot.Workflow;
 }
 
 public sealed record CreateJobRequest(

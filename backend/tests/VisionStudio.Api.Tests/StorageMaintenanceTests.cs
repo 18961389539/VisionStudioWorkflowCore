@@ -1,3 +1,7 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -6,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Api.Security;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api.Tests;
@@ -266,8 +271,8 @@ CREATE TABLE run_traces(run_id TEXT PRIMARY KEY,started_at TEXT NOT NULL DEFAULT
     [Fact]
     public async Task ControlledRecoveryEndpoint_ClearsFailureLock_AfterChecks()
     {
-        // F03 验收：注入恢复失败（回滚不可完成）→ 失败锁激活且落盘；受控恢复端点在锁定期间
-        // 可达（中间件豁免），完成状态检查后清除锁——不绕过认证、不直接修改内存。
+        // Q07/Q08 验收：回滚不完整时受控核对不得丢弃事务证据；管理员可再次恢复到已验证备份，
+        // 成功后保持待重启门，不能在旧运行实例上继续业务。
         using var factory = new StorageVisionStudioApiFactory();
         using var client = factory.CreateClient();
         _ = await client.GetAsync("/api/health");
@@ -307,14 +312,37 @@ CREATE TABLE run_traces(run_id TEXT PRIMARY KEY,started_at TEXT NOT NULL DEFAULT
         Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, blocked.StatusCode);
 
         var recover = await client.PostAsync("/api/storage/maintenance/recover", null);
-        Assert.Equal(System.Net.HttpStatusCode.OK, recover.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, recover.StatusCode);
+        Assert.True(coordinator.IsFailureLocked);
+        Assert.NotNull(coordinator.ReadTransaction());
+
+        // 连续重试：第二次恢复在commit处失败但完整回滚至第一次失败现场。新事务及其保护副本
+        // （并嵌套原事务）必须继续存在，随后第三次恢复才能成功。
+        var originalTransaction = coordinator.ReadTransaction()!;
+        StorageBackupService.RestoreCommitFaultInjector = () => throw new IOException("second retry injected failure");
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true, true), default));
+        }
+        finally { StorageBackupService.RestoreCommitFaultInjector = null; }
+        var retryTransaction = coordinator.ReadTransaction();
+        Assert.NotNull(retryTransaction);
+        Assert.Equal("retry-rolled-back-to-previously-locked-generation", retryTransaction!.Stage);
+        Assert.Equal(originalTransaction.BackupId, retryTransaction.PreviousTransaction?.BackupId);
+        Assert.True(File.Exists(retryTransaction.SafetyDatabase));
+        Assert.Equal(retryTransaction.SafetyDatabaseSha256, StorageBackupService.ComputeFileSha256(retryTransaction.SafetyDatabase));
+
+        // 从之前验证过的完整备份重试成功；只有新generation校验通过才退休事务。
+        _ = await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true), default);
         Assert.False(coordinator.IsFailureLocked);
         Assert.False(coordinator.IsMaintenanceActive);
         Assert.False(File.Exists(lockPath));
+        Assert.True(coordinator.IsRestartPending);
 
-        // 解锁后常规请求恢复。
+        // 磁盘修复后必须重启重载配置/驱动，当前进程继续阻断业务。
         var after = await client.GetAsync("/api/storage/status");
-        Assert.Equal(System.Net.HttpStatusCode.OK, after.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, after.StatusCode);
     }
 
     [Fact]
@@ -623,6 +651,514 @@ SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_
         Assert.Equal("42", configuration["Storage:CriticalFreeBytes"]);
     }
 
+    [Fact]
+    public void SiteConfig_RealApplicationBuilder_OverridesPackageAppsettings_AndYieldsToCommandLine()
+    {
+        // Q05 回归（独立探针反例转正）：真实 WebApplicationBuilder 下，site-config 必须覆盖包内
+        // appsettings.json 的同名键，并仍被命令行覆盖。旧实现把 site 插到"第一个环境变量源"之前
+        // （实际是带前缀的宿主源），落在 appsettings 之前——现场在 site-config 里写的安全/存储/
+        // 相机覆盖会被包内默认值静默吞掉。
+        using var env = new TempWebHostEnvironment();
+        File.WriteAllText(Path.Combine(env.ContentRootPath, "appsettings.json"),
+            "{\"AuditProbe\":{\"Value\":\"package-default\"}}");
+        var siteDir = Path.Combine(env.ContentRootPath, "data", VisionStudioSiteConfig.FolderName);
+        Directory.CreateDirectory(siteDir);
+        File.WriteAllText(Path.Combine(siteDir, VisionStudioSiteConfig.FileName),
+            "{\"AuditProbe\":{\"Value\":\"site-override\"}}");
+
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(new Microsoft.AspNetCore.Builder.WebApplicationOptions
+        {
+            ContentRootPath = env.ContentRootPath,
+            EnvironmentName = "Production",
+            Args = []
+        });
+        VisionStudioSiteConfig.AddSource(builder.Configuration, env.ContentRootPath);
+
+        Assert.Equal("site-override", builder.Configuration["AuditProbe:Value"]);
+
+        // 源顺序：site 文件源必须排在包内 appsettings.json **之后**（更高优先级）。
+        var sources = builder.Configuration.Sources.ToList();
+        var siteIndex = sources.FindIndex(x => x is Microsoft.Extensions.Configuration.Json.JsonConfigurationSource json &&
+            string.Equals(json.Path, VisionStudioSiteConfig.FileName, StringComparison.OrdinalIgnoreCase));
+        var packageIndex = sources.FindIndex(x => x is Microsoft.Extensions.Configuration.Json.JsonConfigurationSource json &&
+            string.Equals(json.Path, "appsettings.json", StringComparison.OrdinalIgnoreCase));
+        Assert.True(siteIndex > packageIndex, $"site-config source ({siteIndex}) must rank after appsettings.json ({packageIndex})");
+
+        // 命令行仍为最终覆盖层。
+        var builder2 = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder(new Microsoft.AspNetCore.Builder.WebApplicationOptions
+        {
+            ContentRootPath = env.ContentRootPath,
+            EnvironmentName = "Production",
+            Args = ["--AuditProbe:Value=command-line"]
+        });
+        VisionStudioSiteConfig.AddSource(builder2.Configuration, env.ContentRootPath);
+        Assert.Equal("command-line", builder2.Configuration["AuditProbe:Value"]);
+    }
+
+    [Fact]
+    public async Task FailureLock_KeepsAuthAndHealthReachable_WhileBlockingBusinessEndpoints()
+    {
+        // Q06 回归（独立探针反例转正）：失败锁是持久状态，认证/健康路径必须可达——否则重启后
+        // 没有会话的管理员无法登录，受控恢复入口形同虚设。业务端点继续被 503 阻断。
+        using var factory = new StorageVisionStudioApiFactory(maxArtifactBytes: null, siteConfigJson: null, securityEnabled: true);
+        using var client = factory.CreateClient();
+        var coordinator = factory.Services.GetRequiredService<StorageMaintenanceCoordinator>();
+        coordinator.EnterFailureLock("audit injected failure lock");
+        try
+        {
+            var status = await client.GetAsync("/api/auth/status");
+            Assert.NotEqual(System.Net.HttpStatusCode.ServiceUnavailable, status.StatusCode);
+
+            var health = await client.GetAsync("/api/health");
+            Assert.NotEqual(System.Net.HttpStatusCode.ServiceUnavailable, health.StatusCode);
+
+            // 登录端点必须真正进入管道（凭据错误返回 400/401，而不是维护中间件的 503）。
+            var login = await client.PostAsJsonAsync("/api/auth/login", new { username = "nobody", password = "wrong-password" });
+            Assert.NotEqual(System.Net.HttpStatusCode.ServiceUnavailable, login.StatusCode);
+
+            // 普通业务读写继续被阻断。
+            var jobs = await client.GetAsync("/api/jobs");
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, jobs.StatusCode);
+            var production = await client.GetAsync("/api/production/status");
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, production.StatusCode);
+        }
+        finally
+        {
+            coordinator.ClearFailureLock();
+        }
+    }
+
+    [Fact]
+    public async Task FailureLock_AllowsRealAdminLoginAndFullRestore_ButRejectsNonAdminAndAuditsRestore()
+    {
+        using var factory = new StorageVisionStudioApiFactory(maxArtifactBytes: null, siteConfigJson: null, securityEnabled: true);
+        using var bootstrapClient = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        var bootstrap = await bootstrapClient.PostAsJsonAsync("/api/auth/bootstrap", new
+        {
+            username = "admin", displayName = "Storage Admin", password = "AdminPass!234"
+        });
+        Assert.Equal(System.Net.HttpStatusCode.OK, bootstrap.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK,
+            (await bootstrapClient.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "AdminPass!234" })).StatusCode);
+        var user = await bootstrapClient.PostAsJsonAsync("/api/security/users", new
+        {
+            username = "operator1", displayName = "Operator One", role = "Operator", password = "Operator!234"
+        });
+        Assert.Equal(System.Net.HttpStatusCode.OK, user.StatusCode);
+
+        var backupResponse = await bootstrapClient.PostAsJsonAsync("/api/storage/backups", new { includeArtifacts = true });
+        Assert.Equal(System.Net.HttpStatusCode.OK, backupResponse.StatusCode);
+        var backupId = (await backupResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("backupId").GetString()!;
+
+        using var operatorClient = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        Assert.Equal(System.Net.HttpStatusCode.OK,
+            (await operatorClient.PostAsJsonAsync("/api/auth/login", new { username = "operator1", password = "Operator!234" })).StatusCode);
+        var coordinator = factory.Services.GetRequiredService<StorageMaintenanceCoordinator>();
+        coordinator.EnterFailureLock("Q06 real-login recovery test");
+        var forbidden = await operatorClient.PostAsJsonAsync("/api/storage/restore", new
+        {
+            backupId, restoreArtifacts = true, restoreSystemAssets = true
+        });
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        // New browser/session proves the persistent failure-lock does not block a real administrator login.
+        using var recoveryAdmin = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        Assert.NotEqual(System.Net.HttpStatusCode.ServiceUnavailable, (await recoveryAdmin.GetAsync("/api/auth/status")).StatusCode);
+        var login = await recoveryAdmin.PostAsJsonAsync("/api/auth/login", new { username = "admin", password = "AdminPass!234" });
+        Assert.Equal(System.Net.HttpStatusCode.OK, login.StatusCode);
+        Assert.Contains("vs_session=", string.Join(";", login.Headers.GetValues("Set-Cookie")), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, (await recoveryAdmin.GetAsync("/api/storage/status")).StatusCode);
+
+        var restored = await recoveryAdmin.PostAsJsonAsync("/api/storage/restore", new
+        {
+            backupId, restoreArtifacts = true, restoreSystemAssets = true
+        });
+        Assert.Equal(System.Net.HttpStatusCode.OK, restored.StatusCode);
+        Assert.True(coordinator.IsRestartPending);
+        var audit = await factory.Services.GetRequiredService<AuditEventStore>().ListAsync(0, 100, "admin", "storage.restore");
+        Assert.Contains(audit, item => item.Success && item.Username == "admin" && item.Action == "storage.restore");
+    }
+
+    [Fact]
+    public async Task Recover_RefusesToClearLock_WhenArtifactReferencesAreMissing()
+    {
+        // Q07 回归：解锁前必须证明"数据库与磁盘资产是同一份恢复版本"。追溯记录指向的附件文件
+        // 缺失时（DB 已换、附件未跟上；或空目录），即使数据库可读、artifacts 目录存在，也必须保持锁定。
+        using var factory = new StorageVisionStudioApiFactory(maxArtifactBytes: null, siteConfigJson: null);
+        using var client = factory.CreateClient();
+        var db = factory.Services.GetRequiredService<SqliteMetadataDatabase>();
+        var coordinator = factory.Services.GetRequiredService<StorageMaintenanceCoordinator>();
+
+        await using (var connection = await db.OpenConnectionAsync(default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO run_traces (run_id, started_at, source, workflow_id, workflow_name, execution_status, disposition,
+                    total_duration_ms, node_count, overlay_count, has_preview, preview_relative_path, preview_bytes,
+                    has_replay_input, node_reports_json, overlays_json)
+                VALUES ('q07-missing-artifact', '2026-10-10T00:00:00Z', 'Test', 'wf', 'wf', 'Completed', 'OK', 1, 0, 0, 1,
+                    'preview/does-not-exist.jpg', 1, 0, '[]', '[]');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        coordinator.EnterFailureLock("audit injected failure lock");
+        try
+        {
+            var response = await client.PostAsync("/api/storage/maintenance/recover", null);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+            Assert.True(coordinator.IsFailureLocked, "the lock must stay engaged while artifact references are dangling");
+
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Contains("do not exist", body, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            // 清除伪造记录后解锁路径恢复可用（正向对照）。
+            await using (var connection = await db.OpenConnectionAsync(default))
+            {
+                await using var cleanup = connection.CreateCommand();
+                cleanup.CommandText = "DELETE FROM run_traces WHERE run_id='q07-missing-artifact';";
+                await cleanup.ExecuteNonQueryAsync();
+            }
+            var recovered = await client.PostAsync("/api/storage/maintenance/recover", null);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, recovered.StatusCode);
+            Assert.True(coordinator.IsFailureLocked, "validity checks without a transaction manifest cannot prove system-asset rollback");
+        }
+    }
+
+    [Fact]
+    public async Task Recover_ChecksArtifactReferencesBeyondFirstTwoHundred()
+    {
+        using var factory = new StorageVisionStudioApiFactory(maxArtifactBytes: null, siteConfigJson: null);
+        using var client = factory.CreateClient();
+        var db = factory.Services.GetRequiredService<SqliteMetadataDatabase>();
+        var coordinator = factory.Services.GetRequiredService<StorageMaintenanceCoordinator>();
+        var env = factory.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        var root = Path.Combine(env.ContentRootPath, "data", "artifacts", "preview");
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var connection = await db.OpenConnectionAsync(default);
+            for (var i = 0; i < 201; i++)
+            {
+                var relative = i == 200 ? "preview/zzz-missing-after-limit.jpg" : $"preview/present-{i}.jpg";
+                if (i < 200) await File.WriteAllTextAsync(Path.Combine(root, $"present-{i}.jpg"), "ok");
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO run_traces (run_id, started_at, source, workflow_id, workflow_name, execution_status, disposition,
+                        total_duration_ms, node_count, overlay_count, has_preview, preview_relative_path, preview_bytes,
+                        has_replay_input, node_reports_json, overlays_json)
+                    VALUES ($id, '2026-10-10T00:00:00Z', 'Test', 'wf', 'wf', 'Completed', 'OK', 1, 0, 0, 1,
+                        $path, 1, 0, '[]', '[]');
+                    """;
+                command.Parameters.AddWithValue("$id", $"q07-beyond-{i}");
+                command.Parameters.AddWithValue("$path", relative);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            coordinator.EnterFailureLock("audit injected failure lock");
+            var response = await client.PostAsync("/api/storage/maintenance/recover", null);
+            Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+            Assert.True(coordinator.IsFailureLocked);
+            Assert.Contains("zzz-missing-after-limit.jpg", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await using var connection = await db.OpenConnectionAsync(default);
+            await using var cleanup = connection.CreateCommand();
+            cleanup.CommandText = "DELETE FROM run_traces WHERE run_id LIKE 'q07-beyond-%';";
+            await cleanup.ExecuteNonQueryAsync();
+            try { Directory.Delete(root, true); } catch { }
+            coordinator.ClearFailureLock();
+        }
+    }
+
+    [Fact]
+    public void RestartPendingGate_EngagesAfterRestore_AndClearsOnNextProcessStart()
+    {
+        // Q08 回归：恢复成功后必须进入"待重启"门（业务 503），且仅在新进程启动时自动解除——
+        // 防止"磁盘已恢复、内存仍是恢复前实例"的混合环境继续服务设备动作。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-restart-gate", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var restartPath = Path.Combine(dir, "restart-pending.json");
+        try
+        {
+            var coordinator = new StorageMaintenanceCoordinator(failureLockPath: null, logger: null, restartPendingPath: restartPath);
+            Assert.False(coordinator.IsRestartPending);
+
+            coordinator.MarkRestartPending("storage restore completed; restart required");
+            Assert.True(coordinator.IsRestartPending);
+            Assert.True(File.Exists(restartPath), "the restart gate must be persisted before it is enforced");
+            Assert.Null(coordinator.TryEnterRequest()); // 纵深防御：lease 路径同样拒绝
+
+            // "新进程启动"：构造新实例读同一标记 → 重启已完成，门自动解除。
+            var afterRestart = new StorageMaintenanceCoordinator(failureLockPath: null, logger: null, restartPendingPath: restartPath);
+            Assert.False(afterRestart.IsRestartPending);
+            Assert.False(File.Exists(restartPath), "the marker is cleared by the next process start");
+            using var lease = afterRestart.TryEnterRequest();
+            Assert.NotNull(lease);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task RestartPendingGate_BlocksEveryStorageMutationAndRecoveryRoute()
+    {
+        using var factory = new StorageVisionStudioApiFactory(maxArtifactBytes: null, siteConfigJson: null);
+        using var client = factory.CreateClient();
+        var coordinator = factory.Services.GetRequiredService<StorageMaintenanceCoordinator>();
+        coordinator.MarkRestartPending("test restore committed");
+
+        foreach (var response in new[]
+        {
+            await client.PostAsJsonAsync("/api/storage/restore", new { backupId = "unused" }),
+            await client.PostAsync("/api/storage/backups", null),
+            await client.PostAsync("/api/storage/maintenance/recover", null)
+        })
+        {
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Contains("restart_required", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        Assert.True(coordinator.IsRestartPending);
+    }
+
+    [Fact]
+    public void InterruptedRestoreTransaction_EngagesFailureLockOnStartup()
+    {
+        // Q08 回归：恢复中途被终止（进程被杀）会留下未完成事务——下一次启动必须直接进入失败锁
+        // （DB/目录可能处于混合状态），而不是当作干净启动放行业务。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-restore-tx", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var transactionPath = Path.Combine(dir, "restore-transaction.json");
+        try
+        {
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            coordinator.BeginRestoreTransaction("backup-1", ["database-replaced", "committed"],
+                Path.Combine(dir, "safety.db"), "safety-hash", "source-hash", 1, "target-hash",
+                new Dictionary<string, string> { [dir] = "assets-hash" }, []);
+            coordinator.AdvanceRestoreTransaction("database-replaced");
+            Assert.True(File.Exists(transactionPath));
+
+            // "进程重启"：新实例看到未完成事务 → 失败锁。
+            var afterRestart = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            Assert.True(afterRestart.IsFailureLocked);
+            Assert.Contains("interrupted", afterRestart.Reason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            // 事务残留不能被无条件清除；验证闭环由受控入口执行。
+            Assert.NotNull(afterRestart.ReadTransaction());
+            afterRestart.ClearRestoreTransaction();
+            afterRestart.ClearFailureLock();
+            var third = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            Assert.False(third.IsFailureLocked);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void RestoreTransactionWriteFailure_ThrowsBeforeAnyReplacementCanProceed()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-restore-tx-fail", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var blocker = Path.Combine(dir, "not-a-directory");
+        File.WriteAllText(blocker, "x");
+        var coordinator = new StorageMaintenanceCoordinator(
+            failureLockPath: null, logger: null, restartPendingPath: null,
+            restoreTransactionPath: Path.Combine(blocker, "restore-transaction.json"));
+
+        Assert.ThrowsAny<IOException>(() => coordinator.BeginRestoreTransaction("backup", ["database-replaced"],
+            Path.Combine(dir, "safety.db"), "safety", "source", 1, "expected", new Dictionary<string, string>(), []));
+        Assert.Null(coordinator.ReadTransaction());
+        Directory.Delete(dir, true);
+    }
+
+    [Fact]
+    public void CorruptRestoreIntent_IsPreservedAndCannotBeOverwritten()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-corrupt-restore-tx", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "restore-transaction.json");
+        const string corrupt = "{not-json";
+        File.WriteAllText(path, corrupt);
+        var coordinator = new StorageMaintenanceCoordinator(
+            failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: path);
+
+        Assert.True(coordinator.IsFailureLocked);
+        Assert.Throws<InvalidOperationException>(() => coordinator.BeginRestoreTransaction("new", ["database-replaced"],
+            Path.Combine(dir, "safety.db"), "safety", "source", 1, "target", new Dictionary<string, string>(), []));
+        Assert.Equal(corrupt, File.ReadAllText(path));
+        Directory.Delete(dir, true);
+    }
+
+    [Fact]
+    public async Task RestoreIntentWriteFailure_LeavesLiveDatabaseAndAssetsUntouched()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        var services = factory.Services;
+        var backups = services.GetRequiredService<StorageBackupService>();
+        var db = services.GetRequiredService<SqliteMetadataDatabase>();
+        var env = services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        var backup = await backups.CreateAsync(true, default);
+        var beforeDb = Path.Combine(env.ContentRootPath, "intent-before.db");
+        await db.CreateSnapshotAsync(beforeDb);
+        var beforeDbHash = StorageBackupService.ComputeFileSha256(beforeDb);
+        var artifactsRoot = Path.Combine(env.ContentRootPath, "data", "artifacts");
+        var asset = Path.Combine(artifactsRoot, "intent-failure.jpg");
+        await File.WriteAllTextAsync(asset, "unchanged");
+        var beforeAssetsHash = StorageBackupService.ComputeDirectorySha256(artifactsRoot);
+        var txMarker = Path.Combine(env.ContentRootPath, "data", ".storage-maintenance", "restore-transaction.json");
+        Directory.CreateDirectory(txMarker); // forces durable atomic rename to fail
+
+        await Assert.ThrowsAnyAsync<Exception>(() => backups.RestoreAsync(
+            new StorageRestoreRequest(backup.BackupId, true, true), default));
+        var afterDb = Path.Combine(env.ContentRootPath, "intent-after.db");
+        await db.CreateSnapshotAsync(afterDb);
+        Assert.Equal(beforeDbHash, StorageBackupService.ComputeFileSha256(afterDb));
+        Assert.Equal(beforeAssetsHash, StorageBackupService.ComputeDirectorySha256(artifactsRoot));
+    }
+
+    [Fact]
+    public async Task Restore_MigratesOlderBackupBeforeComparingInstalledDatabaseHash()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        var services = factory.Services;
+        var backups = services.GetRequiredService<StorageBackupService>();
+        var db = services.GetRequiredService<SqliteMetadataDatabase>();
+        var env = services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        var backup = await backups.CreateAsync(true, default);
+        var archivePath = Path.Combine(env.ContentRootPath, "data", "backups", backup.BackupId + ".vsbackup");
+        var oldDbPath = Path.Combine(env.ContentRootPath, "legacy-schema.db");
+        await db.CreateSnapshotAsync(oldDbPath);
+        // Pooling=False：快照副本随后要被 zip 以独占方式读取——SQLite 连接池会留住底层句柄，
+        // 让"已释放"的连接仍锁住文件（此前全量运行时随机 IOException）。
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = oldDbPath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            await using var downgrade = connection.CreateCommand();
+            downgrade.CommandText = "ALTER TABLE run_traces DROP COLUMN error_code; UPDATE schema_info SET version=19 WHERE id=1; DELETE FROM schema_migration_history WHERE version=20;";
+            await downgrade.ExecuteNonQueryAsync();
+        }
+
+        await using (var stream = new FileStream(archivePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Update))
+        {
+            var databaseEntry = zip.GetEntry("database/visionstudio.db")!;
+            databaseEntry.Delete();
+            zip.CreateEntryFromFile(oldDbPath, "database/visionstudio.db", CompressionLevel.Optimal);
+            var manifestEntry = zip.GetEntry("manifest.json")!;
+            StorageBackupManifest manifest;
+            await using (var input = manifestEntry.Open())
+                manifest = (await JsonSerializer.DeserializeAsync<StorageBackupManifest>(input,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web)))!;
+            manifestEntry.Delete();
+            await using var oldDbStream = File.OpenRead(oldDbPath);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(oldDbStream));
+            var oldManifest = manifest with { SchemaVersion = 19, DatabaseSha256 = hash };
+            await using var output = zip.CreateEntry("manifest.json").Open();
+            await JsonSerializer.SerializeAsync(output, oldManifest, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+
+        var result = await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true, true), default);
+        Assert.Equal(19, result.SourceSchemaVersion);
+        Assert.Equal(db.CurrentSchemaVersion, result.CurrentSchemaVersion);
+        Assert.True(services.GetRequiredService<StorageMaintenanceCoordinator>().IsRestartPending);
+    }
+
+    [Fact]
+    public async Task Restore_FailedInstallOfOriginallyAbsentSystemRoot_CanBeRetriedFromFullBackup()
+    {
+        using var factory = new StorageVisionStudioApiFactory();
+        var services = factory.Services;
+        var env = services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        var backups = services.GetRequiredService<StorageBackupService>();
+        var coordinator = services.GetRequiredService<StorageMaintenanceCoordinator>();
+        var devicesRoot = Path.Combine(env.ContentRootPath, "data", "devices");
+        if (Directory.Exists(devicesRoot)) Directory.Delete(devicesRoot, true);
+        var backup = await backups.CreateAsync(true, default);
+
+        FileStream? blocker = null;
+        StorageBackupService.RestoreCommitFaultInjector = () =>
+        {
+            var lockedFile = Path.Combine(devicesRoot, "created-during-failed-install.tmp");
+            File.WriteAllText(lockedFile, "tainted");
+            blocker = new FileStream(lockedFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            throw new IOException("leave originally absent system root installed");
+        };
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => backups.RestoreAsync(
+                new StorageRestoreRequest(backup.BackupId, true, true), default));
+        }
+        finally
+        {
+            StorageBackupService.RestoreCommitFaultInjector = null;
+            blocker?.Dispose();
+        }
+
+        Assert.True(coordinator.IsFailureLocked);
+        Assert.True(Directory.Exists(devicesRoot), "failed install leaves a target that was absent in the original generation");
+        var originalAbsent = Assert.Single(coordinator.ReadTransaction()!.ProtectedAssets,
+            asset => string.Equals(asset.Target, devicesRoot, StringComparison.OrdinalIgnoreCase));
+        Assert.False(originalAbsent.Existed);
+
+        // The durable Existed=false baseline remains authoritative; a complete full restore may replace
+        // the tainted target and retire the transaction only after generation hashes validate.
+        _ = await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true, true), default);
+        Assert.False(coordinator.IsFailureLocked);
+        Assert.True(coordinator.IsRestartPending);
+        Assert.Empty(Directory.EnumerateFiles(devicesRoot));
+    }
+
+    [Fact]
+    public void CommittedRestoreTransaction_IsRetiredOnStartup_WithoutLocking()
+    {
+        // R03 回归：恢复已提交（stage=committed）但事务文件残留（例如删除时被短暂占用）时，
+        // 启动只做剩余清理（清保护副本 + 删事务文件），绝不锁定主机；未提交的中间态仍然锁定。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-committed-tx", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var transactionPath = Path.Combine(dir, "restore-transaction.json");
+        var preserved = Path.Combine(dir, "preserved-artifacts");
+        // 与协调器 WriteTransaction 相同的序列化约定（默认选项）——契约必须与产品写入一致。
+        var json = new JsonSerializerOptions();
+        try
+        {
+            Directory.CreateDirectory(preserved);
+            var committed = new StorageMaintenanceCoordinator.RestoreTransaction(
+                "backup-1", DateTimeOffset.UtcNow, "committed", ["committed"], DateTimeOffset.UtcNow, null,
+                Path.Combine(dir, "pre-restore.db"), "safety-hash", "source-hash", 20, "target-hash",
+                new Dictionary<string, string>(),
+                [new StorageMaintenanceCoordinator.RestoreProtectionAsset(preserved, preserved, true, "asset-hash")],
+                null);
+            File.WriteAllText(transactionPath, JsonSerializer.Serialize(committed, json));
+
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            Assert.False(coordinator.IsFailureLocked);   // committed：恢复已完成，绝不锁定主机
+            Assert.False(File.Exists(transactionPath));  // 事务被退役
+            Assert.False(Directory.Exists(preserved));   // 保护副本按提交顺序被清理
+
+            // 对照：未提交的中间态（数据库已替换、事务未提交）仍然锁定。
+            var inFlight = committed with { Stage = "database-replaced" };
+            File.WriteAllText(transactionPath, JsonSerializer.Serialize(inFlight, json));
+            var locked = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            Assert.True(locked.IsFailureLocked);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -766,14 +1302,19 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "visionstudio-storage-tests", Guid.NewGuid().ToString("N"));
     private readonly long _maxArtifactBytes;
+    private readonly bool _securityEnabled;
 
     public StorageVisionStudioApiFactory() : this(maxArtifactBytes: null, siteConfigJson: null) { }
 
     public StorageVisionStudioApiFactory(long? maxArtifactBytes) : this(maxArtifactBytes, siteConfigJson: null) { }
 
     public StorageVisionStudioApiFactory(long? maxArtifactBytes, string? siteConfigJson)
+        : this(maxArtifactBytes, siteConfigJson, securityEnabled: false) { }
+
+    public StorageVisionStudioApiFactory(long? maxArtifactBytes, string? siteConfigJson, bool securityEnabled)
     {
         _maxArtifactBytes = maxArtifactBytes ?? 1073741824;
+        _securityEnabled = securityEnabled;
         Directory.CreateDirectory(_root);
         if (siteConfigJson is not null)
         {
@@ -788,7 +1329,9 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
     {
         builder.UseEnvironment("Testing");
         builder.UseContentRoot(_root);
-        builder.UseSetting("Security:Enabled", "false");
+        // Q06：失败锁可达性测试需要**真实 Security 管道**（旧的端点测试一律关闭 Security，
+        // 无法证明生产认证路径可用）。
+        builder.UseSetting("Security:Enabled", _securityEnabled ? "true" : "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
         builder.UseSetting("Storage:WarningFreeBytes", "1");

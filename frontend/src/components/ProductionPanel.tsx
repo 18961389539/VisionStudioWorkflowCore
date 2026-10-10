@@ -1,9 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Descriptions, InputNumber, message, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { AlarmRecord, ProductionRuntimeConfig, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
+import { responseErrorMessage } from '../apiErrors';
+
+// R04：轮询节拍、单请求超时与"最后成功时间"语义——HTTP 失败不得让旧状态冒充实时数据。
+const PRODUCTION_POLL_TIMEOUT_MS = 5000;
 
 type JobItem = { id: string; name: string; productId?: string | null; recipeCode?: string | null; publishedVersion?: number | null };
+
+/// R05：待核对的设备动作（管理员核对入口的数据契约，与后端 ProductionDeviceActionPendingState 对齐）。
+export type DeviceActionPendingState = {
+  runId?: string | null;
+  manifestHash?: string | null;
+  deviceIds: string[];
+  robotIds: string[];
+  deviceFingerprints?: Record<string, string>;
+  phase?: string;
+  setAt?: string | null;
+  reason?: string | null;
+  unreadable?: boolean;
+};
 
 type Props = { open: boolean; onClose: () => void; embedded?: boolean };
 
@@ -51,26 +68,64 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const [startError, setStartError] = useState<string>();
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>();
   const [staleConnection, setStaleConnection] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
+  // R04：轮询代次 + 取消 + 超时。旧响应绝不覆盖新结果；请求挂起也不会让界面停留在
+  // "数据更新于当前时间"的假象上（503/401/500 必须显式标记陈旧并给出原因）。
+  const refreshGeneration = useRef(0);
+  const refreshAbort = useRef<AbortController | null>(null);
+  // R05：待核对设备动作——管理员必须在产品内看到清单并提交核对证据（此前后端具备能力但界面缺失）。
+  const [pendingActions, setPendingActions] = useState<DeviceActionPendingState>();
+  const [resolveOpen, setResolveOpen] = useState(false);
+  const [resolveForm] = Form.useForm<{ evidence: string; identityEvidence: string; reason?: string }>();
 
   const refresh = useCallback(async () => {
+    const generation = ++refreshGeneration.current;
+    refreshAbort.current?.abort();
+    const controller = new AbortController();
+    refreshAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), PRODUCTION_POLL_TIMEOUT_MS);
     try {
       const [statusRes, configRes, jobsRes, alarmsRes] = await Promise.all([
-        fetch('/api/production/status'), fetch('/api/production/config'), fetch('/api/jobs'), fetch('/api/alarms?activeOnly=false')
+        fetch('/api/production/status', { signal: controller.signal }),
+        fetch('/api/production/config', { signal: controller.signal }),
+        fetch('/api/jobs', { signal: controller.signal }),
+        fetch('/api/alarms?activeOnly=false', { signal: controller.signal })
       ]);
-      if (statusRes.ok) setStatus(await statusRes.json());
+      if (generation !== refreshGeneration.current) return; // 旧响应：丢弃，不覆盖更新的结果
+      // 只有**关键生产快照**真正取到才算刷新成功——可选数据（配置/配方/报警）失败只降级显示。
+      if (!statusRes.ok)
+        throw new Error(await responseErrorMessage(statusRes, `生产状态读取失败（HTTP ${statusRes.status}）`));
+      setStatus(await statusRes.json());
       if (configRes.ok) setConfig(await configRes.json());
       if (jobsRes.ok) setJobs(await jobsRes.json());
       if (alarmsRes.ok) setAlarms(await alarmsRes.json());
+      try {
+        const pendingRes = await fetch('/api/production/device-actions/pending', { signal: controller.signal });
+        if (generation === refreshGeneration.current)
+          setPendingActions(pendingRes.ok && pendingRes.status !== 204 ? await pendingRes.json() : undefined);
+      } catch { /* 待核对清单是辅助信息：读取失败不影响主快照的新鲜度判定 */ }
       setLastUpdatedAt(new Date());
       setStaleConnection(false);
-    } catch { setStaleConnection(true); /* keep the operator screen alive while the host restarts */ }
+      setRefreshError(undefined);
+    } catch (error) {
+      if (generation !== refreshGeneration.current) return;
+      // keep the operator screen alive while the host restarts — but never present stale data as current
+      setStaleConnection(true);
+      setRefreshError(error instanceof Error ? error.message : '生产状态读取失败');
+    } finally {
+      window.clearTimeout(timeout);
+      if (refreshAbort.current === controller) refreshAbort.current = null;
+    }
   }, []);
 
   useEffect(() => {
     if (!open) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      refreshAbort.current?.abort();
+    };
   }, [open, refresh]);
 
   // 错误原因优先后端的 ProblemDetails.detail；失败信息同时返回调用方，用于持久展示而不是一闪而过
@@ -134,7 +189,9 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <div className="production-hero-metric"><b>{(status?.lastDurationMs ?? 0).toFixed(1)}</b><span>最近耗时（毫秒）</span></div>
       </div>
       <span className={`production-hero-updated${staleConnection ? ' stale' : ''}`}>
-        {staleConnection ? '数据更新已中断（主机可能重启中）' : `数据更新于 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '-'}`}
+        {staleConnection
+          ? `数据已过期 · 最后成功更新 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '—'}${refreshError ? ` · ${refreshError}` : ''}`
+          : `数据更新于 ${lastUpdatedAt?.toLocaleTimeString('zh-CN') ?? '-'}`}
       </span>
     </div>
   );
@@ -333,6 +390,70 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       {contextHolder}
       {hero}
       {actions}
+      {/* R05：待核对设备动作——管理员必须在产品内看到清单、提交可追溯的证据；
+          核对前所有设备动作入口（生产/手动/临时运行）都会被统一授权闸门拒绝。 */}
+      {pendingActions && (
+        <Alert
+          type="error"
+          showIcon
+          message="存在待核对的设备动作：核对前所有设备动作入口都会被拒绝"
+          description={
+            <Space direction="vertical" size={4}>
+              <span>原因：{pendingActions.reason ?? '上一周期的设备动作结果未确认'}{pendingActions.unreadable ? '（安全状态文件不可读，需人工处理）' : ''}</span>
+              {pendingActions.runId && <span>运行：{pendingActions.runId}</span>}
+              {pendingActions.deviceIds.length > 0 && <span>涉及设备：{pendingActions.deviceIds.join('、')}</span>}
+              {pendingActions.robotIds.length > 0 && <span>涉及机器人：{pendingActions.robotIds.join('、')}</span>}
+              <span>步骤：现场核对设备物理状态与身份 → 提交核对证据（写入审计）→ 生产/手动动作恢复可用。</span>
+              <Button danger size="small" onClick={() => setResolveOpen(true)}>提交核对证据</Button>
+            </Space>
+          }
+        />
+      )}
+      <Modal
+        open={resolveOpen}
+        onCancel={() => setResolveOpen(false)}
+        title="提交设备动作核对证据"
+        okText="提交核对"
+        okButtonProps={{ danger: true }}
+        onOk={async () => {
+          try {
+            const values = await resolveForm.validateFields();
+            setBusy('resolve');
+            const response = await fetch('/api/production/device-actions/resolve', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                runId: pendingActions?.runId ?? '',
+                manifestHash: pendingActions?.manifestHash ?? '',
+                deviceIds: pendingActions?.deviceIds ?? [],
+                robotIds: pendingActions?.robotIds ?? [],
+                reason: values.reason ?? 'manual reconciliation',
+                evidence: values.evidence,
+                deviceIdentityEvidence: values.identityEvidence
+              })
+            });
+            if (!response.ok) throw new Error(await responseErrorMessage(response, `核对提交失败（HTTP ${response.status}）`));
+            messageApi.success('核对证据已提交并写入审计');
+            setResolveOpen(false);
+            resolveForm.resetFields();
+            await refresh();
+          } catch (error) {
+            if (error instanceof Error && error.message) messageApi.error(error.message);
+          } finally { setBusy(undefined); }
+        }}
+      >
+        <Form form={resolveForm} layout="vertical">
+          <Form.Item name="evidence" label="现场核对证据（必填）" rules={[{ required: true, message: '请填写现场核对证据' }]}>
+            <Input.TextArea rows={3} placeholder="例：PLC 触发位已复位为 0，机器人回到安全位，示教器无待处理指令（含时间与执行人）" />
+          </Form.Item>
+          <Form.Item name="identityEvidence" label="设备身份证据（必填）" rules={[{ required: true, message: '请填写设备身份证据' }]}>
+            <Input.TextArea rows={2} placeholder="例：设备铭牌/序列号、在线诊断中的端点与驱动版本，与待核对清单一致" />
+          </Form.Item>
+          <Form.Item name="reason" label="核对说明（可选）">
+            <Input placeholder="例：现场确认上一周期动作已完成/已撤销" />
+          </Form.Item>
+        </Form>
+      </Modal>
       {state === 'Faulted' && (
         <Alert
           type="error"

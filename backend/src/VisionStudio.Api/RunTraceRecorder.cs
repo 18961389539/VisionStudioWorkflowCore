@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
@@ -27,6 +28,25 @@ public sealed class RunTraceRecorder(TraceabilityStore traces, ILogger<RunTraceR
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Run {RunId} start record could not be written.", runId);
+        }
+    }
+
+    /// <summary>
+    /// R01：副作用运行的起始记录——失败必须抛出，调用方不得盲跑设备动作。
+    /// 纯计算运行保留 <see cref="BeginAsync"/> 的 best-effort 语义。
+    /// </summary>
+    public async Task BeginStrictAsync(string runId, DateTimeOffset startedAt, WorkflowDefinition workflow, RunTraceContext context)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(WriteTimeout);
+            await traces.BeginAsync(runId, startedAt, workflow, context, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            throw new ApiUnavailableException(
+                $"Refusing to execute a device side-effect workflow: its start record could not be persisted ({ex.Message}). " +
+                "Resolve the metadata storage problem before running device actions.");
         }
     }
 

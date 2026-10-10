@@ -101,10 +101,12 @@ public static class CameraEndpoints
             return Results.Ok(cameras.Get(id));
         }).RequireEngineer("camera.settings.update", "camera");
 
-        app.MapPost("/api/cameras/{id}/trigger", (string id, CameraManager cameras, DeviceLeaseRegistry leases) =>
+        app.MapPost("/api/cameras/{id}/trigger", (string id, CameraManager cameras, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth) =>
         {
             // 请求期硬件租约：触发期间独占该相机（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("camera", id, $"Cannot trigger camera '{id}'");
+            // R01：统一动作授权——触发会产出真实帧，属设备动作入口。
+            using var intent = auth.BeginManualIntent("camera.trigger", [], [], [id]);
             cameras.Trigger(id);
             return Results.Ok(cameras.Get(id));
         }).RequireOperator("camera.trigger", "camera");

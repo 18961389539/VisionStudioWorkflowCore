@@ -156,9 +156,18 @@ public sealed class RuntimeDependencyManifestService(
     /// F02：按 ID 清单核对设备/机器人状态（与 <see cref="VerifyLockedDevices(RuntimeDependencyManifest)"/>
     /// 同一判定标准）。持久化的"故障时锁定清单"可能不属于当前发布流程——核对必须无条件针对该清单，
     /// 否则切换到无设备的新流程时，空清单会必然通过。
+    /// Q02：核对条件强化——连接状态只是必要条件：
+    ///   · 设备要求存在**新鲜**采样（有读数时，最新时间戳必须在阈值内），过期反馈不能证明上一动作；
+    ///   · 传入指纹时校验设备身份/端点未漂移（替换成别的设备同样"Connected"）；
+    ///   · 机器人额外要求无未完成的底层停止调用（Q04 登记）。
     /// </summary>
-    public DeviceStateVerification VerifyLockedDevices(IReadOnlyList<string> deviceIds, IReadOnlyList<string> robotIds)
+    public DeviceStateVerification VerifyLockedDevices(
+        IReadOnlyList<string> deviceIds,
+        IReadOnlyList<string> robotIds,
+        IReadOnlyDictionary<string, string>? expectedDeviceFingerprints = null,
+        TimeSpan? maxSampleAge = null)
     {
+        var sampleAgeThreshold = maxSampleAge ?? MaxSampleAge;
         var issues = new List<string>();
         foreach (var deviceId in deviceIds)
         {
@@ -166,7 +175,30 @@ public sealed class RuntimeDependencyManifestService(
             {
                 var descriptor = devices.Get(deviceId);
                 if (descriptor.ConnectionState != DeviceConnectionState.Connected)
+                {
                     issues.Add($"device '{deviceId}' is {descriptor.ConnectionState}, not Connected — the previous cycle's writes cannot be confirmed ({descriptor.Error ?? "no detail"})");
+                    continue;
+                }
+                // Q02：连接的证明力到此为止。上一动作的结果必须由**新鲜**反馈佐证：
+                // 有采样值但已过期（轮询停止/通信半死）时，Connected 只说明 socket 还在。
+                if (descriptor.Values.Count > 0)
+                {
+                    var newest = descriptor.Values.Values.Max(x => x.Timestamp);
+                    var age = DateTimeOffset.UtcNow - newest;
+                    if (age > sampleAgeThreshold)
+                        issues.Add($"device '{deviceId}' has no fresh samples (latest is {age.TotalSeconds:0.#}s old, threshold {sampleAgeThreshold.TotalSeconds:0.#}s) — stale feedback cannot confirm the previous cycle's writes");
+                }
+                // 设备身份/端点漂移：替换后的设备也会报告 Connected，但已不是执行上一动作的那一个。
+                if (expectedDeviceFingerprints is not null &&
+                    expectedDeviceFingerprints.TryGetValue(deviceId, out var expected) &&
+                    !string.IsNullOrWhiteSpace(expected))
+                {
+                    var actual = DeviceFingerprint(descriptor);
+                    if (!string.Equals(actual, expected, StringComparison.Ordinal))
+                        issues.Add($"device '{deviceId}' identity drifted since the unconfirmed action (expected '{expected}', found '{actual}')");
+                }
+                if (!string.IsNullOrWhiteSpace(descriptor.Error))
+                    issues.Add($"device '{deviceId}' reports error: {descriptor.Error}");
             }
             catch (Exception ex)
             {
@@ -190,6 +222,9 @@ public sealed class RuntimeDependencyManifestService(
                 // 未完成命令：握手停在 Executing/TargetAccepted 说明上一条命令没有被确认收尾。
                 if (descriptor.HandshakeState is RobotHandshakeState.Executing or RobotHandshakeState.TargetAccepted)
                     issues.Add($"robot '{robotId}' has an unconfirmed command {descriptor.LastCommandId} in state {descriptor.HandshakeState}");
+                // Q02/Q04：存在未返回的底层停止调用时，迟到的 Stop 可能落在新动作之后——不得放行。
+                if (robots.HasPendingStop(robotId))
+                    issues.Add($"robot '{robotId}' has an outstanding stop call that has not returned — the robot state is not yet reconciled");
                 if (!string.IsNullOrWhiteSpace(descriptor.Error))
                     issues.Add($"robot '{robotId}' reports error: {descriptor.Error}");
             }
@@ -200,6 +235,41 @@ public sealed class RuntimeDependencyManifestService(
         }
         return new DeviceStateVerification(issues.Count == 0, issues);
     }
+
+    /// <summary>Reject manual reconciliation while a robot command or underlying stop operation is still active.</summary>
+    public DeviceStateVerification VerifyNoPendingRobotOperations(IReadOnlyList<string> robotIds)
+    {
+        var issues = new List<string>();
+        foreach (var robotId in robotIds)
+        {
+            try
+            {
+                var descriptor = robots.Get(robotId);
+                if (robots.HasPendingStop(robotId))
+                    issues.Add($"robot '{robotId}' still has an outstanding stop call");
+                if (descriptor.Busy || descriptor.HandshakeState == RobotHandshakeState.Executing)
+                    issues.Add($"robot '{robotId}' still has an unconfirmed active command {descriptor.LastCommandId} ({descriptor.HandshakeState})");
+            }
+            catch (Exception ex) { issues.Add($"robot '{robotId}' cannot be checked for pending operations: {ex.Message}"); }
+        }
+        return new DeviceStateVerification(issues.Count == 0, issues);
+    }
+
+    /// <summary>Q02：设备身份指纹（driver|protocol|endpoint）——用于检测"换成另一台设备"的漂移。</summary>
+    public static string DeviceFingerprint(DeviceDescriptor descriptor)
+        => $"{descriptor.Driver}|{descriptor.Protocol}|{descriptor.Endpoint}";
+
+    /// <summary>Q02：按 ID 取当前设备身份指纹（登记动作安全状态时捕获）。设备不可解析时返回 null。</summary>
+    public string? TryGetDeviceFingerprint(string deviceId)
+    {
+        try { return DeviceFingerprint(devices.Get(deviceId)); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Q02：设备采样新鲜度阈值（可测试覆盖）。超过该阈值的反馈视为过期，不能作为动作核对证据。
+    /// </summary>
+    internal static TimeSpan MaxSampleAge { get; set; } = TimeSpan.FromSeconds(5);
 
     public async Task<RuntimeDependencyManifest> CaptureAsync(WorkflowDefinition workflow, CancellationToken ct)
     {

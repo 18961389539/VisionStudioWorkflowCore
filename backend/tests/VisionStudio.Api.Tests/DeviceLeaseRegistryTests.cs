@@ -86,10 +86,14 @@ public sealed class DeviceLeaseRegistryTests
     }
 
     [Fact]
-    public void TtlLease_AutoReleases_AndReportsRemainingTime()
+    public void TtlLease_ExpiresIntoAbandoned_TakeoverRequiresIdleProbe()
     {
+        // R02：TTL 到期只证明"持有者可能失联"，不证明"底层操作已结束"（机器人等待上限 120 秒、
+        // 驱动可能忽略取消）。过期租约转为 Abandoned：探针确认资源空闲前一律拒绝接管；
+        // 确认空闲后接管换发新代次，陈旧句柄的释放不再影响新持有者（fencing）。
         var clock = new FakeTimeProvider();
-        var registry = new DeviceLeaseRegistry(clock);
+        var probe = new ControllableProbe();
+        var registry = new DeviceLeaseRegistry(clock, probe);
         using var manual = registry.AcquireOrThrow(
             DeviceLeaseOwner.Manual("request-1"), [Res("robot", "r1")], "operate", ttl: TimeSpan.FromSeconds(60));
 
@@ -98,11 +102,33 @@ public sealed class DeviceLeaseRegistryTests
         Assert.Null(blocked);
         var conflict = Assert.Single(conflicts);
         Assert.Equal(TimeSpan.FromSeconds(50), conflict.Remaining);
+        Assert.False(conflict.Abandoned);
         Assert.Contains("auto-release in 50s", DeviceLeaseRegistry.DescribeConflicts(conflicts));
 
+        // TTL 到期：租约不再被自动删除——操作仍可能活跃。
         clock.Advance(TimeSpan.FromSeconds(51));
+        probe.Busy = true;
+        Assert.Null(registry.TryAcquire(DeviceLeaseOwner.Production("job-1"), [Res("robot", "r1")], out var busyConflicts));
+        Assert.True(Assert.Single(busyConflicts).Abandoned);
+        Assert.Contains("takeover requires the device to report idle", DeviceLeaseRegistry.DescribeConflicts(busyConflicts));
+
+        // 探针确认空闲 → 允许接管。
+        probe.Busy = false;
         using var recovered = registry.AcquireOrThrow(DeviceLeaseOwner.Production("job-1"), [Res("robot", "r1")], "start");
         Assert.Equal(1, registry.ActiveLeaseCount);
+
+        // 陈旧句柄释放必须不影响新持有者（token 换代）。
+        manual.Dispose();
+        Assert.Equal(1, registry.ActiveLeaseCount);
+        var holder = Assert.Single(registry.DescribeConflicts([Res("robot", "r1")]));
+        Assert.Equal("job-1", holder.Owner.Id); // 仍由接管者持有，而不是被旧句柄清空
+    }
+
+    /// <summary>R02：可控活动探针——模拟"底层操作仍在执行/已结束"。</summary>
+    private sealed class ControllableProbe : IDeviceActivityProbe
+    {
+        public bool Busy { get; set; }
+        public bool IsResourceBusy(string resourceKind, string resourceId) => Busy;
     }
 
     [Fact]

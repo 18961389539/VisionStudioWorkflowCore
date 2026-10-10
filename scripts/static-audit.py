@@ -50,7 +50,11 @@ def doc_has(rel: str, token: str) -> bool:
     return token.lower() in (ROOT / rel).read_text(encoding='utf-8').lower()
 
 # JSON
-json_files = [p for p in ROOT.rglob('*.json') if 'node_modules' not in p.parts]
+json_files = [p for p in ROOT.rglob('*.json')
+              if 'node_modules' not in p.parts
+              # 产物/测试沙箱目录不属于仓库源码：其中的 JSON 由测试注入（含故意的损坏样本），
+              # 参与解析校验只会把沙箱残留当成源码问题。
+              and not any(part in ('bin', 'obj', '.artifacts', 'artifacts') for part in p.parts)]
 for p in json_files:
     try: json.loads(p.read_text(encoding='utf-8'))
     except Exception as e: fail(f'JSON {p.relative_to(ROOT)}: {e}')
@@ -570,7 +574,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 232  # 231 + POST /api/storage/maintenance/recover (F03 controlled recovery entry)
+expected_routes = 234  # 232 + POST /api/production/device-actions/resolve + GET /api/production/device-actions/pending (Q02 manual reconciliation, both RequireAdministrator)
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')

@@ -15,10 +15,19 @@ public enum CameraFrameMode
 /// </summary>
 public sealed class CameraManager : IAsyncDisposable
 {
-    private sealed record Runtime(ICameraDevice Device, CameraFrameHub Hub, CameraAcquisitionWorker Worker);
+    private sealed record Runtime(ICameraDevice Device, CameraFrameHub Hub, CameraAcquisitionWorker Worker)
+    {
+        public SemaphoreSlim LifecycleGate { get; } = new(1, 1);
+        public int DeferredDisposeStarted;
+    }
 
     private readonly ConcurrentDictionary<string, Runtime> _runtimes =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _registrationSync = new();
+    private readonly TimeSpan? _stopDrainGrace;
+    private int _disposed;
+
+    public CameraManager(TimeSpan? stopDrainGrace = null) => _stopDrainGrace = stopDrainGrace;
 
     public IReadOnlyList<CameraDescriptor> List() => _runtimes.Values
         .Select(ToDescriptor)
@@ -27,12 +36,16 @@ public sealed class CameraManager : IAsyncDisposable
 
     public void Register(ICameraDevice device, int ringCapacity = 4)
     {
-        var hub = new CameraFrameHub(ringCapacity);
-        var runtime = new Runtime(device, hub, new CameraAcquisitionWorker(device, hub));
-        if (_runtimes.TryAdd(device.Id, runtime)) return;
-        hub.Dispose();
-        runtime.Worker.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        throw new InvalidOperationException($"Camera '{device.Id}' is already registered.");
+        lock (_registrationSync)
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            var hub = new CameraFrameHub(ringCapacity);
+            var runtime = new Runtime(device, hub, new CameraAcquisitionWorker(device, hub, _stopDrainGrace));
+            if (_runtimes.TryAdd(device.Id, runtime)) return;
+            hub.Dispose();
+            runtime.Worker.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new InvalidOperationException($"Camera '{device.Id}' is already registered.");
+        }
     }
 
     public FileCameraDevice RegisterFile(string id, string name, string logicalSource, string physicalSource)
@@ -43,11 +56,29 @@ public sealed class CameraManager : IAsyncDisposable
     }
 
     private Runtime RequireRuntime(string id) =>
-        _runtimes.TryGetValue(id, out var runtime)
+        Volatile.Read(ref _disposed) != 0
+            ? throw new ObjectDisposedException(nameof(CameraManager))
+            : _runtimes.TryGetValue(id, out var runtime)
             ? runtime
             : throw new KeyNotFoundException($"Camera '{id}' is not registered.");
 
     public ICameraDevice Require(string id) => RequireRuntime(id).Device;
+
+    /// <summary>
+    /// R02：该相机当前是否处于采集/收尾/隔离状态——租约接管的空闲判定依据
+    /// （Stopped/Faulted 之外的任何状态都视为忙碌）。
+    /// </summary>
+    public bool IsAcquisitionActive(string id)
+    {
+        var worker = RequireRuntime(id).Worker;
+        return worker.IsRunning ||
+               worker.Snapshot().AcquisitionState is CameraAcquisitionState.Starting
+                   or CameraAcquisitionState.Running
+                   or CameraAcquisitionState.WaitingTrigger
+                   or CameraAcquisitionState.Reconnecting
+                   or CameraAcquisitionState.Stopping
+                   or CameraAcquisitionState.StopUnconfirmed;
+    }
     public CameraDescriptor Get(string id) => ToDescriptor(RequireRuntime(id));
 
     public CameraTransportTelemetry GetTransportTelemetry(string id)
@@ -59,40 +90,75 @@ public sealed class CameraManager : IAsyncDisposable
             Error: "Camera adapter does not expose vendor transport telemetry.");
     }
 
-    public Task OpenAsync(string id, CancellationToken cancellationToken = default) => Require(id).OpenAsync(cancellationToken);
+    public async Task OpenAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var runtime = RequireRuntime(id);
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try { ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this); await runtime.Device.OpenAsync(cancellationToken); }
+        finally { runtime.LifecycleGate.Release(); }
+    }
 
     public async Task CloseAsync(string id, CancellationToken cancellationToken = default)
     {
         var runtime = RequireRuntime(id);
-        await runtime.Worker.StopAsync(cancellationToken);
-        try { await runtime.Device.StopAsync(cancellationToken); } catch { }
-        await runtime.Device.CloseAsync(cancellationToken);
-        runtime.Hub.Clear();
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            await runtime.Worker.StopAsync(cancellationToken);
+            if (runtime.Worker.IsStopUnconfirmed)
+                throw new InvalidOperationException($"Camera '{id}' acquisition has an unconfirmed in-flight grab. The SDK session was retained; retry close after the grab returns.");
+            try { await runtime.Device.StopAsync(cancellationToken); } catch { }
+            await runtime.Device.CloseAsync(cancellationToken);
+            runtime.Hub.Clear();
+        }
+        finally { runtime.LifecycleGate.Release(); }
     }
 
     public async Task StartAsync(string id, CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var runtime = RequireRuntime(id);
-        if (!runtime.Worker.IsRunning) runtime.Hub.Clear();
-        await runtime.Worker.StartAsync(cancellationToken);
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (!runtime.Worker.IsRunning && !runtime.Worker.IsStopUnconfirmed) runtime.Hub.Clear();
+            await runtime.Worker.StartAsync(cancellationToken);
+        }
+        finally { runtime.LifecycleGate.Release(); }
     }
 
     public async Task StopAsync(string id, CancellationToken cancellationToken = default)
     {
         var runtime = RequireRuntime(id);
-        await runtime.Worker.StopAsync(cancellationToken);
-        await runtime.Device.StopAsync(cancellationToken);
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            await runtime.Worker.StopAsync(cancellationToken);
+            if (runtime.Worker.IsStopUnconfirmed)
+                throw new InvalidOperationException($"Camera '{id}' acquisition has an unconfirmed in-flight grab. The SDK session was retained; retry stop after the grab returns.");
+            await runtime.Device.StopAsync(cancellationToken);
+        }
+        finally { runtime.LifecycleGate.Release(); }
     }
 
     public async Task ApplySettingsAsync(string id, CameraSettings settings, CancellationToken cancellationToken = default)
     {
         var runtime = RequireRuntime(id);
-        var previousMode = runtime.Device.Settings.TriggerMode;
-        var normalized = settings.Normalize();
-        await runtime.Device.ApplySettingsAsync(normalized, cancellationToken);
-        // A worker parked waiting for a trigger must be woken when switching back to free-run.
-        if (previousMode is not CameraTriggerMode.Continuous && normalized.TriggerMode == CameraTriggerMode.Continuous)
-            runtime.Worker.Wake();
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            var previousMode = runtime.Device.Settings.TriggerMode;
+            var normalized = settings.Normalize();
+            await runtime.Device.ApplySettingsAsync(normalized, cancellationToken);
+            // A worker parked waiting for a trigger must be woken when switching back to free-run.
+            if (previousMode is not CameraTriggerMode.Continuous && normalized.TriggerMode == CameraTriggerMode.Continuous)
+                runtime.Worker.Wake();
+        }
+        finally { runtime.LifecycleGate.Release(); }
     }
 
     public CameraCommissioningCapabilities GetCommissioningCapabilities(string id)
@@ -168,12 +234,18 @@ public sealed class CameraManager : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var runtime = RequireRuntime(id);
-        if (!runtime.Worker.IsRunning)
+        await runtime.LifecycleGate.WaitAsync(cancellationToken);
+        try
         {
-            if (!autoStart) throw new InvalidOperationException($"Camera '{id}' acquisition is stopped and Auto Start is disabled.");
-            runtime.Hub.Clear();
-            await runtime.Worker.StartAsync(cancellationToken);
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (!runtime.Worker.IsRunning)
+            {
+                if (!autoStart) throw new InvalidOperationException($"Camera '{id}' acquisition is stopped and Auto Start is disabled.");
+                runtime.Hub.Clear();
+                await runtime.Worker.StartAsync(cancellationToken);
+            }
         }
+        finally { runtime.LifecycleGate.Release(); }
 
         if (triggerBeforeGrab)
         {
@@ -216,13 +288,50 @@ public sealed class CameraManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var runtime in _runtimes.Values)
+        Runtime[] runtimes;
+        lock (_registrationSync)
         {
-            try { await runtime.Worker.DisposeAsync(); } catch { }
-            try { await runtime.Device.DisposeAsync(); } catch { }
-            runtime.Hub.Dispose();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            runtimes = _runtimes.Values.ToArray();
         }
-        _runtimes.Clear();
+        foreach (var runtime in runtimes)
+        {
+            await runtime.LifecycleGate.WaitAsync();
+            try
+            {
+                try { await runtime.Worker.DisposeAsync(); } catch { }
+                if (runtime.Worker.IsStopUnconfirmed)
+                {
+                    if (Interlocked.Exchange(ref runtime.DeferredDisposeStarted, 1) == 0)
+                        _ = DisposeAfterStopConfirmationAsync(runtime);
+                    continue;
+                }
+                try { await runtime.Device.DisposeAsync(); } catch { }
+                runtime.Hub.Dispose();
+                _runtimes.TryRemove(runtime.Device.Id, out _);
+            }
+            finally { runtime.LifecycleGate.Release(); }
+        }
+    }
+
+    private async Task DisposeAfterStopConfirmationAsync(Runtime runtime)
+    {
+        try
+        {
+            await runtime.Worker.WaitForStopConfirmationAsync().ConfigureAwait(false);
+            await runtime.LifecycleGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+            await runtime.Worker.DisposeAsync().ConfigureAwait(false);
+            try { await runtime.Device.StopAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
+            try { await runtime.Device.CloseAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
+            try { await runtime.Device.DisposeAsync().ConfigureAwait(false); } catch { }
+            runtime.Hub.Dispose();
+            _runtimes.TryRemove(runtime.Device.Id, out _);
+            }
+            finally { runtime.LifecycleGate.Release(); }
+        }
+        catch { /* Process shutdown remains best-effort; never release the device before the grab exits. */ }
     }
 
     private static CameraDescriptor ToDescriptor(Runtime runtime) => new(

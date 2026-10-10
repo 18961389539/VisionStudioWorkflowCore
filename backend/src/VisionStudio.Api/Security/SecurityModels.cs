@@ -30,6 +30,12 @@ public sealed class SecurityOptions
     /// <summary>启动时免密码以内置管理员身份建立会话（默认关闭）。</summary>
     public bool AutoLoginAdmin { get; set; }
 
+    /// <summary>
+    /// R08：允许把明文 HTTP 绑定到非 loopback 地址。默认 false——把控制端口暴露到网络必须
+    /// 使用 HTTPS（或可信反向代理终止 TLS）；仅为隔离测试网络保留逃生舱。
+    /// </summary>
+    public bool AllowInsecureRemoteTransport { get; set; }
+
     /// <summary>自动登录使用的内置管理员账号名，账号不存在时自动创建（随机口令，不对外公开）。</summary>
     public string AutoLoginUsername { get; set; } = "admin";
 
