@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
 namespace VisionStudio.Api.Infrastructure;
@@ -16,7 +15,7 @@ public sealed class RuntimeOnlyMiddleware(RequestDelegate next, IConfiguration c
 
         if (_runtimeOnly && path.StartsWithSegments("/api") && !safeRead && !RuntimeOnlyPolicy.IsMutationAllowed(path, context.Request.Method))
         {
-            var correlationId = Activity.Current?.Id ?? context.TraceIdentifier;
+            var correlationId = RequestCorrelation.Get(context);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.Response.Headers["X-Correlation-ID"] = correlationId;
 
@@ -58,6 +57,8 @@ public static class RuntimeOnlyPolicy
             if (value.Equals("/api/storage/backups", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(method)) return true;
             if (value.StartsWith("/api/storage/backups/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsDelete(method)) return true;
             if (value.Equals("/api/storage/restore", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(method)) return true;
+            // F03：受控恢复入口（失败锁核验后解锁）在运行模式下同样必须可达。
+            if (value.Equals("/api/storage/maintenance/recover", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(method)) return true;
         }
         if (!HttpMethods.IsPost(method)) return false;
         if (value.Equals("/api/production/start", StringComparison.OrdinalIgnoreCase)) return true;

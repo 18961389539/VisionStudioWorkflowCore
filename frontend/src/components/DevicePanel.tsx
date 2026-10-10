@@ -51,6 +51,9 @@ const displayValue = (value: unknown) => {
 
 export default function DevicePanel({ open, onClose }: Props) {
   const [devices, setDevices] = useState<DeviceDescriptor[]>([]);
+  // F11：最近一次成功刷新的时间与陈旧标识——静默轮询失败不能只是"保留旧数据"而不留痕迹。
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
+  const [stale, setStale] = useState(false);
   const [selectedId, setSelectedId] = useState('virtual-modbus-1');
   const [selectedTagId, setSelectedTagId] = useState('trigger');
   const [busy, setBusy] = useState('');
@@ -69,8 +72,12 @@ export default function DevicePanel({ open, onClose }: Props) {
       if (!response.ok) throw new Error('Device runtime unavailable');
       const data: DeviceDescriptor[] = await response.json();
       setDevices(data);
+      setLastSuccessAt(Date.now());
+      setStale(false);
       if (!data.some((x) => x.id === selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (error) {
+      // F11：无论手动还是静默轮询，失败都标记陈旧；已有数据保留但显示"可能已过期"。
+      setStale(true);
       if (!quiet) messageApi.error(error instanceof Error ? error.message : 'Device refresh failed');
     }
   };
@@ -205,6 +212,14 @@ export default function DevicePanel({ open, onClose }: Props) {
 
   const registerKind = Form.useWatch('kind', registerForm);
 
+  // F11：面板头部的时间/状态标签——轮询失败时明确提示数据可能过期，而不是静默展示旧值。
+  const freshnessTag = lastSuccessAt === null
+    ? { color: stale ? 'red' : 'default', text: stale ? '设备数据暂不可用' : '等待首次刷新' }
+    : {
+        color: stale ? 'red' : 'green',
+        text: `最后更新 ${new Date(lastSuccessAt).toLocaleTimeString('zh-CN', { hour12: false })}${stale ? ' · 数据可能已过期' : ''}`
+      };
+
   return (
     <Modal open={open} onCancel={onClose} footer={null} width={1360} title="设备运行时 · NModbus / Siemens S7 / 标签 / 诊断" destroyOnHidden>
       {contextHolder}
@@ -213,6 +228,7 @@ export default function DevicePanel({ open, onClose }: Props) {
         <Button type="primary" onClick={() => openRegistration('modbus')}>+ Modbus TCP</Button>
         <Button onClick={() => openRegistration('s7')}>+ Siemens S7</Button>
         <Tag color="blue">设备驱动</Tag><Tag color="purple">批量设备驱动</Tag><Tag color="cyan">强类型标签</Tag><Tag color="gold">质量状态 + 时间戳</Tag>
+        <Tag color={freshnessTag.color}>{freshnessTag.text}</Tag>
       </Space>
 
       <Table<DeviceDescriptor>

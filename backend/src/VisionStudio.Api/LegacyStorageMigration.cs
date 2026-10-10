@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
@@ -63,7 +64,7 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateJobsAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(_env.ContentRootPath, "data", "jobs");
+        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "jobs");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -108,7 +109,7 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateCalibrationsAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(_env.ContentRootPath, "data", "calibrations");
+        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "calibrations");
         if (!Directory.Exists(root)) return 0;
         var count = 0;
         foreach (var dir in Directory.EnumerateDirectories(root))
@@ -154,9 +155,9 @@ public sealed class LegacyStorageMigrationService
 
     private async Task<int> MigrateTracesAsync(SqliteConnection connection, CancellationToken ct)
     {
-        var root = Path.Combine(_env.ContentRootPath, "data", "traces");
+        var root = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "traces");
         if (!Directory.Exists(root)) return 0;
-        var artifactRoot = Path.Combine(_env.ContentRootPath, "data", "artifacts");
+        var artifactRoot = Path.Combine(VisionStudioDataRoot.Resolve(_env.ContentRootPath), "artifacts");
         var count = 0;
         foreach (var metadataPath in Directory.EnumerateFiles(root, "metadata.json", SearchOption.AllDirectories))
         {

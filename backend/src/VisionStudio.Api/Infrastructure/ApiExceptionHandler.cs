@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
@@ -18,7 +17,8 @@ public sealed class ApiExceptionHandler(
             return false;
 
         var classification = Classify(exception);
-        var correlationId = Activity.Current?.Id ?? httpContext.TraceIdentifier;
+        // 与审计记录/其它中间件共用同一请求级关联 ID（首次计算后缓存），响应与审计永远可互相匹配
+        var correlationId = RequestCorrelation.Get(httpContext);
 
         if (classification.Status >= 500)
             logger.LogError(exception, "Unhandled API exception. CorrelationId={CorrelationId}", correlationId);

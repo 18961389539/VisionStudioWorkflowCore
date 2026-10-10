@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using System.Threading.RateLimiting;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Camera.Basler;
@@ -29,10 +30,28 @@ public static class VisionStudioServiceRegistration
         IConfiguration configuration,
         IWebHostEnvironment environment)
     {
+        // 生产环境禁止免密码管理员自动登录：开发便利开关（appsettings.json 默认 true）不得
+        // 随配置继承进入现场。Production（含未显式设置 ASPNETCORE_ENVIRONMENT 的默认情形）
+        // 下 AutoLoginAdmin=true 直接拒绝启动；本地开发请使用 Development 环境（run-dev.ps1）。
+        var securityOptions = configuration.GetSection("Security").Get<SecurityOptions>() ?? new SecurityOptions();
+        if (environment.IsProduction() && securityOptions.Enabled && securityOptions.AutoLoginAdmin)
+        {
+            throw new InvalidOperationException(
+                "Security:AutoLoginAdmin=true is not allowed in the Production environment. " +
+                "Disable it in appsettings.Production.json, or run local development with ASPNETCORE_ENVIRONMENT=Development.");
+        }
+
         services.ConfigureHttpJsonOptions(options =>
         {
             options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         });
+
+        // 持久滚动文件日志（data/logs，按天、保留 14 天）：现场故障后可直接取日志导出，
+        // 不依赖控制台留存。写入失败绝不影响主流程，但丢弃/失败计数经 /api/health 暴露（F10）。
+        var fileLogger = new RollingFileLoggerProvider(
+            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "logs"));
+        services.AddLogging(builder => builder.AddProvider(fileLogger));
+        services.AddSingleton(fileLogger);
 
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
@@ -90,7 +109,11 @@ public static class VisionStudioServiceRegistration
 
         services.AddSingleton<SqliteMetadataDatabase>();
         services.AddSingleton<LegacyStorageMigrationService>();
-        services.AddSingleton<StorageMaintenanceCoordinator>();
+        // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
+        // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
+        services.AddSingleton(sp => new StorageMaintenanceCoordinator(
+            Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), ".storage-maintenance", "failure-lock.json"),
+            sp.GetRequiredService<ILogger<StorageMaintenanceCoordinator>>()));
         services.AddSingleton<StorageCapacityService>();
 
         services.AddSingleton<VisionNodeRegistry>();
@@ -111,7 +134,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<GigENetworkDiagnosticsService>();
         services.AddSingleton<ISynchronizedFrameSetService>(sp => sp.GetRequiredService<CameraSynchronizationService>());
         services.AddSingleton<MediaLibraryService>();
-        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(environment.ContentRootPath, "data", "provenance")));
+        services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "provenance")));
         services.AddSingleton<VendorProvenanceProbeRegistry>();
         services.AddSingleton<HardwareProvenanceService>();
         services.AddSingleton<RobotCommandTraceStore>();
@@ -123,7 +146,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<IAssetHealthProvider, DeviceAssetHealthProvider>();
         services.AddSingleton<IAssetHealthProvider, RobotAssetHealthProvider>();
         services.AddSingleton<DiagnosticsCenterService>();
-        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(environment.ContentRootPath, "data", "devices")));
+        services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "devices")));
 
         var tcpSimulatorPort = configuration.GetValue("RobotTcpSimulator:Port", 40501);
         services.AddSingleton(_ => new TcpRobotSimulatorServer(tcpSimulatorPort));
@@ -179,6 +202,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ProductionRuntimeConfigStore>();
         services.AddSingleton<ProductionPtpDriftGuardService>();
         services.AddSingleton<ProductionSynchronizationHealthGuardService>();
+        // F01/F02：设备动作安全状态的持久化（副作用故障标记 + 锁定清单跨重启保留）。
+        services.AddSingleton<DeviceActionSafetyStore>();
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();

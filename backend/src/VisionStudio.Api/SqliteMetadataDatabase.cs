@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using Microsoft.Data.Sqlite;
 
 namespace VisionStudio.Api;
@@ -18,7 +19,7 @@ public sealed class SqliteMetadataDatabase
 
     public SqliteMetadataDatabase(IWebHostEnvironment env)
     {
-        var dataRoot = Path.Combine(env.ContentRootPath, "data");
+        var dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
         Directory.CreateDirectory(dataRoot);
         _databasePath = Path.Combine(dataRoot, "visionstudio.db");
         _connectionString = BuildConnectionString(_databasePath, SqliteOpenMode.ReadWriteCreate, pooling: true);

@@ -10,7 +10,8 @@ public sealed record DiagnosticsSummary(
     int Degraded,
     int Faulted,
     int Offline,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<string> StaleProviders);
 
 /// <summary>
 /// Normalizes health from all runtime asset managers, emits state/error/recovery events,
@@ -25,6 +26,10 @@ public sealed class DiagnosticsCenterService(
 {
     private readonly ConcurrentDictionary<string, AssetHealthSnapshot> _assets = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<AssetEventEnvelope> _events = new();
+    /// <summary>每个 provider 上次成功采样贡献的资产键：采样失败时用于保留这些资产（不被误判为删除）。</summary>
+    private readonly ConcurrentDictionary<string, HashSet<string>> _providerAssets = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>当前采样失败的 provider（ProviderId → 错误）：在汇总中暴露“数据可能过期”的信号。</summary>
+    private readonly ConcurrentDictionary<string, string> _failedProviders = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(Math.Clamp(configuration.GetValue("Diagnostics:PollIntervalMs", 1000), 200, 60_000));
     private readonly int _maxEvents = Math.Clamp(configuration.GetValue("Diagnostics:MaxEvents", 1000), 100, 10000);
 
@@ -47,7 +52,8 @@ public sealed class DiagnosticsCenterService(
             assets.Count(x => x.Level == AssetHealthLevel.Degraded),
             assets.Count(x => x.Level == AssetHealthLevel.Faulted),
             assets.Count(x => x.Level == AssetHealthLevel.Offline),
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            _failedProviders.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -71,9 +77,20 @@ public sealed class DiagnosticsCenterService(
             try { snapshots = provider.Snapshot(); }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Diagnostics provider {ProviderId} snapshot failed", provider.ProviderId);
+                // 采样失败不是“资产消失”：保留该 provider 上次贡献的资产（补进本轮 seen，跳过删除），
+                // 否则一次暂时故障就会被误报为 AssetRemoved 并从健康统计中消失；
+                // 该 provider 同时进入 StaleProviders，汇总里能看到“数据可能过期”。
+                logger.LogWarning(ex, "Diagnostics provider {ProviderId} snapshot failed; last known assets retained", provider.ProviderId);
+                _failedProviders[provider.ProviderId] = ex.Message;
+                if (_providerAssets.TryGetValue(provider.ProviderId, out var lastKnown))
+                    foreach (var key in lastKnown) seen.Add(key);
                 continue;
             }
+
+            _failedProviders.TryRemove(provider.ProviderId, out _);
+            _providerAssets[provider.ProviderId] = snapshots
+                .Select(x => x.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var current in snapshots)
             {

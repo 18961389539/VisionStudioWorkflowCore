@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using VisionStudio.Api;
 
 namespace VisionStudio.Api.Tests;
 
@@ -70,6 +72,33 @@ public sealed class SecurityTests
         var user = await EnsureAdminAsync(admin);
         var response = await admin.PutAsJsonAsync($"/api/security/users/{user.GetProperty("id").GetString()}", new { displayName = "Plant Administrator", role = "Engineer", enabled = true });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConcurrentAdministratorDemotions_CannotRemoveLastAdministrators()
+    {
+        // F09 回归：两名并发降级必须至少保留一名启用管理员。若检查与 UPDATE 不在同一写事务中，
+        // 两路请求都能读到"还有另一名管理员"并依次降级。事务化（BEGIN IMMEDIATE）后其中一路必然冲突。
+        using var factory = new SecureVisionStudioApiFactory();
+        using var admin = factory.CreateFreshClient();
+        var first = await EnsureAdminAsync(admin);
+        var secondResponse = await admin.PostAsJsonAsync("/api/security/users", new { username = "admin2", displayName = "Second Admin", role = "Administrator", password = "Admin2!234567" });
+        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        var second = await secondResponse.Content.ReadFromJsonAsync<JsonElement>();
+
+        var demoteFirst = admin.PutAsJsonAsync($"/api/security/users/{first.GetProperty("id").GetString()}", new { displayName = "Plant Administrator", role = "Engineer", enabled = true });
+        var demoteSecond = admin.PutAsJsonAsync($"/api/security/users/{second.GetProperty("id").GetString()}", new { displayName = "Second Admin", role = "Engineer", enabled = true });
+        var responses = await Task.WhenAll(demoteFirst, demoteSecond);
+        // 两路并发降级必有一路失败：事务串行化会拒绝其一（409）；若被降级的管理员恰是请求发起者，
+        // 其后续请求还可能在授权层被拒（403）——两者都表示"最后的管理员未被移除"。
+        Assert.Contains(responses, r => r.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.Forbidden);
+
+        // 直接查库断言（降级后的会话可能不再是管理员，不能再走列表 API）。
+        var db = factory.Services.GetRequiredService<SqliteMetadataDatabase>();
+        await using var connection = await db.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM security_users WHERE enabled=1 AND role='Administrator';";
+        Assert.Equal(1L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]

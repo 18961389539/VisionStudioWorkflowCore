@@ -191,6 +191,43 @@ public sealed class DebugSessionsAndSideEffectTests
             sessions.StartAsync(workflow, new VisionRunOptions(DebugRunMode.RunNode, "a")));
     }
 
+    [Fact]
+    public async Task Session_ConcurrentRelease_AllCallersAwaitTheSameReleaseTask()
+    {
+        BlockingExecutor.Reset();
+        ProduceExecutor.Reset();
+        await using var provider = BuildProvider();
+        var sessions = provider.GetRequiredService<WorkflowDebugSessionService>();
+        var workflow = new VisionStudio.Abstractions.WorkflowDefinition(
+            "session-concurrent-release",
+            "Concurrent Release",
+            [
+                new NodeDefinition("a", ProduceExecutor.NodeType, "a", null, null),
+                new NodeDefinition("b", BlockingExecutor.NodeType, "b", null, null)
+            ],
+            [new VisionStudio.Abstractions.EdgeDefinition("c1", "a", "next", "b", "exec", "control")]);
+
+        var (session, seg1) = await sessions.StartAsync(workflow, new VisionRunOptions(DebugRunMode.Breakpoints, null, ["a"]));
+        Assert.Equal("a", seg1.HaltNodeId);
+
+        // Continue 进入阻塞节点 b：Gate 被执行持住，释放无法立即完成（复现删除请求与宿主清理交错的窗口）
+        var continueTask = sessions.ContinueAsync(session, default);
+        await BlockingExecutor.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var first = session.ReleaseAsync();
+        var second = session.ReleaseAsync();
+
+        // 关键回归点：并发释放必须共享同一个释放任务——第二个调用等待第一个完成后再返回，
+        // 否则调用方会在执行仍在运行、资源尚未释放时就释放硬件租约。
+        Assert.Same(first, second);
+        Assert.False(second.IsCompleted);
+
+        BlockingExecutor.ReleaseGate.TrySetResult();
+        await continueTask.ContinueWith(_ => { }, TaskScheduler.Default); // 正常返回或取消都属于预期收尾
+        await second.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(session.Disposed);
+    }
+
     private static WorkflowDefinition EffectThenProduceWorkflow(string id)
     {
         var workflow = ProduceChain(id, ("compute", 5));
@@ -225,6 +262,7 @@ public sealed class DebugSessionsAndSideEffectTests
         var registry = new VisionNodeRegistry();
         registry.Register(ProduceExecutor.Catalog, new ProduceExecutor(), "test");
         registry.Register(EffectExecutor.Catalog, new EffectExecutor(), "test");
+        registry.Register(BlockingExecutor.Catalog, new BlockingExecutor(), "test");
         services.AddSingleton(registry);
         services.AddSingleton<WorkflowPlanCache>();
         services.AddSingleton<VisionNodeDispatcher>();
@@ -293,6 +331,42 @@ public sealed class DebugSessionsAndSideEffectTests
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>(),
                 new Dictionary<string, object?> { ["executed"] = node.Id }));
+        }
+    }
+
+    /// <summary>
+    /// 可控阻塞节点：进入后挂起直到测试放行，且故意忽略取消——用于复现“执行已进入但尚未收尾”的窗口，
+    /// 让并发释放必须真正等待执行退出（而不是提前返回）才能完成。
+    /// </summary>
+    private sealed class BlockingExecutor : IVisionNodeExecutor
+    {
+        public const string NodeType = "test.blocking";
+        public string Type => NodeType;
+
+        public static TaskCompletionSource Entered { get; private set; } = NewTcs();
+        public static TaskCompletionSource ReleaseGate { get; private set; } = NewTcs();
+
+        private static TaskCompletionSource NewTcs() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public static void Reset()
+        {
+            Entered = NewTcs();
+            ReleaseGate = NewTcs();
+        }
+
+        public static NodeCatalogItem Catalog { get; } = new(
+            NodeType, "Blocking", "Test",
+            [new PortDescriptor("exec", VisionDataType.Control)],
+            [new PortDescriptor("next", VisionDataType.Control)],
+            []);
+
+        public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            await ReleaseGate.Task;
+            return new NodeExecutorResult(
+                new Dictionary<string, VisionValue>(),
+                new Dictionary<string, object?> { ["released"] = node.Id });
         }
     }
 }

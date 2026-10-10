@@ -51,11 +51,9 @@ public sealed class MediaLibraryService
     public MediaLibraryService(IWebHostEnvironment environment, IConfiguration configuration)
     {
         var configured = configuration.GetValue<string>("MediaLibrary:RootPath");
-        _root = Path.GetFullPath(string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(environment.ContentRootPath, "data", "media")
-            : Path.IsPathRooted(configured)
-                ? configured
-                : Path.Combine(environment.ContentRootPath, configured));
+        // R05：相对配置路径也必须相对**数据根**解析（而非打包目录）；否则发布后媒体库会落在包内，
+        // 与备份的 system/media 段（数据根/media）不一致 —— 备份清单与还原目标就此错位。
+        _root = VisionStudioDataRoot.ResolveMediaRoot(environment.ContentRootPath, configured);
         Directory.CreateDirectory(_root);
         EnsureNoReparsePoint(_root);
         MaxImportBytes = Math.Max(1_048_576, configuration.GetValue<long?>("MediaLibrary:MaxImportBytes") ?? 104_857_600);

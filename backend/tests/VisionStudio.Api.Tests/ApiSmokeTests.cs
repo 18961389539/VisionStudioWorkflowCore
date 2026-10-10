@@ -20,6 +20,14 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
         var payload = await response.Content.ReadFromJsonAsync<Dictionary<string, object>>();
         Assert.NotNull(payload);
         Assert.Contains("v0.63", payload!["mvp"].ToString()!.ToLowerInvariant());
+
+        // F10：日志可靠性计数（丢弃/写入失败/刷盘失败/排空超时）经 health 暴露，不再静默。
+        var health = await _client.GetFromJsonAsync<JsonElement>("/api/health");
+        var logging = health.GetProperty("logging");
+        Assert.True(logging.GetProperty("droppedEntries").GetInt64() >= 0);
+        Assert.True(logging.TryGetProperty("writeFailures", out _));
+        Assert.True(logging.TryGetProperty("flushFailures", out _));
+        Assert.True(logging.TryGetProperty("drainTimeouts", out _));
     }
 
     [Fact]
@@ -198,12 +206,27 @@ public sealed class ApiSmokeTests : IClassFixture<VisionStudioApiFactory>
 
 public sealed class VisionStudioApiFactory : WebApplicationFactory<Program>
 {
+    // F01: this factory uses the real content root (src/VisionStudio.Api). A cancelled side-effect
+    // cycle would otherwise persist the device-action safety marker into the source tree and block
+    // production starts in *other* hosts that share the same data root — isolate it per instance.
+    private readonly string _safetyFile = Path.Combine(Path.GetTempPath(), $"vs-safety-{Guid.NewGuid():N}.json");
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("Security:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
+        builder.UseSetting("Production:DeviceActionSafetyFile", _safetyFile);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            try { if (File.Exists(_safetyFile)) File.Delete(_safetyFile); } catch { }
+        }
     }
 }
 
@@ -237,6 +260,9 @@ public sealed class RuntimeOnlyHostTests
 
 public sealed class RuntimeOnlyApiFactory : WebApplicationFactory<Program>
 {
+    // F01: same isolation as VisionStudioApiFactory (shared real content root).
+    private readonly string _safetyFile = Path.Combine(Path.GetTempPath(), $"vs-safety-{Guid.NewGuid():N}.json");
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -244,5 +270,15 @@ public sealed class RuntimeOnlyApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Security:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
+        builder.UseSetting("Production:DeviceActionSafetyFile", _safetyFile);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing)
+        {
+            try { if (File.Exists(_safetyFile)) File.Delete(_safetyFile); } catch { }
+        }
     }
 }

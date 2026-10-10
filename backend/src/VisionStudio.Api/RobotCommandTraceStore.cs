@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VisionStudio.Engine.Robot;
@@ -33,7 +34,7 @@ public sealed class RobotCommandTraceStore : IRobotCommandObserver
 
     public RobotCommandTraceStore(IWebHostEnvironment env)
     {
-        _root = Path.Combine(env.ContentRootPath, "data", "robot-traces");
+        _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "robot-traces");
         Directory.CreateDirectory(_root);
     }
 

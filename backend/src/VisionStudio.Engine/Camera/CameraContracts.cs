@@ -28,6 +28,8 @@ public enum CameraAcquisitionState
 {
     Stopped,
     Starting,
+    /// <summary>F08：停止收尾进行中（等待旧采集循环退出、控制句柄尚未清理）。</summary>
+    Stopping,
     Running,
     WaitingTrigger,
     Reconnecting,

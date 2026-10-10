@@ -9,11 +9,18 @@ namespace VisionStudio.Api.Tests;
 /// assets leased, a running production blocks new sessions that reference the same assets, and
 /// releasing the holder (delete) frees the asset for the next owner.
 /// </summary>
-public sealed class DeviceLeaseArbitrationTests : IClassFixture<VisionStudioApiFactory>
+public sealed class DeviceLeaseArbitrationTests : IDisposable
 {
+    // F01: per-test host — stopping a running side-effect workflow persists the device-action safety
+    // marker (product behaviour: the next start requires device verification). A shared host would
+    // let one test's stop block another test's production start; xUnit creates a fresh class
+    // instance (and therefore a fresh host/safety file) per test, which keeps tests independent.
+    private readonly VisionStudioApiFactory _factory = new();
     private readonly HttpClient _client;
 
-    public DeviceLeaseArbitrationTests(VisionStudioApiFactory factory) => _client = factory.CreateClient();
+    public DeviceLeaseArbitrationTests() => _client = _factory.CreateClient();
+
+    public void Dispose() => _factory.Dispose();
 
     [Fact]
     public async Task PausedDebugSession_BlocksProductionStart_UntilSessionDeleted()

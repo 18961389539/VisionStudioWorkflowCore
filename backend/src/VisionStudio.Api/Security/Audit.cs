@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Data.Sqlite;
+using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Security;
 
@@ -22,6 +23,22 @@ public static class AuditContext
 
 public sealed class AuditEventStore(SqliteMetadataDatabase database)
 {
+    private long _persistFailures;
+    private DateTimeOffset? _lastPersistFailureAt;
+    private string? _lastPersistFailure;
+
+    /// <summary>审计持久化失败计数（单例计数器）：数据库忙/磁盘故障时审计记录会静默丢失，此计数是唯一信号。</summary>
+    public long PersistFailures => Interlocked.Read(ref _persistFailures);
+    public DateTimeOffset? LastPersistFailureAt => _lastPersistFailureAt;
+    public string? LastPersistFailure => _lastPersistFailure;
+
+    internal void RecordPersistFailure(Exception ex)
+    {
+        Interlocked.Increment(ref _persistFailures);
+        _lastPersistFailureAt = DateTimeOffset.UtcNow;
+        _lastPersistFailure = ex.Message;
+    }
+
     public async Task RecordAsync(HttpContext context, AuditActionMetadata meta, int statusCode, CancellationToken ct = default)
     {
         var user = context.User;
@@ -40,7 +57,7 @@ VALUES($at,$userId,$username,$role,$action,$resource,$method,$path,$status,$succ
         command.Parameters.AddWithValue("$method", context.Request.Method); command.Parameters.AddWithValue("$path", context.Request.Path.Value ?? string.Empty);
         command.Parameters.AddWithValue("$status", statusCode); command.Parameters.AddWithValue("$success", statusCode is >= 200 and < 400 ? 1 : 0);
         command.Parameters.AddWithValue("$target", Db(AuditContext.GetTarget(context) ?? RouteTarget(context)));
-        command.Parameters.AddWithValue("$correlation", Db(context.TraceIdentifier)); command.Parameters.AddWithValue("$ip", Db(context.Connection.RemoteIpAddress?.ToString()));
+        command.Parameters.AddWithValue("$correlation", Db(RequestCorrelation.Get(context))); command.Parameters.AddWithValue("$ip", Db(context.Connection.RemoteIpAddress?.ToString()));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -70,7 +87,7 @@ VALUES($at,$userId,$username,$role,$action,$resource,$method,$path,$status,$succ
 
 public sealed class AuditMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, AuditEventStore store, StorageMaintenanceCoordinator maintenance)
+    public async Task InvokeAsync(HttpContext context, AuditEventStore store, StorageMaintenanceCoordinator maintenance, ILogger<AuditMiddleware> logger)
     {
         var meta = context.GetEndpoint()?.Metadata.GetMetadata<AuditActionMetadata>();
         if (meta is null) { await next(context); return; }
@@ -81,7 +98,15 @@ public sealed class AuditMiddleware(RequestDelegate next)
             if (!maintenance.IsMaintenanceActive)
             {
                 try { await store.RecordAsync(context, meta, status, CancellationToken.None); }
-                catch { /* audit persistence must not replace the primary request result */ }
+                catch (Exception ex)
+                {
+                    // 审计持久化失败不得替换主请求结果，但必须留下可观测信号：
+                    // 结构化错误日志 + 单例失败计数（经 /api/health 的 audit 字段暴露，审计链降级可见）。
+                    store.RecordPersistFailure(ex);
+                    logger.LogError(ex,
+                        "Audit event persistence failed (audit trail degraded). Action={Action} Resource={Resource} {Method} {Path} CorrelationId={CorrelationId}",
+                        meta.Action, meta.Resource, context.Request.Method, context.Request.Path, RequestCorrelation.Get(context));
+                }
             }
         }
     }

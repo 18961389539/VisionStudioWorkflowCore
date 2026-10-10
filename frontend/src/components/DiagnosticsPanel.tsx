@@ -45,10 +45,17 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
         return [...next, asset].sort((x, y) => `${x.kind}:${x.id}`.localeCompare(`${y.kind}:${y.id}`));
       });
     });
-    connection.on('assetEvent', (evt: AssetEventEnvelope) => setEvents(current => [evt, ...current].slice(0, 500)));
+    connection.on('assetEvent', (evt: AssetEventEnvelope) => {
+      setEvents(current => [evt, ...current].slice(0, 500));
+      // 删除事件必须同步移除资产，否则断线/事件期间已移除的资产会一直残留在列表里
+      if (evt.type === 'AssetRemoved') {
+        setAssets(current => current.filter(x => !(x.kind === evt.kind && x.id === evt.assetId)));
+      }
+    });
     connection.on('diagnosticsSummary', (next: DiagnosticsSummary) => setSummary(next));
     connection.onreconnecting(() => setLive('reconnecting'));
-    connection.onreconnected(() => setLive('connected'));
+    // 重连后重新拉取快照与事件：断线期间的状态变化/删除可能已被广播错过，仅恢复连接标记会长期显示过期数据
+    connection.onreconnected(() => { setLive('connected'); void refresh(); });
     connection.onclose(() => setLive('offline'));
 
     setLive('connecting');
@@ -69,6 +76,14 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
       <Typography.Text type="secondary">仅当状态、健康度或错误发生变化时才会发送事件，不会在每次轮询时重复发送。</Typography.Text>
     </Space>
     {error && <Alert type="warning" showIcon message={error} style={{ marginBottom: 12 }} />}
+    {summary?.staleProviders && summary.staleProviders.length > 0 && (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message={`诊断采样故障：${summary.staleProviders.join('、')} 的数据可能过期（已保留上次快照，暂不作为删除处理）`}
+      />
+    )}
 
     <div className="diagnostics-summary">
       <Statistic title="资产总数" value={summary?.total ?? assets.length} />

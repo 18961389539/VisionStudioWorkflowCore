@@ -31,7 +31,7 @@ public sealed class AlarmStore
 
     public AlarmStore(IWebHostEnvironment env)
     {
-        var dir = Path.Combine(env.ContentRootPath, "data", "production");
+        var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "alarms.json");
     }

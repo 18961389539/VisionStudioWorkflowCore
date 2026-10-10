@@ -114,6 +114,12 @@ public sealed record WorkflowRuntimeReferences(
 /// semantic: CapturedAt and display-only timestamps are excluded, so unchanged runtime dependencies
 /// produce the same hash across repeated publications.
 /// </summary>
+/// <summary>恢复前设备状态核对结果；不通过时必须禁止自动恢复新周期。</summary>
+public sealed record DeviceStateVerification(bool Ok, IReadOnlyList<string> Issues)
+{
+    public string Summary => Issues.Count == 0 ? "all devices verified" : string.Join("; ", Issues);
+}
+
 public sealed class RuntimeDependencyManifestService(
     VisionNodeRegistry registry,
     PluginManager plugins,
@@ -131,6 +137,69 @@ public sealed class RuntimeDependencyManifestService(
         WriteIndented = false,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    /// <summary>
+    /// 副作用故障恢复前的设备状态核对：锁定清单中的每个设备/机器人当前必须处于"可安全重跑"
+    /// 的状态——不只是能解析、不只是非 Faulted。设备必须真正 Connected（Disconnected/Connecting/
+    /// Reconnecting 都无法确认上一周期的写入是否落地）；机器人必须 Connected、非 Busy、握手无 Error
+    /// 且无未完成的在途命令。核对不通过时禁止恢复——重新启动自动周期前必须完成核对并留下记录。
+    ///
+    /// Get 返回的是管理器状态快照，不含 PLC 动作完成标志或机器人命令确认 ID；因此对"设备动作结果
+    /// 不确定"的场景采取保守拒绝：任何非 Connected、Busy 或握手异常都视为不可恢复。
+    /// </summary>
+    public DeviceStateVerification VerifyLockedDevices(RuntimeDependencyManifest manifest)
+        => VerifyLockedDevices(
+            manifest.Devices.Select(x => x.Id).ToArray(),
+            manifest.Robots.Select(x => x.Id).ToArray());
+
+    /// <summary>
+    /// F02：按 ID 清单核对设备/机器人状态（与 <see cref="VerifyLockedDevices(RuntimeDependencyManifest)"/>
+    /// 同一判定标准）。持久化的"故障时锁定清单"可能不属于当前发布流程——核对必须无条件针对该清单，
+    /// 否则切换到无设备的新流程时，空清单会必然通过。
+    /// </summary>
+    public DeviceStateVerification VerifyLockedDevices(IReadOnlyList<string> deviceIds, IReadOnlyList<string> robotIds)
+    {
+        var issues = new List<string>();
+        foreach (var deviceId in deviceIds)
+        {
+            try
+            {
+                var descriptor = devices.Get(deviceId);
+                if (descriptor.ConnectionState != DeviceConnectionState.Connected)
+                    issues.Add($"device '{deviceId}' is {descriptor.ConnectionState}, not Connected — the previous cycle's writes cannot be confirmed ({descriptor.Error ?? "no detail"})");
+            }
+            catch (Exception ex)
+            {
+                issues.Add($"device '{deviceId}' cannot be resolved: {ex.Message}");
+            }
+        }
+        foreach (var robotId in robotIds)
+        {
+            try
+            {
+                var descriptor = robots.Get(robotId);
+                if (descriptor.ConnectionState != RobotConnectionState.Connected)
+                {
+                    issues.Add($"robot '{robotId}' is {descriptor.ConnectionState}, not Connected — the previous cycle's motion cannot be confirmed ({descriptor.Error ?? "no detail"})");
+                    continue;
+                }
+                if (descriptor.Busy)
+                    issues.Add($"robot '{robotId}' is still Busy with command {descriptor.LastCommandId} — an in-flight motion was not confirmed stopped");
+                if (descriptor.HandshakeState == RobotHandshakeState.Faulted || descriptor.Handshake.Error)
+                    issues.Add($"robot '{robotId}' reports a handshake Error (state {descriptor.HandshakeState}, command {descriptor.LastCommandId})");
+                // 未完成命令：握手停在 Executing/TargetAccepted 说明上一条命令没有被确认收尾。
+                if (descriptor.HandshakeState is RobotHandshakeState.Executing or RobotHandshakeState.TargetAccepted)
+                    issues.Add($"robot '{robotId}' has an unconfirmed command {descriptor.LastCommandId} in state {descriptor.HandshakeState}");
+                if (!string.IsNullOrWhiteSpace(descriptor.Error))
+                    issues.Add($"robot '{robotId}' reports error: {descriptor.Error}");
+            }
+            catch (Exception ex)
+            {
+                issues.Add($"robot '{robotId}' cannot be resolved: {ex.Message}");
+            }
+        }
+        return new DeviceStateVerification(issues.Count == 0, issues);
+    }
 
     public async Task<RuntimeDependencyManifest> CaptureAsync(WorkflowDefinition workflow, CancellationToken ct)
     {

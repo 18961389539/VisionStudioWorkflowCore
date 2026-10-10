@@ -336,7 +336,7 @@ export type CameraTransportTelemetry = {
 };
 
 export type CameraAcquisitionStats = {
-  acquisitionState: 'Stopped' | 'Starting' | 'Running' | 'WaitingTrigger' | 'Reconnecting' | 'Faulted';
+  acquisitionState: 'Stopped' | 'Starting' | 'Stopping' | 'Running' | 'WaitingTrigger' | 'Reconnecting' | 'Faulted';
   framesPublished: number;
   ringOverwrites: number;
   acquisitionErrors: number;
@@ -1153,6 +1153,8 @@ export type DiagnosticsSummary = {
   faulted: number;
   offline: number;
   updatedAt: string;
+  /** 采样失败的 provider：其资产为保留的上次快照，数据可能过期 */
+  staleProviders?: string[];
 };
 
 export type MediaLibraryStatus = {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "aa9e76a9316b9527c003d56556e33f1bc8d2e102ce56f94afb204e86c51ceead",
+  "hash": "599abb058cf39ab2649e66d129cd0354abe3100b2cfba223e9c982ee81fdca73",
   "items": [
     {
       "type": "image.acquire",
@@ -1489,7 +1489,7 @@
         "supportsRoi": false,
         "emitsOverlay": false,
         "deterministic": false,
-        "supportsRunNode": true,
+        "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
       }
@@ -1614,7 +1614,7 @@
         "supportsRoi": false,
         "emitsOverlay": false,
         "deterministic": false,
-        "supportsRunNode": true,
+        "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
       }
@@ -2665,7 +2665,7 @@
         "supportsRoi": false,
         "emitsOverlay": false,
         "deterministic": false,
-        "supportsRunNode": true,
+        "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
       }

@@ -55,7 +55,8 @@ public sealed class WorkflowDebugSession : IDisposable
     internal SemaphoreSlim Gate { get; } = new(1, 1);
 
     private volatile bool _disposed;
-    private int _releaseStarted;
+    private readonly object _releaseSync = new();
+    private Task? _releaseTask;
     private volatile CancellationTokenSource? _activeExecution;
 
     /// <summary>
@@ -104,12 +105,20 @@ public sealed class WorkflowDebugSession : IDisposable
 
     /// <summary>
     /// 释放会话：先阻止新操作（Disposed 门），再取消并等待正在执行的 continue / run-node 退出，
-    /// 最后释放计划租约与原生图像资源。执行不再可能读到已释放的 Mat / 计划；
-    /// 执行收尾的 Gate.Release() 也不会撞上已销毁的信号量（本实现不销毁 Gate）。
+    /// 最后释放计划租约与原生图像资源。所有并发调用者共享同一个释放任务并等待其完成——
+    /// 删除请求与宿主清理交错时，任何调用者都不会在资源尚未释放时提前返回，调用方可以安全地
+    /// 在 await 完成后释放硬件租约。执行收尾的 Gate.Release() 也不会撞上已销毁的信号量（不销毁 Gate）。
     /// </summary>
-    public async Task ReleaseAsync()
+    public Task ReleaseAsync()
     {
-        if (Interlocked.Exchange(ref _releaseStarted, 1) != 0) return;
+        lock (_releaseSync)
+        {
+            return _releaseTask ??= ReleaseCoreAsync();
+        }
+    }
+
+    private async Task ReleaseCoreAsync()
+    {
         _disposed = true;
         try { _activeExecution?.Cancel(); }
         catch (ObjectDisposedException) { /* 与执行收尾的登记释放竞争：等待其退出即可 */ }

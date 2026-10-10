@@ -7,7 +7,7 @@ import { localizeStatus } from '../i18n';
 type Props = { open: boolean; onClose: () => void };
 
 const stateColor: Record<string, string> = { Closed: 'default', Open: 'blue', Streaming: 'green', Faulted: 'red' };
-const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
+const acquisitionColor: Record<string, string> = { Stopped: 'default', Starting: 'processing', Stopping: 'processing', Running: 'green', WaitingTrigger: 'gold', Reconnecting: 'orange', Faulted: 'red' };
 const labelColor: Record<string, string> = { Unlabeled: 'default', OK: 'green', NG: 'red', Review: 'gold' };
 const labelText: Record<string, string> = { Unlabeled: '未标注', OK: '合格', NG: '不合格', Review: '待复核' };
 const formatBytes = (value: number) => value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;

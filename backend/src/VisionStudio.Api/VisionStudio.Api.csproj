@@ -3,12 +3,18 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 程序版本单一来源：备份清单（StorageBackupService.VisionStudioVersion）、/api/health 与前端 version.ts 对齐 -->
+    <Version>0.63.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
     <ProjectReference Include="..\VisionStudio.Camera.Basler\VisionStudio.Camera.Basler.csproj" />
     <ProjectReference Include="..\VisionStudio.Camera.Hikrobot\VisionStudio.Camera.Hikrobot.csproj" />
     <ProjectReference Include="..\VisionStudio.Plugin.Worker\VisionStudio.Plugin.Worker.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 测试需要直接驱动内部采样/释放等生命周期路径（并发与故障注入场景无法经 HTTP 制造） -->
+    <InternalsVisibleTo Include="VisionStudio.Api.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="McMaster.NETCore.Plugins" Version="2.0.0" />

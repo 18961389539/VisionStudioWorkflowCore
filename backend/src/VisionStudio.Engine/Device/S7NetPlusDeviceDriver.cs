@@ -116,6 +116,11 @@ public sealed class S7NetPlusDeviceDriver : IDeviceDriver, IDeviceBatchDriver, I
                 return Sample(tag, ConvertReadValue(tag, raw));
             });
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected lifecycle outcome (workflow timeout / controlled stop): not a device fault.
+            throw;
+        }
         catch (Exception ex)
         {
             SetProtocolError(ex);
@@ -139,6 +144,9 @@ public sealed class S7NetPlusDeviceDriver : IDeviceDriver, IDeviceBatchDriver, I
                 // on a controller-specific negotiated PDU size while still reducing round trips.
                 foreach (var chunk in tags.Chunk(8))
                 {
+                    // 批次边界检查取消：单个协议调用因 SDK 语义不可取消（取消会关闭 socket），
+                    // 但取消后不得继续发送剩余批次——工作流超时与设备实际结束时点必须收敛。
+                    cancellationToken.ThrowIfCancellationRequested();
                     var items = chunk.Select(t => DataItem.FromAddress(t.Address)).ToList();
                     await RequirePlc().ReadMultipleVarsAsync(items, CancellationToken.None);
                     for (var i = 0; i < chunk.Length; i++)
@@ -146,6 +154,11 @@ public sealed class S7NetPlusDeviceDriver : IDeviceDriver, IDeviceBatchDriver, I
                 }
                 return (IReadOnlyList<DeviceTagSample>)output;
             }, batchRead: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected lifecycle outcome: not a device fault.
+            throw;
         }
         catch (Exception ex)
         {
@@ -166,6 +179,11 @@ public sealed class S7NetPlusDeviceDriver : IDeviceDriver, IDeviceBatchDriver, I
             cancellationToken.ThrowIfCancellationRequested();
             var converted = ConvertWriteValue(tag, value);
             await _diagnostics.TrackAsync(() => RequirePlc().WriteAsync(tag.Address, converted, CancellationToken.None));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected lifecycle outcome: not a device fault.
+            throw;
         }
         catch (Exception ex)
         {
@@ -190,10 +208,17 @@ public sealed class S7NetPlusDeviceDriver : IDeviceDriver, IDeviceBatchDriver, I
             {
                 foreach (var chunk in items.Chunk(6))
                 {
+                    // 批次边界检查取消：取消后不得继续写入剩余批次（避免"工作流已超时、设备仍在收写入"）。
+                    cancellationToken.ThrowIfCancellationRequested();
                     var dataItems = chunk.Select(x => DataItem.FromAddressAndValue(x.Tag.Address, ConvertWriteValue(x.Tag, x.Value))).ToArray();
                     await RequirePlc().WriteAsync(dataItems);
                 }
             }, batchWrite: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected lifecycle outcome: not a device fault.
+            throw;
         }
         catch (Exception ex)
         {

@@ -45,7 +45,9 @@ public sealed record ProductionRuntimeConfig(
     int SynchronizationGuardCheckEveryCycles = 5,
     int SynchronizationGuardUnhealthyChecksToFault = 2,
     int SynchronizationGuardHealthyChecksToRecover = 3,
-    int SynchronizationGuardRecoveryTimeoutMs = 30000);
+    int SynchronizationGuardRecoveryTimeoutMs = 30000,
+    /// <summary>同一故障事件内允许的自动恢复总次数：耗尽后锁定 Faulted，需人工核对与恢复。</summary>
+    int MaxRecoveryAttempts = 3);
 
 public sealed record ProductionRuntimeStatus(
     ProductionRuntimeState State,
@@ -69,7 +71,11 @@ public sealed record ProductionRuntimeStatus(
     ProductionPtpGuardSnapshot? PtpGuard,
     ProductionSynchronizationGuardSnapshot? SynchronizationGuard,
     int PendingTraceCount = 0,
-    int TraceQueueCapacity = 8);
+    int TraceQueueCapacity = 8,
+    /// <summary>当前故障事件内已消耗的自动恢复次数（成功后清零）。</summary>
+    int RecoveryAttempts = 0,
+    /// <summary>锁定快照的工作流是否引用设备（PLC）/机器人：含设备副作用的失败不允许自动重跑。</summary>
+    bool HasDeviceSideEffects = false);
 
 public sealed record ProductionStartRequest(string? JobId = null);
 
@@ -85,7 +91,7 @@ public sealed class ProductionRuntimeConfigStore
 
     public ProductionRuntimeConfigStore(IWebHostEnvironment env)
     {
-        var dir = Path.Combine(env.ContentRootPath, "data", "production");
+        var dir = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "production");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "runtime.json");
     }
@@ -210,6 +216,7 @@ public sealed class ProductionRuntimeService
     private readonly DeviceLeaseRegistry _leases;
     private readonly ILogger<ProductionRuntimeService> _logger;
     private readonly ProductionTraceOptions _traceOptions;
+    private readonly DeviceActionSafetyStore? _safetyStore;
     private ProductionTraceWriter? _traceWriter;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
@@ -231,6 +238,22 @@ public sealed class ProductionRuntimeService
     private double _lastDurationMs;
     private string? _lastDisposition;
     private string? _lastError;
+    private int _recoveryAttempts;
+    /// <summary>锁定快照的工作流是否含设备（PLC/机器人）副作用：含副作用时禁止自动恢复重跑。</summary>
+    private bool _hasDeviceSideEffects;
+    /// <summary>
+    /// 副作用故障后保留的"设备动作未知"标记：一旦副作用流程失败即置位，只有经过设备状态核对
+    /// 且核对通过才清除。该标记独立于 Faulted 状态与循环生命周期——Stop 不会清除它，因此
+    /// "Stop → Start" 无法绕过核对，重启后的自动启动同样受其约束。
+    /// </summary>
+    private bool _deviceActionStateUnknown;
+    /// <summary>置位未知标记时锁定的依赖清单哈希，用于重启后仍能核对同一批设备。</summary>
+    private string? _unknownActionManifestHash;
+    /// <summary>F02：故障时锁定的设备/机器人 ID 清单——核对必须针对它，而不是新发布流程的清单。</summary>
+    private string[] _unknownActionDeviceIds = [];
+    private string[] _unknownActionRobotIds = [];
+    /// <summary>F01：持久化状态不可读（损坏）——无法核对，必须人工处理后才能启动。</summary>
+    private bool _unknownActionUnverifiable;
     private ProductionPtpGuardSnapshot _ptpGuardStatus = ProductionPtpGuardSnapshot.Disabled;
     private ProductionSynchronizationGuardSnapshot _synchronizationGuardStatus = ProductionSynchronizationGuardSnapshot.Disabled;
     private int _synchronizationGuardUnhealthyChecks;
@@ -249,7 +272,8 @@ public sealed class ProductionRuntimeService
         ProductionSynchronizationHealthGuardService synchronizationGuard,
         DeviceLeaseRegistry leases,
         ILogger<ProductionRuntimeService> logger,
-        Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null)
+        Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null,
+        DeviceActionSafetyStore? safetyStore = null)
     {
         _jobs = jobs;
         _runner = runner;
@@ -264,6 +288,21 @@ public sealed class ProductionRuntimeService
         _leases = leases;
         _logger = logger;
         _traceOptions = traceOptions?.Value ?? new ProductionTraceOptions();
+        _safetyStore = safetyStore;
+
+        // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
+        // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
+        if (safetyStore?.Load() is { } persisted)
+        {
+            _deviceActionStateUnknown = true;
+            _unknownActionManifestHash = persisted.ManifestHash;
+            _unknownActionDeviceIds = persisted.DeviceIds.ToArray();
+            _unknownActionRobotIds = persisted.RobotIds.ToArray();
+            _unknownActionUnverifiable = persisted.Unreadable;
+            _logger.LogWarning(
+                "Persisted device-action safety state loaded (set {SetAt}, unreadable={Unreadable}): {Reason}. Production start requires device verification.",
+                persisted.SetAt, persisted.Unreadable, persisted.Reason);
+        }
     }
 
     public ProductionRuntimeStatus Status
@@ -294,7 +333,9 @@ public sealed class ProductionRuntimeService
                     _ptpGuardStatus,
                     _synchronizationGuardStatus,
                     _traceWriter?.PendingCount ?? 0,
-                    _traceOptions.QueueCapacity);
+                    _traceOptions.QueueCapacity,
+                    _recoveryAttempts,
+                    _hasDeviceSideEffects);
             }
         }
     }
@@ -345,6 +386,12 @@ public sealed class ProductionRuntimeService
             await _dependencies.ValidateOrThrowAsync(snapshot.DependencyManifest, snapshot.Workflow, ct);
             await _alarms.RecoverAsync("PROD-DEPENDENCY-DRIFT", "ProductionRuntime", ct);
 
+            // 统一安全闸门：只要上一次副作用故障留下的"设备动作未知"标记仍在，任何启动路径
+            // （人工 Start、/api/production/recover、重启后的自动启动）都必须先通过设备状态核对。
+            // 该标记独立于 Stop、持久化到磁盘（F01），因此 Stop、重启与切换流程都无法绕过；
+            // 核对针对**故障时锁定的**清单（F02），而不是本次所选流程的清单。
+            await EnsureNoUnknownDeviceActionsAsync();
+
             var ptpGuard = await _ptpGuard.EvaluateAsync(snapshot.Workflow, config, ct);
             lock (_stateSync) _ptpGuardStatus = ptpGuard;
             if (!ptpGuard.Healthy)
@@ -379,6 +426,9 @@ public sealed class ProductionRuntimeService
                 _currentRunId = null;
                 _cycleCount = _okCount = _ngCount = _errorCount = _watchdogTrips = 0;
                 _consecutiveFailures = 0;
+                _recoveryAttempts = 0;
+                // 设备（PLC）/机器人引用 = 副作用：含副作用的流程失败后不允许自动重跑（见 LoopCoreAsync）
+                _hasDeviceSideEffects = snapshot.DependencyManifest.Devices.Count > 0 || snapshot.DependencyManifest.Robots.Count > 0;
                 _synchronizationGuardUnhealthyChecks = 0;
                 _synchronizationGuardHealthyChecks = 0;
                 _lastDurationMs = 0;
@@ -473,11 +523,132 @@ public sealed class ProductionRuntimeService
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// 统一设备安全闸门：若存在未核对的"设备动作未知"标记，则对**故障时锁定的**设备/机器人
+    /// 清单（F02：持久化清单，而不是当前流程的清单）执行设备状态核对；核对通过才清除标记并
+    /// 放行启动，不通过则抛 409 并保持标记（同时写入日志形成记录）。
+    /// Start / Recover / 自动启动共用此闸门，杜绝任何绕过路径。
+    /// </summary>
+    private Task EnsureNoUnknownDeviceActionsAsync()
+    {
+        bool unknown;
+        string? unknownHash;
+        string[] deviceIds;
+        string[] robotIds;
+        bool unverifiable;
+        lock (_stateSync)
+        {
+            unknown = _deviceActionStateUnknown;
+            unknownHash = _unknownActionManifestHash;
+            deviceIds = _unknownActionDeviceIds;
+            robotIds = _unknownActionRobotIds;
+            unverifiable = _unknownActionUnverifiable;
+        }
+        if (!unknown) return Task.CompletedTask;
+
+        if (unverifiable)
+        {
+            _logger.LogError(
+                "Production start blocked: the persisted device-action safety state is unreadable (manifest {ManifestHash}); manual resolution is required before starting.",
+                unknownHash);
+            throw new ApiConflictException(
+                "The persisted device-action safety state is unreadable, so the previous cycle's device actions cannot be verified. " +
+                "Verify the physical device state and resolve the safety state file manually before starting.");
+        }
+
+        // F02：核对必须针对故障时锁定的清单——否则切换到无设备的新流程时，空清单必然通过核对，
+        // 原故障设备从未被检查（旧实现传入的是本次启动所选流程的 manifest，存在此绕过路径）。
+        var verification = _dependencies.VerifyLockedDevices(deviceIds, robotIds);
+        if (!verification.Ok)
+        {
+            _logger.LogError(
+                "Production start blocked: unresolved device actions from a previous side-effect failure (manifest {ManifestHash}): {Issues}",
+                unknownHash, verification.Summary);
+            throw new ApiConflictException(
+                $"Device state verification failed after a side-effect failure: {verification.Summary}. " +
+                "The previous cycle's device actions are unconfirmed; resolve the device state before starting (the verification failure is recorded).");
+        }
+
+        ClearDeviceActionUnknownState();
+        _logger.LogInformation(
+            "Device state verification cleared the unknown-action marker: {Devices} device(s), {Robots} robot(s) verified.",
+            deviceIds.Length, robotIds.Length);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// F01：置位"设备动作不确定"标记并立即持久化（含故障时锁定的设备/机器人清单）。
+    /// 持久化失败时内存标记仍生效；但重启会丢失——必须留下错误记录。
+    /// </summary>
+    private void SetDeviceActionUnknownState(RuntimeDependencyManifest manifest, string reason)
+    {
+        string[] deviceIds;
+        string[] robotIds;
+        lock (_stateSync)
+        {
+            _deviceActionStateUnknown = true;
+            _unknownActionManifestHash = manifest.ManifestHash;
+            _unknownActionDeviceIds = deviceIds = manifest.Devices.Select(x => x.Id).ToArray();
+            _unknownActionRobotIds = robotIds = manifest.Robots.Select(x => x.Id).ToArray();
+            _unknownActionUnverifiable = false;
+        }
+        try
+        {
+            _safetyStore?.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow, reason));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to persist the device-action safety state (manifest {ManifestHash}); the in-memory marker stays in force but a restart would lose it.",
+                manifest.ManifestHash);
+        }
+    }
+
+    /// <summary>F01：核对通过（或人工解决）后清除未知动作标记（内存 + 持久化）。</summary>
+    private void ClearDeviceActionUnknownState()
+    {
+        lock (_stateSync)
+        {
+            _deviceActionStateUnknown = false;
+            _unknownActionManifestHash = null;
+            _unknownActionDeviceIds = [];
+            _unknownActionRobotIds = [];
+            _unknownActionUnverifiable = false;
+        }
+        _safetyStore?.Clear();
+    }
+
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
     {
         if (Status.State != ProductionRuntimeState.Faulted) return Status;
         if (_loopTask is { IsCompleted: false })
             throw new InvalidOperationException("Cannot recover while the previous execution loop is still alive. Stop/terminate the blocked operation first.");
+
+        // F02：先跑统一安全闸门——存在未知动作标记时，核对持久化的**故障时锁定清单**并在
+        // 通过后清除标记；这样即使失败后重新发布/切换了流程，恢复也不会绕过原故障设备的核对。
+        await EnsureNoUnknownDeviceActionsAsync();
+
+        // 副作用故障的恢复闸门：在清理现场前核对锁定清单中设备/机器人的当前状态。
+        // 核对不通过（设备不可解析或 Faulted）时保持 Faulted——设备状态未知时绝不重启自动周期；
+        // 通过与失败的核对结果均写入日志，形成可追溯记录。
+        PublishedJobSnapshot? locked;
+        lock (_stateSync) locked = _lockedSnapshot;
+        if (locked is not null && (locked.DependencyManifest.Devices.Count > 0 || locked.DependencyManifest.Robots.Count > 0))
+        {
+            var verification = _dependencies.VerifyLockedDevices(locked.DependencyManifest);
+            if (!verification.Ok)
+            {
+                _logger.LogError("Production recovery blocked by device state verification: {Issues}", verification.Summary);
+                throw new ApiConflictException(
+                    $"Device state verification failed before recovery: {verification.Summary}. " +
+                    "Resolve the device state and retry recovery (the verification failure is recorded).");
+            }
+            _logger.LogInformation(
+                "Device state verification passed before production recovery: {Devices} device(s), {Robots} robot(s).",
+                locked.DependencyManifest.Devices.Count, locked.DependencyManifest.Robots.Count);
+            // 核对通过：清除未知标记（StartAsync 的闸门因此放行）。
+            ClearDeviceActionUnknownState();
+        }
 
         await StopAsync(ct); // cleans completed loop/CTS without loading a new version yet.
         await _alarms.RecoverAsync("PROD-RUN-FAILURE", "ProductionRuntime", ct);
@@ -623,26 +794,67 @@ public sealed class ProductionRuntimeService
             WorkflowRunResult result;
             ProductionRuntimeConfig config;
             lock (_stateSync) config = _config;
+
+            // 周期开始即分配 RunId 并耐久写入起始记录：执行中/排队中进程被杀或断电时，重启后
+            // 能列出"已接受未完成"的周期，而不是整条记录缺失（内存队列只承载大图编码，关键
+            // 元数据与恢复标记不再仅驻留内存）。起始记录不可写时不盲跑设备，本周期按失败处理。
+            var runId = RunTraceRecorder.NewRunId();
+            var traceContext = new RunTraceContext("ProductionRuntime", locked.JobId, locked.Version, locked.WorkflowHash,
+                DependencyManifestHash: locked.DependencyManifest.ManifestHash);
+            string? startRecordError = null;
             try
             {
-                result = await _runner.RunAsync(
-                    locked.Workflow,
-                    new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
-                    cancellationToken: ct);
+                using var beginTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await _traces.BeginAsync(runId, DateTimeOffset.UtcNow, locked.Workflow, traceContext, beginTimeout.Token);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                result = new WorkflowRunResult(Guid.NewGuid().ToString("N"), false, 0, false, 0, 0, [], [], null, ex.Message, "Error")
+                startRecordError = $"Production cycle start record could not be persisted: {ex.Message}";
+            }
+
+            if (startRecordError is not null)
+            {
+                result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null, startRecordError, "Error")
                 {
-                    ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                    ErrorCode = VisionRunErrorCodes.RuntimeError
                 };
+            }
+            else
+            {
+                try
+                {
+                    result = await _runner.RunAsync(
+                        locked.Workflow,
+                        new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),
+                        runId: runId,
+                        cancellationToken: ct);
+                }
+                catch (Exception ex)
+                {
+                    result = new WorkflowRunResult(runId, false, 0, false, 0, 0, [], [], null, ex.Message, "Error")
+                    {
+                        ErrorCode = ct.IsCancellationRequested ? VisionRunErrorCodes.Cancelled : VisionRunErrorCodes.RuntimeError
+                    };
+                }
             }
 
             // Preserve completed/current cycle evidence even if stop was requested during execution.
-            await writer.EnqueueAsync(result, locked.Workflow,
-                new RunTraceContext("ProductionRuntime", locked.JobId, locked.Version, locked.WorkflowHash,
-                    DependencyManifestHash: locked.DependencyManifest.ManifestHash));
-            if (ct.IsCancellationRequested) break;
+            await writer.EnqueueAsync(result, locked.Workflow, traceContext);
+            if (ct.IsCancellationRequested)
+            {
+                // F01：取消可能发生在设备动作执行中途——含副作用的流程被取消且本轮失败时，必须走
+                // 与"失败锁定"相同的安全语义（置未知标记并持久化），否则 Stop/重启后可直接重跑，
+                // 上一轮的物理动作结果从未被核对。
+                if (!result.Success)
+                {
+                    bool hasSideEffects;
+                    lock (_stateSync) hasSideEffects = _hasDeviceSideEffects;
+                    if (hasSideEffects)
+                        SetDeviceActionUnknownState(locked.DependencyManifest,
+                            "cycle was cancelled while executing a side-effect workflow; device actions may have been partially applied");
+                }
+                break;
+            }
 
             var disposition = result.Success ? (result.QualityDisposition ?? "OK") : "ERROR";
             lock (_stateSync)
@@ -660,6 +872,7 @@ public sealed class ProductionRuntimeService
                 lock (_stateSync)
                 {
                     _consecutiveFailures = 0;
+                    _recoveryAttempts = 0; // 故障事件结束：恢复预算随成功运行重置
                     if (string.Equals(disposition, "NG", StringComparison.OrdinalIgnoreCase)) _ngCount++;
                     else _okCount++;
                 }
@@ -670,11 +883,13 @@ public sealed class ProductionRuntimeService
             {
                 var watchdog = result.Error?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
                 int failures;
+                bool hasDeviceSideEffects;
                 lock (_stateSync)
                 {
                     _errorCount++;
                     _consecutiveFailures++;
                     failures = _consecutiveFailures;
+                    hasDeviceSideEffects = _hasDeviceSideEffects;
                     if (watchdog) _watchdogTrips++;
                 }
 
@@ -682,12 +897,58 @@ public sealed class ProductionRuntimeService
                     await _alarms.RaiseAsync("PROD-WATCHDOG", AlarmSeverity.Error, "ProductionRuntime", result.Error ?? "Production cycle watchdog timeout.", result.RunId, CancellationToken.None);
                 await _alarms.RaiseAsync("PROD-RUN-FAILURE", AlarmSeverity.Error, "ProductionRuntime", result.Error ?? "Production cycle failed.", result.RunId, CancellationToken.None);
 
+                // 含设备副作用（PLC 写入/机器人动作）的流程：失败一次即锁定。上一周期的真实设备
+                // 动作结果在核对前不可确定，任何重跑都会再次触发物理动作——阈值只适用于可以安全
+                // 重试的纯计算错误，绝不能用来给副作用流程"再多试两次"。锁定 Faulted，由人工核对
+                // 设备状态后经 /api/production/recover 恢复（该入口已有启动校验与租约路径）。
+                if (hasDeviceSideEffects)
+                {
+                    var reason = $"Faulted after {failures} consecutive failure(s); the workflow has device side effects - " +
+                                 "device actions from the failed cycle are indeterminate, so automatic replay is disabled. " +
+                                 "Verify actual device state before manual recovery.";
+                    lock (_stateSync)
+                    {
+                        _state = ProductionRuntimeState.Faulted;
+                        _lastError = reason;
+                    }
+                    // F01：未知动作标记与故障时锁定清单持久化——Stop 不清除，重启后仍要求核对。
+                    SetDeviceActionUnknownState(locked.DependencyManifest,
+                        "side-effect workflow failed; device actions from the failed cycle are indeterminate");
+                    await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", reason, result.RunId, CancellationToken.None);
+                    return;
+                }
+
                 if (failures >= config.MaxConsecutiveFailures)
                 {
                     if (!config.AutoRecover)
                     {
-                        lock (_stateSync) _state = ProductionRuntimeState.Faulted;
-                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", $"Faulted after {failures} consecutive failures.", result.RunId, CancellationToken.None);
+                        var reason = $"Faulted after {failures} consecutive failures.";
+                        lock (_stateSync)
+                        {
+                            _state = ProductionRuntimeState.Faulted;
+                            _lastError = reason;
+                        }
+                        await _alarms.RaiseAsync("PROD-FAULTED", AlarmSeverity.Critical, "ProductionRuntime", reason, result.RunId, CancellationToken.None);
+                        return;
+                    }
+
+                    // 纯计算流程允许自动恢复，但同一故障事件有恢复预算：耗尽后锁定 Faulted 等待人工
+                    // 介入，杜绝"恢复-立即再失败"的无限循环（成功运行会重置预算）。
+                    int attempts;
+                    lock (_stateSync)
+                    {
+                        _recoveryAttempts++;
+                        attempts = _recoveryAttempts;
+                    }
+                    if (attempts > config.MaxRecoveryAttempts)
+                    {
+                        var exhausted = $"Automatic recovery budget exhausted after {attempts - 1} attempts (MaxRecoveryAttempts={config.MaxRecoveryAttempts}); locked Faulted for manual recovery.";
+                        lock (_stateSync)
+                        {
+                            _state = ProductionRuntimeState.Faulted;
+                            _lastError = exhausted;
+                        }
+                        await _alarms.RaiseAsync("PROD-RECOVERY-BUDGET", AlarmSeverity.Critical, "ProductionRuntime", exhausted, result.RunId, CancellationToken.None);
                         return;
                     }
 

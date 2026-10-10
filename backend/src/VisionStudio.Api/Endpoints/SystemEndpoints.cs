@@ -11,13 +11,30 @@ public static class SystemEndpoints
 {
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/health", () => Results.Ok(new
+        app.MapGet("/api/health", (AuditEventStore audits, RollingFileLoggerProvider logs) => Results.Ok(new
         {
             status = "ok",
             service = "VisionStudio.Api",
+            // 程序版本单一来源（程序集版本）：安装包 / API / UI / 备份清单显示同一版本号
+            version = StorageBackupService.VisionStudioVersion(),
             workflowEngine = "Workflow Core 3.21.0",
             pluginLoader = "McMaster.NETCore.Plugins 2.0.0",
-            mvp = "V0.63 case verification gate + dataset regression evidence"
+            mvp = "V0.63 case verification gate + dataset regression evidence",
+            // 审计链健康：持久化失败会让审计记录静默丢失，失败计数/最近错误在此可见
+            audit = new
+            {
+                persistFailures = audits.PersistFailures,
+                lastFailureAt = audits.LastPersistFailureAt,
+                lastFailure = audits.LastPersistFailure
+            },
+            // F10：日志可靠性计数——满队列丢弃、写入/刷盘失败、关闭排空超时不再静默（现场排障可见）。
+            logging = new
+            {
+                droppedEntries = logs.DroppedEntries,
+                writeFailures = logs.WriteFailures,
+                flushFailures = logs.FlushFailures,
+                drainTimeouts = logs.DrainTimeouts
+            }
         })).AllowAnonymous();
 
         app.MapGet("/api/host-mode", (IConfiguration configuration) =>

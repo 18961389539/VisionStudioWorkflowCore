@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 
 namespace VisionStudio.Api.Endpoints;
@@ -93,6 +94,41 @@ public static class TraceEndpoints
             AuditContext.SetTarget(http, request.BackupId);
             return Results.Ok(await backups.RestoreAsync(request, ct));
         }).RequireAdministrator("storage.restore", "storage");
+
+        // F03：受控恢复入口——失败锁激活时唯一受认证 + 审计的解锁路径（中间件豁免使其在维护激活时
+        // 仍可达）。先做状态检查（数据库可读、附件根存在），通过才清除持久化失败锁；否则保持锁定
+        // 并给出问题清单（把"盲目解锁放行写入"变成"核对后解锁"）。
+        app.MapPost("/api/storage/maintenance/recover", async (StorageMaintenanceCoordinator coordinator, SqliteMetadataDatabase database,
+            IWebHostEnvironment env, HttpContext http, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, "storage-failure-lock");
+            if (!coordinator.IsFailureLocked)
+                return Results.Ok(new { recovered = false, maintenanceActive = coordinator.IsMaintenanceActive, reason = coordinator.Reason });
+
+            var dataRoot = VisionStudioDataRoot.Resolve(env.ContentRootPath);
+            var problems = new List<string>();
+            try
+            {
+                await using var connection = await database.OpenConnectionAsync(ct);
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT version FROM schema_info WHERE id=1;";
+                await command.ExecuteScalarAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                problems.Add($"database is not readable: {ex.Message}");
+            }
+            var artifactsRoot = Path.Combine(dataRoot, "artifacts");
+            if (!Directory.Exists(artifactsRoot))
+                problems.Add($"artifacts root '{artifactsRoot}' is missing; restore it from the preserved copies before clearing the lock");
+
+            if (problems.Count > 0)
+                throw new ApiConflictException(
+                    "Storage recovery checks failed; the failure lock stays engaged: " + string.Join("; ", problems) + ".");
+
+            coordinator.ClearFailureLock();
+            return Results.Ok(new { recovered = true, maintenanceActive = coordinator.IsMaintenanceActive });
+        }).RequireAdministrator("storage.maintenance.recover", "storage");
 
         return app;
     }

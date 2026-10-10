@@ -16,6 +16,9 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     private readonly object _statsGate = new();
     private CancellationTokenSource? _cts;
     private Task? _loop;
+    /// <summary>F08：停止收尾进行中——期间的 Start 被拒绝，防止新采集任务被旧 Stop 误清或失去控制句柄。</summary>
+    private bool _stopping;
+    private readonly TimeSpan _stopDrainGrace;
     private CameraAcquisitionState _state = CameraAcquisitionState.Stopped;
     private long _framesPublished;
     private long _errors;
@@ -26,10 +29,12 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     private DateTimeOffset? _lastFrameAt;
     private string? _runtimeError;
 
-    public CameraAcquisitionWorker(ICameraDevice device, CameraFrameHub hub)
+    public CameraAcquisitionWorker(ICameraDevice device, CameraFrameHub hub, TimeSpan? stopDrainGrace = null)
     {
         _device = device;
         _hub = hub;
+        // F08：旧采集循环的独立收尾期限（默认 5 秒）——Stop 绝不无限等待，也不依赖调用方 token。
+        _stopDrainGrace = stopDrainGrace ?? TimeSpan.FromSeconds(5);
     }
 
     public bool IsRunning => _loop is { IsCompleted: false };
@@ -63,7 +68,8 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         await _lifecycle.WaitAsync(cancellationToken);
         try
         {
-            if (IsRunning) return;
+            // F08：停止收尾进行中同样拒绝 Start——旧循环未收尾时创建新任务会被旧 Stop 的清理误伤。
+            if (_stopping || IsRunning) return;
             SetState(CameraAcquisitionState.Starting, null);
             await _device.OpenAsync(cancellationToken);
             await _device.StartAsync(cancellationToken);
@@ -76,34 +82,51 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        CancellationTokenSource? cts;
         Task? loop;
         await _lifecycle.WaitAsync(cancellationToken);
         try
         {
-            if (_cts is null)
+            cts = _cts;
+            loop = _loop;
+            if (cts is null && loop is null)
             {
                 SetState(CameraAcquisitionState.Stopped, null);
                 return;
             }
-            _cts.Cancel();
-            loop = _loop;
+            // F08：进入停止收尾——期间的 Start 一律被拒（见 StartAsync），收尾完成后做身份核对再清理。
+            _stopping = true;
+            SetState(CameraAcquisitionState.Stopping, null);
+            cts?.Cancel();
         }
         finally { _lifecycle.Release(); }
 
+        var drainTimedOut = false;
         if (loop is not null)
         {
-            try { await loop.WaitAsync(cancellationToken); }
-            catch (OperationCanceledException) { }
+            // F08：独立收尾期限——不依赖调用方 token（可能永不触发取消），也绝不无限等待旧循环。
+            using var drain = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            drain.CancelAfter(_stopDrainGrace);
+            try { await loop.WaitAsync(drain.Token); }
+            catch (OperationCanceledException) { drainTimedOut = !cancellationToken.IsCancellationRequested; }
+            catch { /* loop 自身异常不得阻断收尾清理：控制句柄必须被一致地归还 */ }
         }
 
-        await _lifecycle.WaitAsync(cancellationToken);
+        // F08：清理必须完成（不可取消）——状态残留会让后续 Start/Stop 语义错乱。
+        await _lifecycle.WaitAsync(CancellationToken.None);
         try
         {
-            _cts?.Dispose();
-            _cts = null;
-            _loop = null;
+            // F08：身份核对（与 _stopping 双保险）——只清理由本次 Stop 捕获的实例，绝不误清新任务。
+            if (ReferenceEquals(_cts, cts))
+            {
+                _cts?.Dispose();
+                _cts = null;
+            }
+            if (ReferenceEquals(_loop, loop)) _loop = null;
+            _stopping = false;
             DrainTrigger();
-            SetState(CameraAcquisitionState.Stopped, null);
+            SetState(CameraAcquisitionState.Stopped,
+                drainTimedOut ? "Stop drainage exceeded the grace period; the acquisition loop is finishing in the background." : null);
         }
         finally { _lifecycle.Release(); }
     }

@@ -68,6 +68,10 @@ public sealed class TraceRetentionOptions
     public int CleanupIntervalMinutes { get; set; } = 60;
 }
 
+/// <summary>
+/// 存储状态（/api/storage/status）。F05：SnapshotSkippedPreviews/Replays 暴露在线备份冻结窗口
+/// 期间跳过的附件落盘次数——"跳过是明确的行为变化，其数量必须可见并由现场验收确认"。
+/// </summary>
 public sealed record TraceStorageStatus(
     string DatabaseFile,
     long DatabaseBytes,
@@ -77,7 +81,9 @@ public sealed record TraceStorageStatus(
     long ArtifactBytes,
     TraceRetentionOptions Retention,
     StorageCapacityStatus? Capacity = null,
-    SchemaMigrationStatus? Schema = null);
+    SchemaMigrationStatus? Schema = null,
+    long SnapshotSkippedPreviews = 0,
+    long SnapshotSkippedReplays = 0);
 
 /// <summary>
 /// SQLite-backed trace index and structured run payload store.
@@ -90,6 +96,11 @@ public sealed class TraceabilityStore
     private readonly string _artifactRoot;
     private readonly TraceRetentionOptions _retention;
     private readonly StorageCapacityService? _capacity;
+    /// <summary>
+    /// R07：附件一致性门持有者（可选）。生产部署经 DI 注入；单测构造时不传即退化为无门（原行为）。
+    /// 落盘 preview/replay 与保留清理时持**共享**租约，与备份的**排他**冻结窗口互斥。
+    /// </summary>
+    private readonly StorageMaintenanceCoordinator? _maintenance;
     private readonly SemaphoreSlim _cleanupGate = new(1, 1);
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
     {
@@ -97,16 +108,32 @@ public sealed class TraceabilityStore
         Converters = { new JsonStringEnumConverter() }
     };
 
+    // F05：在线备份冻结窗口期间跳过的附件落盘计数（经 /api/storage/status 暴露）。
+    private long _snapshotSkippedPreviews;
+    private long _snapshotSkippedReplays;
+
+    /// <summary>F05：因备份冻结窗口跳过的预览落盘次数。</summary>
+    public long SnapshotSkippedPreviews => Interlocked.Read(ref _snapshotSkippedPreviews);
+    /// <summary>F05：因备份冻结窗口跳过的回放落盘次数。</summary>
+    public long SnapshotSkippedReplays => Interlocked.Read(ref _snapshotSkippedReplays);
+
     public TraceabilityStore(SqliteMetadataDatabase db, IWebHostEnvironment env, IOptions<TraceRetentionOptions> retention, StorageCapacityService capacity)
         : this(db, env, retention)
     {
         _capacity = capacity;
     }
 
+    public TraceabilityStore(SqliteMetadataDatabase db, IWebHostEnvironment env, IOptions<TraceRetentionOptions> retention, StorageCapacityService capacity, StorageMaintenanceCoordinator maintenance)
+        : this(db, env, retention)
+    {
+        _capacity = capacity;
+        _maintenance = maintenance;
+    }
+
     public TraceabilityStore(SqliteMetadataDatabase db, IWebHostEnvironment env, IOptions<TraceRetentionOptions> retention)
     {
         _db = db;
-        _artifactRoot = Path.Combine(env.ContentRootPath, "data", "artifacts");
+        _artifactRoot = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "artifacts");
         Directory.CreateDirectory(_artifactRoot);
         _retention = retention.Value;
     }
@@ -288,6 +315,28 @@ ON CONFLICT(run_id) DO UPDATE SET
         var previewRelativePath = PreviewRelativePath(startedAt, result.RunId);
         var absolute = ArtifactPath(previewRelativePath);
         string? temp = null;
+
+        // R07：持共享附件写租约。备份冻结窗口进行中时获得 null → 跳过本次落盘并记 note
+        // （附件是可选证据，绝不阻塞生产循环，也不反压）。
+        using var artifactWrite = _maintenance?.TryEnterArtifactWrite();
+        if (_maintenance is not null && artifactWrite is null)
+        {
+            const string snapshotNote = "Preview artifact skipped because a storage backup snapshot is in progress.";
+            Interlocked.Increment(ref _snapshotSkippedPreviews);
+            try
+            {
+                await using var noteConnection = await _db.OpenConnectionAsync(CancellationToken.None);
+                await using var noteUpdate = noteConnection.CreateCommand();
+                noteUpdate.CommandText = "UPDATE run_traces SET note=COALESCE(note || ' | ','') || $note WHERE run_id=$run;";
+                noteUpdate.Parameters.AddWithValue("$note", snapshotNote);
+                noteUpdate.Parameters.AddWithValue("$run", result.RunId);
+                await noteUpdate.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch { }
+            if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
+            return record with { Note = snapshotNote };
+        }
+
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
@@ -531,7 +580,8 @@ WHERE t.run_id=$run;
         var databaseBytes = Size(_db.DatabasePath) + Size(_db.DatabasePath + "-wal") + Size(_db.DatabasePath + "-shm");
         var capacity = _capacity is null ? null : await _capacity.RefreshAsync(ct);
         var schema = await _db.GetSchemaStatusAsync(ct);
-        return new TraceStorageStatus(Path.GetFileName(_db.DatabasePath), databaseBytes, traceCount, previewCount, replayInputCount, artifactBytes, _retention, capacity, schema);
+        return new TraceStorageStatus(Path.GetFileName(_db.DatabasePath), databaseBytes, traceCount, previewCount, replayInputCount, artifactBytes, _retention, capacity, schema,
+            SnapshotSkippedPreviews, SnapshotSkippedReplays);
     }
 
     public async Task<int> CleanupAsync(CancellationToken ct)
@@ -539,6 +589,12 @@ WHERE t.run_id=$run;
         await _cleanupGate.WaitAsync(ct);
         try
         {
+            // R07：清理会删除附件文件。持共享附件写租约 → 备份冻结窗口（排他）期间不执行，
+            // 从而杜绝"快照已含某 run 的路径、清理随后删掉该文件"的悬空引用。
+            // 备份窗口进行中直接跳过本轮清理（下次宿主 tick 会重试）。
+            using var artifactWrite = _maintenance?.TryEnterArtifactWrite();
+            if (_maintenance is not null && artifactWrite is null) return 0;
+
             var changed = 0;
             await using var connection = await _db.OpenConnectionAsync(ct);
 
@@ -666,6 +722,31 @@ VALUES($run,$sequence,$node,$type,$phase,$success,$start,$end,$duration,$error);
     private async Task<RunTraceRecord> PersistReplayInputAsync(RunTraceRecord record, ReplayInputArtifact replay, DateTimeOffset startedAt, CancellationToken ct)
     {
         if (_capacity is not null && !_capacity.CanPersistArtifact(replay.Png.LongLength)) return record;
+        // N01：CanPersistArtifact 通过即已占用容量预留。与 preview 分支对称——所有提前返回路径
+        // 都必须归还预留，否则冻结窗口反复出现时预留泄漏会累积成虚假占用。
+        var capacityReservation = _capacity is not null ? replay.Png.LongLength : 0L;
+
+        // R07：与 preview 同理，持共享附件写租约；备份冻结窗口内跳过落盘（保留素材可重生成/重新采集）。
+        // N01：跳过路径归还容量预留，并把跳过原因写入数据库（与 preview 分支一致），保证历史记录可诊断。
+        using var artifactWrite = _maintenance?.TryEnterArtifactWrite();
+        if (_maintenance is not null && artifactWrite is null)
+        {
+            const string snapshotNote = "Replay input skipped because a storage backup snapshot is in progress.";
+            Interlocked.Increment(ref _snapshotSkippedReplays);
+            try
+            {
+                await using var noteConnection = await _db.OpenConnectionAsync(CancellationToken.None);
+                await using var noteUpdate = noteConnection.CreateCommand();
+                noteUpdate.CommandText = "UPDATE run_traces SET note=COALESCE(note || ' | ','') || $note WHERE run_id=$run;";
+                noteUpdate.Parameters.AddWithValue("$note", snapshotNote);
+                noteUpdate.Parameters.AddWithValue("$run", record.RunId);
+                await noteUpdate.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch { }
+            if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
+            return record with { Note = string.IsNullOrWhiteSpace(record.Note) ? snapshotNote : record.Note + " | " + snapshotNote };
+        }
+
         var relative = ReplayRelativePath(startedAt, record.RunId);
         var absolute = ArtifactPath(relative);
         string? temp = null;
@@ -709,7 +790,7 @@ VALUES($run,$sequence,$node,$type,$phase,$success,$start,$end,$duration,$error);
             {
                 try { if (File.Exists(temp)) File.Delete(temp); } catch { }
             }
-            _capacity?.ReleaseArtifactReservation(replay.Png.LongLength);
+            if (capacityReservation > 0) _capacity?.ReleaseArtifactReservation(capacityReservation);
         }
     }
 

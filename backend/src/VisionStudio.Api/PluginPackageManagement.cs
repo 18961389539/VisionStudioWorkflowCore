@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -126,8 +127,8 @@ public sealed class PluginPackageService
 
     public PluginPackageService(IWebHostEnvironment environment, IOptions<PluginPackageOptions> options, ILogger<PluginPackageService> logger)
     {
-        _repositoryRoot = Path.Combine(environment.ContentRootPath, "data", "plugin-packages");
-        _trustRoot = Path.Combine(environment.ContentRootPath, "data", "plugin-trust");
+        _repositoryRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "plugin-packages");
+        _trustRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "plugin-trust");
         _trustFile = Path.Combine(_trustRoot, "trusted-publishers.json");
         _pointerFile = Path.Combine(_repositoryRoot, "active-pointers.json");
         _options = options.Value;

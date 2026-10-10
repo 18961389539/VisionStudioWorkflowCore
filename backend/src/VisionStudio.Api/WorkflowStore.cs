@@ -1,3 +1,4 @@
+using VisionStudio.Api.Infrastructure;
 using System.Text.Json;
 using VisionStudio.Engine;
 
@@ -10,7 +11,7 @@ public sealed class WorkflowStore
 
     public WorkflowStore(IWebHostEnvironment env)
     {
-        _root = Path.Combine(env.ContentRootPath, "data", "workflows");
+        _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "workflows");
         Directory.CreateDirectory(_root);
     }
 

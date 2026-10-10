@@ -25,6 +25,9 @@ backend/src/VisionStudio.Api/plugins/*/*
 # dotnet artifacts 输出（dotnet build/test --artifacts-path，体积 ~700MB）
 .artifacts/
 
+# 质量门禁产物（scripts/quality-gate.ps1 的 coverage / test-results）
+artifacts/
+
 # WorkBuddy 本地协作记忆
 .workbuddy/
 
@@ -34,5 +37,7 @@ backend/src/VisionStudio.Api/plugins/*/*
 *.tsbuildinfo
 frontend/.vite/
 backend/logs/
+__pycache__/
+*.pyc
 Thumbs.db
 .DS_Store

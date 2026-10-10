@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
+using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api.Security;
 
@@ -49,7 +50,7 @@ public sealed class VisionStudioAuthenticationHandler(
     private async Task WriteProblemAsync(int status, string title, string detail, string code)
     {
         Response.StatusCode = status; Response.ContentType = "application/problem+json";
-        var correlationId = Context.TraceIdentifier;
+        var correlationId = RequestCorrelation.Get(Context);
         Response.Headers["X-Correlation-ID"] = correlationId;
         await Response.WriteAsync(JsonSerializer.Serialize(new { type = $"https://httpstatuses.com/{status}", title, status, detail, code, correlationId }));
     }

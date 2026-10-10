@@ -181,12 +181,16 @@ WHERE s.token_hash=$token AND s.revoked_at IS NULL AND s.expires_at>$now AND u.e
     {
         ValidateRole(request.Role); ValidateDisplayName(request.DisplayName);
         await using var connection = await database.OpenConnectionAsync(ct);
-        var current = await GetUserAsync(connection, id, ct) ?? throw new ApiNotFoundException($"Security user '{id}' was not found.");
+        // F09：降级检查与 UPDATE 必须在同一写事务（BEGIN IMMEDIATE，开始即取写锁）内完成。
+        // 否则两个并发请求都能读到"还有另一名启用管理员"，然后依次降级，把最后两名管理员同时移除。
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var current = await GetUserAsync(connection, id, ct, transaction) ?? throw new ApiNotFoundException($"Security user '{id}' was not found.");
         var demotesAdministrator = string.Equals(current.Role, SecurityRoles.Administrator, StringComparison.OrdinalIgnoreCase) &&
             (!request.Enabled || !string.Equals(request.Role, SecurityRoles.Administrator, StringComparison.OrdinalIgnoreCase));
-        if (demotesAdministrator && !await HasOtherEnabledAdministratorAsync(connection, id, ct))
+        if (demotesAdministrator && !await HasOtherEnabledAdministratorAsync(connection, id, ct, transaction))
             throw new ApiConflictException("At least one enabled Administrator must remain.");
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "UPDATE security_users SET display_name=$display,role=$role,enabled=$enabled,updated_at=$updated WHERE id=$id;";
         command.Parameters.AddWithValue("$display", request.DisplayName?.Trim() ?? string.Empty);
         command.Parameters.AddWithValue("$role", NormalizeRole(request.Role));
@@ -194,8 +198,10 @@ WHERE s.token_hash=$token AND s.revoked_at IS NULL AND s.expires_at>$now AND u.e
         command.Parameters.AddWithValue("$updated", DateTimeOffset.UtcNow.ToString("O"));
         command.Parameters.AddWithValue("$id", id);
         if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Security user '{id}' was not found.");
-        if (!request.Enabled) await RevokeUserSessionsAsync(connection, id, ct);
-        return (await GetUserAsync(connection, id, ct))!;
+        if (!request.Enabled) await RevokeUserSessionsAsync(connection, id, ct, transaction);
+        var updated = (await GetUserAsync(connection, id, ct, transaction))!;
+        await transaction.CommitAsync(ct);
+        return updated;
     }
 
     public async Task ResetPasswordAsync(string id, string password, CancellationToken ct = default)
@@ -258,18 +264,20 @@ VALUES($id,$username,$normalized,$display,$role,1,$salt,$hash,$iter,$at,$at,NULL
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private async Task<bool> HasOtherEnabledAdministratorAsync(SqliteConnection connection, string id, CancellationToken ct)
+    private async Task<bool> HasOtherEnabledAdministratorAsync(SqliteConnection connection, string id, CancellationToken ct, SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM security_users WHERE id<>$id AND enabled=1 AND role=$role LIMIT 1);";
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$role", SecurityRoles.Administrator);
         return Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0;
     }
 
-    private async Task<SecurityUserDto?> GetUserAsync(SqliteConnection connection, string id, CancellationToken ct)
+    private async Task<SecurityUserDto?> GetUserAsync(SqliteConnection connection, string id, CancellationToken ct, SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT id,username,display_name,role,enabled,created_at,updated_at,last_login_at,password_changed_at FROM security_users WHERE id=$id;";
         command.Parameters.AddWithValue("$id", id);
         await using var reader = await command.ExecuteReaderAsync(ct); return await reader.ReadAsync(ct) ? ReadUser(reader) : null;
