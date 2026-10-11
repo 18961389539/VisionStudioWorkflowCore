@@ -79,6 +79,9 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   // C06：辅助请求有自己的生命周期——不重叠、有超时、可在关闭时取消。
   const auxiliaryInFlight = useRef(false);
   const auxiliaryAbort = useRef<AbortController | null>(null);
+  // N05：辅助数据有**独立代次**——与主快照代次解耦（旧实现共用主代次，主快照每秒推进会让
+  // 1.5 秒的辅助响应永远"迟到"而被丢弃，待核对清单永远刷新不出来）。
+  const auxiliaryGeneration = useRef(0);
   const [pendingUnavailable, setPendingUnavailable] = useState(false);
   // R05：待核对设备动作——管理员必须在产品内看到清单并提交核对证据（此前后端具备能力但界面缺失）。
   const [pendingActions, setPendingActions] = useState<DeviceActionPendingState>();
@@ -102,12 +105,15 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃，不覆盖更新的结果
       if (!statusRes.ok)
         throw new Error(await responseErrorMessage(statusRes, `生产状态读取失败（HTTP ${statusRes.status}）`));
-      setStatus(await statusRes.json());
+      // N05：body 解析是异步边界——提交前必须再次核对代次（关闭重开后旧 body 不得被接受）。
+      const statusData = (await statusRes.json()) as ProductionRuntimeStatus;
+      if (generation !== refreshGeneration.current) return;
+      setStatus(statusData);
       setLastUpdatedAt(new Date());
       setStaleConnection(false);
       setRefreshError(undefined);
-      // 辅助数据：各自独立、失败只降级显示；每个异步边界后核对代次。
-      void loadAuxiliary(generation);
+      // 辅助数据：独立生命周期与独立代次（N05），失败只降级显示。
+      void loadAuxiliary();
     } catch (error) {
       if (generation !== refreshGeneration.current) return;
       // keep the operator screen alive while the host restarts — but never present stale data as current
@@ -120,11 +126,12 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     }
   }, []);
 
-  const loadAuxiliary = async (generation: number) => {
+  const loadAuxiliary = async () => {
     // C06：辅助请求不阻塞关键快照，但也不能共用主请求的 timeout/controller——它有自己的
     // 生命周期（超时 + 关闭取消），且不重叠发起（挂起的辅助请求不会逐 tick 累积）。
     if (auxiliaryInFlight.current) return;
     auxiliaryInFlight.current = true;
+    const generation = ++auxiliaryGeneration.current;
     const controller = new AbortController();
     auxiliaryAbort.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), PRODUCTION_POLL_TIMEOUT_MS);
@@ -135,13 +142,14 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         fetch('/api/alarms?activeOnly=false', { signal: controller.signal }),
         fetch('/api/production/device-actions/pending', { signal: controller.signal })
       ]);
-      if (generation !== refreshGeneration.current) return;
+      if (generation !== auxiliaryGeneration.current) return;
       const [configRes, jobsRes, alarmsRes, pendingRes] = settled;
 
       const parseIfCurrent = async <T,>(result: PromiseSettledResult<Response>): Promise<T | undefined> => {
         if (result.status !== 'fulfilled' || !result.value.ok) return undefined;
         const data = (await result.value.json()) as T;
-        if (generation !== refreshGeneration.current) throw new Error('stale auxiliary response');
+        // N05：只与辅助代次比较——主快照推进不再饿死辅助刷新；关闭/重开仍会使旧响应失效。
+        if (generation !== auxiliaryGeneration.current) throw new Error('stale auxiliary response');
         return data;
       };
 
@@ -166,7 +174,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           setPendingUnavailable(true);
         }
       }
-      if (generation !== refreshGeneration.current) return;
+      if (generation !== auxiliaryGeneration.current) return;
     } catch { /* 辅助数据读取失败/代次失效不影响主快照的新鲜度判定 */ }
     finally {
       window.clearTimeout(timeout);
@@ -182,8 +190,9 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => {
       window.clearInterval(timer);
-      // C06：关闭面板即使代次失效——迟到的响应（含辅助 body）绝不能再更新已关闭的界面。
+      // C06/N05：关闭面板使**两个**代次都失效——迟到的响应（含辅助 body）绝不能再更新已关闭的界面。
       refreshGeneration.current++;
+      auxiliaryGeneration.current++;
       refreshAbort.current?.abort();
       auxiliaryAbort.current?.abort();
     };

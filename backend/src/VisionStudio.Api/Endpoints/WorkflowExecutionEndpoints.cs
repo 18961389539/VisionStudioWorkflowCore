@@ -70,16 +70,22 @@ public static class WorkflowExecutionEndpoints
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
+            WorkflowModuleExpander modules,
             CancellationToken ct) =>
         {
             var context = new RunTraceContext("AdHoc");
             var runId = RunTraceRecorder.NewRunId();
             // 运行期硬件租约：覆盖整段执行（含计时收尾），完成/取消/异常时经 using 统一释放
             using var lease = await production.AcquireRunLeaseAsync(runId, workflow, $"Cannot run workflow '{workflow.Id}'", ct);
-            // R01：临时运行同样受统一动作授权约束，并在执行前耐久登记意图；含副作用流程的
-            // 起始证据写失败时绝不盲跑设备动作（best-effort 起始记录只适用于纯计算流程）。
-            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", workflow, runId, ct);
-            if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
+            // N01/N06：动作分类、完成判定与意图登记必须消费**展开后的执行计划**——
+            // 模块调用在运行期展开（报告 ID 带 `module-xxx::` 前缀），用未展开定义判定会漏检；
+            // 纯计算流程不登记动作意图（失败不应阻断设备动作）。
+            var effectiveWorkflow = (await modules.ExpandAsync(workflow, ct)).Workflow;
+            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow);
+            using var actionIntent = hasSideEffects
+                ? await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", effectiveWorkflow, runId, ct)
+                : null;
+            if (hasSideEffects)
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
@@ -88,10 +94,13 @@ public static class WorkflowExecutionEndpoints
             await recorder.FinalizeAsync(result, workflow, context);
             // C01/F02：成功 + 追溯证据已提交 + **设备动作确认完成** 三者齐全才解除意图。
             // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
-            if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, result))
-                actionIntent.Complete();
-            else if (result.Success)
-                actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
+            if (actionIntent is not null)
+            {
+                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                    actionIntent.Complete();
+                else if (result.Success)
+                    actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
+            }
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.adhoc", "workflow");
 
@@ -102,6 +111,7 @@ public static class WorkflowExecutionEndpoints
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
+            WorkflowModuleExpander modules,
             CancellationToken ct) =>
         {
             // 交互式调试：捕获逐节点图像以支持按节点检查中间结果
@@ -109,18 +119,25 @@ public static class WorkflowExecutionEndpoints
             var context = new RunTraceContext("Debug", DebugMode: options.Mode.ToString());
             var runId = RunTraceRecorder.NewRunId();
             using var lease = await production.AcquireRunLeaseAsync(runId, request.Workflow, $"Cannot debug-run workflow '{request.Workflow.Id}'", ct);
-            // R01：调试运行与生产/临时运行共用同一动作授权与意图登记契约。
-            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.debug", request.Workflow, runId, ct);
-            if (DeviceSideEffectClassifier.HasDeviceSideEffects(request.Workflow))
+            // N01/N06：展开执行计划后判定副作用；纯计算调试不登记动作意图。
+            var effectiveWorkflow = (await modules.ExpandAsync(request.Workflow, ct)).Workflow;
+            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow);
+            using var actionIntent = hasSideEffects
+                ? await auth.BeginWorkflowIntentAsync("workflow.run.debug", effectiveWorkflow, runId, ct)
+                : null;
+            if (hasSideEffects)
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             var result = await runner.RunAsync(request.Workflow, options, runId, ct);
             await recorder.FinalizeAsync(result, request.Workflow, context);
-            if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(request.Workflow, result))
-                actionIntent.Complete();
-            else if (result.Success)
-                actionIntent.MarkUnknown("the debug run returned success but an accepted device action still awaits completion confirmation");
+            if (actionIntent is not null)
+            {
+                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                    actionIntent.Complete();
+                else if (result.Success)
+                    actionIntent.MarkUnknown("the debug run returned success but an accepted device action still awaits completion confirmation");
+            }
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.debug", "workflow");
 

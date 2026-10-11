@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
+using VisionStudio.Engine.Robot;
 
 namespace VisionStudio.Api;
 
@@ -24,7 +25,9 @@ public sealed record ManualActionResolution(
     string Reason,
     string Evidence,
     string DeviceIdentityEvidence,
-    DateTimeOffset ResolvedAt);
+    DateTimeOffset ResolvedAt,
+    /// <summary>N07：被核对意图关联的真实执行标识（运行 RunId / 调试会话 ID）——核对记录必须能定位原执行。</summary>
+    string? RelatedRunId = null);
 
 /// <summary>R01/F02：一条手动/临时运行的设备动作意图（耐久登记，进程崩溃后仍可追溯）。</summary>
 /// <param name="State">
@@ -229,21 +232,27 @@ public sealed class DeviceActionAuthorizationService(
     RuntimeDependencyManifestService dependencies,
     ILogger<DeviceActionAuthorizationService> logger)
 {
-    private volatile string? _stateTransitionFailure;
+    private volatile IntentStateFailure? _stateTransitionFailure;
+
+    /// <summary>
+    /// N03：存储故障锁**绑定具体意图**——故障原因、原动作与状态必须能与 pending / health / 核对
+    /// 共享同一事实源；核对只能解除**匹配**该意图的锁（旧实现是一条字符串：pending 看不到原故障、
+    /// 也无法核对，而核对任意无关意图就会把锁清掉）。
+    /// </summary>
+    public sealed record IntentStateFailure(string RunId, string Action, string Reason, DateTimeOffset At);
 
     /// <summary>
     /// F02/Fix1：**同进程故障锁**。意图状态变更（MarkUnknown / Complete）落盘失败时置位——
-    /// 文件写不进去意味着"意图台账不再可信"，此时只记日志会让同进程继续放行动作（探针已复现：
-    /// 占用意图文件 → MarkUnknown 失败 → 下一次手动写入仍 200）。因此必须在内存里立即阻断本进程
-    /// 所有动作入口，直到进程重启（内存锁自然消失）或管理员完成核对。
+    /// 文件写不进去意味着"意图台账不再可信"，必须在内存里立即阻断本进程所有动作入口，
+    /// 直到进程重启（内存锁自然消失）或管理员完成对**该意图**的核对。
     /// </summary>
-    public string? StateTransitionFailure => _stateTransitionFailure;
+    public IntentStateFailure? StateTransitionFailure => _stateTransitionFailure;
 
-    private void EngageStateTransitionFailureLock(string reason)
+    private void EngageStateTransitionFailureLock(string runId, string action, string reason)
     {
         if (_stateTransitionFailure is not null) return;
-        _stateTransitionFailure = reason;
-        logger.LogError("In-process device-action failure lock engaged: {Reason}", reason);
+        _stateTransitionFailure = new IntentStateFailure(runId, action, reason, DateTimeOffset.UtcNow);
+        logger.LogError("In-process device-action failure lock engaged for intent {RunId} ({Action}): {Reason}", runId, action, reason);
     }
 
     /// <summary>生产安全状态是否仍未闭合（跨进程遗留或 Unknown / 不可读）。</summary>
@@ -255,7 +264,25 @@ public sealed class DeviceActionAuthorizationService(
 
     /// <summary>所有未闭合的手动意图（Unknown 任意进程 + Issued 来自更早进程）——用于 pending/health/闸门。</summary>
     public IReadOnlyList<ManualActionIntent> UnresolvedManualIntents()
-        => manualIntents.Load().Where(IsUnresolved).ToArray();
+    {
+        var intents = manualIntents.Load().Where(IsUnresolved).ToList();
+        // N03：故障锁绑定的意图即使磁盘上仍是 Issued，也必须出现在待核对清单里（并带故障原因）——
+        // 否则现场既看不到故障、也无法核对原动作，只能被迫重启进程。
+        if (_stateTransitionFailure is { } failure &&
+            intents.All(x => !string.Equals(x.RunId, failure.RunId, StringComparison.Ordinal)))
+        {
+            var persisted = manualIntents.Load().FirstOrDefault(x => string.Equals(x.RunId, failure.RunId, StringComparison.Ordinal));
+            var entry = (persisted ?? new ManualActionIntent(
+                failure.RunId, failure.Action, [], [], [], failure.At, DeviceActionSafetyStore.CurrentProcessId)) with
+            {
+                State = ManualActionIntentState.Unknown,
+                ClosedReason = $"safety-state transition failed: {failure.Reason}",
+                ClosedAt = failure.At
+            };
+            intents.Add(entry);
+        }
+        return intents;
+    }
 
     /// <summary>全部在册意图（含本进程活跃）——供运维查看当前有哪些动作在飞行中。</summary>
     public IReadOnlyList<ManualActionIntent> AllManualIntents() => manualIntents.Load();
@@ -340,9 +367,19 @@ public sealed class DeviceActionAuthorizationService(
         if (string.IsNullOrWhiteSpace(reason) || string.IsNullOrWhiteSpace(evidence) || string.IsNullOrWhiteSpace(identityEvidence))
             throw new ApiValidationException("Reason, on-site evidence, and device identity evidence are required (the resolution is retained as an auditable record).");
 
-        var target = manualIntents.Load().FirstOrDefault(x => string.Equals(x.RunId, runId, StringComparison.Ordinal))
-            ?? throw new ApiNotFoundException($"Manual action intent '{runId}' does not exist.");
-        if (!IsUnresolved(target))
+        var failure = _stateTransitionFailure;
+        var matchesFailureLock = failure is not null && string.Equals(failure.RunId, runId, StringComparison.Ordinal);
+        var target = manualIntents.Load().FirstOrDefault(x => string.Equals(x.RunId, runId, StringComparison.Ordinal));
+        if (target is null && matchesFailureLock)
+        {
+            // N03：磁盘条目可能不存在/不可写，但故障锁本身记录了原意图——允许按故障锁信息核对。
+            target = new ManualActionIntent(failure!.RunId, failure.Action, [], [], [], failure.At,
+                DeviceActionSafetyStore.CurrentProcessId, ManualActionIntentState.Unknown,
+                $"safety-state transition failed: {failure.Reason}", failure.At);
+        }
+        if (target is null)
+            throw new ApiNotFoundException($"Manual action intent '{runId}' does not exist.");
+        if (!IsUnresolved(target) && !matchesFailureLock)
             throw new ApiConflictException(
                 $"Manual action intent '{runId}' ({target.Action}) is still active in this process; wait for it to finish or stop it before reconciling.");
 
@@ -361,10 +398,16 @@ public sealed class DeviceActionAuthorizationService(
         manualIntents.SaveResolution(new ManualActionResolution(
             target.RunId, target.Action, target.DeviceIds, target.RobotIds, target.CameraIds,
             target.ProcessId, target.State, target.ClosedReason,
-            operatorName, reason.Trim(), evidence.Trim(), identityEvidence.Trim(), DateTimeOffset.UtcNow));
-        manualIntents.Remove(runId);
-        // 核对完成 ⇒ 由本次意图触发的同进程故障锁可以解除。
-        _stateTransitionFailure = null;
+            operatorName, reason.Trim(), evidence.Trim(), identityEvidence.Trim(), DateTimeOffset.UtcNow,
+            target.RelatedRunId));
+        try { manualIntents.Remove(runId); }
+        catch (Exception ex)
+        {
+            // 故障锁场景下磁盘可能仍不可写：证据已耐久保存，锁的解除不应因此失败（否则形成死锁）。
+            logger.LogWarning(ex, "Clearing intent {RunId} from the ledger failed; the durable resolution evidence is already committed.", runId);
+        }
+        // N03：只解除**绑定该意图**的故障锁——核对无关意图绝不能放行原故障。
+        if (matchesFailureLock) _stateTransitionFailure = null;
         logger.LogWarning(
             "Manual action intent {RunId} ({Action}) was reconciled and cleared by administrator '{Operator}'; evidence retained in {Directory}.",
             runId, target.Action, operatorName, manualIntents.ResolutionDirectory);
@@ -412,11 +455,11 @@ public sealed class DeviceActionHandle : IDisposable
     private readonly ILogger _logger;
     private readonly string _runId;
     private readonly string _action;
-    private readonly Action<string>? _onStateFailure;
+    private readonly Action<string, string, string>? _onStateFailure;
     private int _settled;
     private int _disposed;
 
-    internal DeviceActionHandle(ManualActionIntentStore store, ILogger logger, string runId, string action, Action<string>? onStateFailure = null)
+    internal DeviceActionHandle(ManualActionIntentStore store, ILogger logger, string runId, string action, Action<string, string, string>? onStateFailure = null)
     {
         _store = store;
         _logger = logger;
@@ -436,7 +479,7 @@ public sealed class DeviceActionHandle : IDisposable
         {
             // 清除失败 ⇒ 意图台账不可信：置同进程故障锁（重启前不得再下发动作）。
             _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be cleared.", _action, _runId);
-            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be cleared: {ex.Message}");
+            _onStateFailure?.Invoke(_runId, _action, $"the intent could not be cleared: {ex.Message}");
         }
     }
 
@@ -451,7 +494,7 @@ public sealed class DeviceActionHandle : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown.", _action, _runId);
-            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be marked as unknown: {ex.Message}");
+            _onStateFailure?.Invoke(_runId, _action, $"the intent could not be marked as unknown: {ex.Message}");
         }
     }
 
@@ -465,7 +508,7 @@ public sealed class DeviceActionHandle : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown on dispose.", _action, _runId);
-            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be marked as unknown on dispose: {ex.Message}");
+            _onStateFailure?.Invoke(_runId, _action, $"the intent could not be marked as unknown on dispose: {ex.Message}");
         }
     }
 }
@@ -509,20 +552,42 @@ public static class DeviceSideEffectClassifier
             return true;
         foreach (var report in robotReports.Where(report => report.Success))
         {
-            if (!nodes.TryGetValue(report.NodeId, out var node)) continue;
+            // N01：未知映射（模块展开前缀 `module-xxx::`、插件节点）**不能静默跳过**——那会让完成
+            // 判定对展开后的执行计划失效。无法解析到节点配置时保守要求核对。
+            if (!nodes.TryGetValue(report.NodeId, out var node))
+                return true;
             var action = node.GetString("action", "Handshake");
             if (action.Equals("SendTarget", StringComparison.OrdinalIgnoreCase) || !node.GetBool("waitForInPosition", true))
                 return true;
 
-            // runner 返回成功只证明节点返回了。必须由机器人协议快照确认完成（到位 + InPosition）
-            // 才允许清除耐久意图。
-            if (!TryGetOutput(report, "inPosition", out var inPosition) || inPosition is not true ||
-                !TryGetOutput(report, "state", out var state) ||
-                !string.Equals(state as string, "InPosition", StringComparison.OrdinalIgnoreCase))
-                return true;
+            var inPosition = TryGetOutput(report, "inPosition", out var ip) ? ip as bool? : null;
+            var state = TryGetOutput(report, "state", out var st) ? st as string : null;
+
+            // 路径 a：到位确认（Move / 等到位握手）。
+            if (inPosition is true && string.Equals(state, "InPosition", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // 路径 b（N02）：默认 autoAck=true 的握手在 Ack 后协议复位为 Ready（inPosition 清零），
+            // 但 Ack 本身证明该命令已完成——正常成功不得被误判为"未确认"。
+            if (HandshakeAcknowledged(report) && !RobotReportsBusy(report))
+                continue;
+
+            return true;
         }
         return false;
     }
+
+    /// <summary>N02：节点报告的手势快照是否已确认（Ack）——Ack 后协议复位为 Ready，不能用 Ready 反推完成。</summary>
+    private static bool HandshakeAcknowledged(NodeRunReport report)
+        => TryGetHandshake(report) is { Ack: true, Error: false };
+
+    private static bool RobotReportsBusy(NodeRunReport report)
+        => TryGetHandshake(report) is { Busy: true };
+
+    private static RobotHandshakeSignals? TryGetHandshake(NodeRunReport report)
+        => report.Summary is { } summary && summary.TryGetValue("handshake", out var value) && value is RobotHandshakeSignals signals
+            ? signals
+            : null;
 
     private static bool TryGetOutput(NodeRunReport report, string name, out object? value)
     {

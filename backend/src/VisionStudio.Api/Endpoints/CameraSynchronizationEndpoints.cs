@@ -98,21 +98,32 @@ public static class CameraSynchronizationEndpoints
 
         app.MapPost("/api/camera-sync/groups/{id}/trigger", async (
             string id, CameraSynchronizationTriggerRequest request, CameraSynchronizationService sync,
-            DeviceLeaseRegistry leases, CancellationToken ct) =>
+            DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
             // 请求期硬件租约：立即触发路径在请求内等待成帧，租约覆盖组内全部相机
             using var lease = await AcquireGroupLeaseAsync(id, sync, leases, "trigger", ct);
-            return Results.Ok(await sync.TriggerAsync(id, request with { Scheduled = false }, ct));
+            // N08：组触发是真实物理动作入口——与单相机触发共用同一授权与意图契约（此前只有租约）。
+            using var intent = auth.BeginManualIntent("camera.sync.trigger", [], [],
+                lease.Resources.Where(x => x.Kind == DeviceLeaseResourceKinds.Camera).Select(x => x.Id).ToArray());
+            var result = await sync.TriggerAsync(id, request with { Scheduled = false }, ct);
+            // 立即触发在请求内等待成帧：成帧成功（调用返回）才解除意图。
+            intent.Complete();
+            return Results.Ok(result);
         })
             .RequireOperator("camera.sync.trigger", "camera-sync");
 
         app.MapPost("/api/camera-sync/groups/{id}/schedule", async (
             string id, CameraSynchronizationTriggerRequest request, CameraSynchronizationService sync,
-            DeviceLeaseRegistry leases, CancellationToken ct) =>
+            DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
             // 调度触发同样在请求内等待目标时刻成帧（lead time 最长 60s），故用同一请求期租约
             using var lease = await AcquireGroupLeaseAsync(id, sync, leases, "schedule", ct);
-            return Results.Ok(await sync.TriggerAsync(id, request with { Scheduled = true }, ct));
+            // N08：调度触发与立即触发同一契约——取消/超时/未成帧都保留意图供核对。
+            using var intent = auth.BeginManualIntent("camera.sync.schedule", [], [],
+                lease.Resources.Where(x => x.Kind == DeviceLeaseResourceKinds.Camera).Select(x => x.Id).ToArray());
+            var result = await sync.TriggerAsync(id, request with { Scheduled = true }, ct);
+            intent.Complete();
+            return Results.Ok(result);
         })
             .RequireOperator("camera.sync.schedule", "camera-sync");
 

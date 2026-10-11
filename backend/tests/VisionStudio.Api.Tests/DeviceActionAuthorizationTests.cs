@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
+using VisionStudio.Engine.Robot;
 
 namespace VisionStudio.Api.Tests;
 
@@ -43,6 +44,38 @@ public sealed class DeviceActionAuthorizationTests
         var empty = new WorkflowRunResult("run-c01-empty", true, 1, false, 0, 0, [], [], null, QualityDisposition: "OK");
         Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(acceptedWorkflow, empty));
     }
+
+    [Fact]
+    public void RequiresManualReconciliation_AcceptsAcknowledgedHandshake()
+    {
+        // N02 回归：默认 autoAck=true 的握手在 Ack 后协议复位为 Ready（inPosition/complete 清零）——
+        // 节点报告的只是"Ack 已确认 + 不再忙碌 + 无错误"的历史结果，正常成功不得被误判为未确认。
+        var workflow = RobotWorkflow(action: "Handshake", waitForInPosition: true);
+        var acknowledged = new WorkflowRunResult("run-n02-ack", true, 1, false, 0, 0,
+            [HandshakeReport(ack: true, busy: false, error: false)], [], null, QualityDisposition: "OK");
+        Assert.False(DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, acknowledged));
+
+        // 对照：Ack 后仍在忙碌（命令尚未物理结束）⇒ 保守要求核对。
+        var stillBusy = new WorkflowRunResult("run-n02-busy", true, 1, false, 0, 0,
+            [HandshakeReport(ack: true, busy: true, error: false)], [], null, QualityDisposition: "OK");
+        Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, stillBusy));
+
+        // 对照：握手出错 ⇒ 必须要求核对。
+        var errored = new WorkflowRunResult("run-n02-error", true, 1, false, 0, 0,
+            [HandshakeReport(ack: false, busy: false, error: true)], [], null, QualityDisposition: "OK");
+        Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, errored));
+    }
+
+    /// <summary>N02：构造带手势快照摘要的机器人节点报告。</summary>
+    private static NodeRunReport HandshakeReport(bool ack, bool busy, bool error)
+        => new("r1", "robot.executeTarget", true, 1,
+            new Dictionary<string, object?>
+            {
+                ["handshake"] = new RobotHandshakeSignals(
+                    TargetReady: false, Execute: false, Busy: busy, Complete: false,
+                    Error: error, Ack: ack, CommandId: 1, ErrorCode: null, UpdatedAt: DateTimeOffset.UtcNow)
+            },
+            Phase: NodeExecutionPhase.Run);
 
     [Fact]
     public void RuntimeOnlyPolicy_AllowsDeviceActionReconciliationEndpoints()

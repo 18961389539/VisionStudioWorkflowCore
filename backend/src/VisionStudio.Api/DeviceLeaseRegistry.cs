@@ -100,6 +100,36 @@ public sealed class DeviceLeaseRegistry
         _probe = probe;
     }
 
+    /// <summary>
+    /// N04：管理员显式释放一个**已放弃**的租约（TTL 已过且持有者从未释放）。要求设备活动探针
+    /// 确认空闲——瞬时空闲不足以自动接管，但可以支撑"人工确认 + 审计"的受控释放。
+    /// </summary>
+    public bool TryForceRelease(string resourceKind, string resourceId, out string reason)
+    {
+        lock (_gate)
+        {
+            var key = (resourceKind, resourceId);
+            if (!_leases.TryGetValue(key, out var entry))
+            {
+                reason = "no lease exists for this resource";
+                return false;
+            }
+            if (!entry.Abandoned)
+            {
+                reason = "the lease is still active (its holder has not released it and the TTL has not elapsed)";
+                return false;
+            }
+            if (_probe is not null && _probe.IsResourceBusy(resourceKind, resourceId))
+            {
+                reason = "the device still reports active work; stop it or wait for it to finish before releasing";
+                return false;
+            }
+            _leases.TryRemove(key, out _);
+            reason = $"released the abandoned lease previously held by {entry.Owner.Kind} '{entry.Owner.Id}'";
+            return true;
+        }
+    }
+
     /// <summary>Number of assets currently leased (expired TTL entries are swept first).</summary>
     public int ActiveLeaseCount
     {
@@ -138,17 +168,12 @@ public sealed class DeviceLeaseRegistry
             conflicts = CollectConflictsLocked(normalized, owner, now);
             if (conflicts.Count > 0)
             {
-                // R02：接管规则——只有"全部冲突都是 Abandoned"且"活动探针确认每个资源空闲"时
-                // 才回收陈旧条目并授予新代次（token 递增；旧句柄的 Release 因 token 不匹配而失效）。
-                // 任何一项仍在忙碌（机器人 120 秒等待、忽略取消的驱动调用）都必须继续拒绝。
-                if (_probe is null ||
-                    conflicts.Any(x => !x.Abandoned) ||
-                    conflicts.Any(x => _probe.IsResourceBusy(x.ResourceKind, x.ResourceId)))
-                {
-                    return null;
-                }
-                foreach (var conflict in conflicts)
-                    _leases.TryRemove((conflict.ResourceKind, conflict.ResourceId), out _);
+                // N04：**不做自动接管**。TTL 到期只证明"持有者可能失联"，不能证明"旧调用已终止"——
+                // 瞬时设备空闲（命令门空闲/连接态）不足以作为证据，而且设备下发路径没有代次校验，
+                // 旧请求句柄在被替换后仍能继续写设备（探针：takeover=True 后旧所有者写入成功）。
+                // 恢复路径只有两条：进程重启（内存租约消失），或管理员显式释放（TryForceRelease，
+                // 要求条目已 Abandoned 且设备确认空闲，并写入审计）。
+                return null;
             }
 
             var token = ++_nextToken;

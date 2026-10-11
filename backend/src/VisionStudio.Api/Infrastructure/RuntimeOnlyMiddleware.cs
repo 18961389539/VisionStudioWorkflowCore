@@ -69,6 +69,9 @@ public static class RuntimeOnlyPolicy
         // C04：受管理员认证 + 审计的设备动作核对在正式运行模式下必须可达——否则 Unknown 只能先
         // resolve、而 resolve 被 RuntimeOnly 拒绝，故障恢复形成死路。
         if (value.Equals("/api/production/device-actions/resolve", StringComparison.OrdinalIgnoreCase)) return true;
+        // N04：受管理员认证的租约释放同样属于运行期运维操作。
+        if (value.StartsWith("/api/leases/", StringComparison.OrdinalIgnoreCase) &&
+            value.EndsWith("/release", StringComparison.OrdinalIgnoreCase)) return true;
         return value.StartsWith("/api/alarms/", StringComparison.OrdinalIgnoreCase) &&
                value.EndsWith("/ack", StringComparison.OrdinalIgnoreCase);
     }

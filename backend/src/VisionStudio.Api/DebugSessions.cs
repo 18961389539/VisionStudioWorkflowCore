@@ -29,6 +29,8 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
     private readonly DeviceLeaseRegistry _leases;
     /// <summary>F01：调试会话的每次执行都受统一设备动作授权约束（允许副作用 ≠ 上一动作已核对）。</summary>
     private readonly DeviceActionAuthorizationService _authorization;
+    /// <summary>N01：模块展开器——动作分类与完成判定必须消费展开后的执行计划。</summary>
+    private readonly WorkflowModuleExpander _modules;
     private readonly int _maxSessions;
     private readonly TimeSpan _idleTimeout;
     private readonly ILogger<DebugSessionService> _logger;
@@ -41,6 +43,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         RuntimeDependencyManifestService dependencies,
         DeviceLeaseRegistry leases,
         DeviceActionAuthorizationService authorization,
+        WorkflowModuleExpander modules,
         IConfiguration configuration,
         ILogger<DebugSessionService> logger)
     {
@@ -48,6 +51,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         _dependencies = dependencies;
         _leases = leases;
         _authorization = authorization;
+        _modules = modules;
         _maxSessions = Math.Clamp(configuration.GetValue("DebugSessions:MaxSessions", 4), 1, 32);
         _idleTimeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("DebugSessions:IdleTimeoutSeconds", 300), 30, 3600));
         _logger = logger;
@@ -65,15 +69,19 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // F01：含副作用的调试会话在首次运行（到达断点前可能已执行副作用节点——探针已确认
         // "write 在 breakpoint 之前执行"）前必须通过统一动作授权闸门，并耐久登记意图。
         // AllowSideEffects 只代表用户同意执行副作用，不代表上一动作已经安全核对。
+        // N07：会话 ID 提前生成——意图的 RelatedRunId 必须能定位到本次调试会话（此前传 null）。
+        var sessionId = Guid.NewGuid().ToString("N");
+        // N01：用**展开后的执行计划**判定副作用（模块内的设备动作不能被漏检）。
+        var effectiveWorkflow = (await _modules.ExpandAsync(workflow, ct)).Workflow;
         DeviceActionHandle? guard = null;
-        if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
-            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.create", workflow, null, ct);
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow))
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.create", effectiveWorkflow, sessionId, ct);
         try
         {
-            var started = await CreateCoreAsync(workflow, options, ct);
+            var started = await CreateCoreAsync(workflow, options, sessionId, ct);
             // C01：成功到达断点 + 报告成功 + 设备动作确认完成才解除意图；失败/取消保留为 Unknown。
             if (guard is not null && started.Result.Success &&
-                !DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, started.Result))
+                !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, started.Result))
             {
                 guard.Complete();
             }
@@ -89,11 +97,11 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
     private async Task<(string SessionId, WorkflowRunResult Result)> CreateCoreAsync(
         WorkflowDefinition workflow,
         VisionRunOptions options,
+        string sessionId,
         CancellationToken ct)
     {
         // The lease must cover the engine's initial run to the first breakpoint (it can already touch
-        // hardware), so the id is reserved here and the lease owner matches the session for its lifetime.
-        var sessionId = Guid.NewGuid().ToString("N");
+        // hardware), so the id is reserved by the caller and the lease owner matches the session for its lifetime.
         WorkflowRuntimeReferences references;
         try
         {
@@ -139,13 +147,15 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         EnsureLeaseHeld(entry, "continue");
         // F01：每次继续执行都必须重新通过授权闸门——运行期间产生安全故障（未闭合意图）后，
         // 已有会话也不能继续下发动作。
+        // N01：继续执行同样用展开后的执行计划判定（模块内的设备动作不能被漏检）。
+        var effectiveWorkflow = (await _modules.ExpandAsync(entry.Session.Workflow, ct)).Workflow;
         DeviceActionHandle? guard = null;
-        if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
-            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.continue", entry.Session.Workflow, sessionId, ct);
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow))
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.continue", effectiveWorkflow, sessionId, ct);
         try
         {
             var result = await _engine.ContinueAsync(entry.Session, ct);
-            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(entry.Session.Workflow, result))
+            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
                 guard.Complete();
             else if (guard is not null && result.Success)
                 guard.MarkUnknown("the debug session continued successfully but an accepted device action still awaits completion confirmation");
@@ -166,13 +176,15 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
             throw new ApiNotFoundException($"Node '{nodeId}' is not part of debug session '{sessionId}'.");
         EnsureLeaseHeld(entry, "run-node");
         // F01：单节点执行与"继续"同一契约——未闭合意图存在时不得再下发任何动作。
+        // N01：单节点执行同样用展开后的执行计划判定。
+        var effectiveWorkflow = (await _modules.ExpandAsync(entry.Session.Workflow, ct)).Workflow;
         DeviceActionHandle? guard = null;
-        if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
-            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.run-node", entry.Session.Workflow, sessionId, ct);
+        if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow))
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.run-node", effectiveWorkflow, sessionId, ct);
         try
         {
             var result = await _engine.RunNodeWithCachedInputsAsync(entry.Session, nodeId, ct);
-            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(entry.Session.Workflow, result))
+            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
                 guard.Complete();
             else if (guard is not null && result.Success)
                 guard.MarkUnknown("the debug node run returned success but an accepted device action still awaits completion confirmation");
