@@ -41,11 +41,14 @@ public static class ProductionEndpoints
             // 证据必填（否则核对不可追溯），清除动作写入审计（AuditContext 目标 = 意图 ID）。
             if (!string.IsNullOrWhiteSpace(request.ManualIntentId))
             {
-                if (string.IsNullOrWhiteSpace(request.Evidence) || string.IsNullOrWhiteSpace(request.DeviceIdentityEvidence))
-                    throw new ApiValidationException(
-                        "Reconciling a manual action requires both on-site evidence and device identity evidence (auditable record).");
+                // Fix3：证据校验与"先存证、后解除"的顺序由授权服务统一负责（单一来源）。
                 AuditContext.SetTarget(http, request.ManualIntentId);
-                authorization.ResolveManualIntent(request.ManualIntentId);
+                authorization.ResolveManualIntent(
+                    request.ManualIntentId,
+                    operatorName ?? string.Empty,
+                    string.IsNullOrWhiteSpace(request.Reason) ? "manual reconciliation" : request.Reason,
+                    request.Evidence,
+                    request.DeviceIdentityEvidence);
                 return Results.Ok(production.Status);
             }
 

@@ -65,8 +65,12 @@ public static class RobotEndpoints
                     AutoConnect: true,
                     WaitForComplete: request.WaitForInPosition,
                     AutoAck: request.AutoAck), ct);
-                // 握手协议包含完成/错误确认：成功后才可以解除意图。
-                intent.Complete();
+                // Fix2：只有**确认完成且不再忙碌**的握手才能解除意图——非等待握手会返回
+                // Completed=false（机器人仍 Busy），"指令已受理"不等于"动作已完成"。
+                if (result.Completed && !result.Robot.Busy)
+                    intent.Complete();
+                else
+                    intent.MarkUnknown($"robot handshake returned completed={result.Completed}, busy={result.Robot.Busy}");
                 return Results.Ok(new { result, robot = robots.Get(id) });
             }
 

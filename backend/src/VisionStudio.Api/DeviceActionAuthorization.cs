@@ -7,6 +7,25 @@ using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
 
+/// <summary>
+/// F03/Fix3：一次管理员核对的**耐久证据**——被核对意图的完整快照 + 操作者 + 现场与身份证据全文。
+/// 只在证据落盘成功后才允许解除意图（顺序不可颠倒，否则"先解除、后写审计"会留下无证据的放行）。
+/// </summary>
+public sealed record ManualActionResolution(
+    string RunId,
+    string Action,
+    IReadOnlyList<string> DeviceIds,
+    IReadOnlyList<string> RobotIds,
+    IReadOnlyList<string> CameraIds,
+    string? OriginalProcessId,
+    ManualActionIntentState OriginalState,
+    string? OriginalClosedReason,
+    string OperatorName,
+    string Reason,
+    string Evidence,
+    string DeviceIdentityEvidence,
+    DateTimeOffset ResolvedAt);
+
 /// <summary>R01/F02：一条手动/临时运行的设备动作意图（耐久登记，进程崩溃后仍可追溯）。</summary>
 /// <param name="State">
 /// F02：意图生命周期。Issued = 动作已下发、结果未确认（同进程视为活跃，其它进程视为遗留）；
@@ -44,10 +63,15 @@ public enum ManualActionIntentState
 /// · 写入使用 FileStream + Flush(true)（WriteThrough），并为文件加格式版本；
 /// · 读取兼容历史裸数组格式。
 /// </summary>
-public sealed class ManualActionIntentStore
+public class ManualActionIntentStore
 {
     private const int FormatVersion = 1;
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    // 审计/台账文件必须**人类可读**：默认编码器会把中文证据转义成 \uXXXX，现场导出后无法直接阅读。
+    // UnsafeRelaxedJsonEscaping 只用于落盘 JSON（非 HTML 上下文），保留 UTF-8 明文。
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly string _path;
     private readonly ILogger<ManualActionIntentStore> _logger;
     private readonly object _sync = new();
@@ -63,7 +87,30 @@ public sealed class ManualActionIntentStore
 
     public string StatePath => _path;
 
-    public IReadOnlyList<ManualActionIntent> Load()
+    /// <summary>F03：核对证据目录（与被核对的意图台账同根，便于现场整体导出）。</summary>
+    public string ResolutionDirectory => _path + ".resolutions";
+
+    /// <summary>F03/Fix3：耐久保存核对证据（含被核对意图快照）——必须先于解除意图完成。</summary>
+    public virtual void SaveResolution(ManualActionResolution resolution)
+    {
+        lock (_sync)
+        {
+            var directory = ResolutionDirectory;
+            Directory.CreateDirectory(directory);
+            var safeRunId = new string(resolution.RunId.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
+            if (string.IsNullOrWhiteSpace(safeRunId)) safeRunId = "legacy";
+            var path = Path.Combine(directory, $"{safeRunId}-{resolution.ResolvedAt:yyyyMMddTHHmmssfffZ}-{Guid.NewGuid():N}.json");
+            var temp = path + ".tmp";
+            using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, resolution, Json);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temp, path, true);
+        }
+    }
+
+    public virtual IReadOnlyList<ManualActionIntent> Load()
     {
         lock (_sync)
         {
@@ -105,7 +152,7 @@ public sealed class ManualActionIntentStore
         return root.GetProperty("intents").Deserialize<List<ManualActionIntent>>(Json);
     }
 
-    public void Add(ManualActionIntent intent)
+    public virtual void Add(ManualActionIntent intent)
     {
         lock (_sync)
         {
@@ -115,7 +162,7 @@ public sealed class ManualActionIntentStore
         }
     }
 
-    public void Remove(string runId)
+    public virtual void Remove(string runId)
     {
         lock (_sync)
         {
@@ -125,7 +172,7 @@ public sealed class ManualActionIntentStore
     }
 
     /// <summary>F02：把意图标记为"结果未确认"——比删除更保守，重启/同进程都会继续阻断。</summary>
-    public void MarkUnknown(string runId, string reason)
+    public virtual void MarkUnknown(string runId, string reason)
     {
         lock (_sync)
         {
@@ -180,6 +227,23 @@ public sealed class DeviceActionAuthorizationService(
     RuntimeDependencyManifestService dependencies,
     ILogger<DeviceActionAuthorizationService> logger)
 {
+    private volatile string? _stateTransitionFailure;
+
+    /// <summary>
+    /// F02/Fix1：**同进程故障锁**。意图状态变更（MarkUnknown / Complete）落盘失败时置位——
+    /// 文件写不进去意味着"意图台账不再可信"，此时只记日志会让同进程继续放行动作（探针已复现：
+    /// 占用意图文件 → MarkUnknown 失败 → 下一次手动写入仍 200）。因此必须在内存里立即阻断本进程
+    /// 所有动作入口，直到进程重启（内存锁自然消失）或管理员完成核对。
+    /// </summary>
+    public string? StateTransitionFailure => _stateTransitionFailure;
+
+    private void EngageStateTransitionFailureLock(string reason)
+    {
+        if (_stateTransitionFailure is not null) return;
+        _stateTransitionFailure = reason;
+        logger.LogError("In-process device-action failure lock engaged: {Reason}", reason);
+    }
+
     /// <summary>生产安全状态是否仍未闭合（跨进程遗留或 Unknown / 不可读）。</summary>
     public DeviceActionSafetyState? UnresolvedProductionState()
     {
@@ -201,6 +265,10 @@ public sealed class DeviceActionAuthorizationService(
     /// <summary>手动/临时/调试/作业运行入口的闸门：存在未闭合意图时抛出 409。安全停止/只读路径不得调用。</summary>
     public void EnsureActionsAllowed(string action)
     {
+        // Fix1：同进程故障锁优先——意图台账不可信时绝不继续下发动作。
+        if (_stateTransitionFailure is { } processFailure)
+            Block(action, $"an in-process safety-state failure lock is engaged ({processFailure}); reconcile the device state or restart the host");
+
         if (UnresolvedProductionState() is { } state)
             Block(action, $"an unresolved production device-action intent exists ({state.Phase}: {state.Reason})");
 
@@ -216,6 +284,9 @@ public sealed class DeviceActionAuthorizationService(
     /// <summary>生产 Start/Recover 的附加闸门：任何手动意图（含本进程活跃）都阻断启动。</summary>
     public void EnsureProductionStartAllowed()
     {
+        if (_stateTransitionFailure is { } processFailure)
+            throw new ApiConflictException(
+                $"Production start blocked: an in-process safety-state failure lock is engaged ({processFailure}); reconcile the device state or restart the host.");
         IReadOnlyList<ManualActionIntent> intents;
         try { intents = manualIntents.Load(); }
         catch (Exception ex)
@@ -260,16 +331,30 @@ public sealed class DeviceActionAuthorizationService(
     /// 正在本进程执行（Issued）的意图不得被清除——那会把"动作仍在飞行"当成"已核对"。
     /// 证据必填由调用端（受管理员认证的端点）校验并写入审计。
     /// </summary>
-    public ManualActionIntent ResolveManualIntent(string runId)
+    public ManualActionIntent ResolveManualIntent(string runId, string operatorName, string reason, string evidence, string identityEvidence)
     {
+        if (string.IsNullOrWhiteSpace(operatorName)) throw new ApiValidationException("Authenticated administrator identity is required.");
+        if (string.IsNullOrWhiteSpace(reason) || string.IsNullOrWhiteSpace(evidence) || string.IsNullOrWhiteSpace(identityEvidence))
+            throw new ApiValidationException("Reason, on-site evidence, and device identity evidence are required (the resolution is retained as an auditable record).");
+
         var target = manualIntents.Load().FirstOrDefault(x => string.Equals(x.RunId, runId, StringComparison.Ordinal))
             ?? throw new ApiNotFoundException($"Manual action intent '{runId}' does not exist.");
         if (!IsUnresolved(target))
             throw new ApiConflictException(
                 $"Manual action intent '{runId}' ({target.Action}) is still active in this process; wait for it to finish or stop it before reconciling.");
+
+        // Fix3：顺序不可颠倒——先把核对证据（含意图快照）耐久落盘，成功后才解除意图。
+        // 存证失败 ⇒ 抛出且意图保留（绝不出现"无证据放行"）。
+        manualIntents.SaveResolution(new ManualActionResolution(
+            target.RunId, target.Action, target.DeviceIds, target.RobotIds, target.CameraIds,
+            target.ProcessId, target.State, target.ClosedReason,
+            operatorName, reason.Trim(), evidence.Trim(), identityEvidence.Trim(), DateTimeOffset.UtcNow));
         manualIntents.Remove(runId);
+        // 核对完成 ⇒ 由本次意图触发的同进程故障锁可以解除。
+        _stateTransitionFailure = null;
         logger.LogWarning(
-            "Manual action intent {RunId} ({Action}) was reconciled and cleared by an administrator.", runId, target.Action);
+            "Manual action intent {RunId} ({Action}) was reconciled and cleared by administrator '{Operator}'; evidence retained in {Directory}.",
+            runId, target.Action, operatorName, manualIntents.ResolutionDirectory);
         return target;
     }
 
@@ -288,7 +373,7 @@ public sealed class DeviceActionAuthorizationService(
             throw new ApiUnavailableException(
                 $"Refusing to execute device action '{action}': its safety intent could not be persisted ({ex.Message}). Resolve the storage problem first.");
         }
-        return new DeviceActionHandle(manualIntents, logger, runId, action);
+        return new DeviceActionHandle(manualIntents, logger, runId, action, EngageStateTransitionFailureLock);
     }
 
     private void Block(string action, string reason)
@@ -313,15 +398,17 @@ public sealed class DeviceActionHandle : IDisposable
     private readonly ILogger _logger;
     private readonly string _runId;
     private readonly string _action;
+    private readonly Action<string>? _onStateFailure;
     private int _settled;
     private int _disposed;
 
-    internal DeviceActionHandle(ManualActionIntentStore store, ILogger logger, string runId, string action)
+    internal DeviceActionHandle(ManualActionIntentStore store, ILogger logger, string runId, string action, Action<string>? onStateFailure = null)
     {
         _store = store;
         _logger = logger;
         _runId = runId;
         _action = action;
+        _onStateFailure = onStateFailure;
     }
 
     public string RunId => _runId;
@@ -333,8 +420,9 @@ public sealed class DeviceActionHandle : IDisposable
         try { _store.Remove(_runId); }
         catch (Exception ex)
         {
-            // 清除失败 ⇒ 意图残留：重启后阻断（保守方向）。
-            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be cleared; it will block new actions after a restart.", _action, _runId);
+            // 清除失败 ⇒ 意图台账不可信：置同进程故障锁（重启前不得再下发动作）。
+            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be cleared.", _action, _runId);
+            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be cleared: {ex.Message}");
         }
     }
 
@@ -348,7 +436,8 @@ public sealed class DeviceActionHandle : IDisposable
         try { _store.MarkUnknown(_runId, reason); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown; it stays registered.", _action, _runId);
+            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown.", _action, _runId);
+            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be marked as unknown: {ex.Message}");
         }
     }
 
@@ -361,7 +450,8 @@ public sealed class DeviceActionHandle : IDisposable
         try { _store.MarkUnknown(_runId, $"action '{_action}' ended without an explicit completion confirmation"); }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown on dispose; it stays registered as issued.", _action, _runId);
+            _logger.LogError(ex, "Manual action intent for '{Action}' ({RunId}) could not be marked as unknown on dispose.", _action, _runId);
+            _onStateFailure?.Invoke($"the intent for '{_action}' ({_runId}) could not be marked as unknown on dispose: {ex.Message}");
         }
     }
 }
