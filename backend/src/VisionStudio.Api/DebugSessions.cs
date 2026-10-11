@@ -29,6 +29,8 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
     private readonly DeviceLeaseRegistry _leases;
     /// <summary>F01：调试会话的每次执行都受统一设备动作授权约束（允许副作用 ≠ 上一动作已核对）。</summary>
     private readonly DeviceActionAuthorizationService _authorization;
+    /// <summary>N07：调试片段的节点报告/耗时/结果必须耐久提交——追溯提交失败不得解除动作意图。</summary>
+    private readonly RunTraceRecorder _traces;
     /// <summary>N01：模块展开器——动作分类与完成判定必须消费展开后的执行计划。</summary>
     private readonly WorkflowModuleExpander _modules;
     private readonly int _maxSessions;
@@ -44,6 +46,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         DeviceLeaseRegistry leases,
         DeviceActionAuthorizationService authorization,
         WorkflowModuleExpander modules,
+        RunTraceRecorder traces,
         IConfiguration configuration,
         ILogger<DebugSessionService> logger)
     {
@@ -52,6 +55,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         _leases = leases;
         _authorization = authorization;
         _modules = modules;
+        _traces = traces;
         _maxSessions = Math.Clamp(configuration.GetValue("DebugSessions:MaxSessions", 4), 1, 32);
         _idleTimeout = TimeSpan.FromSeconds(Math.Clamp(configuration.GetValue("DebugSessions:IdleTimeoutSeconds", 300), 30, 3600));
         _logger = logger;
@@ -155,10 +159,15 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         try
         {
             var result = await _engine.ContinueAsync(entry.Session, ct);
-            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
-                guard.Complete();
-            else if (guard is not null && result.Success)
-                guard.MarkUnknown("the debug session continued successfully but an accepted device action still awaits completion confirmation");
+            if (guard is not null && result.Success)
+            {
+                // N07：片段动作证据（节点报告/耗时/结果）必须先耐久提交——提交失败不得解除意图。
+                await SubmitFragmentEvidenceAsync(result, entry.Session, ct);
+                if (!DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                    guard.Complete();
+                else
+                    guard.MarkUnknown("the debug session continued successfully but an accepted device action still awaits completion confirmation");
+            }
             return result;
         }
         catch (InvalidOperationException ex)
@@ -184,10 +193,15 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         try
         {
             var result = await _engine.RunNodeWithCachedInputsAsync(entry.Session, nodeId, ct);
-            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
-                guard.Complete();
-            else if (guard is not null && result.Success)
-                guard.MarkUnknown("the debug node run returned success but an accepted device action still awaits completion confirmation");
+            if (guard is not null && result.Success)
+            {
+                // N07：单节点片段同样先提交耐久证据。
+                await SubmitFragmentEvidenceAsync(result, entry.Session, ct);
+                if (!DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                    guard.Complete();
+                else
+                    guard.MarkUnknown("the debug node run returned success but an accepted device action still awaits completion confirmation");
+            }
             return result;
         }
         catch (InvalidOperationException ex)
@@ -195,6 +209,26 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
             throw new ApiConflictException(ex.Message, ex);
         }
         finally { guard?.Dispose(); }
+    }
+
+    /// <summary>
+    /// N07：把调试片段的完整证据（节点报告/耗时/结果/关联会话）耐久提交到运行追溯。
+    /// 提交失败只记日志——动作意图保持 Unknown（绝不因证据丢失而放行），供管理员核对。
+    /// </summary>
+    private async Task SubmitFragmentEvidenceAsync(WorkflowRunResult result, WorkflowDebugSession session, CancellationToken ct)
+    {
+        try
+        {
+            // FinalizeAsync 自带 10 秒有界超时且失败向上抛（"failure surfaces to the caller"）。
+            await _traces.FinalizeAsync(result, session.Workflow,
+                new RunTraceContext("DebugFragment", DebugMode: session.Options.Mode.ToString(), Note: session.SessionId));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Debug fragment evidence for session {SessionId} (fragment run {RunId}) could not be persisted; the action intent stays unresolved.",
+                session.SessionId, result.RunId);
+        }
     }
 
     public async Task<DebugSessionSnapshot> SnapshotAsync(string sessionId, CancellationToken ct = default)
