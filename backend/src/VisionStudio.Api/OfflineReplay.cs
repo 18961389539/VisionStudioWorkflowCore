@@ -113,6 +113,8 @@ public sealed class OfflineReplayService(
         var runId = RunTraceRecorder.NewRunId();
         // 回放可能保留真实硬件节点（设备写、机器人指令等）：引用硬件资产时取运行期租约，纯离线路径不占租约
         using var lease = await production.AcquireRunLeaseAsync(runId, executable, $"Cannot replay trace '{sourceRunId}'", ct);
+        // A02：进入所有权环境——节点真实派发边界据此校验租约代次（失去所有权的旧执行被拒绝）。
+        using var commandScope = DeviceCommandOwnership.Enter(lease);
         if (persistTrace) await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, editedWorkflow, context);
         var result = await runner.RunAsync(executable, options, runId, ct);
 
@@ -166,6 +168,8 @@ public sealed class OfflineReplayService(
         var context = new RunTraceContext(traceSource, DebugMode: options.Mode.ToString());
         var runId = RunTraceRecorder.NewRunId();
         using var lease = await production.AcquireRunLeaseAsync(runId, executable, $"Cannot validate image '{sourceRef}'", ct);
+        // A02：进入所有权环境——节点真实派发边界据此校验租约代次（失去所有权的旧执行被拒绝）。
+        using var commandScope = DeviceCommandOwnership.Enter(lease);
         if (persistTrace) await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
         var result = await runner.RunAsync(executable, options, runId, ct);
         if (persistTrace)

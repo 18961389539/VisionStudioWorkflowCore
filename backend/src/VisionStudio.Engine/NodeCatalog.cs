@@ -31,7 +31,10 @@ public static class BuiltInNodeCatalog
                 new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false)
             ],
             "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
-            "builtin"),
+            "builtin",
+            // R02：triggerBeforeGrab=true 时节点会主动触发相机（物理动作）；纯取图（false/缺省）保持只读语义。
+            Actions: [new(NodeActionKind.CameraTrigger, NodeActionCompletion.Synchronous, WhenParameter: "triggerBeforeGrab", WhenValue: "true")],
+            Resources: [new("camera", "cameraId")]),
         new(
             "camera.syncCapture",
             "Synchronized Capture",
@@ -53,7 +56,10 @@ public static class BuiltInNodeCatalog
             ],
             "Issue one synchronization-group Action Command, collect one new frame from every member camera, and output a workflow-owned FrameSet with measured skew.",
             "builtin",
-            new VisionToolCapabilities(ExecutionMode: VisionExecutionMode.WorkflowCore)),
+            new VisionToolCapabilities(ExecutionMode: VisionExecutionMode.WorkflowCore),
+            // R02：同步采集总会下发设备端 Action Command（真实物理触发），恒为设备动作。
+            Actions: [new(NodeActionKind.CameraTrigger, NodeActionCompletion.Synchronous)],
+            Resources: [new("cameraSyncGroup", "groupId")]),
         new(
             "frameset.image",
             "FrameSet Image",
@@ -70,7 +76,8 @@ public static class BuiltInNodeCatalog
             ],
             [new("cameraId", "Camera ID", "text", "camera-1")],
             "Select one camera image from a synchronized FrameSet without cloning the underlying frame.",
-            "builtin"),
+            "builtin",
+            Resources: [new("camera", "cameraId")]),
         new(
             "image.synthetic",
             "Synthetic Image",
@@ -448,7 +455,8 @@ public static class BuiltInNodeCatalog
             ],
             "Read a typed tag through DeviceManager. Returns value, quality and timestamp without exposing protocol SDK objects.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false),
+            Resources: [new("device", "deviceId")]),
         new(
             "device.writeTag",
             "Write Device Tag",
@@ -472,7 +480,9 @@ public static class BuiltInNodeCatalog
             ],
             "Write a generic device tag. Connected input wins; otherwise the typed fallback parameter is used.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false),
+            Actions: [new(NodeActionKind.DeviceWrite, NodeActionCompletion.Synchronous)],
+            Resources: [new("device", "deviceId")]),
         new(
             "device.waitTag",
             "Wait Device Tag",
@@ -500,7 +510,8 @@ public static class BuiltInNodeCatalog
             ],
             "Block the workflow until a tag condition becomes true or the timeout expires. Useful for PLC trigger/ready handshakes.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false),
+            Resources: [new("device", "deviceId")]),
         new(
             "device.writeVisionResult",
             "Write Vision Result",
@@ -518,7 +529,9 @@ public static class BuiltInNodeCatalog
             ],
             "Write OK/NG + optional X/Y/R as an ordered PLC result transaction: Ready=0, payload, Ready=1.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false),
+            Actions: [new(NodeActionKind.DeviceWrite, NodeActionCompletion.Synchronous)],
+            Resources: [new("device", "deviceId")]),
         new(
             "robot.currentPose",
             "Robot Current Pose",
@@ -544,7 +557,8 @@ public static class BuiltInNodeCatalog
             ],
             "Read the current planar robot pose and neutral handshake state from RobotManager. Vendor protocol objects remain outside Workflow Core.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false),
+            Resources: [new("robot", "robotId")]),
         new(
             "robot.executeTarget",
             "Execute Robot Target",
@@ -572,7 +586,9 @@ public static class BuiltInNodeCatalog
             ],
             "Execute a vendor-neutral RobotTarget2D using SendTarget/Move or the standard TargetReady→Execute→Busy→Complete/Error→Ack industrial handshake with timeout/retry policy.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false)),
+            new VisionToolCapabilities(Deterministic: false, SupportsParallel: false, SupportsRunNode: false),
+            Actions: [new(NodeActionKind.RobotCommand, NodeActionCompletion.ProtocolConfirmed)],
+            Resources: [new("robot", "robotId")]),
         new(
             "robot.guidance2d",
             "Robot Guidance 2D",

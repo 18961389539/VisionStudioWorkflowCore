@@ -1,4 +1,5 @@
 using VisionStudio.Api.Contracts;
+using VisionStudio.Engine;
 using VisionStudio.Engine.Robot;
 using VisionStudio.Api.Security;
 
@@ -51,6 +52,8 @@ public static class RobotEndpoints
         {
             // 请求期硬件租约：指令执行期间独占该机器人（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("robot", id, $"Cannot command robot '{id}'");
+            // A02：进入所有权环境——真实派发边界据此校验租约代次（失去所有权的旧调用被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // R01：统一动作授权 + 动作前耐久登记（命令可能被取消/中断，意图必须可追溯）。
             using var intent = auth.BeginManualIntent("robot.command", [], [id]);
             var target = new VisionRobotTarget2D(

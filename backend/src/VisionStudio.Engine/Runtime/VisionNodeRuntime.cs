@@ -36,6 +36,8 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         IReadOnlyDictionary<string, VisionValue> inputs = new Dictionary<string, VisionValue>();
         try
         {
+            // A02：节点执行前重入所有权环境——真实派发（写设备/机器人指令/相机触发）据此校验租约代次。
+            using var ownership = DeviceCommandOwnership.Enter(data.Ownership);
             inputs = dispatcher.ResolveInputs(data, node);
             var result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken);
             sw.Stop();

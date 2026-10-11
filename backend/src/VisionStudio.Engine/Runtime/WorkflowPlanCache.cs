@@ -28,11 +28,32 @@ public sealed class WorkflowPlanCache(
     public long CompilationCount { get { lock (_sync) return _compilations; } }
 
     /// <summary>
-    /// True when the node catalog declares the type must not be executed implicitly by a debug warmup
-    /// (external side effects such as PLC writes or robot commands).
+    /// True when the node must not be executed implicitly by a debug warmup (external side effects
+    /// such as PLC writes, robot commands or an actively triggering camera).
+    /// 扩展契约：显式动作声明（Actions）优先，且按**节点参数**求值（声明条件只在满足时计）；
+    /// 未声明目录回退到旧能力标记。
+    /// </summary>
+    public bool RequiresSideEffectApproval(NodeDefinition node)
+    {
+        if (!nodes.IsRegistered(node.Type)) return false;
+        var catalog = nodes.Require(node.Type).Catalog;
+        return catalog.DeclaresActions
+            ? NodeActionContract.NodeHasAction(node, catalog)
+            : catalog.Capabilities?.SupportsRunNode == false;
+    }
+
+    /// <summary>
+    /// 类型级审批判定（保守口径：看不到节点参数时，声明了任何动作即要求审批）。
+    /// 调试执行路径请使用节点级重载，避免"仅部分参数才成立的动作"被误判为恒有副作用。
     /// </summary>
     public bool RequiresSideEffectApproval(string nodeType)
-        => nodes.IsRegistered(nodeType) && nodes.Require(nodeType).Catalog.Capabilities?.SupportsRunNode == false;
+    {
+        if (!nodes.IsRegistered(nodeType)) return false;
+        var catalog = nodes.Require(nodeType).Catalog;
+        return catalog.DeclaresActions
+            ? catalog.Actions!.Count > 0
+            : catalog.Capabilities?.SupportsRunNode == false;
+    }
 
     public async Task<Lease> AcquireAsync(WorkflowDefinition workflow, CancellationToken ct = default)
     {

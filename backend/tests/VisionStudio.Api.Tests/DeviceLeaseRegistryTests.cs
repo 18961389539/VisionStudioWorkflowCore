@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Engine;
 
 namespace VisionStudio.Api.Tests;
 
@@ -235,5 +236,191 @@ public sealed class DeviceLeaseRegistryTests
         Assert.Equal(
             ["camera:cam-1", "device:dev-1", "device:dev-2", "robot:rob-1"],
             resources.Select(x => $"{x.Kind}:{x.Id}").OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void CommandPermit_RejectsStaleOwner_AfterAdminForceReleaseAndTakeover()
+    {
+        // A02 回归（2026-10-11 复审）：管理员释放过期租约后，旧执行完成过第一步写也不能再写第二步——
+        // 真实派发边界校验递增所有权令牌（探针反例：旧调用 OLD-OWNER-STEP2 写入成功）。
+        var clock = new FakeTimeProvider();
+        var probe = new ControllableProbe();
+        var registry = new DeviceLeaseRegistry(clock, probe);
+        var oldLease = registry.AcquireOrThrow(
+            DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "first-step", ttl: TimeSpan.FromSeconds(60));
+        using (DeviceCommandOwnership.Enter(oldLease))
+        using (registry.AcquireCommandPermit("device", "d1"))
+        {
+            // 第一步写在租约有效期内完成。
+        }
+
+        // TTL 到期仍不自动接管；管理员释放成功后新执行取得租约。
+        clock.Advance(TimeSpan.FromSeconds(61));
+        Assert.Null(registry.TryAcquire(DeviceLeaseOwner.Production("new-owner"), [Res("device", "d1")], out _));
+        Assert.True(registry.TryForceRelease("device", "d1", out _));
+        using var newLease = registry.AcquireOrThrow(DeviceLeaseOwner.Production("new-owner"), [Res("device", "d1")], "takeover");
+
+        // 旧执行的第二步派发：必须被拒绝（旧实现：成功写入）。
+        var stale = Assert.Throws<ApiConflictException>(() =>
+        {
+            using var staleScope = DeviceCommandOwnership.Enter(oldLease);
+            registry.AcquireCommandPermit("device", "d1");
+        });
+        Assert.Contains("revoked", stale.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 新执行正常派发。
+        using (DeviceCommandOwnership.Enter(newLease))
+        using (registry.AcquireCommandPermit("device", "d1"))
+        {
+        }
+    }
+
+    [Fact]
+    public void CommandPermit_BlocksAdminForceRelease_WhileCommandIsBeingDispatched()
+    {
+        // A02 竞争窗口：许可存续（真实派发进行中）期间管理员释放必须被拒绝——
+        // 检查与派发之间不留"释放后旧写仍落盘"的窗口。
+        var clock = new FakeTimeProvider();
+        var probe = new ControllableProbe();
+        var registry = new DeviceLeaseRegistry(clock, probe);
+        var lease = registry.AcquireOrThrow(
+            DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate", ttl: TimeSpan.FromSeconds(60));
+        using var scope = DeviceCommandOwnership.Enter(lease);
+        clock.Advance(TimeSpan.FromSeconds(61));
+
+        var permit = registry.AcquireCommandPermit("device", "d1");
+        Assert.False(registry.TryForceRelease("device", "d1", out var reason));
+        Assert.Contains("still being dispatched", reason);
+
+        permit.Dispose();
+        Assert.True(registry.TryForceRelease("device", "d1", out _));
+    }
+
+    [Fact]
+    public void CommandPermit_RejectsSupersededOwner_EvenWithoutForceRelease()
+    {
+        // 正常释放后被新所有者取得：旧令牌换代 ⇒ 旧执行派发被拒。
+        var registry = new DeviceLeaseRegistry();
+        var oldLease = registry.AcquireOrThrow(DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate");
+        using (DeviceCommandOwnership.Enter(oldLease))
+        using (registry.AcquireCommandPermit("device", "d1"))
+        {
+        }
+
+        oldLease.Dispose();
+        using var newLease = registry.AcquireOrThrow(DeviceLeaseOwner.Production("job-1"), [Res("device", "d1")], "start");
+
+        Assert.Throws<ApiConflictException>(() =>
+        {
+            using var staleScope = DeviceCommandOwnership.Enter(oldLease);
+            registry.AcquireCommandPermit("device", "d1");
+        });
+    }
+
+    [Fact]
+    public void CommandPermit_RejectsReleasedLease_WhenNoNewOwnerTookOver()
+    {
+        // R01 反例一（2026-10-11 复审）：普通释放（Dispose）后且无新持有者时，旧令牌仍能派发。
+        // 现在：IsReleased 校验在同一临界区内完成 ⇒ 拒绝。
+        var registry = new DeviceLeaseRegistry();
+        var lease = registry.AcquireOrThrow(DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate");
+        using (DeviceCommandOwnership.Enter(lease))
+        using (registry.AcquireCommandPermit("device", "d1"))
+        {
+        }
+
+        lease.Dispose();
+        Assert.True(lease.IsReleased);
+        Assert.False(registry.IsHeldBy(lease.Owner, lease.Resources));
+
+        var rejected = Assert.Throws<ApiConflictException>(() =>
+        {
+            using var scope = DeviceCommandOwnership.Enter(lease);
+            registry.AcquireCommandPermit("device", "d1");
+        });
+        Assert.Contains("released", rejected.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandPermit_RejectsResourceOutsideLeaseScope()
+    {
+        // R01 反例二：只租了 other-device，却对未租用的 d1 派发（范围外资源）。
+        var registry = new DeviceLeaseRegistry();
+        using var lease = registry.AcquireOrThrow(DeviceLeaseOwner.Manual("request-1"), [Res("device", "other-device")], "operate");
+
+        var rejected = Assert.Throws<ApiConflictException>(() =>
+        {
+            using var scope = DeviceCommandOwnership.Enter(lease);
+            registry.AcquireCommandPermit("device", "d1");
+        });
+        Assert.Contains("outside the lease scope", rejected.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 租约范围内的资源正常放行。
+        using (DeviceCommandOwnership.Enter(lease))
+        using (registry.AcquireCommandPermit("device", "other-device"))
+        {
+        }
+    }
+
+    [Fact]
+    public void CommandPermit_RejectsMissingContext_AndForeignRegistry()
+    {
+        // R01：无上下文不再默认放行；异地注册表的令牌同样拒绝。
+        var registry = new DeviceLeaseRegistry();
+        var noContext = Assert.Throws<ApiConflictException>(() => registry.AcquireCommandPermit("device", "d1"));
+        Assert.Contains("no device-command ownership context", noContext.Message, StringComparison.OrdinalIgnoreCase);
+
+        using var lease = registry.AcquireOrThrow(DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate");
+        var foreignRegistry = new DeviceLeaseRegistry();
+        var rejected = Assert.Throws<ApiConflictException>(() =>
+        {
+            using var scope = DeviceCommandOwnership.Enter(lease);
+            foreignRegistry.AcquireCommandPermit("device", "d1");
+        });
+        Assert.Contains("different lease registry", rejected.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandPermit_AllowsExplicitSystemContext()
+    {
+        // R01：启动/维护/验收路径必须显式进入系统上下文，而不是靠"无上下文默认放行"。
+        var registry = new DeviceLeaseRegistry();
+        using (DeviceCommandOwnership.EnterSystem("probe-maintenance", "unit test"))
+        using (registry.AcquireCommandPermit("device", "d1"))
+        {
+        }
+
+        // 系统上下文许可同样登记在途：进行中禁止管理员强制释放（避免派发窗口内被换代）。
+        var clock = new FakeTimeProvider();
+        var probe = new ControllableProbe();
+        var registry2 = new DeviceLeaseRegistry(clock, probe);
+        var lease = registry2.AcquireOrThrow(
+            DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate", ttl: TimeSpan.FromSeconds(60));
+        clock.Advance(TimeSpan.FromSeconds(61));
+        using var systemScope = DeviceCommandOwnership.EnterSystem("probe-maintenance", "unit test");
+        using var permit = registry2.AcquireCommandPermit("device", "d1");
+        Assert.False(registry2.TryForceRelease("device", "d1", out var reason));
+        Assert.Contains("still being dispatched", reason);
+    }
+
+    [Fact]
+    public void TryAcquire_IsBlocked_WhileAnotherHoldersCommandIsInFlight()
+    {
+        // R01：真实派发中的旧命令是独立冲突来源——即使租约已被普通释放，旧命令未收尾前
+        // 持有者不同的获取必须被拒绝（防"释放→接管→旧命令仍在设备上执行"的重叠窗口）。
+        var registry = new DeviceLeaseRegistry();
+        var oldLease = registry.AcquireOrThrow(DeviceLeaseOwner.Manual("request-1"), [Res("device", "d1")], "operate");
+        using var scope = DeviceCommandOwnership.Enter(oldLease);
+        var permit = registry.AcquireCommandPermit("device", "d1"); // 模拟派发进行中
+        oldLease.Dispose(); // 普通释放（异常/提前释放路径）
+
+        var acquired = registry.TryAcquire(DeviceLeaseOwner.Production("job-1"), [Res("device", "d1")], out var conflicts);
+        Assert.Null(acquired);
+        var conflict = Assert.Single(conflicts);
+        Assert.Contains("still being dispatched", conflict.Reason);
+        Assert.Contains("still being dispatched", DeviceLeaseRegistry.DescribeConflicts(conflicts));
+
+        permit.Dispose();
+        using var recovered = registry.AcquireOrThrow(DeviceLeaseOwner.Production("job-1"), [Res("device", "d1")], "start");
     }
 }

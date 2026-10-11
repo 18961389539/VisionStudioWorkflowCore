@@ -56,8 +56,10 @@ finally { Pop-Location }
 # 2) Frontend build, then stage dist into wwwroot (the publish input cache).
 Push-Location "$root/frontend"
 try {
-    npm install --no-audit --no-fund
-    Assert-LastExitCode 'npm install'
+    # 统一使用 npm ci 按 lockfile 精确安装（与 CI 一致）——npm install 会按 semver 浮动解析依赖，
+    # 两条构建链可能漂移出不同的运行时组合。
+    npm ci --no-audit --no-fund
+    Assert-LastExitCode 'npm ci'
 
     npm run build
     Assert-LastExitCode 'npm run build'

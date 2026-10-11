@@ -97,6 +97,53 @@ public sealed class RuntimeDependencyManifestTests
         Assert.Contains("Re-publish", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task SynchronizedGroupId_ExpandsToMemberCameras()
+    {
+        // R04（2026-10-11 复审）：静态 token 断言改为行为契约——camera.syncCapture 声明的
+        // cameraSyncGroup 资源经 CollectNodeResources 收集，组成员相机必须展开进 manifest Cameras
+        //（旧的字符串匹配规则与重构后的实现脱节，误报资源展开丢失）。
+        using var env = new TempWebHostEnvironment();
+        var db = new SqliteMetadataDatabase(env);
+        var groups = new CameraSynchronizationGroupStore(db);
+        await groups.UpsertAsync(new CameraSynchronizationGroupRequest("sync-a", "Sync A", "fake-sync", ["virtual-1", "virtual-2"]));
+
+        var cameras = new CameraManager();
+        cameras.Register(new VirtualCameraDevice());
+        cameras.Register(new VirtualCameraDevice("virtual-2", "Second Camera"));
+        var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("camera.syncCapture"), new SyncCaptureStubExecutor(), "builtin");
+        var plugins = new PluginManager(registry, NullLogger<PluginManager>.Instance);
+        var devices = new DeviceManager();
+        var profiles = new DeviceProfileStore(Path.Combine(env.ContentRootPath, "data", "devices"));
+        var robots = new RobotManager();
+        var calibrations = new CalibrationAssetStore(db, new CalibrationWorkspaceService());
+        var hardware = new HardwareProvenanceService(
+            new HardwareProvenanceStore(Path.Combine(env.ContentRootPath, "data", "provenance")), cameras, devices, robots, new VendorProvenanceProbeRegistry());
+        var dependencies = new RuntimeDependencyManifestService(registry, plugins, cameras, devices, profiles, robots, calibrations, hardware,
+            synchronizationGroups: groups);
+
+        var workflow = new WorkflowDefinition(
+            "sync-manifest", "Sync Manifest",
+            [new NodeDefinition("cap", "camera.syncCapture", "Capture", null,
+                new Dictionary<string, System.Text.Json.JsonElement> {
+                    ["groupId"] = System.Text.Json.JsonSerializer.SerializeToElement("sync-a")
+                })],
+            []);
+        var manifest = await dependencies.CaptureAsync(workflow, default);
+
+        var cameraIds = manifest.Cameras.Select(x => x.Id).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[] { "virtual-1", "virtual-2" }, cameraIds);
+    }
+
+    private sealed class SyncCaptureStubExecutor : IVisionNodeExecutor
+    {
+        public string Type => "camera.syncCapture";
+
+        public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>(), new Dictionary<string, object?>()));
+    }
+
     private static RuntimeBundle CreateRuntime(TempWebHostEnvironment env, SqliteMetadataDatabase? db = null)
     {
         var cameras = new CameraManager();

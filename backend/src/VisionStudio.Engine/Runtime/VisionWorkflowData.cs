@@ -61,6 +61,13 @@ public sealed class VisionWorkflowData : IDisposable
     /// </summary>
     public string? WorkflowScope { get; set; }
 
+    /// <summary>
+    /// A02：本次执行的设备命令所有权令牌（由运行入口的租约环境捕获）。节点运行时在真实派发前
+    /// 重入该环境——即使 Workflow Core 的调度边界丢失执行上下文，派发仍携带正确的所有权身份；
+    /// 令牌被换代/撤销后，旧执行的后续派发会在派发边界被拒绝。
+    /// </summary>
+    public IDeviceCommandOwnershipToken? Ownership { get; set; }
+
     public NodeDefinition RequireNode(string nodeId) => _nodesById.TryGetValue(nodeId, out var node)
         ? node
         : throw new InvalidOperationException($"Node '{nodeId}' was not found in the visual workflow definition.");

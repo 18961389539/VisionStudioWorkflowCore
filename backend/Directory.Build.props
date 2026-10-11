@@ -1,0 +1,12 @@
+<Project>
+  <!--
+    CS9057 修复（2026-10-11 复审「分析器无法加载」）：OpenCvSharp5 的分析器要求 Roslyn >= 5.9，
+    而随 SDK 分发的编译器较旧，分析器被静默跳过（"构建通过 ≠ 分析器在工作"）。
+    这里以 Microsoft.Net.Compilers.Toolset 固定编译器版本：本机构建与 CI 使用同一套编译器，
+    分析器真实启用，同时消除"两条构建链编译器漂移"的可复现性问题。
+    PrivateAssets=all：构建期工具，不流向下游包消费者。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="5.9.0" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

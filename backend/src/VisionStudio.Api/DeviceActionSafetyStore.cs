@@ -151,7 +151,9 @@ public sealed record DeviceActionSafetyState(
     DeviceActionSafetyPhase Phase = DeviceActionSafetyPhase.Unknown,
     string? RunId = null,
     IReadOnlyDictionary<string, string>? DeviceFingerprints = null,
-    string? ProcessId = null);
+    string? ProcessId = null,
+    /// <summary>R02（2026-10-11 复审）：动作时锁定的相机清单——旧格式文件缺省为空（保守方向：空清单不做相机检查）。</summary>
+    IReadOnlyList<string>? CameraIds = null);
 
 public enum DeviceActionSafetyPhase
 {
@@ -170,4 +172,6 @@ public sealed record DeviceActionSafetyResolution(
     string Reason,
     string Evidence,
     string DeviceIdentityEvidence,
-    DateTimeOffset ResolvedAt);
+    DateTimeOffset ResolvedAt,
+    /// <summary>R02：核对证据保留原相机清单（与安全状态对齐）。</summary>
+    IReadOnlyList<string>? CameraIds = null);

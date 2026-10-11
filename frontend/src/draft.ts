@@ -37,8 +37,15 @@ export function readDraft(): WorkflowDraft | undefined {
   }
 }
 
-export function writeDraft(draft: WorkflowDraft): void {
-  try { window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft)); } catch { /* 忽略存储失败 */ }
+export function writeDraft(draft: WorkflowDraft): boolean {
+  try {
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    return true;
+  } catch {
+    // 存储空间满 / 浏览器禁用本地存储：不能再静默忽略——调用方必须提示用户草稿未保存
+    //（否则用户以为有热恢复兜底，刷新后丢失全部未保存修改）。
+    return false;
+  }
 }
 
 export function clearDraft(): void {

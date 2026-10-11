@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "599abb058cf39ab2649e66d129cd0354abe3100b2cfba223e9c982ee81fdca73",
+  "hash": "7e7af35bed5300a2d7eeee5e77f61b451fc9d86585c4a1eea043c7f2c4b8cd76",
   "items": [
     {
       "type": "image.acquire",
@@ -86,7 +86,22 @@
         }
       ],
       "description": "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "actions": [
+        {
+          "kind": "CameraTrigger",
+          "completion": "Synchronous",
+          "whenParameter": "triggerBeforeGrab",
+          "whenValue": "true"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "camera",
+          "parameter": "cameraId"
+        }
+      ],
+      "declaresActions": true
     },
     {
       "type": "frameset.image",
@@ -150,7 +165,14 @@
         }
       ],
       "description": "Select one camera image from a synchronized FrameSet without cloning the underlying frame.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "resources": [
+        {
+          "kind": "camera",
+          "parameter": "cameraId"
+        }
+      ],
+      "declaresActions": false
     },
     {
       "type": "camera.syncCapture",
@@ -242,7 +264,20 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "WorkflowCore"
-      }
+      },
+      "actions": [
+        {
+          "kind": "CameraTrigger",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "cameraSyncGroup",
+          "parameter": "groupId"
+        }
+      ],
+      "declaresActions": true
     },
     {
       "type": "image.synthetic",
@@ -309,7 +344,8 @@
         }
       ],
       "description": "Generate a deterministic test image for MVP validation.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "calibration.planar",
@@ -416,7 +452,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformCompose",
@@ -453,7 +490,8 @@
       ],
       "parameters": [],
       "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformConstant",
@@ -549,7 +587,8 @@
         }
       ],
       "description": "Create a rigid 2D transform between named engineering coordinate frames.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.distance",
@@ -591,7 +630,8 @@
       ],
       "parameters": [],
       "description": "Distance between two points only when frame and unit match.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.point",
@@ -669,7 +709,8 @@
         }
       ],
       "description": "Create a constant coordinate-aware reference point.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.pose",
@@ -756,7 +797,8 @@
         }
       ],
       "description": "Create a constant frame-aware 2D pose.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.frameTree",
@@ -792,7 +834,8 @@
         }
       ],
       "description": "Build a bidirectional frame graph and resolve transforms by named frame path.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformInverse",
@@ -824,7 +867,8 @@
       ],
       "parameters": [],
       "description": "Invert a Transform2D and swap source/target frame and units.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.poseToTransform",
@@ -864,7 +908,8 @@
         }
       ],
       "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.frameResolve",
@@ -916,7 +961,8 @@
         }
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformCoordinatePoint",
@@ -953,7 +999,8 @@
       ],
       "parameters": [],
       "description": "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformCoordinatePose",
@@ -990,7 +1037,8 @@
       ],
       "parameters": [],
       "description": "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformLine",
@@ -1037,7 +1085,8 @@
       ],
       "parameters": [],
       "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformPoint",
@@ -1084,7 +1133,8 @@
       ],
       "parameters": [],
       "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformPose",
@@ -1121,7 +1171,8 @@
       ],
       "parameters": [],
       "description": "Transform X/Y and local orientation into a named target frame.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "device.readTag",
@@ -1210,7 +1261,14 @@
         "supportsRunNode": true,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": false
     },
     {
       "type": "device.waitTag",
@@ -1372,7 +1430,14 @@
         "supportsRunNode": true,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": false
     },
     {
       "type": "device.writeTag",
@@ -1492,7 +1557,20 @@
         "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "actions": [
+        {
+          "kind": "DeviceWrite",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": true
     },
     {
       "type": "device.writeVisionResult",
@@ -1617,7 +1695,20 @@
         "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "actions": [
+        {
+          "kind": "DeviceWrite",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": true
     },
     {
       "type": "feature.circle",
@@ -1726,7 +1817,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "feature.edge",
@@ -1794,7 +1886,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "feature.line",
@@ -1882,7 +1975,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "flow.if",
@@ -1961,7 +2055,8 @@
         }
       ],
       "description": "Workflow Core conditional marker.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "flow.join",
@@ -1988,7 +2083,8 @@
       ],
       "parameters": [],
       "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "flow.parallel",
@@ -2015,7 +2111,8 @@
       ],
       "parameters": [],
       "description": "Start two Workflow Core parallel paths.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "flow.result",
@@ -2052,7 +2149,8 @@
       ],
       "parameters": [],
       "description": "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "geometry.angle",
@@ -2097,7 +2195,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "geometry.intersection",
@@ -2142,7 +2241,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "geometry.distance",
@@ -2187,7 +2287,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "measure.caliper",
@@ -2330,7 +2431,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "measure.blob",
@@ -2402,7 +2504,8 @@
         }
       ],
       "description": "Find the largest contour and return typed geometry.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "measure.rotatedRect",
@@ -2474,7 +2577,8 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
-      }
+      },
+      "declaresActions": false
     },
     {
       "type": "image.threshold",
@@ -2516,7 +2620,8 @@
         }
       ],
       "description": "Binary threshold using OpenCvSharp.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "robot.executeTarget",
@@ -2668,7 +2773,20 @@
         "supportsRunNode": false,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "actions": [
+        {
+          "kind": "RobotCommand",
+          "completion": "ProtocolConfirmed"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "robot",
+          "parameter": "robotId"
+        }
+      ],
+      "declaresActions": true
     },
     {
       "type": "robot.j4TcpCompensation",
@@ -2771,7 +2889,8 @@
         }
       ],
       "description": "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     },
     {
       "type": "robot.currentPose",
@@ -2871,7 +2990,14 @@
         "supportsRunNode": true,
         "supportsParallel": false,
         "executionMode": "Auto"
-      }
+      },
+      "resources": [
+        {
+          "kind": "robot",
+          "parameter": "robotId"
+        }
+      ],
+      "declaresActions": false
     },
     {
       "type": "robot.guidance2d",
@@ -2987,7 +3113,8 @@
         }
       ],
       "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
-      "pluginId": "builtin"
+      "pluginId": "builtin",
+      "declaresActions": false
     }
   ]
 }

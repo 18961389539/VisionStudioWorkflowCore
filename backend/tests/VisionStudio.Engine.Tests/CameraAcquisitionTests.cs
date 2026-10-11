@@ -120,6 +120,47 @@ public sealed class CameraAcquisitionTests
     }
 
     [Fact]
+    public async Task TriggerPermit_IsHeldThroughDispatch_AndNeverLeaksOnCoalesceOrStop()
+    {
+        // R02 回归（2026-10-11 复审）："入队成功"不等于物理动作完成——派发许可必须覆盖
+        // 实际下发阶段（触发调用 + Grab）才释放；信号合并/停止排空时立即释放，绝不泄漏在途计数。
+        var device = new FakeCamera(new CameraSettings(TriggerMode: CameraTriggerMode.Software));
+        using var hub = new CameraFrameHub(2);
+        await using var worker = new CameraAcquisitionWorker(device, hub);
+        await worker.StartAsync();
+
+        var first = new TrackingPermit();
+        worker.Trigger(first);
+        await WaitUntilAsync(() => worker.Snapshot().FramesPublished >= 1);
+        await WaitUntilAsync(() => first.Disposed); // 帧发布后（下发返回）才释放
+
+        // 未消费的挂起信号被合并：后到的许可立即释放；挂起许可在 Start 排空时释放，绝不泄漏。
+        await worker.StopAsync();
+        var pending = new TrackingPermit();
+        worker.Trigger(pending);           // 停止状态：信号挂起，许可待命
+        var coalesced = new TrackingPermit();
+        worker.Trigger(coalesced);         // 与前一个信号合并 ⇒ 立即释放
+        Assert.True(coalesced.Disposed);
+        Assert.False(pending.Disposed);    // 仍随挂起信号待命
+        await worker.StartAsync();         // Start 排空挂起信号与许可
+        Assert.True(pending.Disposed);
+        await worker.StopAsync();
+
+        // Continuous 模式没有真实下发：许可在入口立即释放。
+        var continuous = new FakeCamera(new CameraSettings(TriggerMode: CameraTriggerMode.Continuous));
+        await using var worker2 = new CameraAcquisitionWorker(continuous, hub);
+        var noop = new TrackingPermit();
+        worker2.Trigger(noop);
+        Assert.True(noop.Disposed);
+    }
+
+    private sealed class TrackingPermit : IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
+    }
+
+    [Fact]
     public async Task StopInProgress_RejectsConcurrentStart_AndKeepsControlHandles()
     {
         // F08 回归：旧 Stop 在等待 loop 收尾期间，并发 Start 必须被拒绝——否则旧 Stop 会

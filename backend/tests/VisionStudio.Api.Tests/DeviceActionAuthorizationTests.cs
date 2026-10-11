@@ -276,6 +276,120 @@ public sealed class DeviceActionAuthorizationTests
             => throw new IOException("injected: resolution evidence could not be persisted");
     }
 
+    /// <summary>A04：模拟"意图台账只读"——证据可落盘，但台账闭合（Remove）失败。</summary>
+    private sealed class RemoveFailingStore(IWebHostEnvironment env, IConfiguration configuration, ILogger<ManualActionIntentStore> logger)
+        : ManualActionIntentStore(env, configuration, logger)
+    {
+        public override void Remove(string runId)
+            => throw new IOException("injected: intent ledger is read-only");
+    }
+
+    [Fact]
+    public async Task MultipleSettlementFailures_KeepIndependentLocks_EachResolveClosesOnlyItsOwn()
+    {
+        // A01 回归（2026-10-11 复审）：两个动作状态提交失败时，旧实现只保留第一把故障锁——
+        // 核对第一个后唯一锁清空、系统放行，而第二条仍为本进程 Issued 被过滤出待核对清单
+        // （探针：failureLock=False secondState=Issued unresolved=0 nextAction=200）。
+        // 现在逐意图独立登记：一个核对只闭合**对应**失败，最后一个未闭合故障消除前新动作一直被拒。
+        using var factory = new StorageVisionStudioApiFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<ManualActionIntentStore>(sp =>
+                new MarkUnknownFailingStore(
+                    sp.GetRequiredService<IWebHostEnvironment>(),
+                    sp.GetRequiredService<IConfiguration>(),
+                    NullLogger<ManualActionIntentStore>.Instance))));
+        using var client = factory.CreateClient();
+        var auth = factory.Services.GetRequiredService<DeviceActionAuthorizationService>();
+
+        // 两个动作都在故障发生前登记；随后各自的状态提交（MarkUnknown）落盘失败 ⇒ 两把独立故障锁。
+        var first = auth.BeginManualIntent("probe.first-failed", ["virtual-modbus-1"], []);
+        var second = auth.BeginManualIntent("probe.second-failed", ["virtual-abb-1"], []);
+        first.Dispose();
+        second.Dispose();
+        Assert.Equal(2, auth.StateTransitionFailures.Count);
+
+        // 待核对清单必须同时列出两条（旧实现第二条被过滤：unresolved=0）。
+        var pending = await client.GetAsync("/api/production/device-actions/pending");
+        Assert.Equal(HttpStatusCode.OK, pending.StatusCode);
+        var pendingBody = await pending.Content.ReadAsStringAsync();
+        Assert.Contains(first.RunId, pendingBody);
+        Assert.Contains(second.RunId, pendingBody);
+
+        // 核对第一条 ⇒ 只闭合对应失败；第二条仍然阻断新动作。
+        var resolveFirst = await PostResolveAsync(client, first.RunId);
+        Assert.True(resolveFirst.IsSuccessStatusCode, await resolveFirst.Content.ReadAsStringAsync());
+        Assert.Single(auth.StateTransitionFailures);
+        var stillBlocked = await client.PutAsJsonAsync(
+            "/api/devices/virtual-modbus-1/tags",
+            new { values = new Dictionary<string, object?> { ["statusText"] = "probe" } });
+        Assert.Equal(HttpStatusCode.Conflict, stillBlocked.StatusCode); // 旧实现：200 放行
+
+        // 核对第二条 ⇒ 最后一把锁清除，动作入口恢复。
+        var resolveSecond = await PostResolveAsync(client, second.RunId);
+        Assert.True(resolveSecond.IsSuccessStatusCode, await resolveSecond.Content.ReadAsStringAsync());
+        Assert.Empty(auth.StateTransitionFailures);
+        var allowed = await client.PutAsJsonAsync(
+            "/api/devices/virtual-modbus-1/tags",
+            new { values = new Dictionary<string, object?> { ["statusText"] = "probe2" } });
+        Assert.NotEqual(HttpStatusCode.Conflict, allowed.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResolutionLedgerFailure_DoesNotReportSuccess_AndStartupAppliesDurableEvidence()
+    {
+        // A04 回归（2026-10-11 复审）：核对证据先落盘正确，但台账删除失败时旧实现仅记警告、
+        // 仍清内存锁并返回成功——进程内显示已恢复且放行，重启后同一记录又要求核对
+        // （探针：resolve-remove=200 nextAction=200，重启后 nextAction=409）。
+        // 现在：闭合持久化失败 ⇒ 不返回"完成恢复"；启动时一致识别耐久证据，重启后不再重复要求核对。
+        using var factory = new StorageVisionStudioApiFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services.AddSingleton<ManualActionIntentStore>(sp =>
+                new RemoveFailingStore(
+                    sp.GetRequiredService<IWebHostEnvironment>(),
+                    sp.GetRequiredService<IConfiguration>(),
+                    NullLogger<ManualActionIntentStore>.Instance))));
+        using var client = factory.CreateClient();
+        var store = (RemoveFailingStore)factory.Services.GetRequiredService<ManualActionIntentStore>();
+        store.Add(new ManualActionIntent(
+            "resolve-remove-probe", "device.writeTag", ["virtual-modbus-1"], [], [],
+            DateTimeOffset.UtcNow, ProcessId: "previous-process"));
+
+        var resolve = await PostResolveAsync(client, "resolve-remove-probe");
+        Assert.True((int)resolve.StatusCode >= 400, $"expected failure, got {(int)resolve.StatusCode}"); // 旧实现：200
+
+        // 证据已耐久保存，但闭合未应用 ⇒ 动作继续阻断（旧实现：放行）。
+        Assert.NotEmpty(Directory.GetFiles(store.ResolutionDirectory, "*.json"));
+        var blocked = await client.PutAsJsonAsync(
+            "/api/devices/virtual-modbus-1/tags",
+            new { values = new Dictionary<string, object?> { ["statusText"] = "probe" } });
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+
+        // "重启"：新服务实例读同一台账/证据 ⇒ 启动时一致识别为已核对，不再重新要求核对（旧实现：409）。
+        var restarted = new DeviceActionAuthorizationService(
+            factory.Services.GetRequiredService<DeviceActionSafetyStore>(),
+            store,
+            factory.Services.GetRequiredService<RuntimeDependencyManifestService>(),
+            NullLogger<DeviceActionAuthorizationService>.Instance);
+        Assert.Empty(restarted.UnresolvedManualIntents());
+        restarted.EnsureActionsAllowed("probe.after-restart"); // 不得抛出
+
+        // 重复核对幂等：返回既有核对结果，而不是报"不存在"或再次失败。
+        var again = restarted.ResolveManualIntent(
+            "resolve-remove-probe", "probe-operator", "checked", "checked", "checked");
+        Assert.Equal("resolve-remove-probe", again.RunId);
+    }
+
+    private static Task<HttpResponseMessage> PostResolveAsync(HttpClient client, string manualIntentId)
+        => client.PostAsJsonAsync("/api/production/device-actions/resolve", new
+        {
+            runId = "",
+            manifestHash = "",
+            deviceIds = Array.Empty<string>(),
+            robotIds = Array.Empty<string>(),
+            reason = "probe: verified on site",
+            evidence = "probe: device state checked",
+            deviceIdentityEvidence = "probe: identity checked",
+            manualIntentId
+        });
+
     private static async Task WriteUnresolvedIntentAsync(StorageVisionStudioApiFactory factory)
     {
         var env = factory.Services.GetRequiredService<IWebHostEnvironment>();

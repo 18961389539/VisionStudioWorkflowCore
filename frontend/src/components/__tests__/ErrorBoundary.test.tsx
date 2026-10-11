@@ -18,6 +18,8 @@ describe('ErrorBoundary', () => {
       expect(screen.getByText('界面遇到未处理的错误')).toBeTruthy();
       expect(screen.getByText('重新加载')).toBeTruthy();
       expect(screen.getByText('尝试恢复')).toBeTruthy();
+      // 诊断必须可导出（不再只写 console）：崩溃上下文要能交给后端工程师。
+      expect(screen.getByText('导出诊断')).toBeTruthy();
     } finally {
       spy.mockRestore();
     }

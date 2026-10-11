@@ -36,6 +36,15 @@ public sealed class DeviceManager : IAsyncDisposable
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// A02：真实写入派发前的所有权校验。默认不做校验（独立构建/单元测试）；
+    /// 接入租约注册表后，失去所有权的旧执行不能再写设备。
+    /// </summary>
+    private readonly IDeviceCommandOwnershipGate _ownership;
+
+    public DeviceManager(IDeviceCommandOwnershipGate? ownershipGate = null)
+        => _ownership = ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance;
+
     public void Register(IDeviceDriver driver)
     {
         ArgumentNullException.ThrowIfNull(driver);
@@ -120,6 +129,8 @@ public sealed class DeviceManager : IAsyncDisposable
         await entry.CommandGate.WaitAsync(cancellationToken);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再写设备。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
             if (entry.Driver is IDeviceBatchDriver batch)
             {
                 var converted = values.ToDictionary(
@@ -168,6 +179,8 @@ public sealed class DeviceManager : IAsyncDisposable
         await entry.CommandGate.WaitAsync(cancellationToken);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再写设备。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
             foreach (var (tagId, value) in writes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -244,6 +257,8 @@ public sealed class DeviceManager : IAsyncDisposable
         await entry.CommandGate.WaitAsync(cancellationToken);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再写设备。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Device, deviceId);
             await WriteTagCoreAsync(entry, tagId, value, cancellationToken);
         }
         finally { entry.CommandGate.Release(); }

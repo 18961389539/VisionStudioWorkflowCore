@@ -579,9 +579,12 @@ public sealed class CameraSynchronizationService(
         {
             ptpSnapshots = await CapturePtpSnapshotsAsync(group, ct);
             await ValidateOrThrowAsync(group, request.Scheduled, ct);
+            // R02/A02：真实设备动作——组内每台相机都在同一派发许可边界内下发 Action Command。
+            using var commandPermits = AcquireGroupCommandPermits(group);
             var provider = _actionProviders[group.Driver];
             var before = group.CameraIds.ToDictionary(x => x, x => cameras.GetLatestSequence(x), StringComparer.OrdinalIgnoreCase);
             long? tickFrequencyHz = null;
+            long? scheduledLeadMs = null;
             if (request.Scheduled)
             {
                 var statuses = ptpSnapshots;
@@ -594,6 +597,7 @@ public sealed class CameraSynchronizationService(
                     tickFrequencyHz = frequencies[0];
                 }
                 var lead = Math.Clamp(request.LeadTimeMs ?? group.ScheduledLeadTimeMs, 10, 60_000);
+                scheduledLeadMs = lead;
                 scheduledTime = checked(clock + lead * 1_000_000L);
             }
             command = await provider.IssueActionCommandAsync(new CameraActionCommandRequest(
@@ -601,7 +605,13 @@ public sealed class CameraSynchronizationService(
                 ScheduledDeviceTimeNs: scheduledTime, TimeoutMs: 1000, DeviceTickFrequencyHz: tickFrequencyHz), ct);
 
             var timeout = TimeSpan.FromMilliseconds(Math.Clamp(request.FrameTimeoutMs, 100, 30_000));
-            var tasks = group.CameraIds.Select(async cameraId => await cameras.WaitForFrameTimingAsync(cameraId, before[cameraId], timeout, ct).AsTask()).ToArray();
+            // R02（2026-10-11 复审）：调度触发的设备端计划最远可排在 60s 后——帧等待窗口必须覆盖
+            // 目标时刻（成帧超时 + lead + 派发裕量）。否则请求超时会与设备端计划执行解耦：
+            // HTTP 已判失败，相机却仍会在计划时刻出帧，等于"以结束 HTTP 请求替代设备端确认"。
+            var wait = scheduledLeadMs is { } leadMs
+                ? timeout + TimeSpan.FromMilliseconds(leadMs) + TimeSpan.FromSeconds(2)
+                : timeout;
+            var tasks = group.CameraIds.Select(async cameraId => await cameras.WaitForFrameTimingAsync(cameraId, before[cameraId], wait, ct).AsTask()).ToArray();
             var timings = await Task.WhenAll(tasks);
             var (skew, basis) = ComputeSkew(timings);
             var resultFrames = timings.Select(x => new CameraSynchronizationFrameResult(x.CameraId, x.Sequence, x.HostTimestamp, x.DeviceTimestampNs, x.TriggerId)).ToArray();
@@ -635,9 +645,12 @@ public sealed class CameraSynchronizationService(
         {
             ptpSnapshots = await CapturePtpSnapshotsAsync(group, cancellationToken);
             await ValidateOrThrowAsync(group, request.Scheduled, cancellationToken);
+            // R02/A02：真实设备动作——工作流路径与手动路径共用同一派发许可边界。
+            using var commandPermits = AcquireGroupCommandPermits(group);
             var provider = _actionProviders[group.Driver];
             var before = group.CameraIds.ToDictionary(x => x, x => cameras.GetLatestSequence(x), StringComparer.OrdinalIgnoreCase);
             long? tickFrequencyHz = null;
+            long? scheduledLeadMs = null;
             if (request.Scheduled)
             {
                 var statuses = ptpSnapshots;
@@ -650,6 +663,7 @@ public sealed class CameraSynchronizationService(
                     tickFrequencyHz = frequencies[0];
                 }
                 var lead = Math.Clamp(request.LeadTimeMs ?? group.ScheduledLeadTimeMs, 10, 60_000);
+                scheduledLeadMs = lead;
                 scheduledTime = checked(clock + lead * 1_000_000L);
             }
 
@@ -663,8 +677,12 @@ public sealed class CameraSynchronizationService(
                 DeviceTickFrequencyHz: tickFrequencyHz), cancellationToken);
 
             var timeout = TimeSpan.FromMilliseconds(Math.Clamp(request.FrameTimeoutMs, 100, 30_000));
+            // R02（2026-10-11 复审）：工作流路径与手动路径同修——调度等待窗口覆盖目标时刻。
+            var wait = scheduledLeadMs is { } leadMs
+                ? timeout + TimeSpan.FromMilliseconds(leadMs) + TimeSpan.FromSeconds(2)
+                : timeout;
             var tasks = group.CameraIds
-                .Select(cameraId => cameras.WaitForFrameLeaseAsync(cameraId, before[cameraId], timeout, cancellationToken).AsTask())
+                .Select(cameraId => cameras.WaitForFrameLeaseAsync(cameraId, before[cameraId], wait, cancellationToken).AsTask())
                 .ToArray();
             try
             {
@@ -704,6 +722,36 @@ public sealed class CameraSynchronizationService(
                 if (!images.ContainsKey(lease.CameraId)) lease.Dispose();
             await RecordFailureBestEffortAsync(runId, group, "workflow", request.Scheduled, requestedAt, scheduledTime, command, ptpSnapshots, ex);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// R02：组级命令派发许可——覆盖组内全部相机（真实 Action Command 会同时作用于每台成员相机）。
+    /// 任一台相机的所有权校验失败 ⇒ 全部回滚并抛出（绝不下发"部分相机无许可"的组命令）。
+    /// </summary>
+    private IDisposable AcquireGroupCommandPermits(CameraSynchronizationGroup group)
+    {
+        var permits = new List<IDisposable>(group.CameraIds.Count);
+        try
+        {
+            foreach (var cameraId in group.CameraIds) permits.Add(cameras.AcquireCommandPermit(cameraId));
+            return new CommandPermitScope(permits);
+        }
+        catch
+        {
+            foreach (var permit in permits) permit.Dispose();
+            throw;
+        }
+    }
+
+    private sealed class CommandPermitScope(List<IDisposable> permits) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            foreach (var permit in permits) permit.Dispose();
         }
     }
 

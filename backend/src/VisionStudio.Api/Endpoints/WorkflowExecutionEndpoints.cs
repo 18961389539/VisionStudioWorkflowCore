@@ -71,17 +71,20 @@ public static class WorkflowExecutionEndpoints
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
             WorkflowModuleExpander modules,
+            VisionNodeRegistry nodes,
             CancellationToken ct) =>
         {
             var context = new RunTraceContext("AdHoc");
             var runId = RunTraceRecorder.NewRunId();
             // 运行期硬件租约：覆盖整段执行（含计时收尾），完成/取消/异常时经 using 统一释放
             using var lease = await production.AcquireRunLeaseAsync(runId, workflow, $"Cannot run workflow '{workflow.Id}'", ct);
+            // A02：进入所有权环境——节点真实派发边界据此校验租约代次（失去所有权的旧执行被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // N01/N06：动作分类、完成判定与意图登记必须消费**展开后的执行计划**——
             // 模块调用在运行期展开（报告 ID 带 `module-xxx::` 前缀），用未展开定义判定会漏检；
             // 纯计算流程不登记动作意图（失败不应阻断设备动作）。
             var effectiveWorkflow = (await modules.ExpandAsync(workflow, ct)).Workflow;
-            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow);
+            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, nodes);
             using var actionIntent = hasSideEffects
                 ? await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", effectiveWorkflow, runId, ct)
                 : null;
@@ -96,7 +99,7 @@ public static class WorkflowExecutionEndpoints
             // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
             if (actionIntent is not null)
             {
-                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result, nodes))
                     actionIntent.Complete();
                 else if (result.Success)
                     actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
@@ -112,6 +115,7 @@ public static class WorkflowExecutionEndpoints
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
             WorkflowModuleExpander modules,
+            VisionNodeRegistry nodes,
             CancellationToken ct) =>
         {
             // 交互式调试：捕获逐节点图像以支持按节点检查中间结果
@@ -119,9 +123,11 @@ public static class WorkflowExecutionEndpoints
             var context = new RunTraceContext("Debug", DebugMode: options.Mode.ToString());
             var runId = RunTraceRecorder.NewRunId();
             using var lease = await production.AcquireRunLeaseAsync(runId, request.Workflow, $"Cannot debug-run workflow '{request.Workflow.Id}'", ct);
+            // A02：进入所有权环境——节点真实派发边界据此校验租约代次（失去所有权的旧执行被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // N01/N06：展开执行计划后判定副作用；纯计算调试不登记动作意图。
             var effectiveWorkflow = (await modules.ExpandAsync(request.Workflow, ct)).Workflow;
-            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow);
+            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, nodes);
             using var actionIntent = hasSideEffects
                 ? await auth.BeginWorkflowIntentAsync("workflow.run.debug", effectiveWorkflow, runId, ct)
                 : null;
@@ -133,7 +139,7 @@ public static class WorkflowExecutionEndpoints
             await recorder.FinalizeAsync(result, request.Workflow, context);
             if (actionIntent is not null)
             {
-                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result, nodes))
                     actionIntent.Complete();
                 else if (result.Success)
                     actionIntent.MarkUnknown("the debug run returned success but an accepted device action still awaits completion confirmation");

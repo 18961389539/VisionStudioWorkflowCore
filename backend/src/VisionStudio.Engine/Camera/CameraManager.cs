@@ -26,8 +26,14 @@ public sealed class CameraManager : IAsyncDisposable
     private readonly object _registrationSync = new();
     private readonly TimeSpan? _stopDrainGrace;
     private int _disposed;
+    /// <summary>A02：真实触发派发前的所有权校验（默认不校验；接入租约注册表后生效）。</summary>
+    private readonly IDeviceCommandOwnershipGate _ownership;
 
-    public CameraManager(TimeSpan? stopDrainGrace = null) => _stopDrainGrace = stopDrainGrace;
+    public CameraManager(TimeSpan? stopDrainGrace = null, IDeviceCommandOwnershipGate? ownershipGate = null)
+    {
+        _stopDrainGrace = stopDrainGrace;
+        _ownership = ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance;
+    }
 
     public IReadOnlyList<CameraDescriptor> List() => _runtimes.Values
         .Select(ToDescriptor)
@@ -79,6 +85,9 @@ public sealed class CameraManager : IAsyncDisposable
                    or CameraAcquisitionState.Stopping
                    or CameraAcquisitionState.StopUnconfirmed;
     }
+
+    /// <summary>R02：该相机是否存在未返回的停止调用（停止未确认隔离生效中）——核对前必须拒绝放行。</summary>
+    public bool IsStopUnconfirmed(string id) => RequireRuntime(id).Worker.IsStopUnconfirmed;
     public CameraDescriptor Get(string id) => ToDescriptor(RequireRuntime(id));
 
     public CameraTransportTelemetry GetTransportTelemetry(string id)
@@ -191,8 +200,43 @@ public sealed class CameraManager : IAsyncDisposable
         var runtime = RequireRuntime(id);
         if (!runtime.Worker.IsRunning)
             throw new InvalidOperationException($"Camera '{id}' acquisition is stopped. Start it before triggering.");
-        runtime.Worker.Trigger();
+        // R02/A02：主动触发是真实设备动作——派发前校验所有权代次；许可随触发移交工作线程，
+        // 覆盖实际下发阶段（队列等待 + 底层触发调用），而非仅"入队成功"。
+        var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Camera, id);
+        try { runtime.Worker.Trigger(permit); }
+        catch { permit?.Dispose(); throw; }
     }
+
+    /// <summary>
+    /// R01（2026-10-11 复审）：手动触发的**可等待**形态——把"入队成功"与"下发完成"区分开：
+    /// 正常返回 = 驱动软件触发调用已返回（下发确认成功，调用方此刻才能闭合动作意图）；
+    /// <see cref="CameraTriggerNotIssuedException"/> = 校验拒绝，未下发任何动作（可安全清除意图）；
+    /// 其余异常 = 已入队但下发失败/被取消（动作结果未知——调用方必须保留耐久记录并阻断后续动作）。
+    /// </summary>
+    public async Task TriggerAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var runtime = RequireRuntime(id);
+        if (!runtime.Worker.IsRunning)
+            throw new CameraTriggerNotIssuedException($"Camera '{id}' acquisition is stopped. Start it before triggering.");
+        var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Camera, id);
+        try
+        {
+            await runtime.Worker.TriggerAndWaitAsync(permit);
+        }
+        catch
+        {
+            // 许可未交付（合并/入队前失败）时兜底释放；CommandPermit 释放幂等，已交付时为无害重复释放。
+            permit?.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// R02：相机的命令派发许可（供相机同步取图等同一硬件入口复用同一闸门）。
+    /// 许可必须覆盖真实派发；闸门未接入（独立构建/测试）时返回空操作许可。
+    /// </summary>
+    public IDisposable AcquireCommandPermit(string id)
+        => _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Camera, id) ?? NoopDeviceCommandPermit.Instance;
 
 
     public long GetLatestSequence(string id) => RequireRuntime(id).Hub.LatestSequence;
@@ -249,8 +293,12 @@ public sealed class CameraManager : IAsyncDisposable
 
         if (triggerBeforeGrab)
         {
+            // R02/A02：主动触发是真实设备动作——与手动触发共用同一派发许可边界；
+            // 许可随触发移交工作线程，覆盖实际下发阶段。
+            var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Camera, id);
             var beforeTrigger = runtime.Hub.LatestSequence;
-            runtime.Worker.Trigger();
+            try { runtime.Worker.Trigger(permit); }
+            catch { permit?.Dispose(); throw; }
             return await runtime.Hub.WaitForNextAsync(beforeTrigger, timeout, cancellationToken);
         }
 

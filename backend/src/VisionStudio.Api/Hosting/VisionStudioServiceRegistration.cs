@@ -248,6 +248,11 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton(sp => new DeviceLeaseRegistry(
             timeProvider: null,
             probe: sp.GetRequiredService<IDeviceActivityProbe>()));
+        // A02：设备/机器人/相机的真实命令派发边界共用租约注册表作为所有权闸门——
+        // 失去所有权（换代/撤销）的旧执行在派发前被拒绝。惰性解析打破
+        // "管理器 → 闸门 → 注册表 → 活动探针 → 管理器"的构造环。
+        services.AddSingleton<IDeviceCommandOwnershipGate>(sp =>
+            new LazyDeviceCommandOwnershipGate(() => sp.GetRequiredService<DeviceLeaseRegistry>()));
 
         services.AddSingleton<RunStore>();
         services.AddSingleton<WorkflowStore>();

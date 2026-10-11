@@ -1,6 +1,7 @@
 using VisionStudio.Api.Contracts;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
+using VisionStudio.Engine;
 using VisionStudio.Engine.Device;
 
 namespace VisionStudio.Api.Endpoints;
@@ -64,6 +65,8 @@ public static class DeviceEndpoints
         {
             // 请求期硬件租约：写操作执行期间独占该设备（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("device", id, $"Cannot write device '{id}'");
+            // A02：进入所有权环境——真实派发边界据此校验租约代次（失去所有权的旧调用被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // R01：统一动作授权——未闭合的安全意图阻断所有设备动作入口，并在动作前耐久登记本次意图。
             using var intent = auth.BeginManualIntent("device.writeTags", [id], []);
             await devices.WriteManyAsync(id, request.Values, autoConnect: true, cancellationToken: ct);
@@ -119,6 +122,8 @@ public static class DeviceEndpoints
             CancellationToken ct) =>
         {
             using var lease = leases.AcquireManualOrThrow("device", id, $"Cannot write device '{id}'");
+            // A02：进入所有权环境——真实派发边界据此校验租约代次（失去所有权的旧调用被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             using var intent = auth.BeginManualIntent("device.writeTag", [id], []);
             await devices.WriteTagAsync(id, tagId, request.Value, autoConnect: true, ct);
             // F02：写入确认成功才解除意图（读回验证通过后再 Complete）。

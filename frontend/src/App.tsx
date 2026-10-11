@@ -1065,17 +1065,28 @@ function Editor() {
   }, [dirty]);
 
   // 本地草稿：有未保存修改时防抖写入；保存 / 恢复 / 丢弃后清除；恢复入口未决期间冻结存储，避免覆盖待恢复的草稿
+  const draftWriteWarnedRef = useRef(false);
   useEffect(() => {
     if (draftNotice) return;
     if (!dirty) { clearDraft(); return; }
-    const timer = window.setTimeout(() => writeDraft({
-      version: 1,
-      savedAt: new Date().toISOString(),
-      workflowId: designerWorkflowId,
-      workflowName: designerWorkflowName,
-      demoKey,
-      payload: workflowPayload
-    }), 600);
+    const timer = window.setTimeout(() => {
+      const persisted = writeDraft({
+        version: 1,
+        savedAt: new Date().toISOString(),
+        workflowId: designerWorkflowId,
+        workflowName: designerWorkflowName,
+        demoKey,
+        payload: workflowPayload
+      });
+      // 草稿写入失败不能再静默忽略：用户需要立即知道"热恢复兜底"不存在（存储满/被禁用），
+      // 并尽快 Ctrl+S 保存到后端；每个脏周期只提示一次，避免防抖重试刷屏。
+      if (!persisted && !draftWriteWarnedRef.current) {
+        draftWriteWarnedRef.current = true;
+        messageApi.warning('本地草稿保存失败（浏览器存储已满或被禁用），无法热恢复；请尽快 Ctrl+S 保存到后端');
+      } else if (persisted) {
+        draftWriteWarnedRef.current = false;
+      }
+    }, 600);
     return () => window.clearTimeout(timer);
   }, [demoKey, designerWorkflowId, designerWorkflowName, dirty, draftNotice, workflowPayload]);
 

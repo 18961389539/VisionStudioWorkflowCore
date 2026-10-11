@@ -4,7 +4,7 @@ namespace VisionStudio.Engine.Runtime;
 /// Node-debug execution policy for nodes with external side effects (PLC writes, robot commands).
 ///
 /// RunNode / RunFromNode / Breakpoints execute predecessors for real ("warmup"), so a node whose
-/// catalog declares SupportsRunNode=false must not be executed implicitly by a debug run unless the
+/// catalog declares external actions must not be executed implicitly by a debug run unless the
 /// caller explicitly approves it through VisionRunOptions.AllowSideEffects. The explicitly selected
 /// target node itself is always allowed - executing it is a deliberate operator action.
 ///
@@ -13,8 +13,9 @@ namespace VisionStudio.Engine.Runtime;
 /// be taken):
 ///  - RunNode / RunFromNode: every node ordered before the target;
 ///  - Breakpoints: every node in the workflow (the halt point is only known at runtime).
-/// Read-only acquisitions (image.acquire / camera.syncCapture) are intentionally not flagged: replay
-/// and tuning substitute their source, and live debugging starts from a camera grab.
+/// The approval check is node-aware: parameter-conditioned declarations (for example
+/// image.acquire only triggers when triggerBeforeGrab=true) are evaluated per node, so a plain
+/// read-only acquisition stays debug-friendly while an actively triggering node requires approval.
 /// </summary>
 public static class DebugSideEffectPolicy
 {
@@ -23,7 +24,7 @@ public static class DebugSideEffectPolicy
         IReadOnlyList<string> orderedNodeIds,
         DebugRunMode mode,
         string? targetNodeId,
-        Func<string, bool> requiresSideEffectApproval)
+        Func<NodeDefinition, bool> requiresSideEffectApproval)
     {
         if (mode == DebugRunMode.Full) return [];
 
@@ -34,7 +35,7 @@ public static class DebugSideEffectPolicy
         var risks = new List<NodeDefinition>();
         foreach (var node in workflow.Nodes)
         {
-            if (!requiresSideEffectApproval(node.Type)) continue;
+            if (!requiresSideEffectApproval(node)) continue;
             var implicitExecution = mode switch
             {
                 DebugRunMode.RunNode or DebugRunMode.RunFromNode =>

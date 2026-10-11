@@ -14,6 +14,13 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly SemaphoreSlim _trigger = new(0, 1);
     private readonly object _statsGate = new();
+    /// <summary>
+    /// R02/A02：随触发信号传递的命令派发许可。许可在派发入口（调用方上下文）获取，
+    /// 由工作线程持有至**实际下发阶段**（含底层触发调用/Grab）结束——"入队成功"不等于
+    /// 物理动作完成，释放在下发返回之后；信号被合并/排空时立即释放，绝不泄漏在途计数。
+    /// </summary>
+    private readonly object _permitGate = new();
+    private IDisposable? _pendingPermit;
     private CancellationTokenSource? _cts;
     private Task? _loop;
     /// <summary>F08：停止收尾进行中——期间的 Start 被拒绝，防止新采集任务被旧 Stop 误清或失去控制句柄。</summary>
@@ -119,6 +126,8 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
             if (cts is null && loop is null)
             {
                 _stopUnconfirmed = false;
+                // R02：即便采集从未启动，也要排空待命信号与随信号挂起的派发许可（不泄漏在途计数）。
+                DrainTrigger();
                 SetState(CameraAcquisitionState.Stopped, null);
                 return;
             }
@@ -181,88 +190,221 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         finally { _lifecycle.Release(); }
     }
 
-    public void Trigger()
+    public void Trigger(IDisposable? dispatchPermit = null)
     {
         var mode = _device.Settings.TriggerMode;
-        if (mode == CameraTriggerMode.Continuous) return;
+        if (mode == CameraTriggerMode.Continuous) { dispatchPermit?.Dispose(); return; }
         if (mode == CameraTriggerMode.External && !_device.Capabilities.HostSimulatedExternalTrigger)
+        {
+            dispatchPermit?.Dispose();
             throw new InvalidOperationException($"Camera '{_device.Id}' is configured for hardware external trigger; the host cannot synthesize that line trigger.");
-        Signal();
+        }
+        Signal(dispatchPermit);
     }
 
-    public void Wake() => Signal();
+    /// <summary>R01：待处理触发对应的"真实下发完成"任务槽——与信号/许可同槽（_permitGate 保护）。</summary>
+    private TaskCompletionSource? _pendingDispatch;
 
-    private void Signal()
+    /// <summary>
+    /// R01（2026-10-11 复审）：入队触发并等待**真实下发**完成——返回即驱动软件触发调用已返回
+    /// （下发确认成功）；抛出 = 已入队但下发失败/被取消（动作结果未知，调用方必须保留耐久记录）；
+    /// 校验拒绝（相机停止/外触发模式）抛出 <see cref="CameraTriggerNotIssuedException"/>（未下发，可安全清除）。
+    /// 与既有 Signal 合并语义一致：已存在待处理触发时并入同一次下发（等待同一完成任务）。
+    /// </summary>
+    public Task TriggerAndWaitAsync(IDisposable? dispatchPermit = null)
     {
-        if (_trigger.CurrentCount == 0)
+        var mode = _device.Settings.TriggerMode;
+        if (mode == CameraTriggerMode.Continuous) { dispatchPermit?.Dispose(); return Task.CompletedTask; }
+        if (mode == CameraTriggerMode.External && !_device.Capabilities.HostSimulatedExternalTrigger)
+        {
+            dispatchPermit?.Dispose();
+            throw new CameraTriggerNotIssuedException($"Camera '{_device.Id}' is configured for hardware external trigger; the host cannot synthesize that line trigger.");
+        }
+        Task dispatch;
+        bool enqueued = false;
+        lock (_permitGate)
+        {
+            if (_trigger.CurrentCount > 0)
+            {
+                // 已有待处理触发：并入同一次下发；本许可立即释放（与 Signal 合并语义一致）。
+                dispatchPermit?.Dispose();
+                dispatch = _pendingDispatch?.Task ?? Task.CompletedTask;
+            }
+            else
+            {
+                _pendingPermit?.Dispose();
+                _pendingPermit = dispatchPermit;
+                _pendingDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                dispatch = _pendingDispatch.Task;
+                enqueued = true;
+            }
+        }
+        if (enqueued)
         {
             try { _trigger.Release(); }
-            catch (SemaphoreFullException) { }
+            catch (SemaphoreFullException) { /* 与循环消费竞争：许可/完成任务已随信号交付 */ }
         }
+        return dispatch;
+    }
+
+    public void Wake() => Signal(null);
+
+    /// <summary>R02：信号与许可同槽存储——信号被合并时许可立即释放（许可生命周期归本线程所有）。</summary>
+    private void Signal(IDisposable? dispatchPermit = null)
+    {
+        lock (_permitGate)
+        {
+            if (_trigger.CurrentCount == 0)
+            {
+                _pendingPermit?.Dispose();
+                _pendingPermit = dispatchPermit;
+            }
+            else
+            {
+                dispatchPermit?.Dispose();
+                return;
+            }
+        }
+        try { _trigger.Release(); }
+        catch (SemaphoreFullException) { /* 与循环消费竞争：许可已随信号交付或被下一个 Signal 合并处理 */ }
     }
 
     private void DrainTrigger()
     {
-        while (_trigger.Wait(0)) { }
+        lock (_permitGate)
+        {
+            while (_trigger.Wait(0)) { }
+            _pendingPermit?.Dispose();
+            _pendingPermit = null;
+            // R01：未消费的触发连同其"下发完成"任务一并取消——等待方得到取消而不是永久挂起
+            //（取消 ≠ 下发完成：调用方据此保留动作记录）。
+            _pendingDispatch?.TrySetCanceled();
+            _pendingDispatch = null;
+        }
+    }
+
+    /// <summary>取走本次触发的派发许可与"下发完成"任务（由当前迭代持有至下发结束）。</summary>
+    private (IDisposable? Permit, TaskCompletionSource? Dispatch) TakePendingTrigger()
+    {
+        lock (_permitGate)
+        {
+            var permit = _pendingPermit;
+            var dispatch = _pendingDispatch;
+            _pendingPermit = null;
+            _pendingDispatch = null;
+            return (permit, dispatch);
+        }
+    }
+
+    private void DisposePendingPermit()
+    {
+        lock (_permitGate)
+        {
+            _pendingPermit?.Dispose();
+            _pendingPermit = null;
+            _pendingDispatch?.TrySetCanceled();
+            _pendingDispatch = null;
+        }
     }
 
     private async Task LoopAsync(CancellationToken cancellationToken, long generation)
     {
         SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            var settings = _device.Settings.Normalize();
-            var hostGatedExternal = settings.TriggerMode == CameraTriggerMode.External && _device.Capabilities.HostSimulatedExternalTrigger;
-            if (settings.TriggerMode == CameraTriggerMode.Software || hostGatedExternal)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
-                await _trigger.WaitAsync(cancellationToken);
-                SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
-            }
-            else if (settings.TriggerMode == CameraTriggerMode.External)
-            {
-                // A real vendor adapter blocks in GrabAsync until the hardware line produces a frame.
-                SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
-            }
+                var settings = _device.Settings.Normalize();
+                var hostGatedExternal = settings.TriggerMode == CameraTriggerMode.External && _device.Capabilities.HostSimulatedExternalTrigger;
+                // R02：本次迭代的派发许可——在真实下发（触发调用/Grab）结束后释放。
+                // R01：同槽取走"下发完成"任务——真实触发调用返回/失败/取消时据此通知等待方。
+                IDisposable? dispatchPermit = null;
+                TaskCompletionSource? dispatchCompletion = null;
+                if (settings.TriggerMode == CameraTriggerMode.Software || hostGatedExternal)
+                {
+                    SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
+                    await _trigger.WaitAsync(cancellationToken);
+                    (dispatchPermit, dispatchCompletion) = TakePendingTrigger();
+                    SetStateIfCurrent(generation, CameraAcquisitionState.Running, null);
+                    if (hostGatedExternal)
+                    {
+                        // 主机模拟外触发没有独立的软件触发调用可等待：信号交付即"下发完成"
+                        //（随后的 GrabAsync 才是成帧阶段，许可仍覆盖到它结束）。
+                        dispatchCompletion?.TrySetResult();
+                    }
+                }
+                else if (settings.TriggerMode == CameraTriggerMode.External)
+                {
+                    // A real vendor adapter blocks in GrabAsync until the hardware line produces a frame.
+                    SetStateIfCurrent(generation, CameraAcquisitionState.WaitingTrigger, null);
+                }
 
-            var sw = Stopwatch.StartNew();
-            try
-            {
-                if (settings.TriggerMode == CameraTriggerMode.Software)
-                    await _device.ExecuteSoftwareTriggerAsync(cancellationToken);
+                var sw = Stopwatch.StartNew();
+                try
+                {
+                    if (settings.TriggerMode == CameraTriggerMode.Software)
+                    {
+                        try
+                        {
+                            await _device.ExecuteSoftwareTriggerAsync(cancellationToken);
+                            // R01：驱动软件触发调用已返回——等待方此刻才能判定"下发完成"。
+                            dispatchCompletion?.TrySetResult();
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            dispatchCompletion?.TrySetCanceled(cancellationToken);
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            dispatchCompletion?.TrySetException(ex);
+                            throw;
+                        }
+                    }
 
-                using var frame = await _device.GrabAsync(TimeSpan.FromSeconds(2), cancellationToken);
-                // Q03：迟到帧丢弃——若本代次已被作废（停止未确认隔离/新循环接管），
-                // 这把旧帧不得进入帧环、也不得更新统计。
-                if (!TryPublishFrame(generation, frame)) return;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (CameraFrameTimeoutException)
-            {
-                // No external/software-triggered frame arrived during this wait. This is not a disconnect.
-                Interlocked.Increment(ref _timeouts);
-                continue;
-            }
-            catch (Exception ex)
-            {
-                Interlocked.Increment(ref _errors);
-                SetStateIfCurrent(generation, CameraAcquisitionState.Reconnecting, ex.Message);
-                await ReconnectAsync(generation, cancellationToken);
-                continue;
-            }
+                    using var frame = await _device.GrabAsync(TimeSpan.FromSeconds(2), cancellationToken);
+                    // Q03：迟到帧丢弃——若本代次已被作废（停止未确认隔离/新循环接管），
+                    // 这把旧帧不得进入帧环、也不得更新统计。
+                    if (!TryPublishFrame(generation, frame)) return;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (CameraFrameTimeoutException)
+                {
+                    // No external/software-triggered frame arrived during this wait. This is not a disconnect.
+                    Interlocked.Increment(ref _timeouts);
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Increment(ref _errors);
+                    SetStateIfCurrent(generation, CameraAcquisitionState.Reconnecting, ex.Message);
+                    await ReconnectAsync(generation, cancellationToken);
+                    continue;
+                }
+                finally
+                {
+                    // R02：许可覆盖整个下发阶段（触发调用 + Grab）——返回/超时/异常后才释放在途计数。
+                    dispatchPermit?.Dispose();
+                }
 
-            if (settings.TriggerMode == CameraTriggerMode.Continuous)
-            {
-                var period = TimeSpan.FromSeconds(1d / settings.TargetFps);
-                var remaining = period - sw.Elapsed;
-                if (remaining > TimeSpan.Zero)
-                    await Task.Delay(remaining, cancellationToken);
+                if (settings.TriggerMode == CameraTriggerMode.Continuous)
+                {
+                    var period = TimeSpan.FromSeconds(1d / settings.TargetFps);
+                    var remaining = period - sw.Elapsed;
+                    if (remaining > TimeSpan.Zero)
+                        await Task.Delay(remaining, cancellationToken);
+                }
             }
         }
-        SetStateIfCurrent(generation, CameraAcquisitionState.Stopped, null);
+        finally
+        {
+            // 取消/退出时可能仍有未被消费的触发信号与许可：一并释放，绝不让在途计数泄漏。
+            DisposePendingPermit();
+            SetStateIfCurrent(generation, CameraAcquisitionState.Stopped, null);
+        }
     }
 
     private async Task ReconnectAsync(long generation, CancellationToken cancellationToken)
@@ -370,3 +512,10 @@ public sealed class CameraAcquisitionWorker : IAsyncDisposable
         _lifecycle.Dispose();
     }
 }
+
+/// <summary>
+/// R01（2026-10-11 复审）：触发在**入队前**被拒绝——相机未采集/外触发模式无法主机合成。
+/// 没有任何动作下发给设备，调用方可安全执行 AbortBeforeIssue（清除意图而不留核对记录）。
+/// 继承 InvalidOperationException 保持既有捕获兼容。
+/// </summary>
+public sealed class CameraTriggerNotIssuedException(string message) : InvalidOperationException(message);

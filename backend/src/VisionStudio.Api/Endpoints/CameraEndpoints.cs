@@ -2,6 +2,7 @@ using VisionStudio.Api.Contracts;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 using VisionStudio.Api.Media;
+using VisionStudio.Engine;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Api.Endpoints;
@@ -101,14 +102,33 @@ public static class CameraEndpoints
             return Results.Ok(cameras.Get(id));
         }).RequireEngineer("camera.settings.update", "camera");
 
-        app.MapPost("/api/cameras/{id}/trigger", (string id, CameraManager cameras, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth) =>
+        app.MapPost("/api/cameras/{id}/trigger", async (string id, CameraManager cameras, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
             // 请求期硬件租约：触发期间独占该相机（TTL 仅作为释放路径丢失时的兜底）
             using var lease = leases.AcquireManualOrThrow("camera", id, $"Cannot trigger camera '{id}'");
+            // A02：进入所有权环境——真实派发边界据此校验租约代次（失去所有权的旧调用被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // R01：统一动作授权——触发会产出真实帧，属设备动作入口。
             using var intent = auth.BeginManualIntent("camera.trigger", [], [], [id]);
-            cameras.Trigger(id);
-            // F02：触发是"下发即完成"的同步动作（无后续运动/写入），确认成功即解除意图。
+            try
+            {
+                // R01（2026-10-11 复审整改）：等待**真实下发**返回才判定成功——"入队成功"不再被当成
+                // "下发完成"（旧实现驱动仍在执行时接口已 200 且意图已闭合，进程中断即丢失核对记录）。
+                await cameras.TriggerAsync(id, ct);
+            }
+            catch (CameraTriggerNotIssuedException)
+            {
+                // 校验拒绝（相机停止/外触发模式）：没有任何动作下发，安全清除意图。
+                intent.AbortBeforeIssue();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // 已入队但下发失败/被取消：动作结果未知——保留耐久记录，阻断后续动作直到人工核对。
+                intent.MarkUnknown($"camera trigger dispatch did not confirm: {ex.Message}");
+                throw;
+            }
+            // F02/R01：下发确认成功才解除意图（成帧属于采集阶段，由派发许可覆盖，不在本意图范围）。
             intent.Complete();
             return Results.Ok(cameras.Get(id));
         }).RequireOperator("camera.trigger", "camera");

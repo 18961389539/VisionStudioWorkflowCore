@@ -170,6 +170,8 @@ public sealed class WorkflowDebugSessionService(
         sessionId = string.IsNullOrWhiteSpace(sessionId) ? Guid.NewGuid().ToString("N") : sessionId;
         var data = new VisionWorkflowData { Definition = workflow };
         data.Configure(options);
+        // A02：捕获会话创建入口租约环境的所有权令牌——片段执行的真实派发沿用会话租约身份。
+        data.Ownership = DeviceCommandOwnership.Current;
         var lease = await plans.AcquireAsync(workflow, ct);
         try
         {

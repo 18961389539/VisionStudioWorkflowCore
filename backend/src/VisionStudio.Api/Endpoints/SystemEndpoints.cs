@@ -54,8 +54,9 @@ public static class SystemEndpoints
             {
                 productionBlockers.Add($"manual action intent file could not be read: {ex.Message}");
             }
-            // Fix1：意图台账落盘失败会置同进程故障锁——它同样必须表达为"生产动作未就绪"。
-            if (authorization.StateTransitionFailure is { } processFailure)
+            // Fix1/A01：意图台账落盘失败会置同进程故障锁（逐意图独立登记）——
+            // 每个故障都必须表达为"生产动作未就绪"（只报第一个会掩盖其余故障）。
+            foreach (var processFailure in authorization.StateTransitionFailures)
                 productionBlockers.Add($"in-process device-action failure lock engaged: {processFailure}");
             if (maintenance.IsMaintenanceActive) productionBlockers.Add("storage maintenance is active");
             if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");

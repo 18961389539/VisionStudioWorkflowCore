@@ -718,7 +718,12 @@ if 'WaitForFrameLeaseAsync' not in read_safe('backend/src/VisionStudio.Engine/Ca
     fail('V0.36 CameraManager cannot retain exact synchronized frame leases')
 for token in ['ISynchronizedFrameSetService','Task<VisionFrameSet> CaptureAsync','WaitForFrameLeaseAsync']:
     if token not in sync_runtime: fail(f'V0.36 synchronization-to-FrameSet bridge missing: {token}')
-if 'CollectStringReference(node, registration.Catalog, "groupId", synchronizationGroupIds)' not in dependency_source or 'foreach (var cameraId in group.CameraIds) cameraIds.Add(cameraId)' not in dependency_source:
+# R04 (2026-10-11 review): the groupId->member-camera expansion moved into CollectNodeResources
+# (declared Resources path) plus the post-loop expansion; assert the current implementation tokens.
+# The behavioural contract is covered by RuntimeDependencyManifestTests.SynchronizedGroupId_ExpandsToMemberCameras.
+if 'CollectNodeResources(node, registration.Catalog, cameraIds, synchronizationGroupIds, deviceIds, robotIds)' not in dependency_source \
+        or 'foreach (var cameraId in group.CameraIds) cameraIds.Add(cameraId)' not in dependency_source \
+        or 'case "camerasyncgroup": synchronizationGroupIds.Add(value); break;' not in dependency_source:
     fail('V0.36 dependency manifest does not expand synchronization groupId to member cameras')
 for token in ['VisionDataType.FrameSet','FrameSetImageNode_selects_requested_camera_without_clone','VisionFrameSet_disposes_every_owned_image','SynchronizedCaptureNode_emits_FrameSet_and_skew_metadata']:
     if token not in frameset_tests: fail(f'V0.36 FrameSet regression test missing: {token}')

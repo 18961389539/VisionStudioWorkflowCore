@@ -87,7 +87,9 @@ public sealed record DeviceActionResolutionRequest(
     string Evidence,
     string DeviceIdentityEvidence,
     /// <summary>F03：要核对的手动/临时运行动作意图（runId）——与生产意图二选一。</summary>
-    string? ManualIntentId = null);
+    string? ManualIntentId = null,
+    /// <summary>R02（2026-10-11 复审）：生产核对同样必须指认原相机清单（与耐久安全状态精确匹配）。</summary>
+    IReadOnlyList<string>? CameraIds = null);
 public sealed record ProductionDeviceActionPendingState(
     string? RunId,
     string? ManifestHash,
@@ -97,7 +99,9 @@ public sealed record ProductionDeviceActionPendingState(
     DeviceActionSafetyPhase Phase,
     DateTimeOffset? SetAt,
     string? Reason,
-    bool Unreadable);
+    bool Unreadable,
+    /// <summary>R02：动作时锁定的相机清单（旧记录缺省为空）。</summary>
+    IReadOnlyList<string>? CameraIds = null);
 
 public sealed class ProductionRuntimeConfigStore
 {
@@ -240,6 +244,8 @@ public sealed class ProductionRuntimeService
     /// <summary>R01：统一动作授权——生产启动必须同时检查其它入口（手动/临时运行）登记的意图。</summary>
     private readonly DeviceActionAuthorizationService? _authorization;
     private readonly WorkflowModuleExpander? _moduleExpander;
+    /// <summary>扩展安全契约：显式动作声明的目录解析入口（可选；缺省走内置兼容分类）。</summary>
+    private readonly VisionNodeRegistry? _nodes;
     private ProductionTraceWriter? _traceWriter;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
@@ -277,6 +283,8 @@ public sealed class ProductionRuntimeService
     /// <summary>F02：故障时锁定的设备/机器人 ID 清单——核对必须针对它，而不是新发布流程的清单。</summary>
     private string[] _unknownActionDeviceIds = [];
     private string[] _unknownActionRobotIds = [];
+    /// <summary>R02（2026-10-11 复审）：动作时锁定的相机 ID 清单——相机动作纳入同一核对契约。</summary>
+    private string[] _unknownActionCameraIds = [];
     /// <summary>Q02：登记动作时的设备身份指纹（driver|protocol|endpoint），核对时检测设备替换漂移。</summary>
     private IReadOnlyDictionary<string, string> _unknownActionDeviceFingerprints =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -303,7 +311,8 @@ public sealed class ProductionRuntimeService
         Microsoft.Extensions.Options.IOptions<ProductionTraceOptions>? traceOptions = null,
         DeviceActionSafetyStore? safetyStore = null,
         WorkflowModuleExpander? moduleExpander = null,
-        DeviceActionAuthorizationService? authorization = null)
+        DeviceActionAuthorizationService? authorization = null,
+        VisionNodeRegistry? nodes = null)
     {
         _jobs = jobs;
         _runner = runner;
@@ -321,6 +330,7 @@ public sealed class ProductionRuntimeService
         _safetyStore = safetyStore;
         _authorization = authorization;
         _moduleExpander = moduleExpander;
+        _nodes = nodes;
 
         // F01：加载持久化的"设备动作不确定"状态——重启后标记与锁定清单必须复现，
         // 否则自动/人工启动都会跳过设备核对。文件损坏时按"不可核对"处理（保守拒绝启动）。
@@ -332,6 +342,7 @@ public sealed class ProductionRuntimeService
             _unknownActionPhase = persisted.Phase;
             _unknownActionDeviceIds = persisted.DeviceIds.ToArray();
             _unknownActionRobotIds = persisted.RobotIds.ToArray();
+            _unknownActionCameraIds = persisted.CameraIds?.ToArray() ?? [];
             _unknownActionDeviceFingerprints = persisted.DeviceFingerprints ??
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _unknownActionUnverifiable = persisted.Unreadable;
@@ -395,7 +406,8 @@ public sealed class ProductionRuntimeService
                     _unknownActionPhase,
                     persisted?.SetAt,
                     persisted?.Reason,
-                    _unknownActionUnverifiable || persisted?.Unreadable == true);
+                    _unknownActionUnverifiable || persisted?.Unreadable == true,
+                    _unknownActionCameraIds);
             }
         }
     }
@@ -671,6 +683,7 @@ public sealed class ProductionRuntimeService
     {
         string[] deviceIds;
         string[] robotIds;
+        string[] cameraIds;
         Dictionary<string, string> fingerprints;
         lock (_stateSync)
         {
@@ -680,6 +693,8 @@ public sealed class ProductionRuntimeService
             _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
             _unknownActionDeviceIds = deviceIds = manifest.Devices.Select(x => x.Id).ToArray();
             _unknownActionRobotIds = robotIds = manifest.Robots.Select(x => x.Id).ToArray();
+            // R02（2026-10-11 复审）：相机动作纳入同一耐久安全状态——没有相机清单就无法核对相机动作。
+            _unknownActionCameraIds = cameraIds = manifest.Cameras.Select(x => x.Id).ToArray();
             _unknownActionDeviceFingerprints = fingerprints = CaptureDeviceFingerprints(manifest);
             _unknownActionUnverifiable = false;
         }
@@ -688,7 +703,7 @@ public sealed class ProductionRuntimeService
             if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured.");
             _safetyStore.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow, reason,
                 Phase: DeviceActionSafetyPhase.Unknown, RunId: runId, DeviceFingerprints: fingerprints,
-                ProcessId: DeviceActionSafetyStore.CurrentProcessId));
+                ProcessId: DeviceActionSafetyStore.CurrentProcessId, CameraIds: cameraIds));
             lock (_stateSync) _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
         }
         catch (Exception ex)
@@ -709,6 +724,7 @@ public sealed class ProductionRuntimeService
     {
         string[] deviceIds;
         string[] robotIds;
+        string[] cameraIds;
         Dictionary<string, string> fingerprints;
         lock (_stateSync)
         {
@@ -718,6 +734,8 @@ public sealed class ProductionRuntimeService
             _unknownActionPhase = DeviceActionSafetyPhase.IntentRecorded;
             _unknownActionDeviceIds = deviceIds = manifest.Devices.Select(x => x.Id).ToArray();
             _unknownActionRobotIds = robotIds = manifest.Robots.Select(x => x.Id).ToArray();
+            // R02（2026-10-11 复审）：相机动作纳入同一耐久安全状态——没有相机清单就无法核对相机动作。
+            _unknownActionCameraIds = cameraIds = manifest.Cameras.Select(x => x.Id).ToArray();
             _unknownActionDeviceFingerprints = fingerprints = CaptureDeviceFingerprints(manifest);
             _unknownActionUnverifiable = false;
         }
@@ -727,7 +745,7 @@ public sealed class ProductionRuntimeService
             _safetyStore.Save(new DeviceActionSafetyState(manifest.ManifestHash, deviceIds, robotIds, DateTimeOffset.UtcNow,
                 $"side-effect cycle {runId} started; the intent was registered before any device action executed",
                 Phase: DeviceActionSafetyPhase.IntentRecorded, RunId: runId, DeviceFingerprints: fingerprints,
-                ProcessId: DeviceActionSafetyStore.CurrentProcessId));
+                ProcessId: DeviceActionSafetyStore.CurrentProcessId, CameraIds: cameraIds));
             lock (_stateSync) { _unknownActionRunId = runId; _unknownActionPhase = DeviceActionSafetyPhase.IntentRecorded; }
             return true;
         }
@@ -765,6 +783,7 @@ public sealed class ProductionRuntimeService
             _unknownActionPhase = DeviceActionSafetyPhase.Unknown;
             _unknownActionDeviceIds = [];
             _unknownActionRobotIds = [];
+            _unknownActionCameraIds = [];
             _unknownActionDeviceFingerprints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _unknownActionUnverifiable = false;
         }
@@ -790,6 +809,7 @@ public sealed class ProductionRuntimeService
             string? manifestHash;
             string[] deviceIds;
             string[] robotIds;
+            string[] cameraIds;
             bool unverifiable;
             lock (_stateSync)
             {
@@ -798,6 +818,7 @@ public sealed class ProductionRuntimeService
                 manifestHash = _unknownActionManifestHash;
                 deviceIds = _unknownActionDeviceIds;
                 robotIds = _unknownActionRobotIds;
+                cameraIds = _unknownActionCameraIds;
                 unverifiable = _unknownActionUnverifiable;
             }
             if (unverifiable || string.IsNullOrWhiteSpace(manifestHash))
@@ -807,15 +828,22 @@ public sealed class ProductionRuntimeService
             var expectedRunId = string.IsNullOrWhiteSpace(runId) ? "legacy" : runId;
             if (!string.Equals(request.RunId, expectedRunId, StringComparison.Ordinal) || !string.Equals(request.ManifestHash, manifestHash, StringComparison.Ordinal) ||
                 !deviceIds.Order(StringComparer.Ordinal).SequenceEqual((request.DeviceIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal) ||
-                !robotIds.Order(StringComparer.Ordinal).SequenceEqual((request.RobotIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal))
-                throw new ApiConflictException("Resolution must identify the exact original run, manifest, devices, and robots recorded in the safety state.");
+                !robotIds.Order(StringComparer.Ordinal).SequenceEqual((request.RobotIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal) ||
+                !cameraIds.Order(StringComparer.Ordinal).SequenceEqual((request.CameraIds ?? []).Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                throw new ApiConflictException("Resolution must identify the exact original run, manifest, devices, robots, and cameras recorded in the safety state.");
 
             var pendingRobots = _dependencies.VerifyNoPendingRobotOperations(robotIds);
             if (!pendingRobots.Ok)
                 throw new ApiConflictException($"Cannot reconcile while robot operations remain active: {pendingRobots.Summary}");
+            // R02（2026-10-11 复审）：相机在途同样阻断生产核对——触发/采集/停止未确认不得凭说明放行。
+            var busyCameras = cameraIds.Where(_dependencies.IsCameraActionUnresolved).ToArray();
+            if (busyCameras.Length > 0)
+                throw new ApiConflictException(
+                    $"Cannot reconcile while camera actions are still in flight or unconfirmed: {string.Join(", ", busyCameras)}.");
 
             var resolution = new DeviceActionSafetyResolution(expectedRunId, manifestHash, deviceIds, robotIds, operatorName,
-                request.Reason.Trim(), request.Evidence.Trim(), request.DeviceIdentityEvidence.Trim(), DateTimeOffset.UtcNow);
+                request.Reason.Trim(), request.Evidence.Trim(), request.DeviceIdentityEvidence.Trim(), DateTimeOffset.UtcNow,
+                CameraIds: cameraIds);
             if (_safetyStore is null) throw new InvalidOperationException("Device-action safety persistence is not configured.");
             _safetyStore.SaveResolution(resolution);
             ClearDeviceActionUnknownState();
@@ -825,10 +853,11 @@ public sealed class ProductionRuntimeService
     }
 
     // C07：副作用分类与完成度判定统一在 DeviceSideEffectClassifier（生产循环不再另写一份）。
-    private static bool IsDeviceSideEffectNode(NodeDefinition node) => DeviceSideEffectClassifier.IsDeviceSideEffectNode(node.Type);
+    // 扩展契约：携带目录注册表按**节点级参数**求值（声明条件只在满足时才算动作）。
+    private bool IsDeviceSideEffectNode(NodeDefinition node) => DeviceSideEffectClassifier.IsDeviceSideEffectNode(node, _nodes);
 
-    private static bool RequiresManualActionReconciliation(WorkflowDefinition workflow, WorkflowRunResult result)
-        => DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, result);
+    private bool RequiresManualActionReconciliation(WorkflowDefinition workflow, WorkflowRunResult result)
+        => DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, result, _nodes);
 
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
     {
@@ -1055,6 +1084,9 @@ public sealed class ProductionRuntimeService
                 {
                     try
                     {
+                        // A02：生产循环的真实派发携带生产租约令牌——令牌被换代/撤销后，
+                        // 旧周期的后续设备命令在派发边界被拒绝。
+                        using var commandScope = DeviceCommandOwnership.Enter(_lease);
                         result = await _runner.RunAsync(
                             locked.Workflow,
                             new VisionRunOptions(DebugRunMode.Full, TimeoutMs: config.MaxCycleMs, Artifacts: writer.ArtifactOptions),

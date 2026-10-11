@@ -130,7 +130,8 @@ public sealed class RuntimeDependencyManifestService(
     CalibrationAssetStore calibrations,
     HardwareProvenanceService hardwareProvenance,
     WorkflowModuleExpander? moduleExpander = null,
-    CameraSynchronizationGroupStore? synchronizationGroups = null)
+    CameraSynchronizationGroupStore? synchronizationGroups = null,
+    DeviceLeaseRegistry? commandGate = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -244,6 +245,26 @@ public sealed class RuntimeDependencyManifestService(
         catch { return false; } // 已注销/未注册的设备没有在途命令
     }
 
+    /// <summary>
+    /// R02（2026-10-11 复审）：核对前的相机在途检查——命令派发许可未释放（手动触发/取图触发/
+    /// 同步组 Action Command 仍在设备上执行）或采集停止未确认时返回 true。无法解析的相机
+    /// 保守视为未收尾。注意：普通自由连拍（Continuous 采集）不是命令在途，不阻断核对——
+    /// 本检查不把"采集服务在运行"机械等同于危险动作。
+    /// </summary>
+    public bool IsCameraActionUnresolved(string cameraId)
+    {
+        try
+        {
+            if (commandGate is not null && commandGate.IsCommandInFlight(DeviceCommandResourceKinds.Camera, cameraId))
+                return true;
+            return cameras.IsStopUnconfirmed(cameraId);
+        }
+        catch
+        {
+            return true; // 无法解析：绝不当作空闲
+        }
+    }
+
     public DeviceStateVerification VerifyNoPendingRobotOperations(IReadOnlyList<string> robotIds)
     {
         var issues = new List<string>();
@@ -304,10 +325,7 @@ public sealed class RuntimeDependencyManifestService(
                 usedTypes.Add(node.Type);
             }
 
-            CollectStringReference(node, registration.Catalog, "cameraId", cameraIds);
-            CollectStringReference(node, registration.Catalog, "groupId", synchronizationGroupIds);
-            CollectStringReference(node, registration.Catalog, "deviceId", deviceIds);
-            CollectStringReference(node, registration.Catalog, "robotId", robotIds);
+            CollectNodeResources(node, registration.Catalog, cameraIds, synchronizationGroupIds, deviceIds, robotIds);
 
             var assetId = ResolveString(node, registration.Catalog, "assetId");
             var assetVersion = ResolveInt(node, registration.Catalog, "assetVersion");
@@ -453,10 +471,7 @@ public sealed class RuntimeDependencyManifestService(
         {
             if (!registry.IsRegistered(node.Type)) continue;
             var registration = registry.Require(node.Type);
-            CollectStringReference(node, registration.Catalog, "cameraId", cameraIds);
-            CollectStringReference(node, registration.Catalog, "groupId", synchronizationGroupIds);
-            CollectStringReference(node, registration.Catalog, "deviceId", deviceIds);
-            CollectStringReference(node, registration.Catalog, "robotId", robotIds);
+            CollectNodeResources(node, registration.Catalog, cameraIds, synchronizationGroupIds, deviceIds, robotIds);
         }
 
         if (synchronizationGroupIds.Count > 0 && synchronizationGroups is not null)
@@ -789,6 +804,66 @@ public sealed class RuntimeDependencyManifestService(
     {
         var value = ResolveString(node, catalog, name);
         if (!string.IsNullOrWhiteSpace(value)) output.Add(value);
+    }
+
+    /// <summary>
+    /// 扩展安全契约：按目录**声明的资源请求**收集硬件资源 ID（声明承载资源 ID 的参数名），
+    /// 不再按 cameraId/groupId/deviceId/robotId 参数名约定猜测插件的资源。
+    /// 未声明资源的目录沿用参数名约定（兼容回退）；未知资源类别直接失败关闭（目录契约写错必须暴露）。
+    /// </summary>
+    private static void CollectNodeResources(
+        NodeDefinition node,
+        NodeCatalogItem catalog,
+        HashSet<string> cameraIds,
+        HashSet<string> synchronizationGroupIds,
+        HashSet<string> deviceIds,
+        HashSet<string> robotIds)
+    {
+        if (catalog.Resources is { Count: > 0 } declarations)
+        {
+            foreach (var declaration in declarations)
+            {
+                // 契约校验与取值无关：类别写错必须在任何取值下都失败关闭。
+                var kind = declaration.Kind.Trim().ToLowerInvariant();
+                if (kind is not ("camera" or "camerasyncgroup" or "device" or "robot"))
+                    throw new InvalidOperationException(
+                        $"Node catalog '{catalog.Type}' declares unknown resource kind '{declaration.Kind}' " +
+                        "(expected camera | cameraSyncGroup | device | robot).");
+                var value = ResolveDeclaredResourceValue(node, catalog, declaration.Parameter);
+                if (string.IsNullOrWhiteSpace(value)) continue;
+                switch (kind)
+                {
+                    case "camera": cameraIds.Add(value); break;
+                    case "camerasyncgroup": synchronizationGroupIds.Add(value); break;
+                    case "device": deviceIds.Add(value); break;
+                    case "robot": robotIds.Add(value); break;
+                }
+            }
+            return;
+        }
+
+        CollectStringReference(node, catalog, "cameraId", cameraIds);
+        CollectStringReference(node, catalog, "groupId", synchronizationGroupIds);
+        CollectStringReference(node, catalog, "deviceId", deviceIds);
+        CollectStringReference(node, catalog, "robotId", robotIds);
+    }
+
+    /// <summary>
+    /// 声明的资源参数以**声明本身为契约**：即使目录 Parameters 未逐一列出该参数也要读取节点取值
+    ///（插件可以只声明资源而不把参数暴露为可编辑项）；缺省值仍按参数描述符解析。
+    /// </summary>
+    private static string? ResolveDeclaredResourceValue(NodeDefinition node, NodeCatalogItem catalog, string name)
+    {
+        if (node.Parameters is not null && node.Parameters.TryGetValue(name, out var raw))
+        {
+            return raw.ValueKind switch
+            {
+                JsonValueKind.String => raw.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => raw.ToString(),
+                _ => null
+            };
+        }
+        return catalog.Parameters.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.DefaultValue?.ToString();
     }
 
     private static string? ResolveString(NodeDefinition node, NodeCatalogItem catalog, string name)

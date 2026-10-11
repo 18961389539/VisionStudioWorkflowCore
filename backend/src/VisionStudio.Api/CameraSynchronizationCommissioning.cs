@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using VisionStudio.Api.Provenance;
+using VisionStudio.Engine;
 using VisionStudio.Engine.Provenance;
 
 namespace VisionStudio.Api;
@@ -152,6 +153,8 @@ public sealed class CameraSynchronizationCommissioningService(
     CameraSynchronizationService synchronization,
     HardwareProvenanceService provenance,
     VisionStudio.Engine.Camera.CameraManager cameras,
+    DeviceLeaseRegistry leases,
+    DeviceActionAuthorizationService authorization,
     IHostApplicationLifetime lifetime)
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new(StringComparer.OrdinalIgnoreCase);
@@ -275,14 +278,32 @@ public sealed class CameraSynchronizationCommissioningService(
         try
         {
             await store.UpdateAsync(current, CancellationToken.None);
+            var group = await synchronization.GetAsync(current.GroupId, CancellationToken.None);
+            // R01/R02：维护/验收的主动触发与手动、工作流入口共用同一安全协议——
+            // 每轮迭代持有组租约（与生产/调试/手动操作仲裁）+ 登记耐久动作意图（未闭合意图存在时一致拒绝）；
+            // 显式系统上下文保证派发许可在无租约兜底路径上也有可审计的权限来源。
+            using var systemScope = DeviceCommandOwnership.EnterSystem(
+                "camera-synchronization-commissioning", $"commissioning test {current.TestId}");
+            var resources = group.CameraIds
+                .Select(cameraId => new DeviceLeaseResource(DeviceLeaseResourceKinds.Camera, cameraId))
+                .ToArray();
             for (var i = 0; i < current.RequestedIterations; i++)
             {
                 ct.ThrowIfCancellationRequested();
+                // 闸门/租约类失败直接终止测试：带着未闭合动作刷 500 次触发会掩盖故障，协议要求先核对。
+                using var lease = leases.AcquireOrThrow(
+                    new DeviceLeaseOwner("Commissioning", current.TestId, "Camera Commissioning"),
+                    resources,
+                    $"Cannot run camera commissioning test '{current.TestId}'");
+                using var commandScope = DeviceCommandOwnership.Enter(lease);
+                using var intent = authorization.BeginManualIntent(
+                    "camera.sync.commissioning.trigger", [], [], group.CameraIds);
                 try
                 {
                     await synchronization.TriggerAsync(current.GroupId,
                         new CameraSynchronizationTriggerRequest(current.Scheduled, FrameTimeoutMs: current.FrameTimeoutMs), ct,
                         $"commissioning:{current.TestId}");
+                    intent.Complete();
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch { /* Failure is already persisted by synchronization service; continue endurance test. */ }

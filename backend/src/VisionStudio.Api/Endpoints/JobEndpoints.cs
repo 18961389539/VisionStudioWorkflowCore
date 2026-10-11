@@ -104,6 +104,7 @@ public static class JobEndpoints
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
             WorkflowModuleExpander modules,
+            VisionNodeRegistry nodes,
             CancellationToken ct) =>
         {
             var snapshot = await jobs.GetPublishedSnapshotAsync(id, ct);
@@ -112,11 +113,13 @@ public static class JobEndpoints
             var runId = RunTraceRecorder.NewRunId();
             // 运行期硬件租约：与 ad-hoc/debug 运行一致，执行结束（含失败/取消）即释放
             using var lease = await production.AcquireRunLeaseAsync(runId, snapshot.Workflow, $"Cannot run job '{id}'", ct);
+            // A02：进入所有权环境——节点真实派发边界据此校验租约代次（失去所有权的旧执行被拒绝）。
+            using var commandScope = DeviceCommandOwnership.Enter(lease);
             // F01：手动触发的已发布作业运行同样受统一动作授权约束，并在执行前耐久登记意图；
             // 含副作用流程的起始证据写失败绝不盲跑（与 /api/run 同一契约）。
             // N01/N06：展开执行计划后判定副作用与完成度；纯计算作业不登记动作意图。
             var effectiveWorkflow = (await modules.ExpandAsync(snapshot.Workflow, ct)).Workflow;
-            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow);
+            var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, nodes);
             using var actionIntent = hasSideEffects
                 ? await auth.BeginWorkflowIntentAsync("workflow.run.publishedJob", effectiveWorkflow, runId, ct)
                 : null;
@@ -130,7 +133,7 @@ public static class JobEndpoints
             // C01：只有流程成功且**所有已受理的设备动作都确认完成**才解除意图。
             if (actionIntent is not null)
             {
-                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result))
+                if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result, nodes))
                     actionIntent.Complete();
                 else if (result.Success)
                     actionIntent.MarkUnknown("the published job returned success but an accepted device action still awaits completion confirmation");

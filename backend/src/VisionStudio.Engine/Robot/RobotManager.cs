@@ -33,9 +33,14 @@ public sealed class RobotManager : IAsyncDisposable
     }
     private readonly ConcurrentDictionary<string, StopCoordination> _stopCalls = new(StringComparer.OrdinalIgnoreCase);
     private readonly IReadOnlyList<IRobotCommandObserver> _observers;
+    /// <summary>A02：真实运动指令派发前的所有权校验（默认不校验；接入租约注册表后生效）。</summary>
+    private readonly IDeviceCommandOwnershipGate _ownership;
 
-    public RobotManager(IEnumerable<IRobotCommandObserver>? observers = null)
-        => _observers = observers?.ToArray() ?? [];
+    public RobotManager(IEnumerable<IRobotCommandObserver>? observers = null, IDeviceCommandOwnershipGate? ownershipGate = null)
+    {
+        _observers = observers?.ToArray() ?? [];
+        _ownership = ownershipGate ?? AllowAllDeviceCommandOwnershipGate.Instance;
+    }
 
     private SemaphoreSlim CommandGate(string id) => _commandGates.GetOrAdd(id, static _ => new SemaphoreSlim(1, 1));
 
@@ -204,6 +209,8 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再发机器人指令。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Robot, id);
             var call = StartMotionCall(id, () => adapter.SendTargetAsync(target, ct));
             return await call;
         }
@@ -231,6 +238,8 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再发机器人指令。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Robot, id);
             var receipt = await StartMotionCall(id, () => adapter.MoveToAsync(target, ct));
             if (waitForInPosition)
                 await WaitForInPositionAsync(id, receipt.CommandId, timeout, ct);
@@ -266,6 +275,8 @@ public sealed class RobotManager : IAsyncDisposable
         await gate.WaitAsync(ct);
         try
         {
+            // A02：真实派发前校验所有权代次——失去所有权的旧调用不能再发机器人指令。
+            using var permit = _ownership.AcquireCommandPermit(DeviceCommandResourceKinds.Robot, id);
             return await ExecuteHandshakeCoreAsync(id, adapter, target, policy, ct);
         }
         finally { gate.Release(); }

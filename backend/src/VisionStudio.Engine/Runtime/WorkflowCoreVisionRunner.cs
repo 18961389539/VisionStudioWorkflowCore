@@ -21,6 +21,8 @@ public sealed class WorkflowCoreVisionRunner(
         var total = Stopwatch.StartNew();
         var data = new VisionWorkflowData { Definition = workflow };
         data.Configure(options);
+        // A02：捕获入口租约环境的所有权令牌——节点真实派发前在节点运行时重入。
+        data.Ownership = DeviceCommandOwnership.Current;
 
         try
         {
