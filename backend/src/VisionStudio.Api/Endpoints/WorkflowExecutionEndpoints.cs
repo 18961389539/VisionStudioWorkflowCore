@@ -78,7 +78,7 @@ public static class WorkflowExecutionEndpoints
             using var lease = await production.AcquireRunLeaseAsync(runId, workflow, $"Cannot run workflow '{workflow.Id}'", ct);
             // R01：临时运行同样受统一动作授权约束，并在执行前耐久登记意图；含副作用流程的
             // 起始证据写失败时绝不盲跑设备动作（best-effort 起始记录只适用于纯计算流程）。
-            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", workflow, ct);
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", workflow, runId, ct);
             if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             else
@@ -86,8 +86,12 @@ public static class WorkflowExecutionEndpoints
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
             var result = await runner.RunAsync(workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
             await recorder.FinalizeAsync(result, workflow, context);
-            // F02：成功且追溯证据（Finalize）已提交才解除意图；失败/取消保留为 Unknown。
-            if (result.Success) actionIntent.Complete();
+            // C01/F02：成功 + 追溯证据已提交 + **设备动作确认完成** 三者齐全才解除意图。
+            // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
+            if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, result))
+                actionIntent.Complete();
+            else if (result.Success)
+                actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.adhoc", "workflow");
 
@@ -106,14 +110,17 @@ public static class WorkflowExecutionEndpoints
             var runId = RunTraceRecorder.NewRunId();
             using var lease = await production.AcquireRunLeaseAsync(runId, request.Workflow, $"Cannot debug-run workflow '{request.Workflow.Id}'", ct);
             // R01：调试运行与生产/临时运行共用同一动作授权与意图登记契约。
-            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.debug", request.Workflow, ct);
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.debug", request.Workflow, runId, ct);
             if (DeviceSideEffectClassifier.HasDeviceSideEffects(request.Workflow))
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             var result = await runner.RunAsync(request.Workflow, options, runId, ct);
             await recorder.FinalizeAsync(result, request.Workflow, context);
-            if (result.Success) actionIntent.Complete();
+            if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(request.Workflow, result))
+                actionIntent.Complete();
+            else if (result.Success)
+                actionIntent.MarkUnknown("the debug run returned success but an accepted device action still awaits completion confirmation");
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireEngineer("workflow.run.debug", "workflow");
 

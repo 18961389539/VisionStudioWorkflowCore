@@ -113,7 +113,7 @@ public static class JobEndpoints
             using var lease = await production.AcquireRunLeaseAsync(runId, snapshot.Workflow, $"Cannot run job '{id}'", ct);
             // F01：手动触发的已发布作业运行同样受统一动作授权约束，并在执行前耐久登记意图；
             // 含副作用流程的起始证据写失败绝不盲跑（与 /api/run 同一契约）。
-            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.publishedJob", snapshot.Workflow, ct);
+            using var actionIntent = await auth.BeginWorkflowIntentAsync("workflow.run.publishedJob", snapshot.Workflow, runId, ct);
             if (DeviceSideEffectClassifier.HasDeviceSideEffects(snapshot.Workflow))
                 await recorder.BeginStrictAsync(runId, DateTimeOffset.UtcNow, snapshot.Workflow, context);
             else
@@ -121,7 +121,11 @@ public static class JobEndpoints
             // 手动触发的作业运行同样支持按节点图像检查（自动化的 Production Runtime 不走此端点）
             var result = await runner.RunAsync(snapshot.Workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
             await recorder.FinalizeAsync(result, snapshot.Workflow, context);
-            if (result.Success) actionIntent.Complete();
+            // C01：只有流程成功且**所有已受理的设备动作都确认完成**才解除意图。
+            if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(snapshot.Workflow, result))
+                actionIntent.Complete();
+            else if (result.Success)
+                actionIntent.MarkUnknown("the published job returned success but an accepted device action still awaits completion confirmation");
             return EndpointResults.StoreAndMapRunResult(result, store);
         }).RequireOperator("job.run", "job");
 

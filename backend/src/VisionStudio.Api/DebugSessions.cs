@@ -67,12 +67,20 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // AllowSideEffects 只代表用户同意执行副作用，不代表上一动作已经安全核对。
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(workflow))
-            guard = _authorization.BeginManualIntent("debug.session.create", [], [], []);
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.create", workflow, null, ct);
         try
         {
             var started = await CreateCoreAsync(workflow, options, ct);
-            // 成功到达断点且报告成功才解除意图；失败/取消保留为 Unknown。
-            if (guard is not null && started.Result.Success) guard.Complete();
+            // C01：成功到达断点 + 报告成功 + 设备动作确认完成才解除意图；失败/取消保留为 Unknown。
+            if (guard is not null && started.Result.Success &&
+                !DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, started.Result))
+            {
+                guard.Complete();
+            }
+            else if (guard is not null && started.Result.Success)
+            {
+                guard.MarkUnknown("the debug session reached its breakpoint but an accepted device action still awaits completion confirmation");
+            }
             return started;
         }
         finally { guard?.Dispose(); }
@@ -133,11 +141,14 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // 已有会话也不能继续下发动作。
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
-            guard = _authorization.BeginManualIntent("debug.session.continue", [], [], []);
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.continue", entry.Session.Workflow, sessionId, ct);
         try
         {
             var result = await _engine.ContinueAsync(entry.Session, ct);
-            if (guard is not null && result.Success) guard.Complete();
+            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(entry.Session.Workflow, result))
+                guard.Complete();
+            else if (guard is not null && result.Success)
+                guard.MarkUnknown("the debug session continued successfully but an accepted device action still awaits completion confirmation");
             return result;
         }
         catch (InvalidOperationException ex)
@@ -157,11 +168,14 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // F01：单节点执行与"继续"同一契约——未闭合意图存在时不得再下发任何动作。
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(entry.Session.Workflow))
-            guard = _authorization.BeginManualIntent("debug.session.run-node", [], [], []);
+            guard = await _authorization.BeginWorkflowIntentAsync("debug.session.run-node", entry.Session.Workflow, sessionId, ct);
         try
         {
             var result = await _engine.RunNodeWithCachedInputsAsync(entry.Session, nodeId, ct);
-            if (guard is not null && result.Success) guard.Complete();
+            if (guard is not null && result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(entry.Session.Workflow, result))
+                guard.Complete();
+            else if (guard is not null && result.Success)
+                guard.MarkUnknown("the debug node run returned success but an accepted device action still awaits completion confirmation");
             return result;
         }
         catch (InvalidOperationException ex)

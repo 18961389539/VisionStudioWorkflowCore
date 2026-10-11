@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
+using VisionStudio.Engine;
 
 namespace VisionStudio.Api.Tests;
 
@@ -23,6 +24,62 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class DeviceActionAuthorizationTests
 {
+    [Fact]
+    public void RequiresManualReconciliation_RejectsAcceptedButUnconfirmedDeviceAction()
+    {
+        // C01 回归：流程/节点返回成功 ≠ 物理动作完成。只有"已受理"（SendTarget / 未等待到位，
+        // inPosition=false）时必须要求人工核对——旧实现按 result.Success 直接解除意图。
+        var acceptedWorkflow = RobotWorkflow(action: "SendTarget", waitForInPosition: false);
+        Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(acceptedWorkflow, RobotResult("run-c01", "TargetAccepted", inPosition: false)));
+
+        // 对照：等待到位且协议确认 InPosition ⇒ 允许解除。
+        var confirmedWorkflow = RobotWorkflow(action: "Handshake", waitForInPosition: true);
+        Assert.False(DeviceSideEffectClassifier.RequiresManualReconciliation(confirmedWorkflow, RobotResult("run-c01-ok", "InPosition", inPosition: true)));
+
+        // 节点成功但快照缺失（无法证明到位）⇒ 保守要求核对。
+        Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(confirmedWorkflow, RobotResult("run-c01-bare", null, inPosition: null)));
+
+        // 空报告集无法证明异步命令被跳过 ⇒ 保守要求核对。
+        var empty = new WorkflowRunResult("run-c01-empty", true, 1, false, 0, 0, [], [], null, QualityDisposition: "OK");
+        Assert.True(DeviceSideEffectClassifier.RequiresManualReconciliation(acceptedWorkflow, empty));
+    }
+
+    [Fact]
+    public void RuntimeOnlyPolicy_AllowsDeviceActionReconciliationEndpoints()
+    {
+        // C04 回归：正式 RuntimeOnly 模式必须允许受管理员认证 + 审计的设备动作核对与清单读取——
+        // 否则 Unknown 只能先 resolve、而 resolve 被模式白名单拒绝（探针：403 runtime_only），
+        // 故障恢复在真实交付模式下形成死路。
+        Assert.True(RuntimeOnlyPolicy.IsMutationAllowed("/api/production/device-actions/resolve", "POST"));
+        Assert.True(RuntimeOnlyPolicy.IsMutationAllowed("/api/production/device-actions/pending", "GET"));
+        Assert.False(RuntimeOnlyPolicy.IsMutationAllowed("/api/workflows", "POST")); // 工程编辑接口仍受限
+    }
+
+    private static WorkflowDefinition RobotWorkflow(string action, bool waitForInPosition)
+        => new(
+            "c01-probe",
+            "C01 Probe",
+            [new NodeDefinition("r1", "robot.executeTarget", "Send", null, new Dictionary<string, JsonElement>
+            {
+                ["action"] = JsonSerializer.SerializeToElement(action),
+                ["waitForInPosition"] = JsonSerializer.SerializeToElement(waitForInPosition)
+            })],
+            []);
+
+    private static WorkflowRunResult RobotResult(string runId, string? state, bool? inPosition)
+    {
+        var outputs = new Dictionary<string, VisionValueSnapshot>();
+        if (inPosition is { } position)
+            outputs["inPosition"] = new VisionValueSnapshot("Boolean", position ? "True" : "False", position);
+        if (state is not null)
+            outputs["state"] = new VisionValueSnapshot("String", state, state);
+        return new WorkflowRunResult(runId, true, 1, false, 0, 0,
+            [new NodeRunReport("r1", "robot.executeTarget", true, 1, new Dictionary<string, object?>(),
+                Phase: NodeExecutionPhase.Run,
+                Outputs: outputs)],
+            [], null, QualityDisposition: "OK");
+    }
+
     /// <summary>含副作用节点且必然失败的运行（写入不存在的标签）——用于验证"失败后意图保留"。</summary>
     private static WorkflowDefinition FailingWriteWorkflow()
         => new(

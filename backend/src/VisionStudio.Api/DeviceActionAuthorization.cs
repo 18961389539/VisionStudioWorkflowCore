@@ -41,7 +41,9 @@ public sealed record ManualActionIntent(
     string? ProcessId,
     ManualActionIntentState State = ManualActionIntentState.Issued,
     string? ClosedReason = null,
-    DateTimeOffset? ClosedAt = null);
+    DateTimeOffset? ClosedAt = null,
+    /// <summary>C07：关联的真实执行标识（运行 RunId / 调试会话 ID）——核对记录必须能定位原执行。</summary>
+    string? RelatedRunId = null);
 
 public enum ManualActionIntentState
 {
@@ -315,7 +317,7 @@ public sealed class DeviceActionAuthorizationService(
     }
 
     /// <summary>F02：临时/调试/作业运行的意图——资源清单来自工作流的运行依赖捕获。</summary>
-    public async Task<DeviceActionHandle> BeginWorkflowIntentAsync(string action, WorkflowDefinition workflow, CancellationToken ct)
+    public async Task<DeviceActionHandle> BeginWorkflowIntentAsync(string action, WorkflowDefinition workflow, string? relatedRunId, CancellationToken ct)
     {
         EnsureActionsAllowed(action);
         var manifest = await dependencies.CaptureAsync(workflow, ct);
@@ -323,7 +325,8 @@ public sealed class DeviceActionAuthorizationService(
             action,
             manifest.Devices.Select(x => x.Id).ToArray(),
             manifest.Robots.Select(x => x.Id).ToArray(),
-            manifest.Cameras.Select(x => x.Id).ToArray());
+            manifest.Cameras.Select(x => x.Id).ToArray(),
+            relatedRunId);
     }
 
     /// <summary>
@@ -343,6 +346,16 @@ public sealed class DeviceActionAuthorizationService(
             throw new ApiConflictException(
                 $"Manual action intent '{runId}' ({target.Action}) is still active in this process; wait for it to finish or stop it before reconciling.");
 
+        // C05：核对前必须验证**没有已知在途动作**——机器人仍在执行/停止未确认、或设备命令门
+        // 仍被占用时，绝不能把"现场人员写了一段说明"当作动作已终止的证据。
+        var pendingRobots = dependencies.VerifyNoPendingRobotOperations(target.RobotIds);
+        if (!pendingRobots.Ok)
+            throw new ApiConflictException($"Cannot reconcile while robot operations remain active: {pendingRobots.Summary}");
+        var busyDevices = target.DeviceIds.Where(dependencies.IsDeviceCommandInFlight).ToArray();
+        if (busyDevices.Length > 0)
+            throw new ApiConflictException(
+                $"Cannot reconcile while device commands are still in flight: {string.Join(", ", busyDevices)}.");
+
         // Fix3：顺序不可颠倒——先把核对证据（含意图快照）耐久落盘，成功后才解除意图。
         // 存证失败 ⇒ 抛出且意图保留（绝不出现"无证据放行"）。
         manualIntents.SaveResolution(new ManualActionResolution(
@@ -358,14 +371,15 @@ public sealed class DeviceActionAuthorizationService(
         return target;
     }
 
-    private DeviceActionHandle RecordIntent(string action, IReadOnlyList<string> deviceIds, IReadOnlyList<string> robotIds, IReadOnlyList<string> cameraIds)
+    private DeviceActionHandle RecordIntent(string action, IReadOnlyList<string> deviceIds, IReadOnlyList<string> robotIds, IReadOnlyList<string> cameraIds, string? relatedRunId = null)
     {
         var runId = "manual-" + Guid.NewGuid().ToString("N");
         try
         {
             manualIntents.Add(new ManualActionIntent(
                 runId, action, deviceIds, robotIds, cameraIds,
-                DateTimeOffset.UtcNow, DeviceActionSafetyStore.CurrentProcessId));
+                DateTimeOffset.UtcNow, DeviceActionSafetyStore.CurrentProcessId,
+                RelatedRunId: relatedRunId));
         }
         catch (Exception ex)
         {
@@ -457,9 +471,14 @@ public sealed class DeviceActionHandle : IDisposable
 }
 
 /// <summary>
-/// R01/扩展治理：设备副作用节点的单一分类来源。
-/// 生产运行时与临时/调试/作业运行必须用同一份判定——此前只存在于生产循环内部，
-/// 其它入口无法据它决定"起始证据写失败时不得盲跑"或"是否需要动作授权"。
+/// R01/C01/C07：设备动作的**单一分类与完成度契约**。
+///
+/// 分类：生产运行时与临时/调试/作业运行共用同一份副作用节点判定——此前两处各写一份
+/// （生产循环内部 + 授权层），修改一处不能覆盖全系统。
+///
+/// 完成度（C01）：流程/节点返回成功只代表"已受理"，不等于物理动作完成。
+/// 生产循环早已有 RequiresManualReconciliation，但 AdHoc/Debug/调试会话/已发布作业
+/// 不复用它，导致"未确认的异步机器人命令"被当成闭合、意图被清除。
 /// </summary>
 public static class DeviceSideEffectClassifier
 {
@@ -475,4 +494,43 @@ public static class DeviceSideEffectClassifier
         => workflow.Nodes.Any(x => SideEffectNodeTypes.Contains(x.Type));
 
     public static bool IsDeviceSideEffectNode(string nodeType) => SideEffectNodeTypes.Contains(nodeType);
+
+    /// <summary>
+    /// C01：结果中是否存在"已受理但未确认完成"的设备动作——存在即不得解除动作意图。
+    /// 判定依据是节点报告的协议快照（inPosition + state=InPosition），而不是流程 Success。
+    /// </summary>
+    public static bool RequiresManualReconciliation(WorkflowDefinition workflow, WorkflowRunResult result)
+    {
+        var nodes = workflow.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+        var runReports = result.NodeReports.Where(report => report.Phase == NodeExecutionPhase.Run).ToArray();
+        var robotReports = runReports.Where(report => report.NodeType.Equals("robot.executeTarget", StringComparison.OrdinalIgnoreCase)).ToArray();
+        // 空/不完整报告集无法证明异步命令被跳过（测试替身与中断的 runner 常见）——保守要求核对。
+        if (robotReports.Length == 0 && runReports.Length == 0 && workflow.Nodes.Any(node => node.Type == "robot.executeTarget"))
+            return true;
+        foreach (var report in robotReports.Where(report => report.Success))
+        {
+            if (!nodes.TryGetValue(report.NodeId, out var node)) continue;
+            var action = node.GetString("action", "Handshake");
+            if (action.Equals("SendTarget", StringComparison.OrdinalIgnoreCase) || !node.GetBool("waitForInPosition", true))
+                return true;
+
+            // runner 返回成功只证明节点返回了。必须由机器人协议快照确认完成（到位 + InPosition）
+            // 才允许清除耐久意图。
+            if (!TryGetOutput(report, "inPosition", out var inPosition) || inPosition is not true ||
+                !TryGetOutput(report, "state", out var state) ||
+                !string.Equals(state as string, "InPosition", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool TryGetOutput(NodeRunReport report, string name, out object? value)
+    {
+        value = null;
+        if (report.Outputs is null) return false;
+        var pair = report.Outputs.FirstOrDefault(item => item.Key.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (pair.Key is null) return false;
+        value = pair.Value.Value;
+        return true;
+    }
 }

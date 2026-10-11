@@ -88,6 +88,8 @@ export default function CameraPanel({ open, onClose }: Props) {
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
       if (!response.ok) throw new Error(await responseErrorMessage(response, '相机接口不可用'));
       const data: CameraDescriptor[] = await response.json();
+      // C06：body 解析后再核对一次代次，迟到 body 不得覆盖新状态。
+      if (generation !== refreshGeneration.current) return;
       setCameras(data);
       if (!data.some((x) => x.id === selectedId) && data.length > 0) setSelectedId(data[0].id);
     } catch (error) {

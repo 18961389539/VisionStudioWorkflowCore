@@ -61,8 +61,14 @@ export default function RobotPanel({ open, onClose }: Props) {
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
       if (!robotResponse.ok) throw new Error(await responseErrorMessage(robotResponse, '机器人接口不可用'));
       const data: RobotDescriptor[] = await robotResponse.json();
+      // C06：JSON body 解析是异步边界——解析完成后必须再次核对代次，迟到 body 不得覆盖新状态。
+      if (generation !== refreshGeneration.current) return;
       setRobots(data);
-      if (traceResponse.ok) setTraces(await traceResponse.json());
+      if (traceResponse.ok) {
+        const traces = await traceResponse.json();
+        if (generation !== refreshGeneration.current) return;
+        setTraces(traces);
+      }
       if (!data.some((x) => x.id === selectedId) && data[0]) setSelectedId(data[0].id);
     } catch (error) {
       if (generation !== refreshGeneration.current) return;

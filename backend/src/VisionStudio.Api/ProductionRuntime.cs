@@ -824,48 +824,11 @@ public sealed class ProductionRuntimeService
         finally { _gate.Release(); }
     }
 
-    private static bool IsDeviceSideEffectNode(NodeDefinition node)
-    {
-        if (node.Type is "device.writeTag" or "device.writeVisionResult" or "robot.executeTarget") return true;
-        return false;
-    }
+    // C07：副作用分类与完成度判定统一在 DeviceSideEffectClassifier（生产循环不再另写一份）。
+    private static bool IsDeviceSideEffectNode(NodeDefinition node) => DeviceSideEffectClassifier.IsDeviceSideEffectNode(node.Type);
 
     private static bool RequiresManualActionReconciliation(WorkflowDefinition workflow, WorkflowRunResult result)
-    {
-        var nodes = workflow.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
-        var runReports = result.NodeReports.Where(report => report.Phase == NodeExecutionPhase.Run).ToArray();
-        var robotReports = runReports.Where(report => report.NodeType.Equals("robot.executeTarget", StringComparison.OrdinalIgnoreCase)).ToArray();
-        // An empty/incomplete report set (common in test doubles and interrupted runners) cannot
-        // prove that an async command was skipped. Real skipped branches still have run reports
-        // for their control-flow nodes, while the skipped robot node itself has no report.
-        if (robotReports.Length == 0 && runReports.Length == 0 && workflow.Nodes.Any(node => node.Type == "robot.executeTarget"))
-            return true;
-        foreach (var report in robotReports.Where(report => report.Success))
-        {
-            if (!nodes.TryGetValue(report.NodeId, out var node)) continue;
-            var action = node.GetString("action", "Handshake");
-            if (action.Equals("SendTarget", StringComparison.OrdinalIgnoreCase) || !node.GetBool("waitForInPosition", true))
-                return true;
-
-            // A successful runner result only proves that the node returned. Require the robot
-            // node's own protocol snapshot to confirm completion before clearing the durable intent.
-            if (!TryGetOutput(report, "inPosition", out var inPosition) || inPosition is not true ||
-                !TryGetOutput(report, "state", out var state) ||
-                !string.Equals(state as string, "InPosition", StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        return false;
-    }
-
-    private static bool TryGetOutput(NodeRunReport report, string name, out object? value)
-    {
-        value = null;
-        if (report.Outputs is null) return false;
-        var pair = report.Outputs.FirstOrDefault(item => item.Key.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (pair.Key is null) return false;
-        value = pair.Value.Value;
-        return true;
-    }
+        => DeviceSideEffectClassifier.RequiresManualReconciliation(workflow, result);
 
     public async Task<ProductionRuntimeStatus> RecoverAsync(CancellationToken ct)
     {

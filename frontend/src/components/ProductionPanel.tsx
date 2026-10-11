@@ -76,6 +76,10 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const refreshGeneration = useRef(0);
   const refreshAbort = useRef<AbortController | null>(null);
   const refreshInFlight = useRef(false);
+  // C06：辅助请求有自己的生命周期——不重叠、有超时、可在关闭时取消。
+  const auxiliaryInFlight = useRef(false);
+  const auxiliaryAbort = useRef<AbortController | null>(null);
+  const [pendingUnavailable, setPendingUnavailable] = useState(false);
   // R05：待核对设备动作——管理员必须在产品内看到清单并提交核对证据（此前后端具备能力但界面缺失）。
   const [pendingActions, setPendingActions] = useState<DeviceActionPendingState>();
   const [resolveOpen, setResolveOpen] = useState(false);
@@ -103,7 +107,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       setStaleConnection(false);
       setRefreshError(undefined);
       // 辅助数据：各自独立、失败只降级显示；每个异步边界后核对代次。
-      void loadAuxiliary(generation, controller.signal);
+      void loadAuxiliary(generation);
     } catch (error) {
       if (generation !== refreshGeneration.current) return;
       // keep the operator screen alive while the host restarts — but never present stale data as current
@@ -116,22 +120,60 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     }
   }, []);
 
-  const loadAuxiliary = async (generation: number, signal: AbortSignal) => {
-    const settled = await Promise.allSettled([
-      fetch('/api/production/config', { signal }),
-      fetch('/api/jobs', { signal }),
-      fetch('/api/alarms?activeOnly=false', { signal }),
-      fetch('/api/production/device-actions/pending', { signal })
-    ]);
-    if (generation !== refreshGeneration.current) return; // 旧 body 不得覆盖新状态
+  const loadAuxiliary = async (generation: number) => {
+    // C06：辅助请求不阻塞关键快照，但也不能共用主请求的 timeout/controller——它有自己的
+    // 生命周期（超时 + 关闭取消），且不重叠发起（挂起的辅助请求不会逐 tick 累积）。
+    if (auxiliaryInFlight.current) return;
+    auxiliaryInFlight.current = true;
+    const controller = new AbortController();
+    auxiliaryAbort.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), PRODUCTION_POLL_TIMEOUT_MS);
     try {
+      const settled = await Promise.allSettled([
+        fetch('/api/production/config', { signal: controller.signal }),
+        fetch('/api/jobs', { signal: controller.signal }),
+        fetch('/api/alarms?activeOnly=false', { signal: controller.signal }),
+        fetch('/api/production/device-actions/pending', { signal: controller.signal })
+      ]);
+      if (generation !== refreshGeneration.current) return;
       const [configRes, jobsRes, alarmsRes, pendingRes] = settled;
-      if (configRes.status === 'fulfilled' && configRes.value.ok) setConfig(await configRes.value.json());
-      if (jobsRes.status === 'fulfilled' && jobsRes.value.ok) setJobs(await jobsRes.value.json());
-      if (alarmsRes.status === 'fulfilled' && alarmsRes.value.ok) setAlarms(await alarmsRes.value.json());
-      if (pendingRes.status === 'fulfilled')
-        setPendingActions(pendingRes.value.ok && pendingRes.value.status !== 204 ? await pendingRes.value.json() : undefined);
-    } catch { /* 辅助数据读取失败不影响主快照的新鲜度判定 */ }
+
+      const parseIfCurrent = async <T,>(result: PromiseSettledResult<Response>): Promise<T | undefined> => {
+        if (result.status !== 'fulfilled' || !result.value.ok) return undefined;
+        const data = (await result.value.json()) as T;
+        if (generation !== refreshGeneration.current) throw new Error('stale auxiliary response');
+        return data;
+      };
+
+      const configData = await parseIfCurrent<ProductionRuntimeConfig>(configRes);
+      if (configData) setConfig(configData);
+      const jobsData = await parseIfCurrent<JobItem[]>(jobsRes);
+      if (jobsData) setJobs(jobsData);
+      const alarmsData = await parseIfCurrent<AlarmRecord[]>(alarmsRes);
+      if (alarmsData) setAlarms(alarmsData);
+
+      if (pendingRes.status === 'fulfilled' && pendingRes.value.status === 204) {
+        setPendingActions(undefined);   // 明确的"无待核对"（204）
+        setPendingUnavailable(false);
+      } else {
+        const pendingData = await parseIfCurrent<DeviceActionPendingState>(pendingRes);
+        if (pendingData !== undefined) {
+          setPendingActions(pendingData);
+          setPendingUnavailable(false);
+        } else {
+          // C06：读取失败（403/503/网络）**不清空**已有清单——保留并提示不可用，
+          // 绝不把"读不到"冒充成"没有待核对动作"。
+          setPendingUnavailable(true);
+        }
+      }
+      if (generation !== refreshGeneration.current) return;
+    } catch { /* 辅助数据读取失败/代次失效不影响主快照的新鲜度判定 */ }
+    finally {
+      window.clearTimeout(timeout);
+      controller.abort();
+      if (auxiliaryAbort.current === controller) auxiliaryAbort.current = null;
+      auxiliaryInFlight.current = false;
+    }
   };
 
   useEffect(() => {
@@ -140,7 +182,10 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => {
       window.clearInterval(timer);
+      // C06：关闭面板即使代次失效——迟到的响应（含辅助 body）绝不能再更新已关闭的界面。
+      refreshGeneration.current++;
       refreshAbort.current?.abort();
+      auxiliaryAbort.current?.abort();
     };
   }, [open, refresh]);
 
@@ -408,6 +453,14 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       {actions}
       {/* R05：待核对设备动作——管理员必须在产品内看到清单、提交可追溯的证据；
           核对前所有设备动作入口（生产/手动/临时运行）都会被统一授权闸门拒绝。 */}
+      {pendingUnavailable && !pendingActions && (
+        <Alert
+          type="warning"
+          showIcon
+          message="待核对动作清单暂不可用"
+          description="读取待核对清单失败（权限、会话失效或服务不可用）。在确认失败原因之前，不要假定没有待核对动作。"
+        />
+      )}
       {pendingActions && (
         <Alert
           type="error"

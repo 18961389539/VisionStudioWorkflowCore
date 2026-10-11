@@ -25,6 +25,44 @@ namespace VisionStudio.Api.Hosting;
 
 public static class VisionStudioServiceRegistration
 {
+    /// <summary>
+    /// C08：实际有效监听端点的枚举——ASPNETCORE_URLS / urls 与 Kestrel:Endpoints:*:Url 一并检查。
+    /// 通配形式（* / + / 0.0.0.0 / [::] / 仅端口）无法用 Uri.TryCreate 解析，必须显式识别为
+    /// "非 loopback"（此前这些形式被静默跳过，等于放过真正的远程明文监听入口）。
+    /// </summary>
+    private static IEnumerable<string> EffectiveRemoteHttpEndpoints(IConfiguration configuration)
+    {
+        var candidates = new List<string>();
+        var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"];
+        if (!string.IsNullOrWhiteSpace(urls))
+            candidates.AddRange(urls.Split(';', StringSplitOptions.RemoveEmptyEntries));
+        foreach (var endpoint in configuration.GetSection("Kestrel:Endpoints").GetChildren())
+        {
+            var url = endpoint["Url"];
+            if (!string.IsNullOrWhiteSpace(url)) candidates.Add(url);
+        }
+
+        foreach (var raw in candidates.Select(x => x.Trim()).Where(x => x.Length > 0))
+        {
+            if (raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue; // TLS 端点合规
+            if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) continue; // unix socket 等非 HTTP 监听
+            var authority = raw["http://".Length..].TrimEnd('/');
+            var host = authority.Split('/', 2)[0];
+            if (host.StartsWith('['))
+            {
+                var bracketEnd = host.IndexOf(']');
+                host = bracketEnd > 0 ? host[1..bracketEnd] : host;
+            }
+            else
+            {
+                host = host.Split(':', 2)[0];
+            }
+            if (host.Length == 0) host = "*"; // http://:5080 ⇒ 所有网卡
+            if (IsLoopbackHost(host)) continue;
+            yield return raw;
+        }
+    }
+
     /// <summary>R08：loopback 判定（含 IPv6 字面量与 localhost 通配）。</summary>
     private static bool IsLoopbackHost(string host)
         => host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
@@ -54,13 +92,7 @@ public static class VisionStudioServiceRegistration
         // 隔离测试网络如需明文，可显式设置 Security:AllowInsecureRemoteTransport=true。
         if (environment.IsProduction() && securityOptions.Enabled && !securityOptions.AllowInsecureRemoteTransport)
         {
-            var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"] ?? string.Empty;
-            var insecure = urls.Split(';', StringSplitOptions.RemoveEmptyEntries)
-                .Select(x => x.Trim())
-                .Where(x => Uri.TryCreate(x, UriKind.Absolute, out var uri) &&
-                            uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) &&
-                            !IsLoopbackHost(uri.Host))
-                .ToArray();
+            var insecure = EffectiveRemoteHttpEndpoints(configuration).ToArray();
             if (insecure.Length > 0)
             {
                 throw new InvalidOperationException(

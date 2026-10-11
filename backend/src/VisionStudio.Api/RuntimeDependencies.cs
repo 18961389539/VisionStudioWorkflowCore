@@ -237,6 +237,13 @@ public sealed class RuntimeDependencyManifestService(
     }
 
     /// <summary>Reject manual reconciliation while a robot command or underlying stop operation is still active.</summary>
+    /// <summary>C05：该设备当前是否有在途命令——核对前必须确认没有已知在途动作。</summary>
+    public bool IsDeviceCommandInFlight(string deviceId)
+    {
+        try { return devices.IsCommandInFlight(deviceId); }
+        catch { return false; } // 已注销/未注册的设备没有在途命令
+    }
+
     public DeviceStateVerification VerifyNoPendingRobotOperations(IReadOnlyList<string> robotIds)
     {
         var issues = new List<string>();

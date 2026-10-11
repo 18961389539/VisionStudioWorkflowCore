@@ -52,7 +52,14 @@ public sealed class DeviceManager : IAsyncDisposable
     /// R02：该设备当前是否有在途命令（命令门被占用）——租约接管的空闲判定依据。
     /// 租约 TTL 到期只说明持有者可能失联，不能作为"设备可用"的证据。
     /// </summary>
-    public bool IsCommandInFlight(string id) => RequireEntry(id).CommandGate.CurrentCount == 0;
+    public bool IsCommandInFlight(string id)
+    {
+        var entry = RequireEntry(id);
+        if (entry.CommandGate.CurrentCount == 0) return true;
+        // C03：连接/重连阶段命令门尚未获取，但该请求随后会继续写设备——不能把这一瞬间的
+        // "门空闲"当作可接管的证据（旧请求仍持有租约并在等待连接完成）。
+        return entry.Driver.ConnectionState is DeviceConnectionState.Connecting or DeviceConnectionState.Reconnecting;
+    }
     public IDeviceDriver Require(string id) => RequireEntry(id).Driver;
 
     public async Task<bool> RemoveAsync(string id, CancellationToken cancellationToken = default)
