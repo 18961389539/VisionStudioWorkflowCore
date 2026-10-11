@@ -56,6 +56,25 @@ public sealed record TracePage(
     int Total,
     IReadOnlyList<RunTraceRecord> Items);
 
+/// <summary>
+/// 追溯查询过滤条件：分页与统计共用同一组谓词，保证“命中 N 条”与统计口径一致。
+/// 时间一律 UTC（started_at 以 UTC ISO "O" 格式落库，字符串比较即时间比较）；
+/// RunIdPrefix 供“输入运行 ID 直接查找”——前端在直查模式下不附加时间窗。
+/// </summary>
+public sealed record TraceQuery(
+    int Offset = 0,
+    int Limit = 100,
+    string? JobId = null,
+    int? JobVersion = null,
+    string? Disposition = null,
+    string? ExecutionStatus = null,
+    string? Source = null,
+    string? RunIdPrefix = null,
+    string? WorkflowKeyword = null,
+    string? ErrorCode = null,
+    DateTimeOffset? From = null,
+    DateTimeOffset? To = null);
+
 public sealed class TraceRetentionOptions
 {
     public int MetadataRetentionDays { get; set; } = 3650;
@@ -417,37 +436,59 @@ WHERE execution_status='Running' AND started_at < $cutoff;
         return result;
     }
 
-    public async Task<TracePage> PageAsync(int offset, int limit, string? jobId, string? disposition, CancellationToken ct)
+    public async Task<TracePage> PageAsync(TraceQuery query, CancellationToken ct)
     {
-        offset = Math.Max(0, offset);
-        limit = Math.Clamp(limit, 1, 500);
+        var offset = Math.Max(0, query.Offset);
+        var limit = Math.Clamp(query.Limit, 1, 500);
         await using var connection = await _db.OpenConnectionAsync(ct);
-        var where = new List<string>();
         await using var count = connection.CreateCommand();
-        await using var query = connection.CreateCommand();
-        if (!string.IsNullOrWhiteSpace(jobId))
+        await using var list = connection.CreateCommand();
+        var whereSql = BuildTraceWhere(query, (name, value) =>
         {
-            where.Add("job_id=$job");
-            count.Parameters.AddWithValue("$job", jobId);
-            query.Parameters.AddWithValue("$job", jobId);
-        }
-        if (!string.IsNullOrWhiteSpace(disposition))
-        {
-            where.Add("disposition=$disposition");
-            count.Parameters.AddWithValue("$disposition", disposition.ToUpperInvariant());
-            query.Parameters.AddWithValue("$disposition", disposition.ToUpperInvariant());
-        }
-        var whereSql = where.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", where);
+            count.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            list.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        });
         count.CommandText = $"SELECT COUNT(*) FROM run_traces {whereSql};";
         var total = Convert.ToInt32(await count.ExecuteScalarAsync(ct));
 
-        query.CommandText = $"SELECT {TraceColumns} FROM run_traces {whereSql} ORDER BY started_at DESC LIMIT $limit OFFSET $offset;";
-        query.Parameters.AddWithValue("$limit", limit);
-        query.Parameters.AddWithValue("$offset", offset);
+        // 稳定排序：started_at 并列（同一批并发落库的记录）时以 run_id 定序，
+        // OFFSET 翻页才不会因次序抖动而重复或漏行。
+        list.CommandText =
+            $"SELECT {TraceColumns} FROM run_traces {whereSql} ORDER BY started_at DESC, run_id DESC LIMIT $limit OFFSET $offset;";
+        list.Parameters.AddWithValue("$limit", limit);
+        list.Parameters.AddWithValue("$offset", offset);
         var items = new List<RunTraceRecord>();
-        await using var reader = await query.ExecuteReaderAsync(ct);
+        await using var reader = await list.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) items.Add(ReadRecord(reader));
         return new TracePage(offset, limit, total, items);
+    }
+
+    /// <summary>分页与统计共用的 WHERE 构造：两边口径永远一致。</summary>
+    private static string BuildTraceWhere(TraceQuery query, Action<string, object?> bind)
+    {
+        var where = new List<string>();
+        void Add(string clause, string name, object? value)
+        {
+            where.Add(clause);
+            bind(name, value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.JobId)) Add("job_id=$job", "$job", query.JobId.Trim());
+        if (query.JobVersion is { } version) Add("job_version=$jobver", "$jobver", version);
+        if (!string.IsNullOrWhiteSpace(query.Disposition))
+            Add("UPPER(disposition)=UPPER($disposition)", "$disposition", query.Disposition.Trim());
+        if (!string.IsNullOrWhiteSpace(query.ExecutionStatus))
+            Add("UPPER(execution_status)=UPPER($exec)", "$exec", query.ExecutionStatus.Trim());
+        if (!string.IsNullOrWhiteSpace(query.Source)) Add("source=$source", "$source", query.Source.Trim());
+        if (!string.IsNullOrWhiteSpace(query.RunIdPrefix))
+            Add("run_id LIKE $runp", "$runp", query.RunIdPrefix.Trim() + "%");
+        if (!string.IsNullOrWhiteSpace(query.WorkflowKeyword))
+            Add("(workflow_name LIKE $wf OR workflow_id LIKE $wf)", "$wf", "%" + query.WorkflowKeyword.Trim() + "%");
+        if (!string.IsNullOrWhiteSpace(query.ErrorCode))
+            Add("UPPER(error_code)=UPPER($ec)", "$ec", query.ErrorCode.Trim());
+        if (query.From is { } from) Add("started_at >= $from", "$from", Iso(from));
+        if (query.To is { } to) Add("started_at <= $to", "$to", Iso(to));
+        return where.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", where);
     }
 
     public async Task<RunTraceRecord?> GetAsync(string runId, CancellationToken ct)
@@ -478,6 +519,26 @@ WHERE execution_status='Running' AND started_at < $cutoff;
         }
         await transaction.CommitAsync(ct);
         return await GetAsync(runId, ct) ?? throw new InvalidDataException($"Trace '{runId}' could not be read.");
+    }
+
+    /// <summary>与分页同一组过滤谓词的统计（列表、数量、统计共用筛选条件的后端保证）。</summary>
+    public async Task<TraceStats> StatsAsync(TraceQuery query, CancellationToken ct)
+    {
+        await using var connection = await _db.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        var whereSql = BuildTraceWhere(query, (name, value) => command.Parameters.AddWithValue(name, value ?? DBNull.Value));
+        command.CommandText = $"""
+SELECT COUNT(*),
+       SUM(CASE WHEN UPPER(disposition)='OK' THEN 1 ELSE 0 END),
+       SUM(CASE WHEN UPPER(disposition)='NG' THEN 1 ELSE 0 END),
+       SUM(CASE WHEN UPPER(disposition)='REVIEW' THEN 1 ELSE 0 END),
+       SUM(CASE WHEN UPPER(disposition)='ERROR' THEN 1 ELSE 0 END),
+       COALESCE(AVG(total_duration_ms),0)
+FROM run_traces {whereSql};
+""";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+        return new TraceStats(reader.GetInt32(0), reader.IsDBNull(1) ? 0 : reader.GetInt32(1), reader.IsDBNull(2) ? 0 : reader.GetInt32(2), reader.IsDBNull(3) ? 0 : reader.GetInt32(3), reader.IsDBNull(4) ? 0 : reader.GetInt32(4), reader.GetDouble(5));
     }
 
     public async Task<TraceStats> StatsAsync(int days, CancellationToken ct)

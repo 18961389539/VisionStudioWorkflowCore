@@ -12,11 +12,35 @@ public static class TraceEndpoints
         app.MapGet("/api/traces", async (int? take, string? jobId, string? disposition, TraceabilityStore traces, CancellationToken ct) =>
             Results.Ok(await traces.ListAsync(take ?? 100, jobId, disposition, ct)));
 
-        app.MapGet("/api/traces/page", async (int? offset, int? limit, string? jobId, string? disposition, TraceabilityStore traces, CancellationToken ct) =>
-            Results.Ok(await traces.PageAsync(offset ?? 0, limit ?? 100, jobId, disposition, ct)));
+        app.MapGet("/api/traces/page", async (
+            int? offset, int? limit,
+            string? jobId, int? jobVersion, string? disposition, string? executionStatus,
+            string? source, string? runIdPrefix, string? workflow, string? errorCode,
+            DateTimeOffset? from, DateTimeOffset? to,
+            TraceabilityStore traces, CancellationToken ct) =>
+        {
+            var query = new TraceQuery(
+                offset ?? 0, limit ?? 50, jobId, jobVersion, disposition,
+                executionStatus, source, runIdPrefix, workflow, errorCode, from, to);
+            return Results.Ok(await traces.PageAsync(query, ct));
+        });
 
-        app.MapGet("/api/traces/stats", async (int? days, TraceabilityStore traces, CancellationToken ct) =>
-            Results.Ok(await traces.StatsAsync(days ?? 7, ct)));
+        // 统计与列表共用同一组过滤谓词：带上任一过滤参数即按筛选口径统计；
+        // 一个都不带时保留旧的“近 N 天”口径（兼容既有调用）。
+        app.MapGet("/api/traces/stats", async (
+            int? days,
+            string? jobId, int? jobVersion, string? disposition, string? executionStatus,
+            string? source, string? runIdPrefix, string? workflow, string? errorCode,
+            DateTimeOffset? from, DateTimeOffset? to,
+            TraceabilityStore traces, CancellationToken ct) =>
+        {
+            var filtered = jobId is not null || jobVersion is not null || disposition is not null ||
+                executionStatus is not null || source is not null || runIdPrefix is not null ||
+                workflow is not null || errorCode is not null || from is not null || to is not null;
+            return Results.Ok(filtered
+                ? await traces.StatsAsync(new TraceQuery(0, 0, jobId, jobVersion, disposition, executionStatus, source, runIdPrefix, workflow, errorCode, from, to), ct)
+                : await traces.StatsAsync(days ?? 7, ct));
+        });
 
         app.MapGet("/api/traces/{runId}", async (string runId, TraceabilityStore traces, CancellationToken ct) =>
         {

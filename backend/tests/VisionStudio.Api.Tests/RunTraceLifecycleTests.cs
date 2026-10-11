@@ -109,7 +109,7 @@ public sealed class RunTraceLifecycleTests
 
     private static async Task<long> CountRowsAsync(TraceabilityStore store)
     {
-        var page = await store.PageAsync(0, 10, null, null, default);
+        var page = await store.PageAsync(new TraceQuery(0, 10), default);
         return page.Total;
     }
 

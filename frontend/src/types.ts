@@ -707,6 +707,13 @@ export type TraceStats = {
   averageDurationMs: number;
 };
 
+export type TracePage = {
+  offset: number;
+  limit: number;
+  total: number;
+  items: RunTraceRecord[];
+};
+
 export type TraceRetentionOptions = {
   metadataRetentionDays: number;
   okArtifactRetentionDays: number;
