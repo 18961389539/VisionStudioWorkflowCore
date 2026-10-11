@@ -657,20 +657,17 @@ body.resizing-x, body.resizing-y { user-select: none; }
 /* 结果已过期：标题右侧徽标，避免把旧 OK/NG 当成当前结论 */
 .node-stale { padding: 1px 3px; border-radius: 3px; background: rgba(227,160,74,.18); color: #e3a04a; font-size: 9px; font-weight: 700; line-height: 1.4; }
 
-/* 缩放分级：far 只隐藏“普通文字”（端口名/类型/摘要/类型标签），
+/* 缩放分级：far 只隐藏“次要文字”（端口类型/耗时 meta/detail），
+   端口名与关键结果行（footer-summary）对所有节点恒显示——节点缩小后必须仍然可读，
+   不再“仅选中节点显示文字”（2026-10-11 用户反馈修复）。
    错误摘要、必需缺口、判定徽标与过期徽标照旧显示——这些是缩小时最不能丢的信息；
-   mid 显示端口名称、隐藏类型；near 全量（类型、摘要、耗时）。
-   一律用 visibility 保持布局占位，Handle 与节点尺寸不漂移。 */
-.flow-area[data-zoom-level='far'] .port-row .port-label,
-.flow-area[data-zoom-level='far'] .footer-summary,
+   mid 额外隐藏端口类型 small。一律用 visibility 保持布局占位，Handle 与节点尺寸不漂移。 */
+.flow-area[data-zoom-level='far'] .port-row small,
 .flow-area[data-zoom-level='far'] .footer-meta,
 .flow-area[data-zoom-level='far'] .footer-detail { visibility: hidden; }
 .flow-area[data-zoom-level='mid'] .port-row small { display: none; }
-/* 选中或正在连线时临时恢复端口名/摘要：既能确认落点，也不必放大 */
-.flow-area[data-zoom-level='far'] .vision-node.selected .port-label,
-.flow-area[data-zoom-level='far'] .vision-node.selected .footer-summary,
-.flow-area[data-zoom-level='far'] .vision-node.selected .footer-meta,
-.flow-area[data-connecting='true'] .port-row .port-label { visibility: visible; }
+/* 正在连线时恢复端口类型显示：既能确认落点，也不必放大 */
+.flow-area[data-connecting='true'] .port-row small { visibility: visible; display: inline; }
 
 /* ===== 生产运行 / 生产专用界面：首屏状态、操作区与操作员放大 ===== */
 .production-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; padding: 14px 16px; border: 1px solid var(--vs-border-frame); border-radius: 10px; background: var(--vs-bg-card); }
