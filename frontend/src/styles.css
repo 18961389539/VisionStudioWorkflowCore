@@ -31,13 +31,13 @@
   --vs-checker: #151b22;
   --vs-row-selected: #162638;
 
-  /* 文本层次 */
+  /* 文本层次（P2 可读性：次要文字对比度提亮一档） */
   --vs-text-1: #d8dee9;
   --vs-text-2: #c4ceda;
   --vs-text-3: #aeb9c7;
-  --vs-text-4: #8d9aaa;
-  --vs-text-5: #748295;
-  --vs-text-6: #657386;
+  --vs-text-4: #98a5b3;
+  --vs-text-5: #8593a5;
+  --vs-text-6: #78859a;
   --vs-text-code: #d1d5db;
   --vs-text-danger: #ff7875;
   --vs-text-brand: #6aa8ff;
@@ -133,9 +133,15 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .workflow-identity { min-width: 0; overflow: hidden; display: flex; align-items: baseline; gap: 8px; }
 .workflow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vs-text-2); font-size: 13px; }
 .workflow-id { flex: none; color: var(--vs-text-6); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.workflow-dirty { flex: none; font-size: 10px; line-height: 16px; }
+.workflow-dirty { flex: none; font-size: 11px; line-height: 16px; }
 /* 右组永不收缩：收缩由左组承担（工作流名截断），否则 flex-end + 溢出会把左侧子项（示例选择器）裁到起点侧而不可达 */
 .topbar-right { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+/* P0-3：窄窗口把顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见 */
+.topbar-more { display: none; }
+@media (max-width: 1200px) {
+  .topbar-center { display: none; }
+  .topbar-more { display: inline-flex; }
+}
 .menu-caret { margin-left: 2px; font-size: 9px; opacity: .55; }
 .brand { flex: none; font-size: 16px; font-weight: 700; letter-spacing: .3px; }
 .brand span { color: var(--vs-text-brand); font-weight: 600; }
@@ -150,8 +156,33 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .image-stage { min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; background-image: linear-gradient(45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(-45deg,var(--vs-checker) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--vs-checker) 75%),linear-gradient(-45deg,transparent 75%,var(--vs-checker) 75%); background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
 .image-stage img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: auto; }
 .image-placeholder { color: var(--vs-text-6); font-size: 13px; }
+/* P0-1：无图像时图像区压缩为单行提示条（44px，--vs-image-height 由壳层动态给出），运行出图后恢复完整查看器 */
+.preview-area.preview-empty { grid-template-rows: minmax(0, 1fr); }
+.preview-empty-bar { display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--vs-text-5); font-size: 12px; }
+
+/* P1-4：画布右上角的布局切换 + 专注画布（与左上 canvas-toolbar 对称） */
+.canvas-layout-toolbar { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid var(--vs-border-toolbar); border-radius: 8px; background: var(--vs-bg-badge); backdrop-filter: blur(4px); }
+/* P1-5：空状态引导（画布 / 属性面板） */
+.canvas-empty-state { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 40; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 22px 28px; border: 1px dashed var(--vs-border-dashed); border-radius: 12px; background: var(--vs-bg-card); pointer-events: auto; }
+.canvas-empty-title { color: var(--vs-text-3); font-size: 13px; }
+.canvas-empty-actions { display: flex; gap: 8px; }
+.panel-empty-state { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px 14px; }
+.panel-empty-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 200px; }
+.panel-empty-actions .ant-btn { margin-inline: 0; }
 .bottom-panel { min-height: 0; overflow: auto; border-top: 1px solid var(--vs-border-frame); background: var(--vs-bg-bottom); }
-.panel-title { height: 32px; display: flex; align-items: center; padding: 0 10px; font-size: 11px; letter-spacing: .9px; color: var(--vs-text-4); background: var(--vs-bg-title); }
+/* P0-2：模板弹窗——分组卡片，用途说明 + 节点数/节点预览，点击选中后底部显式确认替换 */
+.template-group { margin-bottom: 6px; }
+.template-group-title { font-size: 11px; letter-spacing: .8px; color: var(--vs-text-4); margin: 8px 0 6px; }
+.template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 8px; }
+.template-card { position: relative; text-align: left; padding: 8px 10px; border: 1px solid var(--vs-border-panel); border-radius: 8px; background: var(--vs-bg-card); cursor: pointer; color: var(--vs-text-1); font: inherit; transition: border-color .15s, box-shadow .15s; }
+.template-card:hover { border-color: var(--vs-text-brand); }
+.template-card.active { border-color: var(--vs-text-brand); box-shadow: 0 0 0 1px var(--vs-text-brand) inset; }
+.template-card-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.template-card-current { font-size: 10px; padding: 0 5px; border-radius: 3px; background: rgba(22,104,220,.16); color: var(--vs-text-brand); font-weight: 600; }
+.template-card-desc { margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--vs-text-3); }
+.template-card-meta { margin-top: 6px; font-size: 11px; color: var(--vs-text-5); display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.template-card-chips { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-title { height: 32px; display: flex; align-items: center; padding: 0 10px; font-size: 12px; letter-spacing: .4px; color: var(--vs-text-4); background: var(--vs-bg-title); }
 
 .toolbox { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .toolbox-header { flex: none; background: var(--vs-bg-side); border-bottom: 1px solid var(--vs-border-subtle); }

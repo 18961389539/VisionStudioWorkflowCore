@@ -16,7 +16,7 @@ import {
   type OnConnectEnd,
   type OnNodesChange
 } from '@xyflow/react';
-import { Alert, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
+import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
 import PropertyPanel from './components/PropertyPanel';
 import RunPanel from './components/RunPanel';
@@ -57,6 +57,22 @@ import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, Vi
 const nodeTypes = { vision: VisionNode };
 type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
 type ConnectionPicker = PortRecommendation & { nodeId: string; portName: string; x: number; y: number; position: { x: number; y: number } };
+
+// 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
+const DEMO_LABELS: Record<DemoKey, string> = {
+  camera: '相机示例', cameraTrigger: '触发式相机', frameSet: '同步帧组',
+  measurement: '测量示例', calibration: '标定示例',
+  robotEyeToHand: '眼在手外示例', robotEyeInHand: '眼在手上示例', robotRuntime: '机器人运行时',
+  robotPlc: '机器人 PLC 握手', robotTcp: '机器人 TCP 模拟器', devicePlc: '设备 / PLC 运行时',
+  linear: '线性流程示例', roi: '感兴趣区域示例', if: '条件分支示例', parallel: '并行流程示例', nested: '嵌套流程示例'
+};
+const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
+  { group: '相机采集', keys: ['camera', 'cameraTrigger', 'frameSet'] },
+  { group: '测量与标定', keys: ['measurement', 'calibration'] },
+  { group: '机器人', keys: ['robotEyeToHand', 'robotEyeInHand', 'robotRuntime', 'robotPlc', 'robotTcp'] },
+  { group: '设备 / PLC', keys: ['devicePlc'] },
+  { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested'] }
+];
 
 // 节点紧凑模式：全局显示偏好（压缩标题 / 端口间距 / 页脚），持久化在 localStorage
 const NODE_COMPACT_KEY = 'visionstudio.node-compact';
@@ -184,6 +200,15 @@ function Editor() {
   const [shellSize, setShellSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const shellRef = useRef<HTMLDivElement>(null);
   const [demoKey, setDemoKey] = useState<DemoKey>('linear');
+  // 模板入口 P0：顶栏下拉改为“从模板新建”弹窗——替换当前流程属于破坏性动作，必须显式确认
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templateSelected, setTemplateSelected] = useState<DemoKey | null>(null);
+  // 校验状态三分态（P1）：未校验 / 校验通过 / 有 N 项问题；流程修改后按快照比对标记“需要重新校验”
+  const [validationState, setValidationState] = useState<{ status: 'unvalidated' | 'ok' | 'issues'; summary?: string }>({ status: 'unvalidated' });
+  const validatedSnapshotRef = useRef<string | undefined>(undefined);
+  // 专注画布（P1）：一键收起全部面板，画布独占窗口；退出时还原进入前的布局
+  const [focusMode, setFocusMode] = useState(false);
+  const focusSnapshotRef = useRef<LayoutState | null>(null);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
   const [compiledDsl, setCompiledDsl] = useState<string>();
@@ -761,6 +786,32 @@ function Editor() {
   }), [updateLayout]);
   const markCleanOnNextChange = useRef(false);
   const dirty = savedSnapshot !== undefined && workflowSnapshot !== savedSnapshot;
+  // 校验快照漂移：流程在校验后被修改（参数/节点/连线）⇒ 顶部按钮转“需要重新校验”
+  const needsRevalidate = validationState.status !== 'unvalidated' && validatedSnapshotRef.current !== workflowSnapshot;
+
+  // 模板弹窗的预览数据：节点数 + 前几个节点的目录中文名（构建 demo 图是纯内存操作，代价可忽略）
+  const templatePreviews = useMemo(() => {
+    const previews = new Map<DemoKey, { nodeCount: number; nodeChips: string[] }>();
+    for (const [key, build] of Object.entries(demos)) {
+      const graph = (build as () => { nodes: Node[] })();
+      const labelOf = (type: string) => catalog.find((item) => item.type === type)?.displayName ?? type;
+      previews.set(key as DemoKey, {
+        nodeCount: graph.nodes.length,
+        nodeChips: graph.nodes.slice(0, 5).map((item) => labelOf(String(item.data.typeKey)))
+      });
+    }
+    return previews;
+  }, [catalog]);
+
+  // P0-1：每次新的运行/调试结果落地时自动展开底部结果区（首次使用默认收起，结果出现即回位）
+  const lastExpandedRunRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const runId = result?.runId;
+    if (!runId || lastExpandedRunRef.current === runId) return;
+    lastExpandedRunRef.current = runId;
+    setBottomTab('result');
+    updateLayout({ bottomCollapsed: false, bottomMaximized: false });
+  }, [result?.runId, setBottomTab, updateLayout]);
 
   useEffect(() => {
     if (markCleanOnNextChange.current) {
@@ -770,6 +821,19 @@ function Editor() {
     }
     setSavedSnapshot((current) => current ?? workflowSnapshot);
   }, [workflowSnapshot]);
+
+  // 专注画布（P1）：一键收起全部面板让画布独占窗口；退出时还原进入前的布局快照
+  const toggleFocusMode = () => {
+    if (focusMode) {
+      const snapshot = focusSnapshotRef.current;
+      setFocusMode(false);
+      if (snapshot) updateLayout({ ...snapshot });
+      return;
+    }
+    focusSnapshotRef.current = layout;
+    setFocusMode(true);
+    updateLayout({ leftCollapsed: true, rightCollapsed: true, bottomCollapsed: true, bottomMaximized: false, imageCollapsed: true });
+  };
 
   // 切换示例 / 加载会整块替换流程图，存在未保存修改时先让用户选择
   const guardUnsaved = (label: string, run: () => void) => {
@@ -793,6 +857,8 @@ function Editor() {
     clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
     setLastSavedAt(undefined);
     setValidationIssues([]);
+    validatedSnapshotRef.current = undefined;
+    setValidationState({ status: 'unvalidated' });
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
   };
@@ -829,6 +895,8 @@ function Editor() {
     }
     const issues = serverIssue ? [...clientIssues, serverIssue] : clientIssues;
     setValidationIssues(issues);
+    validatedSnapshotRef.current = workflowSnapshot;
+    setValidationState(issues.length > 0 ? { status: 'issues' } : { status: 'ok', summary: okSummary });
     setHighlightedEdgeId(undefined);
     // 校验结果进入底部“校验问题”标签页并展开结果区，不再用画布浮层遮挡
     setBottomTab('issues');
@@ -893,6 +961,8 @@ function Editor() {
     clearResult(); // 结果与图像（预览/逐节点目录）随 runId 代际一并失效，由 useRunImages 接管
     setLastSavedAt(undefined); // 整块加载后旧保存时间不再代表当前文档
     setValidationIssues([]);
+    validatedSnapshotRef.current = undefined;
+    setValidationState({ status: 'unvalidated' });
     setHighlightedEdgeId(undefined);
     setTimeout(() => fitView({ padding: CANVAS_FIT_PADDING, duration: 250 }), 0);
   }, [catalog, fitView, history, setEdges, setNodes]);
@@ -1193,6 +1263,26 @@ function Editor() {
     { key: 'about', label: '关于 VisionStudio', onClick: () => setAboutOpen(true) }
   ];
 
+  // P0-3：窄窗口时顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见
+  const moreMenu: MenuProps = {
+    items: [
+      { key: 'more-template', label: '从模板新建', onClick: () => { setTemplateSelected(demoKey); setTemplateOpen(true); } },
+      { key: 'more-open', label: '打开已有流程', onClick: () => guardUnsaved('加载已保存的工作流', () => void load()) },
+      { type: 'divider' },
+      ...debugMenuItems,
+      ...deviceMenuItems,
+      ...productionMenuItems,
+      ...toolMenuItems
+    ],
+    selectable: true,
+    selectedKeys: layout.preset === 'custom' ? [] : [layout.preset],
+    onClick: ({ key }) => {
+      if (key === 'layout-edit') applyLayoutPreset('edit');
+      else if (key === 'layout-image') applyLayoutPreset('image');
+      else if (key === 'layout-reset') applyLayoutPreset(layout.preset === 'custom' ? 'edit' : layout.preset);
+    }
+  };
+
   if (runtimeOnly) return <>
     <ProductionPanel open={true} onClose={() => undefined} embedded />
     <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>
@@ -1207,7 +1297,7 @@ function Editor() {
         '--vs-left-width': `${shownLeft}px`,
         '--vs-right-width': `${shownRight}px`,
         '--vs-bottom-height': `${shownBottom}px`,
-        '--vs-image-height': `${layout.image}%`
+        '--vs-image-height': imageViewerSource.url ? `${layout.image}%` : '44px'
       } as CSSProperties}
     >
       {contextHolder}
@@ -1241,44 +1331,10 @@ function Editor() {
             </Tag>
           </div>
         </div>
-        {/* 中段：模板创建 + 领域菜单（低频，收敛于此）；目录/插件数量入“工具”菜单 */}
+        {/* 中段：模板/打开（低频入口）+ 领域菜单；窄窗口整段收进“更多”（媒体查询） */}
         <div className="topbar-center">
-          <span className="topbar-select-label">模板</span>
-          <Tooltip title={demoDescriptions[demoKey]} placement="bottomLeft">
-            <Select<DemoKey>
-              value={demoKey}
-              style={{ width: 118 }}
-              popupMatchSelectWidth={false}
-              onChange={(key) => guardUnsaved('切换模板', () => applyDemo(key))}
-              optionRender={(option) => {
-                const desc = demoDescriptions[option.value as DemoKey];
-                return (
-                  <div className="demo-option">
-                    <div>{option.label}</div>
-                    {desc && <div className="demo-option-desc">{desc}</div>}
-                  </div>
-                );
-              }}
-              options={[
-              { value: 'camera', label: '相机示例' },
-              { value: 'cameraTrigger', label: '触发式相机' },
-              { value: 'frameSet', label: '同步帧组' },
-              { value: 'measurement', label: '测量示例' },
-              { value: 'calibration', label: '标定示例' },
-              { value: 'robotEyeToHand', label: '眼在手外示例' },
-              { value: 'robotEyeInHand', label: '眼在手上示例' },
-              { value: 'robotRuntime', label: '机器人运行时' },
-              { value: 'robotPlc', label: '机器人 PLC 握手' },
-              { value: 'robotTcp', label: '机器人 TCP 模拟器' },
-              { value: 'devicePlc', label: '设备 / PLC 运行时' },
-              { value: 'linear', label: '线性流程示例' },
-              { value: 'roi', label: '感兴趣区域示例' },
-              { value: 'if', label: '条件分支示例' },
-              { value: 'parallel', label: '并行流程示例' },
-              { value: 'nested', label: '嵌套流程示例' }
-            ]}
-            />
-          </Tooltip>
+          <Button onClick={() => { setTemplateSelected(demoKey); setTemplateOpen(true); }}>从模板新建</Button>
+          <Button onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开流程</Button>
           <span className="topbar-divider" />
           <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
             <Button>调试 <span className="menu-caret">▾</span></Button>
@@ -1305,9 +1361,31 @@ function Editor() {
             <Button>工具 <span className="menu-caret">▾</span></Button>
           </Dropdown>
         </div>
-        {/* 右侧固定：高频动作常驻，账号入口（security-badge）经 CSS 融入本段最右 */}
+        {/* 右侧固定：高频动作常驻，账号入口（security-badge）经 CSS 融入本段最右；“更多”仅在窄窗口出现。
+            校验按钮三分态（P1）：未校验 / 校验通过 ✓ / 校验 · N 项问题；流程修改后（快照漂移）标记“需要重新校验” */}
         <div className="topbar-right">
-          <Button onClick={validate}>校验</Button>
+          <Dropdown trigger={['click']} menu={moreMenu}>
+            <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
+          </Dropdown>
+          <Tooltip title={validationState.status === 'ok' && !needsRevalidate ? validationState.summary : undefined}>
+            <Badge
+              count={validationState.status === 'issues' && !needsRevalidate ? validationIssues.length : 0}
+              dot={needsRevalidate}
+              color={needsRevalidate ? 'gold' : undefined}
+              size="small"
+              offset={[10, 0]}
+            >
+              <Button onClick={validate}>
+                {needsRevalidate
+                  ? '需要重新校验'
+                  : validationState.status === 'ok'
+                    ? '校验通过 ✓'
+                    : validationState.status === 'issues'
+                      ? `校验 · ${validationIssues.length} 项问题`
+                      : '校验'}
+              </Button>
+            </Badge>
+          </Tooltip>
           <Button onClick={save}>保存</Button>
           <Button type="primary" onClick={run} loading={running} disabled={debugBusy}>运行</Button>
         </div>
@@ -1410,6 +1488,38 @@ function Editor() {
                 <Button size="small" onClick={() => alignSelection('top')}>顶对齐</Button>
                 <Button size="small" onClick={() => alignSelection('centerY')}>垂直居中</Button>
                 <Button size="small" onClick={() => alignSelection('bottom')}>底对齐</Button>
+              </div>
+            )}
+
+            {/* 布局切换移至画布右上角（P1）：结果区折叠后依然可达；附“专注画布”一键收纳 */}
+            <div className="canvas-layout-toolbar" style={{ position: 'absolute', top: 10, right: 10, zIndex: 44 }}>
+              <Segmented
+                size="small"
+                value={layout.preset}
+                onChange={(value) => { setFocusMode(false); if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
+                options={[
+                  { label: '流程编辑', value: 'edit' },
+                  { label: '图像调试', value: 'image' },
+                  ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
+                ]}
+              />
+              <Button
+                size="small"
+                type={focusMode ? 'primary' : 'default'}
+                onClick={toggleFocusMode}
+                title={focusMode ? '退出专注：还原进入前的面板布局' : '专注画布：收起左右栏与图像/结果区'}
+              >
+                {focusMode ? '退出专注' : '专注'}
+              </Button>
+            </div>
+            {/* 空画布引导（P1）：首屏/新流程时给出下一步动作 */}
+            {nodes.length === 0 && (
+              <div className="canvas-empty-state">
+                <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
+                <div className="canvas-empty-actions">
+                  <Button size="small" type="primary" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
+                  <Button size="small" onClick={() => void load()}>打开已有流程</Button>
+                </div>
               </div>
             )}
 
@@ -1527,35 +1637,47 @@ function Editor() {
             onToggleCollapse={() => updateLayout({ imageCollapsed: !layout.imageCollapsed })}
           />
 
-          {/* 折叠时画布独占中央区域；分隔条上的 ▾ 按钮可重新展开 */}
-          <div className="preview-area" style={layout.imageCollapsed ? { display: 'none' } : undefined}>
-            <div className="panel-title preview-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>图像查看器 · 感兴趣区域 / 覆盖层</span>
-              <Segmented
-                size="small"
-                value={imageSource}
-                onChange={(value) => setImageSource(value as 'preview' | 'output' | 'input')}
-                options={[
-                  { label: '最终预览', value: 'preview' },
-                  { label: '输出', value: 'output', disabled: !selectedOutputAvailable },
-                  { label: '输入', value: 'input', disabled: !selectedInputAvailable }
-                ]}
-              />
-              <Tag style={{ marginInlineEnd: 0 }} color={imageSource === 'preview' ? 'default' : 'blue'} title="当前图像来源（输出=所选节点结果，输入=其上游图像）">{imageViewerSource.label}</Tag>
-            </div>
-            <ImageViewer
-              previewUrl={imageViewerSource.url}
-              imageWidth={imageViewerSource.width}
-              imageHeight={imageViewerSource.height}
-              overlays={viewerOverlays}
-              roi={selectedRoi}
-              roiEnabled={roiEnabled}
-              roiTargetLabel={roiEnabled ? String(selectedNode?.data.label ?? selectedNode?.id ?? '') : undefined}
-              loading={anyBusy}
-              onRoiChange={updateRoi}
-              nodeLabels={nodeLabels}
-              focusTick={roiFocusTick}
-            />
+          {/* 折叠时画布独占中央区域；分隔条上的 ▾ 按钮可重新展开。
+              无图像时整区压缩为提示条（44px），运行出图后自动恢复为完整查看器（P0-1） */}
+          <div className={`preview-area${imageViewerSource.url ? '' : ' preview-empty'}`} style={layout.imageCollapsed ? { display: 'none' } : undefined}>
+            {imageViewerSource.url ? (
+              <>
+                <div className="panel-title preview-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>图像查看器 · 感兴趣区域 / 覆盖层</span>
+                  <Segmented
+                    size="small"
+                    value={imageSource}
+                    onChange={(value) => setImageSource(value as 'preview' | 'output' | 'input')}
+                    options={[
+                      { label: '最终预览', value: 'preview' },
+                      { label: '输出', value: 'output', disabled: !selectedOutputAvailable },
+                      { label: '输入', value: 'input', disabled: !selectedInputAvailable }
+                    ]}
+                  />
+                  <Tag style={{ marginInlineEnd: 0 }} color={imageSource === 'preview' ? 'default' : 'blue'} title="当前图像来源（输出=所选节点结果，输入=其上游图像）">{imageViewerSource.label}</Tag>
+                </div>
+                <ImageViewer
+                  previewUrl={imageViewerSource.url}
+                  imageWidth={imageViewerSource.width}
+                  imageHeight={imageViewerSource.height}
+                  overlays={viewerOverlays}
+                  roi={selectedRoi}
+                  roiEnabled={roiEnabled}
+                  roiTargetLabel={roiEnabled ? String(selectedNode?.data.label ?? selectedNode?.id ?? '') : undefined}
+                  loading={anyBusy}
+                  onRoiChange={updateRoi}
+                  nodeLabels={nodeLabels}
+                  focusTick={roiFocusTick}
+                />
+              </>
+            ) : (
+              <div className="preview-empty-bar">
+                <span>运行流程后，最终预览与逐节点图像会显示在这里</span>
+                <Button size="small" type="primary" ghost onClick={run} loading={running} disabled={debugBusy}>运行当前流程</Button>
+                <Button size="small" onClick={() => setCamerasOpen(true)}>添加图像源</Button>
+                <Button size="small" onClick={() => updateLayout({ imageCollapsed: true })}>收起图像区</Button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1575,7 +1697,19 @@ function Editor() {
           onToggleCollapse={() => updateLayout({ rightCollapsed: !layout.rightCollapsed })}
         />
         <aside className="right-panel">
-          <PropertyPanel node={selectedNode} catalogItem={selectedCatalog} onChange={updateParameter} disabled={anyBusy} onLocateRoi={() => setRoiFocusTick((tick) => tick + 1)} />
+          {selectedNode ? (
+            <PropertyPanel node={selectedNode} catalogItem={selectedCatalog} onChange={updateParameter} disabled={anyBusy} onLocateRoi={() => setRoiFocusTick((tick) => tick + 1)} />
+          ) : (
+            // 空状态给下一步动作（P1）：不只是“选择一个节点”
+            <div className="panel-empty-state">
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个节点查看与编辑参数" />
+              <div className="panel-empty-actions">
+                <Button size="small" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
+                <Button size="small" onClick={() => void load()}>打开已有流程</Button>
+                <Button size="small" type="primary" ghost onClick={run} loading={running} disabled={debugBusy}>运行当前流程</Button>
+              </div>
+            </div>
+          )}
         </aside>
       </main>
 
@@ -1601,7 +1735,7 @@ function Editor() {
       />
 
       <footer className="bottom-panel">
-        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；右侧为可见的布局预设切换 */}
+        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；布局切换已移至画布右上角（P1） */}
         <div className="bottom-tabs-bar">
           <Segmented
             size="small"
@@ -1611,17 +1745,6 @@ function Editor() {
               { label: '运行结果', value: 'result' },
               { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
               { label: '运行观测', value: 'observability' }
-            ]}
-          />
-          <span className="bottom-tabs-spacer" />
-          <Segmented
-            size="small"
-            value={layout.preset}
-            onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
-            options={[
-              { label: '流程编辑', value: 'edit' },
-              { label: '图像调试', value: 'image' },
-              ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
             ]}
           />
         </div>
@@ -1686,6 +1809,56 @@ function Editor() {
         ]}
       >
         <p>当前工作流有未保存的修改，{pendingGuard?.label}前请选择如何处理：</p>
+      </Modal>
+
+      {/* P0-2：模板入口弹窗——分组/用途/预览，替换当前流程前显式确认；“打开已有流程”就近放置 */}
+      <Modal
+        open={templateOpen}
+        title="从模板新建"
+        width={780}
+        onCancel={() => setTemplateOpen(false)}
+        footer={[
+          <Button key="open" onClick={() => { setTemplateOpen(false); guardUnsaved('加载已保存的工作流', () => void load()); }}>打开已有流程…</Button>,
+          <Button key="cancel" onClick={() => setTemplateOpen(false)}>取消</Button>,
+          <Button
+            key="apply"
+            type="primary"
+            disabled={!templateSelected}
+            onClick={() => { if (!templateSelected) return; setTemplateOpen(false); guardUnsaved('从模板新建', () => applyDemo(templateSelected)); }}
+          >
+            使用此模板
+          </Button>
+        ]}
+      >
+        {DEMO_GROUPS.map((group) => (
+          <div key={group.group} className="template-group">
+            <div className="template-group-title">{group.group}</div>
+            <div className="template-cards">
+              {group.keys.map((key) => {
+                const preview = templatePreviews.get(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`template-card${templateSelected === key ? ' active' : ''}`}
+                    onClick={() => setTemplateSelected(key)}
+                    title={demoDescriptions[key]}
+                  >
+                    <div className="template-card-name">
+                      {DEMO_LABELS[key]}
+                      {demoKey === key && <span className="template-card-current">当前</span>}
+                    </div>
+                    <div className="template-card-desc">{demoDescriptions[key]}</div>
+                    <div className="template-card-meta">
+                      {preview?.nodeCount ?? '—'} 节点
+                      {(preview?.nodeChips.length ?? 0) > 0 && <span className="template-card-chips">{preview?.nodeChips.join(' · ')}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </Modal>
 
       <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />

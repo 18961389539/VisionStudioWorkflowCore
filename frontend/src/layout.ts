@@ -39,7 +39,9 @@ export const DEFAULT_LAYOUT: LayoutState = {
   ...LAYOUT_PRESETS.edit,
   leftCollapsed: false,
   rightCollapsed: false,
-  bottomCollapsed: false,
+  // 首屏收起结果区：首次使用/尚未运行时画布优先（2026-10-11 主页改进 P0）。
+  // 运行出结果、点开节点详情、执行校验时都会自动展开，用户手动展开后由 localStorage 记住。
+  bottomCollapsed: true,
   bottomMaximized: false,
   imageCollapsed: false
 };
@@ -71,7 +73,7 @@ export function readLayout(): LayoutState {
       image: readNumber(parsed.image, DEFAULT_LAYOUT.image, LAYOUT_LIMITS.image.min, LAYOUT_LIMITS.image.max),
       leftCollapsed: readFlag(parsed.leftCollapsed, false),
       rightCollapsed: readFlag(parsed.rightCollapsed, false),
-      bottomCollapsed: readFlag(parsed.bottomCollapsed, false),
+      bottomCollapsed: readFlag(parsed.bottomCollapsed, DEFAULT_LAYOUT.bottomCollapsed),
       bottomMaximized: readFlag(parsed.bottomMaximized, false),
       imageCollapsed: readFlag(parsed.imageCollapsed, false)
     };
