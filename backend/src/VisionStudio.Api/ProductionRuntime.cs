@@ -247,6 +247,11 @@ public sealed class ProductionRuntimeService
     /// <summary>扩展安全契约：显式动作声明的目录解析入口（可选；缺省走内置兼容分类）。</summary>
     private readonly VisionNodeRegistry? _nodes;
     private ProductionTraceWriter? _traceWriter;
+    /// <summary>
+    /// R05（2026-10-12 复审）：上一次循环退出时仍有在途追溯提交（存储挂起被预算截断）的 writer。
+    /// 非 null 且 PendingCount &gt; 0 时禁止启动新周期——"后台旧任务未收尾时禁止新周期"，直到排空。
+    /// </summary>
+    private ProductionTraceWriter? _drainingTraceWriter;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _stateSync = new();
     private CancellationTokenSource? _runtimeCts;
@@ -471,6 +476,8 @@ public sealed class ProductionRuntimeService
 
             // R01：手动/临时运行登记的动作意图（含本进程正在进行的动作）同样阻断生产启动。
             _authorization?.EnsureProductionStartAllowed();
+            // R05：上一循环若有在途追溯提交未收尾（存储挂起），禁止启动新周期。
+            EnsureNoDrainingTraceWriter();
             // 统一安全闸门：只要上一次副作用故障留下的"设备动作未知"标记仍在，任何启动路径
             // （人工 Start、/api/production/recover、重启后的自动启动）都必须先通过设备状态核对。
             // 该标记独立于 Stop、持久化到磁盘（F01），因此 Stop、重启与切换流程都无法绕过；
@@ -606,6 +613,22 @@ public sealed class ProductionRuntimeService
             return Status;
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// R05：把"在途追溯提交"作为启动闸门——上一循环退出时若有提交未收尾（存储挂起被预算截断），
+    /// 新周期开始前必须先等它排空。永久挂起时宿主重启是恢复路径（设备动作意图持久保留，
+    /// 重启后由安全闸门要求核对）——绝不允许与同一个挂起存储并发跑新周期。
+    /// </summary>
+    private void EnsureNoDrainingTraceWriter()
+    {
+        var draining = _drainingTraceWriter;
+        if (draining is null) return;
+        if (draining.PendingCount > 0)
+            throw new ApiConflictException(
+                $"{draining.PendingCount} production trace record(s) from the previous loop are still draining to storage; " +
+                "wait for the persistence backend to recover, or restart the host (the device-action intent gate survives a restart).");
+        _drainingTraceWriter = null;
     }
 
     /// <summary>
@@ -1007,9 +1030,9 @@ public sealed class ProductionRuntimeService
 
     private async Task LoopGuardedAsync(PublishedJobSnapshot locked, CancellationToken ct)
     {
+        await using var writer = new ProductionTraceWriter(_traces, _runs, _traceOptions, _logger);
         try
         {
-            await using var writer = new ProductionTraceWriter(_traces, _runs, _traceOptions, _logger);
             lock (_stateSync) _traceWriter = writer;
             await LoopCoreAsync(locked, writer, ct);
         }
@@ -1024,7 +1047,15 @@ public sealed class ProductionRuntimeService
             await _alarms.RaiseAsync("PROD-RUNTIME", AlarmSeverity.Critical, "ProductionRuntime", ex.Message, _currentRunId, CancellationToken.None);
             _logger.LogError(ex, "Production runtime loop faulted unexpectedly.");
         }
-        finally { lock (_stateSync) _traceWriter = null; }
+        finally
+        {
+            lock (_stateSync)
+            {
+                // R05：循环退出时若有在途提交未收尾（预算超时/存储挂起），保留引用以禁止新周期直到排空。
+                if (writer.PendingCount > 0) _drainingTraceWriter = writer;
+                _traceWriter = null;
+            }
+        }
     }
 
     private async Task LoopCoreAsync(PublishedJobSnapshot locked, ProductionTraceWriter writer, CancellationToken ct)
@@ -1046,7 +1077,8 @@ public sealed class ProductionRuntimeService
             try
             {
                 using var beginTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await _traces.BeginAsync(runId, DateTimeOffset.UtcNow, locked.Workflow, traceContext, beginTimeout.Token);
+                // R03：起始登记是关键恢复锚点——强持久提交（断电后"已接受未完成"依然可见）。
+                await _traces.BeginAsync(runId, DateTimeOffset.UtcNow, locked.Workflow, traceContext, beginTimeout.Token, strongDurability: true);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1132,8 +1164,27 @@ public sealed class ProductionRuntimeService
             var tracePersisted = false;
             try
             {
-                await writer.EnqueueAndPersistAsync(result, locked.Workflow, traceContext);
+                // R05：提交等待必须有界（含图像编码/文件 I/O/数据库提交）。超限进入 Faulted 并保留意图，
+                // 在途提交未收尾前禁止新周期——不允许"超时返回继续生产"。
+                using var traceBudget = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(1_000, _traceOptions.CommitBudgetMs)));
+                using var traceWait = CancellationTokenSource.CreateLinkedTokenSource(ct, traceBudget.Token);
+                await writer.EnqueueAndPersistAsync(result, locked.Workflow, traceContext, traceWait.Token);
                 tracePersisted = true;
+            }
+            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+            {
+                // 提交预算耗尽：后台提交可能仍未收尾（writer 记入在途闸门，Drain 也会再有界等待一次）。
+                _drainingTraceWriter = writer;
+                var message = $"Trace evidence for run '{result.RunId}' was not committed within the {_traceOptions.CommitBudgetMs} ms budget; " +
+                              "the loop stops in Faulted until the pending record drains. The device-action intent remains in force.";
+                _logger.LogError(ex, "Production trace commit budget exhausted for run {RunId}.", result.RunId);
+                lock (_stateSync)
+                {
+                    _state = ProductionRuntimeState.Faulted;
+                    _lastError = message;
+                }
+                await _alarms.RaiseAsync("PROD-TRACE-TIMEOUT", AlarmSeverity.Critical, "ProductionRuntime", message, result.RunId, CancellationToken.None);
+                return;
             }
             catch (Exception ex)
             {

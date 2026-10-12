@@ -1,0 +1,101 @@
+# VisionStudio 运维与交付手册
+
+覆盖：部署拓扑、升级 / 回滚、数据恢复（含设备核对闸门）、诊断入口、发布验证门槛。
+命令默认在仓库根目录执行；脚本为 PowerShell（Windows 优先），批注标 Bash 的按需替换。
+
+---
+
+## 1. 部署拓扑
+
+**版本包与生产数据根严格分离**（R08 语义：升级切换不得重置数据）：
+
+| 项 | 位置 | 内容 |
+| --- | --- | --- |
+| 版本包 | `artifacts/runtime-publish`（`scripts/publish-runtime.ps1` 输出） | 后端 DLL、wwwroot 前端、依赖 |
+| 数据根 | 由 `VISIONSTUDIO_DATA_ROOT` 指定（默认 `artifacts/runtime-data`） | 数据库、媒体、设备配置、工作流、插件、备份、日志 |
+
+数据根内容（备份 / 恢复范围）：`visionstudio.db`、`media/`、`devices/`、`provenance/`、
+`production/`、`workflows/`、`plugin-packages/`、`plugin-trust/`、`site-config/`、`backups/`、`logs/`。
+
+启动：
+
+```powershell
+$env:VISIONSTUDIO_DATA_ROOT='<数据根绝对路径>'
+scripts/run-runtime.ps1
+```
+
+## 2. 升级与回滚（scripts/publish-runtime.ps1）
+
+发布流程内置安全门（任一失败都不会触碰当前版本）：
+
+1. 预检：`dotnet restore` + 生成目录（catalog）一致性——失败即中止。
+2. 前端构建 → 打入 wwwroot。
+3. `dotnet publish` 到 staging，**候选包启动烟雾验证**：隔离数据根 + 环回端口启动候选宿主，
+   90 秒内必须响应 `/api/health`；无法启动的候选包绝不替换当前版本。
+4. **升级前数据库检查点**：把 `visionstudio.db`（含 WAL/SHM）快照到
+   `<数据根>/upgrade-checkpoints/<时间戳>/`。⚠ 执行前应停止运行时——活动写入可能使快照不一致。
+5. 事务式目录切换（失败自动还原旧目录）；旧版本保留在 `<输出>.previous`。
+
+**回滚步骤（顺序不可颠倒）**：
+
+1. 停止宿主。
+2. 恢复旧包：`<输出>.previous` → `<输出>`。
+3. **先恢复检查点数据库**：把检查点里的 `visionstudio.db*` 拷回数据根，再启动旧版本——
+   被新版本迁移过的数据库会触发旧版本的 schema 前瞻保护而拒绝启动（包回滚 ≠ 数据回滚）。
+4. **设备重新核对**：数据回滚不改变物理设备事实。启动后按第 3.3 节闸门完成核对，未闭合的
+   设备动作意图只能以现场核对证据解除，绝不能用数据回滚消除。
+
+**兼容边界**：数据库 schema 只向前迁移；插件、站点配置、设备配置随数据根保留；
+跨版本升级前确认 `.NET` runtime 版本与 `/api/runtime/dependencies` 依赖清单。
+
+## 3. 数据恢复
+
+### 3.1 系统备份 / 恢复（宿主在线可执行）
+
+- 创建备份（管理员）：`POST /api/storage/backups` —— 包含 DB、附件、媒体、设备 / 来源配置、
+  生产配置、编辑器工作流、插件包与信任库、站点配置；**不包含**设备动作安全账本（见 3.3）。
+- 恢复：要求生产 Runtime 已 Stopped；成功后需要**重启宿主**（503 `restart_required`）。
+  恢复完成自动进入"恢复后设备核对"状态。
+- **空白机恢复清单**：数据根 + 上述备份资产 + 插件 worker（`VisionStudio.Plugin.Worker.dll`）；
+  逐项验证 `/api/health`、追溯页、设备连接、插件加载、工作流文档列表。
+
+### 3.2 数据根手动恢复
+
+停宿主后可从 `upgrade-checkpoints/` 或备份副本恢复 `visionstudio.db`，媒体 / 附件按目录恢复。
+启动时若检测到未完成的恢复事务标记，宿主进入**失败锁**：按提示重跑恢复或人工核对后清除。
+
+### 3.3 设备动作安全闸门（不随数据回退的事实）
+
+- 副作用流程执行前**耐久登记意图**；失败 / 取消 / 超时后"设备动作结果未知"被持久化到
+  `production/device-action-safety.json`（含锁定的设备 / 机器人 / 相机清单与身份指纹）。
+- 任何启动路径（人工 Start / Recover / 自动启动）都会被闸门阻断，直到管理员通过
+  `POST /api/production/device-actions/resolve` 提交**现场核对证据**（含设备身份证据）。
+- 手动 / 临时动作意图台账：`production/manual-action-intents.json`（同一语义）。
+- **该账本不参与备份、恢复与回滚都不会覆盖它**——系统恢复、数据回滚、宿主重启都不构成
+  设备核对；未闭合动作只能以明确证据解除（`GET /api/production/device-actions/pending` 列出待核对项）。
+
+## 4. 诊断入口
+
+| 入口 | 用途 |
+| --- | --- |
+| `GET /api/health` | 进程 / 存储 / 审计失败计数 |
+| `<数据根>/logs/` | 滚动日志（按天，保留 14 天），含完整异常链 |
+| `X-Correlation-ID` / ProblemDetails `code`+`correlationId` | 请求级关联，贯通响应 / 审计 / 日志 |
+| `GET /api/production/status` / `device-actions/pending` | 生产状态与待核对设备动作 |
+| 前端 trace 面板 | 运行历史、节点时间线、失败签名、调查工单 |
+| `GET /api/storage/status` | 容量与备份集合 |
+
+## 5. 发布验证门槛
+
+- `scripts/quality-gate.ps1`（或 `.sh`）：静态审查 + 生成目录一致性 + 数据迁移 / 发布分离回归 +
+  后端全量测试（排除 Soak）+ 覆盖率下限 + **编译器警告基线** + 前端测试 / 构建。
+- 现场验收：`scripts/l3-fault-drills.ps1`（故障演练）、`scripts/l3-soak.ps1`（24/72h 资源趋势），
+  记录报告、恢复耗时与设备核对证据。
+
+## 6. 版本与变更核对（发布前检查单）
+
+- [ ] 数据根已备份（`POST /api/storage/backups` 或检查点）且校验通过。
+- [ ] 候选包烟雾验证通过（publish 脚本自动执行）。
+- [ ] 生产 Runtime 已停止；无未闭合设备动作（`device-actions/pending` 为空或已核对）。
+- [ ] schema 迁移方向确认（仅向前）；回滚用检查点已就绪。
+- [ ] 插件 / 设备 / 站点配置的兼容性确认（依赖清单一致）。

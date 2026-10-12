@@ -62,7 +62,13 @@ public sealed class StorageBackupService
     private readonly string _artifactRoot;
     private readonly string _backupRoot;
     private readonly string _tempRoot;
-    /// <summary>可恢复系统备份的资产根：媒体库、设备/来源配置、生产运行配置、插件仓库（含信任与活动指针）。</summary>
+    /// <summary>R01（2026-10-12 复审）：设备动作安全账本（device-action-safety.json / manual-action-intents.json
+    /// 及核对证据目录）——属于"当前事实"，既不能由旧备份回退覆盖，也不参与可回滚备份。</summary>
+    private readonly DeviceActionSafetyStore _safetyStore;
+    private readonly ManualActionIntentStore _intentStore;
+    /// <summary>production-config 系统段的根（安全账本的保护/复刻都锚定在它内部）。</summary>
+    private readonly string _productionConfigRoot;
+    /// <summary>可恢复系统备份的资产根：媒体库、设备/来源配置、生产运行配置、工作流文档、插件仓库（含信任与活动指针）。</summary>
     private readonly (string Prefix, string Root)[] _systemSections;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<StorageBackupService>? _logger;
@@ -82,6 +88,8 @@ public sealed class StorageBackupService
         IWebHostEnvironment env,
         IConfiguration configuration,
         IOptions<StorageMaintenanceOptions> options,
+        DeviceActionSafetyStore safetyStore,
+        ManualActionIntentStore intentStore,
         ILogger<StorageBackupService>? logger = null)
     {
         _logger = logger;
@@ -90,17 +98,23 @@ public sealed class StorageBackupService
         _maintenance = maintenance;
         _production = production;
         _options = options.Value;
+        _safetyStore = safetyStore;
+        _intentStore = intentStore;
         var data = VisionStudioDataRoot.Resolve(env.ContentRootPath);
         _artifactRoot = Path.Combine(data, "artifacts");
         _backupRoot = Path.Combine(data, "backups");
         _tempRoot = Path.Combine(data, ".storage-maintenance");
+        _productionConfigRoot = Path.Combine(data, "production");
         _systemSections =
         [
             // R05：媒体段与 MediaLibraryService 共用同一根解析（含 `MediaLibrary:RootPath` 覆盖）。
             ("media", VisionStudioDataRoot.ResolveMediaRoot(env.ContentRootPath, configuration.GetValue<string>("MediaLibrary:RootPath"))),
             ("devices", Path.Combine(data, "devices")),
             ("provenance", Path.Combine(data, "provenance")),
-            ("production-config", Path.Combine(data, "production")),
+            ("production-config", _productionConfigRoot),
+            // R04（2026-10-12 复审）：编辑器保存的工作流文档（data/workflows）是"空白机恢复"必需资产——
+            // 未发布为 Job 版本的流程只存在于此，不能依赖 Job 快照反推。
+            ("workflows", Path.Combine(data, "workflows")),
             // R06：托管插件包（含 `active-pointers.json` 活动版本指针）与发布者信任库
             // （`trusted-publishers.json` + *.cer）位于数据根——空白机恢复必须一并带回，
             // 否则还原后插件全部消失、签名信任全部失效。
@@ -169,6 +183,8 @@ public sealed class StorageBackupService
             // 系统级可恢复备份：媒体库、设备/来源配置、生产运行配置与插件仓库（含信任与活动指针）。
             // 这些是"在空白机器恢复完整运行环境"所必需的运行依赖。
             var systemFiles = new List<(string ZipPath, string File)>();
+            // R01：安全账本是"当前事实"，不是可回滚业务配置——备份排除，恢复时另行严格复刻。
+            var safetyLedgerPaths = SafetyLedgerPaths().Select(Path.GetFullPath).ToArray();
             foreach (var (prefix, root) in _systemSections)
             {
                 if (!Directory.Exists(root)) continue;
@@ -177,6 +193,7 @@ public sealed class StorageBackupService
                     var relative = Path.GetRelativePath(root, file);
                     // 跳过激活/替换过程中的临时目录（.{id}.activate-*）：它们不是可恢复资产。
                     if (relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(part => part.StartsWith('.'))) continue;
+                    if (IsSafetyLedgerPath(Path.GetFullPath(file), safetyLedgerPaths)) continue;
                     systemFiles.Add(($"system/{prefix}/{relative.Replace('\\', '/')}", file));
                 }
             }
@@ -389,6 +406,13 @@ public sealed class StorageBackupService
             // 不必依赖 catch/finally 是否来得及执行。校验全部通过后才登记：此前的失败没有改动任何东西。
             var safetyDb = Path.Combine(workspace, "pre-restore.db");
             await _database.CreateSnapshotAsync(safetyDb, ct);
+            // R01（2026-10-12 复审）：设备动作安全账本是"当前事实"，不属于可回滚业务配置——
+            // 恢复到旧备份绝不能清空/覆盖未闭合的动作意图或核对证据。时序：
+            //  · 正常恢复（无未完成事务标记）→ 从 production 根快照当前账本到固定位置；
+            //  · 未完成恢复的重试（有标记）→ 复用首次恢复前留下的快照（其中才是真正的"恢复前事实"）；
+            //  · 系统资产切换完成后 → 先清除备份带入的旧版本，再用快照严格复刻恢复前状态。
+            var ledgerPreserve = Path.Combine(_tempRoot, "safety-ledgers-pre-restore");
+            var ledgerRelativePaths = PrepareSafetyLedgerPreserve(ledgerPreserve);
             var previousTransaction = _maintenance.ReadTransaction();
             var oldArtifacts = Path.Combine(_tempRoot, $"artifacts-pre-restore-{Guid.NewGuid():N}");
             var systemSwaps = _systemSections.Select(section => new SystemSwap(
@@ -409,7 +433,12 @@ public sealed class StorageBackupService
                 foreach (var (prefix, root) in _systemSections)
                 {
                     var stagedRoot = Path.Combine(stagedSystem, prefix);
-                    if (Directory.Exists(stagedRoot)) expectedAssets[root] = ComputeDirectorySha256(stagedRoot);
+                    // R01：production 段的一致性哈希排除安全账本——账本不参与备份、
+                    // 安装后按"当前事实"复刻，不属于备份资产，也不参与恢复的资产校验。
+                    if (Directory.Exists(stagedRoot))
+                        expectedAssets[root] = prefix == "production-config"
+                            ? ComputeDirectorySha256Except(stagedRoot, ledgerRelativePaths)
+                            : ComputeDirectorySha256(stagedRoot);
                 }
             // Intent must be durable before the first live database or asset replacement. A failed write
             // aborts here; the safety snapshot is still in the disposable workspace.
@@ -454,6 +483,9 @@ public sealed class StorageBackupService
                         swap.Installed = true;
                     }
                     _maintenance.AdvanceRestoreTransaction("system-assets-installed");
+                    // R01：系统资产（含 production 配置目录）已切换——立刻把安全账本复刻回恢复前状态，
+                    // 使"旧备份中的旧账本"无法清空/覆盖未闭合动作（当前事实）。
+                    RestoreSafetyLedgerPreserve(ledgerPreserve, ledgerRelativePaths);
                 }
                 // Commit only after the installed generation matches the hashes captured in the
                 // durable intent. This makes the transaction record evidence, not just a list of paths.
@@ -466,8 +498,14 @@ public sealed class StorageBackupService
                     throw new IOException("Installed metadata database does not match the isolated migrated snapshot (content mismatch).");
                 await ValidateArtifactReferencesAsync(installedSnapshot, _artifactRoot, ct);
                 foreach (var (assetRoot, expectedHash) in expectedAssets)
-                    if (!Directory.Exists(assetRoot) || !string.Equals(ComputeDirectorySha256(assetRoot), expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    // R01：production 段的一致性比对排除安全账本（expected 侧同理计算）——
+                    // 账本按"当前事实"复刻，不属于备份资产。
+                    var exclusions = string.Equals(assetRoot, _productionConfigRoot, StringComparison.OrdinalIgnoreCase)
+                        ? ledgerRelativePaths : Array.Empty<string>();
+                    if (!Directory.Exists(assetRoot) || !string.Equals(ComputeDirectorySha256Except(assetRoot, exclusions), expectedHash, StringComparison.OrdinalIgnoreCase))
                         throw new IOException($"Installed asset root '{assetRoot}' does not match its staged manifest hash.");
+                }
                 foreach (var protectedAsset in protectedAssets)
                 {
                     if (protectedAsset.Existed && (!Directory.Exists(protectedAsset.PreservedPath) ||
@@ -558,16 +596,50 @@ public sealed class StorageBackupService
                         {
                             try { if (Directory.Exists(swap.Old)) Directory.Delete(swap.Old, true); } catch { }
                         }
+                        // R01：提交成功——安全账本快照的使命完成（内容已复刻回 production）。
+                        try { if (Directory.Exists(ledgerPreserve)) Directory.Delete(ledgerPreserve, true); } catch { }
                         try { _maintenance.CompleteRestoreTransaction(); }
                         catch (Exception transactionError)
                         {
                             // 保留工作区（含 pre-restore.db 安全快照），让启动清理/人工核对仍有完整锚点。
                             preserveSafetyCopies = true;
-                            _logger.LogWarning(transactionError,
+                            _logger?.LogWarning(transactionError,
                                 "The committed restore transaction marker could not be removed; startup will retry the cleanup (the restore itself succeeded).");
                         }
                     }
                 }
+            }
+
+            // R01（2026-10-12 复审）：系统恢复本身进入独立的"恢复后设备核对"状态——恢复替换了
+            // 设备/插件/配置资产，物理设备状态与恢复后配置的一致性必须现场确认后才能启动生产。
+            // 仅在当前**没有**未闭合动作时写入合成状态；已有未闭合动作保持不变（它本身已阻断
+            // 启动并要求核对，绝不能被合成状态覆盖——否则丢失原故障的设备/相机清单）。
+            try
+            {
+                var carriedOver = _safetyStore.Load();
+                if (carriedOver is null || !DeviceActionSafetyStore.IsUnresolved(carriedOver))
+                {
+                    var restoreRunId = $"storage-restore:{manifest.BackupId}";
+                    _safetyStore.Save(new DeviceActionSafetyState(
+                        restoreRunId, [], [], DateTimeOffset.UtcNow,
+                        $"a storage restore from backup '{manifest.BackupId}' replaced system assets (devices, plugins, configuration); " +
+                        "verify that the physical device state matches the restored configuration before starting production.",
+                        Phase: DeviceActionSafetyPhase.Unknown,
+                        RunId: restoreRunId,
+                        DeviceFingerprints: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                        ProcessId: null, CameraIds: []));
+                }
+                else
+                {
+                    _logger?.LogWarning(
+                        "Storage restore completed while an unresolved device-action safety state was carried over (run {RunId}); the existing reconciliation gate remains in force.",
+                        carriedOver.RunId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex,
+                    "Storage restore completed but the post-restore device reconciliation state could not be persisted; manually verify device state before starting production.");
             }
 
             // R04：恢复正常完成（可能覆盖了之前一次失败的失败锁）后，解除协调器失败锁，
@@ -688,12 +760,22 @@ public sealed class StorageBackupService
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
-    internal static string ComputeDirectorySha256(string path)
+    internal static string ComputeDirectorySha256(string path) => ComputeDirectorySha256Except(path, []);
+
+    /// <summary>
+    /// R01：目录哈希（可排除指定相对路径，统一以 '/' 规范化）。恢复的安装一致性校验对
+    /// production 段必须忽略安全账本——它们按"当前事实"复刻，不属于备份资产。
+    /// </summary>
+    internal static string ComputeDirectorySha256Except(string path, IReadOnlyList<string> excludedRelativePaths)
     {
+        HashSet<string>? excluded = excludedRelativePaths.Count == 0
+            ? null
+            : new HashSet<string>(excludedRelativePaths.Select(x => x.Replace('\\', '/')), StringComparer.OrdinalIgnoreCase);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).OrderBy(x => x, StringComparer.Ordinal))
         {
             var relative = Path.GetRelativePath(path, file).Replace('\\', '/');
+            if (excluded is not null && excluded.Contains(relative)) continue;
             var relativeBytes = System.Text.Encoding.UTF8.GetBytes(relative);
             hash.AppendData(BitConverter.GetBytes(relativeBytes.Length));
             hash.AppendData(relativeBytes);
@@ -729,6 +811,102 @@ public sealed class StorageBackupService
             var candidate = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
             if (!candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate))
                 throw new ApiValidationException($"Database artifact reference '{relative}' has no file in the restored asset set.");
+        }
+    }
+
+    /// <summary>R01：设备动作安全账本的完整路径集合（含两个 store 的核对证据目录）。</summary>
+    private IEnumerable<string> SafetyLedgerPaths()
+    {
+        yield return _safetyStore.StatePath;
+        yield return _safetyStore.ResolutionDirectory;
+        yield return _intentStore.StatePath;
+        yield return _intentStore.ResolutionDirectory;
+    }
+
+    private static bool IsSafetyLedgerPath(string fullPath, IReadOnlyList<string> ledgerPaths)
+    {
+        foreach (var ledgerFull in ledgerPaths)
+        {
+            if (string.Equals(fullPath, ledgerFull, StringComparison.OrdinalIgnoreCase)) return true;
+            if (fullPath.StartsWith(ledgerFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// R01：把"恢复前的当前安全账本"快照到固定位置，返回需要复刻的相对路径清单。
+    /// 未完成恢复的重试会复用现有快照——那里面才是真正的"恢复前事实"
+    /// （当前 production 目录可能已被上次中断的恢复部分替换）。
+    /// </summary>
+    private IReadOnlyList<string> PrepareSafetyLedgerPreserve(string preserveRoot)
+    {
+        var relativePaths = SafetyLedgerPaths()
+            .Where(IsUnderProductionRoot)
+            .Select(path => Path.GetRelativePath(_productionConfigRoot, Path.GetFullPath(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (relativePaths.Length == 0) return relativePaths;
+
+        var interruptedRestore = _maintenance.HasRestoreTransactionMarker;
+        if (interruptedRestore && Directory.Exists(preserveRoot) && Directory.EnumerateFileSystemEntries(preserveRoot).Any())
+            return relativePaths;
+
+        try { if (Directory.Exists(preserveRoot)) Directory.Delete(preserveRoot, true); } catch { }
+        Directory.CreateDirectory(preserveRoot);
+        foreach (var relativePath in relativePaths)
+        {
+            var source = Path.Combine(_productionConfigRoot, relativePath);
+            var destination = Path.Combine(preserveRoot, relativePath);
+            if (File.Exists(source))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination, overwrite: true);
+            }
+            else if (Directory.Exists(source))
+            {
+                CopyDirectory(source, destination);
+            }
+        }
+        return relativePaths;
+    }
+
+    /// <summary>R01：系统资产切换完成后，把安全账本严格复刻回恢复前状态（先清备份带入的版本，再回拷快照）。</summary>
+    private void RestoreSafetyLedgerPreserve(string preserveRoot, IReadOnlyList<string> relativePaths)
+    {
+        foreach (var relativePath in relativePaths)
+        {
+            var target = Path.Combine(_productionConfigRoot, relativePath);
+            if (File.Exists(target)) File.Delete(target);
+            else if (Directory.Exists(target)) Directory.Delete(target, true);
+
+            var source = Path.Combine(preserveRoot, relativePath);
+            if (File.Exists(source))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(source, target, overwrite: true);
+            }
+            else if (Directory.Exists(source))
+            {
+                CopyDirectory(source, target);
+            }
+        }
+    }
+
+    private bool IsUnderProductionRoot(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetFullPath(_productionConfigRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return full.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: true);
         }
     }
 }

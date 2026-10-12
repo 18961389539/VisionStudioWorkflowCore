@@ -71,24 +71,24 @@ function put(params: URLSearchParams, key: string, value: string | number | null
   if (text) params.set(key, text);
 }
 
-/** 列表查询参数：分页 + 全部筛选。 */
-export function buildTraceParams(filter: TraceFilterState, offset: number, limit: number): URLSearchParams {
+/** 列表查询参数：分页 + 全部筛选。now 可注入以获得确定性结果（测试 / 跨日边界）；生产调用走默认当前时间。 */
+export function buildTraceParams(filter: TraceFilterState, offset: number, limit: number, now = new Date()): URLSearchParams {
   const params = new URLSearchParams();
   params.set('offset', String(Math.max(0, offset)));
   params.set('limit', String(Math.max(1, limit)));
-  applyFilterParams(params, filter);
+  applyFilterParams(params, filter, now);
   return params;
 }
 
-/** 统计参数：与列表同一组筛选（不含分页）—— 数量与统计的口径保证。 */
-export function buildStatsParams(filter: TraceFilterState): URLSearchParams {
+/** 统计参数：与列表同一组筛选（不含分页）—— 数量与统计的口径保证。now 语义同 buildTraceParams。 */
+export function buildStatsParams(filter: TraceFilterState, now = new Date()): URLSearchParams {
   const params = new URLSearchParams();
-  applyFilterParams(params, filter);
+  applyFilterParams(params, filter, now);
   return params;
 }
 
-function applyFilterParams(params: URLSearchParams, filter: TraceFilterState): void {
-  const range = effectiveRange(filter);
+function applyFilterParams(params: URLSearchParams, filter: TraceFilterState, now: Date): void {
+  const range = effectiveRange(filter, now);
   put(params, 'jobId', filter.jobId);
   put(params, 'jobVersion', filter.jobVersion ?? undefined);
   put(params, 'workflow', filter.workflow);

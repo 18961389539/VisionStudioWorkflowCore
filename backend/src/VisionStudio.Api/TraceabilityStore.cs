@@ -165,14 +165,15 @@ public sealed class TraceabilityStore
     /// <see cref="RecordAsync"/> later updates this same row; production cycles skip the start record
     /// and insert their full row at finalization.
     /// </summary>
-    public async Task BeginAsync(string runId, DateTimeOffset startedAt, WorkflowDefinition workflow, RunTraceContext context, CancellationToken ct)
+    public async Task BeginAsync(string runId, DateTimeOffset startedAt, WorkflowDefinition workflow, RunTraceContext context, CancellationToken ct, bool strongDurability = false)
     {
         // Ad-hoc/debug runs embed the workflow immediately so even an interrupted row stays resolvable.
         var embeddedWorkflow = string.IsNullOrWhiteSpace(context.JobId) || context.JobVersion is null
             ? JsonSerializer.Serialize(workflow, _json)
             : null;
 
-        await using var connection = await _db.OpenConnectionAsync(ct);
+        // R03：生产周期的起始登记是关键恢复锚点（"已接受未完成"可见性），由调用方要求强持久。
+        await using var connection = await _db.OpenConnectionAsync(ct, strongDurability);
         await using var command = connection.CreateCommand();
         command.CommandText = """
 INSERT OR IGNORE INTO run_traces(
@@ -207,7 +208,8 @@ VALUES(
         WorkflowRunResult result,
         WorkflowDefinition workflow,
         RunTraceContext context,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool strongDurability = false)
     {
         var startedAt = result.StartedAt ?? DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(result.TotalDurationMs);
         var disposition = result.Success
@@ -244,7 +246,8 @@ VALUES(
             result.ErrorCode);
 
         // Commit the searchable/auditable record first. Binary artifact failure must not erase the run itself.
-        await using (var connection = await _db.OpenConnectionAsync(ct))
+        // R03：生产提交要求强持久——设备动作意图只在该事务确认耐久后才允许闭合。
+        await using (var connection = await _db.OpenConnectionAsync(ct, strongDurability))
         await using (var transaction = connection.BeginTransaction(deferred: false))
         {
             await using var command = connection.CreateCommand();

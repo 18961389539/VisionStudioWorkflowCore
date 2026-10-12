@@ -143,6 +143,46 @@ public sealed class ProductionTraceWriterTests
         Assert.False(trace.HasReplayInput);
     }
 
+    [Fact]
+    public async Task Dispose_WithWedgedPersistence_ReturnsWithinDrainBudget_AndLeavesPendingCountVisible()
+    {
+        // R05（2026-10-12 复审）：排空必须有界——旧实现无限等待 worker，存储挂起时 Dispose 永不返回。
+        // 超限放弃等待后 PendingCount 保持 > 0——Runtime 的启动闸门据此禁止新周期，意图保持未闭合。
+        var entered = Signal();
+        var release = Signal();
+        var writer = new ProductionTraceWriter(async (_, _, _, _) =>
+        {
+            entered.TrySetResult();
+            await release.Task; // 模拟存储永久挂起。
+        }, new RunStore(), new() { QueueCapacity = 2, DrainBudgetMs = 1_000 }, NullLogger.Instance);
+
+        await writer.EnqueueAsync(Result("wedged"), Workflow, Context);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, writer.PendingCount); // 在途提交未收尾。
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await writer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+        watch.Stop();
+
+        // 排空预算（1s）后必须有界返回。
+        Assert.True(watch.ElapsedMilliseconds < 8_000, $"dispose must be bounded by DrainBudgetMs, took {watch.ElapsedMilliseconds} ms");
+        Assert.Equal(1, writer.PendingCount); // 后台提交仍未收尾：引用方据此禁止新周期。
+
+        release.TrySetResult(); // 释放挂起的持久化，让后台任务收尾（避免测试间串扰）。
+        await WaitForPendingCountAsync(writer, 0, TimeSpan.FromSeconds(5));
+        Assert.Equal(0, writer.PendingCount);
+    }
+
+    private static async Task WaitForPendingCountAsync(ProductionTraceWriter writer, int expected, TimeSpan timeout)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.Elapsed < timeout)
+        {
+            if (writer.PendingCount == expected) return;
+            await Task.Delay(25);
+        }
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static readonly WorkflowDefinition Workflow = new("trace-writer", "Trace writer", [], []);
     private static readonly RunTraceContext Context = new("ProductionRuntime");

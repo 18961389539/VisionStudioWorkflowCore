@@ -89,12 +89,38 @@ public sealed class WorkflowModuleStore(SqliteMetadataDatabase db)
 
         var result = new List<WorkflowModuleDescriptor>(modules.Count);
         foreach (var module in modules)
-            result.Add(new WorkflowModuleDescriptor(module.Id,module.Name,module.Description,module.CreatedAt,module.UpdatedAt,module.LatestVersion,await ListVersionsAsync(connection,module.Id,ct)));
+            // R12（2026-10-12 复审）：列表只返回摘要——每模块仅携带最新版本，详情通过
+            // GET /api/modules/{id}（按 ID 直查）、历史版本通过版本端点按需获取。
+            // 旧实现为列表反序列化全部模块的全部版本工作流，规模增长时列表成本失控。
+            result.Add(new WorkflowModuleDescriptor(module.Id,module.Name,module.Description,module.CreatedAt,module.UpdatedAt,module.LatestVersion,await ListVersionsAsync(connection,module.Id,ct,limit:1)));
         return result;
     }
 
     public async Task<WorkflowModuleDescriptor?> GetAsync(string id, CancellationToken ct)
-        => (await ListAsync(ct)).FirstOrDefault(x => x.Id.Equals(id,StringComparison.OrdinalIgnoreCase));
+    {
+        // R12（2026-10-12 复审）：按 ID 直接查询。旧实现调用 ListAsync——列出全部模块并反序列化
+        // 每个模块的全部版本——再取首项；版本规模增长后，查询单个模块的代价与全库版本总量成正比。
+        // 语义保持与 ListAsync 一致：ID 匹配大小写不敏感（COLLATE NOCASE），返回值用库内原始 ID。
+        await using var connection = await db.OpenConnectionAsync(ct);
+        string storedId, name, description, createdAtRaw, updatedAtRaw;
+        int latestVersion;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version FROM workflow_modules WHERE id=$id COLLATE NOCASE;";
+            command.Parameters.AddWithValue("$id", id);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return null;
+            storedId = reader.GetString(0);
+            name = reader.GetString(1);
+            description = reader.GetString(2);
+            createdAtRaw = reader.GetString(3);
+            updatedAtRaw = reader.GetString(4);
+            latestVersion = reader.GetInt32(5);
+        }
+        return new WorkflowModuleDescriptor(storedId, name, description,
+            DateTimeOffset.Parse(createdAtRaw), DateTimeOffset.Parse(updatedAtRaw), latestVersion,
+            await ListVersionsAsync(connection, storedId, ct));
+    }
 
     public async Task<WorkflowModuleVersion?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
@@ -213,12 +239,13 @@ VALUES($id,$version,$hash,$at,$note,$workflow,$inputs,$outputs,$parameters);
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task<IReadOnlyList<WorkflowModuleVersion>> ListVersionsAsync(SqliteConnection connection,string id,CancellationToken ct)
+    private static async Task<IReadOnlyList<WorkflowModuleVersion>> ListVersionsAsync(SqliteConnection connection,string id,CancellationToken ct,int? limit=null)
     {
         var result=new List<WorkflowModuleVersion>();
         await using var command=connection.CreateCommand();
-        command.CommandText="SELECT version,module_hash,created_at,note,workflow_json,inputs_json,outputs_json,parameters_json FROM workflow_module_versions WHERE module_id=$id ORDER BY version DESC;";
+        command.CommandText="SELECT version,module_hash,created_at,note,workflow_json,inputs_json,outputs_json,parameters_json FROM workflow_module_versions WHERE module_id=$id ORDER BY version DESC"+(limit is int take?" LIMIT $limit;":";");
         command.Parameters.AddWithValue("$id",id);
+        if (limit is int bounded) command.Parameters.AddWithValue("$limit",bounded);
         await using var reader=await command.ExecuteReaderAsync(ct);
         while(await reader.ReadAsync(ct)) result.Add(ReadVersion(id,reader.GetInt32(0),reader,offset:1));
         return result;

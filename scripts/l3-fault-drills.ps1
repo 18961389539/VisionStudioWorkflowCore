@@ -18,6 +18,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Compatibility: a Git Bash (msys) parent can export the same variable under two spellings
+# (HTTP_PROXY/http_proxy); Start-Process fails to build the child environment then.
+. (Join-Path $PSScriptRoot 'lib/ProcessEnvironment.ps1')
+Remove-DuplicateProcessEnvironment
 $root = Split-Path -Parent $PSScriptRoot
 $labMode = [string]::IsNullOrWhiteSpace($BaseUrl)
 if (-not $OutputDir) {

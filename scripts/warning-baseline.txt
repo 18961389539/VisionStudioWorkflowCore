@@ -2,7 +2,6 @@
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(147,33) : warning SYSLIB0057
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(427,37) : warning SYSLIB0057
 backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs(18,25) : warning CS0108
-backend/src/VisionStudio.Api/StorageBackupService.cs(566,29) : warning CS8604
 backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs(346,54) : warning CS8603
 backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs(393,54) : warning CS8603
 backend/tests/VisionStudio.Api.Tests/PluginPackageManagementTests.cs(112,20) : warning SYSLIB0057

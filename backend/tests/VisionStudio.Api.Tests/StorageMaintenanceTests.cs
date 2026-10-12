@@ -139,6 +139,84 @@ CREATE TABLE run_traces(run_id TEXT PRIMARY KEY,started_at TEXT NOT NULL DEFAULT
     }
 
     [Fact]
+    public async Task Restore_KeepsCurrentUnresolvedDeviceSafetyState()
+    {
+        // R01（2026-10-12 复审）：恢复到旧备份绝不能清空/覆盖"当前"未闭合的设备动作安全账本——
+        // 账本属于当前事实，不属于可回滚业务配置（旧实现整目录切换会让它随备份丢失，重启后闸门放行）。
+        using var factory = new StorageVisionStudioApiFactory();
+        using var client = factory.CreateClient();
+        _ = await client.GetAsync("/api/health");
+        var backups = factory.Services.GetRequiredService<StorageBackupService>();
+        var safety = factory.Services.GetRequiredService<DeviceActionSafetyStore>();
+
+        // 1) 早期备份：当时没有任何未闭合动作（安全账本不参与备份）。
+        var backup = await backups.CreateAsync(true, default);
+
+        // 2) 备份之后出现未闭合动作（Unknown 标记 + 锁定清单）。
+        safety.Save(new DeviceActionSafetyState("manifest-review", ["dev-1"], ["robot-1"], DateTimeOffset.UtcNow,
+            "probe: unresolved action before restore", Phase: DeviceActionSafetyPhase.Unknown, RunId: "run-review"));
+
+        // 3) 恢复旧备份：当前安全账本必须原样保留（而非被旧备份的"无记录"抹掉）。
+        await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true), default);
+
+        var carried = safety.Load();
+        Assert.NotNull(carried);
+        Assert.Equal("manifest-review", carried!.ManifestHash);
+        Assert.Equal("run-review", carried.RunId);
+        Assert.Equal(new[] { "dev-1" }, carried.DeviceIds.ToArray());
+        Assert.True(DeviceActionSafetyStore.IsUnresolved(carried));
+    }
+
+    [Fact]
+    public async Task Restore_WithoutUnresolvedState_EntersPostRestoreReconciliationGate()
+    {
+        // R01：恢复时若没有未闭合动作，恢复本身也必须进入独立的"恢复后设备核对"状态——
+        // 物理设备状态与恢复后的配置一致性必须现场确认后才能启动生产。
+        using var factory = new StorageVisionStudioApiFactory();
+        using var client = factory.CreateClient();
+        _ = await client.GetAsync("/api/health");
+        var backups = factory.Services.GetRequiredService<StorageBackupService>();
+        var safety = factory.Services.GetRequiredService<DeviceActionSafetyStore>();
+
+        var backup = await backups.CreateAsync(true, default);
+        Assert.Null(safety.Load());
+
+        await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true), default);
+
+        var postRestore = safety.Load();
+        Assert.NotNull(postRestore);
+        Assert.StartsWith("storage-restore:", postRestore!.ManifestHash);
+        Assert.True(DeviceActionSafetyStore.IsUnresolved(postRestore));
+    }
+
+    [Fact]
+    public async Task BackupAndRestore_IncludeSavedEditorWorkflows()
+    {
+        // R04（2026-10-12 复审）：编辑器保存的工作流（data/workflows）必须进系统备份——
+        // 未发布为 Job 版本的流程只存在于此，空白机恢复依赖它。
+        using var factory = new StorageVisionStudioApiFactory();
+        using var client = factory.CreateClient();
+        _ = await client.GetAsync("/api/health");
+        var backups = factory.Services.GetRequiredService<StorageBackupService>();
+        var workflows = factory.Services.GetRequiredService<WorkflowStore>();
+        var env = factory.Services.GetRequiredService<IWebHostEnvironment>();
+
+        await workflows.SaveAsync("review-draft", new WorkflowDefinition("review-draft", "Draft", [], []), default);
+        var backup = await backups.CreateAsync(true, default);
+
+        // 清空 workflows 目录 → 恢复 → 已保存文档必须回来。
+        var workflowsRoot = Path.Combine(env.ContentRootPath, "data", "workflows");
+        Directory.Delete(workflowsRoot, true);
+
+        var restored = await backups.RestoreAsync(new StorageRestoreRequest(backup.BackupId, true), default);
+        Assert.True(restored.SystemAssetsRestored);
+
+        var loaded = await workflows.LoadAsync("review-draft", default);
+        Assert.NotNull(loaded);
+        Assert.Equal("Draft", loaded!.Name);
+    }
+
+    [Fact]
     public async Task RestoreFailure_RollsBackAndKeepsOriginalAssets()
     {
         using var factory = new StorageVisionStudioApiFactory();

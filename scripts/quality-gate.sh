@@ -30,6 +30,12 @@ bash "$ROOT/scripts/test-publish-runtime.sh"
     --collect:"XPlat Code Coverage" \
     --results-directory "$RESULTS"
 )
+# R09 (2026-10-12 review): warning governance is part of the gate where PowerShell is available.
+if command -v pwsh >/dev/null 2>&1; then
+  pwsh -NoProfile -File "$ROOT/scripts/check-warning-baseline.ps1"
+else
+  echo "Skipping PowerShell warning baseline: pwsh is unavailable." >&2
+fi
 python3 "$ROOT/scripts/check-coverage.py" "$RESULTS" --min-line "$MIN_LINE_COVERAGE"
 (
   cd "$ROOT/frontend"

@@ -71,6 +71,12 @@ try {
 }
 finally { Pop-Location }
 
+# R09 (2026-10-12 review): warning governance is part of the gate - new compiler warnings must be
+# fixed, or explicitly added to the reviewable baseline (scripts/warning-baseline.txt). Resolved
+# entries surface as hints (not failures) so the baseline can be pruned deliberately.
+& "$root/scripts/check-warning-baseline.ps1"
+Assert-LastExitCode 'warning baseline'
+
 & $python "$root/scripts/check-coverage.py" $results --min-line $minCoverage
 Assert-LastExitCode 'coverage gate'
 

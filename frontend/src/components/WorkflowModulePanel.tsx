@@ -16,6 +16,8 @@ type Props = {
 
 export default function WorkflowModulePanel(props: Props) {
   const [modules, setModules] = useState<WorkflowModuleDescriptor[]>([]);
+  // R12（2026-10-12 复审）：列表接口只返回摘要（每模块仅最新版本）——完整版本集合按需拉取。
+  const [detailCache, setDetailCache] = useState<Record<string, WorkflowModuleDescriptor>>({});
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [moduleId, setModuleId] = useState('locate-part');
   const [name, setName] = useState('定位工件');
@@ -32,6 +34,7 @@ export default function WorkflowModulePanel(props: Props) {
     if (!response.ok) return;
     const data: WorkflowModuleDescriptor[] = await response.json();
     setModules(data);
+    setDetailCache({}); // 列表摘要刷新后失效详情缓存（保证版本集合与列表同代）。
     if (!activeModuleId && data.length) {
       setActiveModuleId(data[0].id);
       setActiveVersion(data[0].latestVersion);
@@ -40,7 +43,23 @@ export default function WorkflowModulePanel(props: Props) {
 
   useEffect(() => { if (props.open) { refresh(); if (props.selectedNodeId) setSelectedNodes([props.selectedNodeId]); } }, [props.open]);
 
-  const activeModule = modules.find((x) => x.id === activeModuleId);
+  // R12：选中模块后按需拉取详情（完整版本集合、端口与哈希）；摘要先渲染（仅最新版本），
+  // 详情到达后无缝替换——列表接口因此不必为每个模块反序列化全部历史版本。
+  useEffect(() => {
+    if (!props.open || !activeModuleId || detailCache[activeModuleId]) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/modules/${encodeURIComponent(activeModuleId)}`);
+        if (!response.ok) return;
+        const detail: WorkflowModuleDescriptor = await response.json();
+        if (!cancelled) setDetailCache((current) => ({ ...current, [activeModuleId]: detail }));
+      } catch { /* 详情加载失败：退回摘要（仅最新版本），下次打开/切换重试 */ }
+    })();
+    return () => { cancelled = true; };
+  }, [props.open, activeModuleId, detailCache]);
+
+  const activeModule = (activeModuleId ? detailCache[activeModuleId] : undefined) ?? modules.find((x) => x.id === activeModuleId);
   const version = activeModule?.versions.find((x) => x.version === activeVersion) ?? activeModule?.versions[0];
   const selectedCallParameters = useMemo(() => {
     const selected = props.currentWorkflow.nodes.find((x) => x.id === props.selectedNodeId);

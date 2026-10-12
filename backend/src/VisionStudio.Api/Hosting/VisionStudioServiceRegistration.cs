@@ -238,6 +238,8 @@ public static class VisionStudioServiceRegistration
             configuration.GetValue("WorkflowPlanCache:Capacity", 128)));
         services.AddTransient<VisionNodeStep>();
         services.AddTransient<VisionPipelineStep>();
+        // R10：统一运行边界的原始异常日志观察者——用户侧结果只保留简洁诊断，日志保留完整异常链。
+        services.AddSingleton<IVisionRunExceptionObserver, VisionRunExceptionLogObserver>();
         services.AddTransient<WorkflowCoreVisionRunner>();
         services.AddTransient<ModuleAwareVisionWorkflowRunner>();
         services.AddTransient<IVisionWorkflowRunner>(sp => sp.GetRequiredService<ModuleAwareVisionWorkflowRunner>());
@@ -358,4 +360,16 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<JoinNode>();
         services.AddSingleton<ResultDispositionNode>();
     }
+}
+
+/// <summary>
+/// R10（2026-10-12 复审）：宿主侧的运行异常日志观察者。节点异常在结果路径上只保留简短消息，
+/// 这里以结构化日志记录**原始异常**（完整堆栈 / InnerException）——同一失败只在此记录一次。
+/// </summary>
+internal sealed class VisionRunExceptionLogObserver(ILogger<VisionRunExceptionLogObserver> logger) : IVisionRunExceptionObserver
+{
+    public void OnRunException(VisionRunExceptionContext context, Exception exception)
+        => logger.LogError(exception,
+            "Workflow run {RunId} (workflow {WorkflowId} '{WorkflowName}', node {NodeId}) failed with an unhandled exception; the user-facing result carries only the concise message, the full chain is preserved here.",
+            context.RunId, context.WorkflowId, context.WorkflowName, context.NodeId);
 }

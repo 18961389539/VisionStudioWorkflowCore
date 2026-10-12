@@ -731,7 +731,11 @@ if not any(n.get('type') == 'camera.syncCapture' for n in frameset_sample.get('n
     fail('V0.36 synchronized FrameSet sample does not exercise both built-in nodes')
 for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
     doc_present(rel)
-if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or "value: 'frameSet'" not in read_safe('frontend/src/App.tsx'):
+# R09 (2026-10-12 review): the template picker was regrouped into a modal backed by
+# DEMO_GROUPS/DEMO_LABELS (App.tsx) — the old hard-coded `value: 'frameSet'` literal no longer
+# exists, so the previous assertion failed while the feature was intact. Assert the current
+# representation instead (behaviour-test migration tracked in STATIC_AUDIT_TRIAGE.md).
+if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or "'frameSet'" not in frontend_app:
     fail('V0.36 frontend synchronized FrameSet demo is missing')
 ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
 

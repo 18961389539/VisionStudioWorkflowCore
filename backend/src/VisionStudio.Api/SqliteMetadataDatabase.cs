@@ -28,12 +28,12 @@ public sealed class SqliteMetadataDatabase
     public string DatabasePath => _databasePath;
     public int CurrentSchemaVersion => SqliteSchemaMigrationRunner.CurrentVersion;
 
-    public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken ct = default)
+    public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken ct = default, bool strongDurability = false)
     {
         await EnsureInitializedAsync(ct);
         var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct);
-        await ConfigureConnectionAsync(connection, ct);
+        await ConfigureConnectionAsync(connection, ct, strongDurability);
         return connection;
     }
 
@@ -141,10 +141,16 @@ public sealed class SqliteMetadataDatabase
         return (string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase), result, schemaVersion);
     }
 
-    private static async Task ConfigureConnectionAsync(SqliteConnection connection, CancellationToken ct)
+    private static async Task ConfigureConnectionAsync(SqliteConnection connection, CancellationToken ct, bool strongDurability = false)
     {
         await using var pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;";
+        // R03（2026-10-12 复审）：WAL+NORMAL 下**已提交事务仍可能在断电后回退**。关键提交
+        // （生产追溯的起始登记与最终结果、Job 发布）显式升级到 FULL——每次提交 fsync WAL，
+        // 保证"追溯已提交 ⇒ 断电后仍存在"这一前置条件，使设备动作意图的闭合与可恢复证据绑定。
+        // 其余路径保持 NORMAL（WAL 下一致性不受影响，仅耐久性弱化，换取现场节拍）。
+        pragma.CommandText = strongDurability
+            ? "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;"
+            : "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;";
         await pragma.ExecuteNonQueryAsync(ct);
     }
 

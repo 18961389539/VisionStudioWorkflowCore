@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   addEdge,
   Background,
@@ -25,18 +25,8 @@ import ImageViewer from './components/ImageViewer';
 import CameraPanel from './components/CameraPanel';
 import RobotPanel from './components/RobotPanel';
 import DevicePanel from './components/DevicePanel';
-import JobPanel from './components/JobPanel';
-import TracePanel from './components/TracePanel';
-import DatasetValidationPanel from './components/DatasetValidationPanel';
-import ParameterTuningPanel from './components/ParameterTuningPanel';
-import WorkflowModulePanel from './components/WorkflowModulePanel';
-import CalibrationPanel from './components/CalibrationPanel';
-import FrameTreePanel from './components/FrameTreePanel';
 import ProductionPanel from './components/ProductionPanel';
 import DiagnosticsPanel from './components/DiagnosticsPanel';
-import HardwareProvenancePanel from './components/HardwareProvenancePanel';
-import PluginPackagePanel from './components/PluginPackagePanel';
-import AboutPanel from './components/AboutPanel';
 import SplitHandle from './components/SplitHandle';
 import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
 import VisionNode from './components/VisionNode';
@@ -48,15 +38,39 @@ import { demos, demoDescriptions, linearDemo, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, writeDraft, type WorkflowDraft } from './draft';
 import { connectionVerdict, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
+import { responseErrorMessage } from './apiErrors';
 import { onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { useRunImages } from './useRunImages';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, VisionRoi, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 
+// R12（2026-10-12 复审）：低频重面板按需加载（dynamic import + Suspense）——首屏不下载其代码，
+// 首次打开时拉取并进入浏览器缓存。配对的渲染侧见 LazyPanel（条件挂载：关闭即卸载）。
+const JobPanel = lazy(() => import('./components/JobPanel'));
+const TracePanel = lazy(() => import('./components/TracePanel'));
+const DatasetValidationPanel = lazy(() => import('./components/DatasetValidationPanel'));
+const ParameterTuningPanel = lazy(() => import('./components/ParameterTuningPanel'));
+const WorkflowModulePanel = lazy(() => import('./components/WorkflowModulePanel'));
+const CalibrationPanel = lazy(() => import('./components/CalibrationPanel'));
+const FrameTreePanel = lazy(() => import('./components/FrameTreePanel'));
+const HardwareProvenancePanel = lazy(() => import('./components/HardwareProvenancePanel'));
+const PluginPackagePanel = lazy(() => import('./components/PluginPackagePanel'));
+const AboutPanel = lazy(() => import('./components/AboutPanel'));
+
+// R12：条件挂载的按需面板包装——open=false 时完全不渲染（不触发动态加载）；
+// open=true 时由 Suspense 兜住加载窗口（面板自身是 Drawer，加载完立即展开）。
+function LazyPanel({ open, children }: { open: boolean; children: ReactNode }) {
+  return open ? <Suspense fallback={null}>{children}</Suspense> : null;
+}
+
 const nodeTypes = { vision: VisionNode };
 type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
 type ConnectionPicker = PortRecommendation & { nodeId: string; portName: string; x: number; y: number; position: { x: number; y: number } };
+
+// R06（2026-10-12 复审）：编辑器保存/加载是人工关键操作——请求必须有整体超时；失败必须给出
+// 可定位原因（状态码/业务码/关联号），且绝不在无法确认结果时改变本地 dirty/草稿状态。
+const WORKFLOW_IO_TIMEOUT_MS = 15_000;
 
 // 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
 const DEMO_LABELS: Record<DemoKey, string> = {
@@ -209,6 +223,11 @@ function Editor() {
   // 专注画布（P1）：一键收起全部面板，画布独占窗口；退出时还原进入前的布局
   const [focusMode, setFocusMode] = useState(false);
   const focusSnapshotRef = useRef<LayoutState | null>(null);
+  // R06：保存请求在途标志——保存中禁止重复提交（Ctrl+S 连按 / 双击保存按钮）。
+  const saveInFlightRef = useRef(false);
+  // R07（2026-10-12 复审）：并发基线修订——由 GET/PUT 响应头带回；undefined = 未知（不校验），
+  // '' = 已知后端尚无修订记录，字符串 = 上次读/写后的内容修订。
+  const workflowRevisionRef = useRef<string | undefined>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
   const [compiledDsl, setCompiledDsl] = useState<string>();
@@ -386,10 +405,26 @@ function Editor() {
   }, []);
 
   const updateLayout = (patch: Partial<LayoutState>) => setLayout((current) => ({ ...current, ...patch }));
-  const applyLayoutPreset = (preset: LayoutPreset) => setLayout((current) => ({
-    ...current, preset, ...LAYOUT_PRESETS[preset],
-    leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomMaximized: false
-  }));
+
+  // 退出专注的统一收口（P2）：restoreSnapshot=true 还原进入前的布局快照（“退出专注”按钮）；
+  // false 表示布局改由调用方接管（切换布局预设），快照直接丢弃，避免残留快照覆盖用户的新选择
+  const exitFocusMode = (restoreSnapshot: boolean) => {
+    const snapshot = focusSnapshotRef.current;
+    focusSnapshotRef.current = null;
+    setFocusMode(false);
+    if (restoreSnapshot && snapshot) updateLayout({ ...snapshot });
+  };
+
+  // 应用布局预设（P2）：预设 = 全部面板展开的完整布局；若正处专注画布先退出（布局由预设接管），
+  // 并显式展开图像区——否则专注切入的 imageCollapsed:true 会让“图像调试”预设下图像区继续隐藏
+  const applyLayoutPreset = (preset: LayoutPreset) => {
+    if (focusMode) exitFocusMode(false);
+    setLayout((current) => ({
+      ...current, preset, ...LAYOUT_PRESETS[preset],
+      leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomMaximized: false,
+      imageCollapsed: false
+    }));
+  };
   const previewVar = (name: string, value: string) => shellRef.current?.style.setProperty(name, value);
 
   // 渲染时按当前窗口尺寸收窄尺寸，避免小窗口下三栏把画布挤没（存的值保持不变，窗口变回来即恢复）
@@ -822,14 +857,9 @@ function Editor() {
     setSavedSnapshot((current) => current ?? workflowSnapshot);
   }, [workflowSnapshot]);
 
-  // 专注画布（P1）：一键收起全部面板让画布独占窗口；退出时还原进入前的布局快照
+  // 专注画布（P1）：一键收起全部面板让画布独占窗口；退出经 exitFocusMode 还原进入前的布局快照
   const toggleFocusMode = () => {
-    if (focusMode) {
-      const snapshot = focusSnapshotRef.current;
-      setFocusMode(false);
-      if (snapshot) updateLayout({ ...snapshot });
-      return;
-    }
+    if (focusMode) { exitFocusMode(true); return; }
     focusSnapshotRef.current = layout;
     setFocusMode(true);
     updateLayout({ leftCollapsed: true, rightCollapsed: true, bottomCollapsed: true, bottomMaximized: false, imageCollapsed: true });
@@ -1003,28 +1033,85 @@ function Editor() {
   };
 
   const save = async (): Promise<boolean> => {
-    // 保存地址与显示的工作流 ID 单一事实源：不再绑定示例选择器，
-    // 避免“编辑的是 A、保存进 B 的示例槽位”这类覆盖与后端改写 ID 的风险
-    const response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflowPayload)
-    });
-    if (response.ok) {
-      setSavedSnapshot(workflowSnapshot);
-      setLastSavedAt(new Date());
-      messageApi.success('工作流已保存为后端 JSON');
-      return true;
+    // R06：保存中禁止重复提交（Ctrl+S 连按 / 双击按钮）；失败绝不改变 dirty 与本地草稿。
+    if (saveInFlightRef.current) {
+      messageApi.info('保存进行中，请稍候…');
+      return false;
     }
-    messageApi.error('保存失败');
-    return false;
+    saveInFlightRef.current = true;
+    try {
+      // 保存地址与显示的工作流 ID 单一事实源：不再绑定示例选择器，
+      // 避免“编辑的是 A、保存进 B 的示例槽位”这类覆盖与后端改写 ID 的风险
+      let response: Response;
+      try {
+        // R07：只有拿到过并发基线时才携带 expectedRevision——未知基线保持历史行为（不校验）。
+        const revisionQuery = workflowRevisionRef.current === undefined
+          ? '' : `?expectedRevision=${encodeURIComponent(workflowRevisionRef.current)}`;
+        response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}${revisionQuery}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflowPayload),
+          signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS)
+        });
+      } catch (error) {
+        // 网络层失败（连接拒绝 / 请求超时 / 会话中断）：修改仍留在本地草稿，修复连接后可重试。
+        const reason = error instanceof DOMException && error.name === 'TimeoutError'
+          ? `请求超时（>${WORKFLOW_IO_TIMEOUT_MS / 1000}s）`
+          : error instanceof Error ? error.message : '网络不可达';
+        messageApi.error(`保存失败：${reason}。修改仍保留在本地，可修复连接后重试（Ctrl+S）。`);
+        return false;
+      }
+      if (response.ok) {
+        // R07：记住写入后的新修订，作为下一次保存的并发基线。
+        workflowRevisionRef.current = response.headers.get('X-Workflow-Revision') ?? '';
+        setSavedSnapshot(workflowSnapshot);
+        setLastSavedAt(new Date());
+        messageApi.success('工作流已保存为后端 JSON');
+        return true;
+      }
+      // R07：并发冲突优先给出可操作指引（另一会话已保存；绝不静默覆盖）。
+      if (response.status === 409) {
+        const conflictDescription = await responseErrorMessage(response, 'HTTP 409');
+        messageApi.error(`保存被拒绝（${conflictDescription}）：可能已有其他会话保存了该工作流（并发冲突）。请先“打开已有流程”加载最新版本核对差异，再决定是否覆盖。`);
+        return false;
+      }
+      // 非 2xx：呈现状态码、业务码与关联号（可凭关联号在后端日志/审计中定位）。
+      const description = await responseErrorMessage(response, `HTTP ${response.status}`);
+      messageApi.error(`保存失败（${description}）。修改仍保留在本地，未写入后端。`);
+      return false;
+    } finally {
+      saveInFlightRef.current = false;
+    }
   };
 
   const load = async () => {
-    const response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}`);
-    if (!response.ok) {
-      messageApi.warning('后端尚未保存当前示例工作流');
+    // R06：加载失败原因可定位（状态码/业务码/关联号）；失败路径不触碰当前画布。
+    let response: Response;
+    try {
+      response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+    } catch (error) {
+      const reason = error instanceof DOMException && error.name === 'TimeoutError'
+        ? `请求超时（>${WORKFLOW_IO_TIMEOUT_MS / 1000}s）`
+        : error instanceof Error ? error.message : '网络不可达';
+      messageApi.error(`加载失败：${reason}。请检查后端服务与网络后重试。`);
       return;
     }
-    const workflow: WorkflowPayload = await response.json();
+    if (response.status === 404) {
+      messageApi.warning(`后端尚未保存工作流 '${designerWorkflowId}'（404）。先保存一次，之后即可作为加载基线。`);
+      return;
+    }
+    if (!response.ok) {
+      const description = await responseErrorMessage(response, `HTTP ${response.status}`);
+      messageApi.error(`加载失败（${description}）。当前画布保持不变。`);
+      return;
+    }
+    let workflow: WorkflowPayload;
+    try {
+      workflow = await response.json();
+    } catch {
+      messageApi.error('加载失败：响应不是有效的工作流 JSON。当前画布保持不变。');
+      return;
+    }
+    // R07：记录加载到的并发基线（响应头缺失 = 后端尚无修订记录，用空串表达"期望无"）。
+    workflowRevisionRef.current = response.headers.get('X-Workflow-Revision') ?? '';
     restoreWorkflow(workflow);
     messageApi.success('工作流已加载');
   };
@@ -1496,7 +1583,8 @@ function Editor() {
               <Segmented
                 size="small"
                 value={layout.preset}
-                onChange={(value) => { setFocusMode(false); if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
+                // 切预设即退出专注：由 applyLayoutPreset 统一处理（丢弃专注快照，布局完全由预设接管，P2）
+                onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
                 options={[
                   { label: '流程编辑', value: 'edit' },
                   { label: '图像调试', value: 'image' },
@@ -1518,7 +1606,7 @@ function Editor() {
                 <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
                 <div className="canvas-empty-actions">
                   <Button size="small" type="primary" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
-                  <Button size="small" onClick={() => void load()}>打开已有流程</Button>
+                  <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
                 </div>
               </div>
             )}
@@ -1705,7 +1793,7 @@ function Editor() {
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个节点查看与编辑参数" />
               <div className="panel-empty-actions">
                 <Button size="small" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
-                <Button size="small" onClick={() => void load()}>打开已有流程</Button>
+                <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
                 <Button size="small" type="primary" ghost onClick={run} loading={running} disabled={debugBusy}>运行当前流程</Button>
               </div>
             </div>
@@ -1864,23 +1952,23 @@ function Editor() {
       <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />
       <RobotPanel open={robotsOpen} onClose={() => setRobotsOpen(false)} />
       <DevicePanel open={devicesOpen} onClose={() => setDevicesOpen(false)} />
-      <FrameTreePanel open={framesOpen} onClose={() => setFramesOpen(false)} />
-      <CalibrationPanel
-        open={calibrationOpen}
+      <LazyPanel open={framesOpen}><FrameTreePanel open onClose={() => setFramesOpen(false)} /></LazyPanel>
+      <LazyPanel open={calibrationOpen}><CalibrationPanel
+        open
         onClose={() => setCalibrationOpen(false)}
         canApplyToSelectedNode={selectedNode?.data.typeKey === 'calibration.planar'}
         onApplyToSelectedNode={applyCalibrationParameters}
-      />
-      <JobPanel open={jobsOpen} onClose={() => setJobsOpen(false)} workflow={workflowPayload} onLoadWorkflow={restoreWorkflow} onRunResult={applyResult} />
-      <TracePanel open={tracesOpen} onClose={() => setTracesOpen(false)} />
-      <DatasetValidationPanel open={validationOpen} onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} />
-      <ParameterTuningPanel open={tuningOpen} onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} onApplyWorkflow={(candidate) => { restoreWorkflow(candidate); setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} />
-      <WorkflowModulePanel open={modulesOpen} onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} onApplyWorkflow={(workflow) => { restoreWorkflow(workflow); messageApi.success('已将所选节点替换为固定版本的可复用模块'); }} onLoadWorkflow={(workflow) => { restoreWorkflow(workflow); messageApi.success('已将模块内部节点加载到设计器'); }} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} />
+      /></LazyPanel>
+      <LazyPanel open={jobsOpen}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} onLoadWorkflow={restoreWorkflow} onRunResult={applyResult} /></LazyPanel>
+      <LazyPanel open={tracesOpen}><TracePanel open onClose={() => setTracesOpen(false)} /></LazyPanel>
+      <LazyPanel open={validationOpen}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
+      <LazyPanel open={tuningOpen}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} onApplyWorkflow={(candidate) => { restoreWorkflow(candidate); setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>
+      <LazyPanel open={modulesOpen}><WorkflowModulePanel open onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} onApplyWorkflow={(workflow) => { restoreWorkflow(workflow); messageApi.success('已将所选节点替换为固定版本的可复用模块'); }} onLoadWorkflow={(workflow) => { restoreWorkflow(workflow); messageApi.success('已将模块内部节点加载到设计器'); }} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} /></LazyPanel>
       <ProductionPanel open={productionOpen} onClose={() => setProductionOpen(false)} />
       <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
-      <AboutPanel open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <HardwareProvenancePanel open={hardwareProvenanceOpen} onClose={() => setHardwareProvenanceOpen(false)} />
-      <PluginPackagePanel open={pluginsOpen} onClose={() => setPluginsOpen(false)} onCatalogRefresh={refreshCatalog} />
+      <LazyPanel open={aboutOpen}><AboutPanel open onClose={() => setAboutOpen(false)} /></LazyPanel>
+      <LazyPanel open={hardwareProvenanceOpen}><HardwareProvenancePanel open onClose={() => setHardwareProvenanceOpen(false)} /></LazyPanel>
+      <LazyPanel open={pluginsOpen}><PluginPackagePanel open onClose={() => setPluginsOpen(false)} onCatalogRefresh={refreshCatalog} /></LazyPanel>
     </div>
   );
 }

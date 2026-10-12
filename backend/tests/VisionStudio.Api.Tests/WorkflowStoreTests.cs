@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
+using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
 using Xunit;
 
@@ -51,6 +52,35 @@ public sealed class WorkflowStoreTests : IDisposable
         // 原子写不残留临时文件（旧实现直接 File.Create，异常时会留下截断文件）
         Assert.Empty(Directory.GetFiles(_root, "*.tmp"));
         Assert.Empty(Directory.GetFiles(_root, ".*"));
+    }
+
+    [Fact]
+    public async Task Save_WithExpectedRevision_RejectsStaleWriterAndAcceptsMatchingBaseline()
+    {
+        // R07（2026-10-12 复审）：乐观并发——A 读取后被 B 覆盖，A 的旧基线保存必须 409，
+        // 绝不静默覆盖；不传基线保持历史兼容路径；空串表示"期望尚无修订记录"。
+        var first = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V1", [], []), CancellationToken.None);
+        Assert.False(string.IsNullOrWhiteSpace(first));
+        Assert.Equal(first, await _store.GetRevisionAsync("wf", CancellationToken.None));
+
+        // 以最新基线保存 → 成功且修订变化。
+        var second = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V2", [], []), CancellationToken.None, expectedRevision: first);
+        Assert.NotEqual(first, second);
+
+        // 会话仍持有旧基线 → 冲突，磁盘保持"胜者"内容。
+        await Assert.ThrowsAsync<ApiConflictException>(() =>
+            _store.SaveAsync("wf", new WorkflowDefinition("wf", "loser", [], []), CancellationToken.None, expectedRevision: first));
+        Assert.Equal("V2", (await _store.LoadAsync("wf", CancellationToken.None))!.Name);
+
+        // 不传基线 = 兼容路径（旧调用方）：允许覆盖。
+        var third = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V3", [], []), CancellationToken.None);
+        Assert.NotEqual(second, third);
+
+        // 空串 = 期望"尚无修订记录"：已有记录时冲突；全新 ID 则匹配成功。
+        await Assert.ThrowsAsync<ApiConflictException>(() =>
+            _store.SaveAsync("wf", new WorkflowDefinition("wf", "V4", [], []), CancellationToken.None, expectedRevision: ""));
+        var fresh = await _store.SaveAsync("wf-new", new WorkflowDefinition("wf-new", "N", [], []), CancellationToken.None, expectedRevision: "");
+        Assert.False(string.IsNullOrWhiteSpace(fresh));
     }
 
     [Fact]

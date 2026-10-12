@@ -51,7 +51,7 @@ describe('buildTraceParams', () => {
   it('包含分页、筛选与时间窗，空值与空白被剔除', () => {
     const params = buildTraceParams(
       { preset: 'today', jobId: ' job-1 ', executionStatus: 'Failed', errorCode: '', workflow: '  ' },
-      100, 50,
+      100, 50, NOW,
     );
     expect(params.get('offset')).toBe('100');
     expect(params.get('limit')).toBe('50');
@@ -80,8 +80,8 @@ describe('buildTraceParams', () => {
 describe('buildStatsParams 与列表口径一致', () => {
   it('统计参数与列表参数的筛选部分完全相同（仅少分页）', () => {
     const filter: TraceFilterState = { preset: 'week', disposition: 'NG', workflow: '压装' };
-    const list = buildTraceParams(filter, 40, 20);
-    const stats = buildStatsParams(filter);
+    const list = buildTraceParams(filter, 40, 20, NOW);
+    const stats = buildStatsParams(filter, NOW);
     for (const [key, value] of list.entries()) {
       if (key === 'offset' || key === 'limit') {
         expect(stats.has(key)).toBe(false);

@@ -173,6 +173,13 @@ public sealed class DeviceDisconnectedException(string message) : InvalidOperati
 public sealed class DeviceWriteNotAllowedException(string message) : InvalidOperationException(message);
 public sealed class DeviceAddressException(string message) : FormatException(message);
 
+/// <summary>
+/// R02（2026-10-12 复审）：协议操作超过配置预算未完成（对端接受连接但不回复、半包等）。
+/// 抛出前驱动已关闭/隔离底层连接，挂起的 I/O 不会继续占用传输层。超时后设备动作是否已到达
+/// 对端**不保证**——调用方必须按"结果未知"处理（设备安全账本），不得未经状态核对自动重发。
+/// </summary>
+public sealed class DeviceProtocolTimeoutException(string message) : TimeoutException(message);
+
 public static class DeviceValueConversion
 {
     public static object? ConvertTo(DeviceTagDataType type, object? value)

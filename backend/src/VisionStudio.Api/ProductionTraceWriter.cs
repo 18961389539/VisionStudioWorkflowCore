@@ -7,6 +7,13 @@ public sealed class ProductionTraceOptions
 {
     public int QueueCapacity { get; set; } = 8;
     public long MaxRawArtifactBytesPerRun { get; set; } = 32L * 1024 * 1024;
+    /// <summary>
+    /// R05（2026-10-12 复审）：单次生产追溯提交（含图像编码、文件 I/O、数据库提交）的等待预算。
+    /// 超限后循环停止进入 Faulted 并保留设备动作意图，直到在途提交排空——不允许"超时返回继续生产"。
+    /// </summary>
+    public int CommitBudgetMs { get; set; } = 30_000;
+    /// <summary>R05：停止时排空在途追溯记录的预算（Dispose 等待上限）；超限放弃等待（设备动作意图仍保底）。</summary>
+    public int DrainBudgetMs { get; set; } = 15_000;
 }
 
 /// <summary>
@@ -20,6 +27,7 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
     private readonly Func<WorkflowRunResult, WorkflowDefinition, RunTraceContext, CancellationToken, Task> _persist;
     private readonly RunStore _runs;
     private readonly ILogger _logger;
+    private readonly ProductionTraceOptions _options;
     private readonly Task _worker;
     private Exception? _failure;
     private int _pending;
@@ -28,7 +36,8 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
     public int PendingCount => Volatile.Read(ref _pending);
 
     public ProductionTraceWriter(TraceabilityStore traces, RunStore runs, ProductionTraceOptions options, ILogger logger)
-        : this(async (result, workflow, context, ct) => { await traces.RecordAsync(result, workflow, context, ct); },
+        // R03：生产追溯提交走强持久连接（synchronous=FULL）——意图闭合以"提交已耐久"为前提。
+        : this(async (result, workflow, context, ct) => { await traces.RecordAsync(result, workflow, context, ct, strongDurability: true); },
             runs, options, logger, traces.GetArtifactOptions(options.MaxRawArtifactBytesPerRun)) { }
 
     public ProductionTraceWriter(
@@ -40,6 +49,7 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
         _persist = persist;
         _runs = runs;
         _logger = logger;
+        _options = options;
         ArtifactOptions = artifacts ?? new RunArtifactOptions(DeferEncoding: true, MaxRawBytes: options.MaxRawArtifactBytesPerRun);
         _queue = Channel.CreateBounded<Item>(new BoundedChannelOptions(options.QueueCapacity)
         {
@@ -130,9 +140,25 @@ public sealed class ProductionTraceWriter : IAsyncDisposable
         ThrowIfFaulted();
     }
 
+    /// <summary>
+    /// R05：排空必须有界。旧实现无限等待 worker——存储挂起时 Dispose 永远不会返回。
+    /// 超限放弃等待（后台提交可能仍在运行，由 Runtime 的"在途提交"闸门禁止新周期，
+    /// 设备动作意图保持未闭合，重启后要求核对——不会静默丢失）。
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         _queue.Writer.TryComplete();
-        await _worker;
+        var budgetMs = Math.Max(1_000, _options.DrainBudgetMs);
+        try
+        {
+            await _worker.WaitAsync(TimeSpan.FromMilliseconds(budgetMs)).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Production trace drain did not complete within {BudgetMs} ms; the persistence worker may still be running. " +
+                "New production cycles stay blocked until it drains, and the device-action intent remains in force.",
+                budgetMs);
+        }
     }
 }

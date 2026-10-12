@@ -99,10 +99,12 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
     {
         if (ConnectionState == DeviceConnectionState.Connected) return;
         SetState(DeviceConnectionState.Connecting, null);
+        var client = new TcpClient { ReceiveTimeout = _options.TimeoutMs, SendTimeout = _options.TimeoutMs, NoDelay = true };
         try
         {
-            var client = new TcpClient { ReceiveTimeout = _options.TimeoutMs, SendTimeout = _options.TimeoutMs, NoDelay = true };
-            await client.ConnectAsync(_options.Host, _options.Port, cancellationToken);
+            // R02：连接建立同样受配置预算约束——不响应的端点在连接阶段也不能无限占用。
+            await client.ConnectAsync(_options.Host, _options.Port, cancellationToken).AsTask()
+                .WaitAsync(TimeSpan.FromMilliseconds(_options.TimeoutMs), cancellationToken);
             var master = new ModbusFactory().CreateMaster(client);
             lock (_stateGate)
             {
@@ -114,8 +116,16 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
                 _error = null;
             }
         }
+        catch (TimeoutException)
+        {
+            client.Dispose();
+            SetState(DeviceConnectionState.Faulted, $"connect to {_options.Host}:{_options.Port} exceeded the {_options.TimeoutMs} ms timeout");
+            throw new DeviceProtocolTimeoutException(
+                $"Connecting to device '{Id}' ({_options.Host}:{_options.Port}) did not complete within {_options.TimeoutMs} ms.");
+        }
         catch (Exception ex)
         {
+            client.Dispose();
             SetState(DeviceConnectionState.Faulted, ex.Message);
             throw;
         }
@@ -133,6 +143,56 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
             _error = null;
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// R02（2026-10-12 复审）：给单次协议事务套上真实截止时间。NModbus 的异步操作不接受
+    /// CancellationToken——唯一能中止挂起 I/O 的方式是关闭底层传输，因此超时/取消后连接被隔离
+    /// （Faulted），旧 I/O 有界收尾后才释放 IO 门；下一次操作必须重新 ConnectAsync。驱动**不自动
+    /// 重试**：写动作超时可能意味着对端已执行，重发必须由上层基于设备状态核对决定。
+    /// </summary>
+    private async Task<T> RunProtocolAsync<T>(Func<Task<T>> operation, CancellationToken ct, string description)
+    {
+        ct.ThrowIfCancellationRequested();
+        var pending = operation();
+        try
+        {
+            return await pending.WaitAsync(TimeSpan.FromMilliseconds(_options.TimeoutMs), ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            await AbandonConnectionAsync(pending, $"protocol operation '{description}' exceeded the {_options.TimeoutMs} ms timeout").ConfigureAwait(false);
+            throw new DeviceProtocolTimeoutException(
+                $"Modbus operation '{description}' on device '{Id}' did not complete within {_options.TimeoutMs} ms; the connection was reset. " +
+                "Whether the device applied the operation is unknown.");
+        }
+        catch (OperationCanceledException)
+        {
+            await AbandonConnectionAsync(pending, $"protocol operation '{description}' was cancelled before completion").ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task RunProtocolAsync(Func<Task> operation, CancellationToken ct, string description)
+        => await RunProtocolAsync(async () => { await operation().ConfigureAwait(false); return true; }, ct, description).ConfigureAwait(false);
+
+    /// <summary>
+    /// R02：隔离连接以中止挂起的协议 I/O（NModbus 不支持取消）。先关闭传输，再给旧操作一个有界窗口
+    /// 收尾，确保释放 IO 门时它不再触碰旧连接；旧操作也触碰不到新连接——新操作必须先重连并取得新 master。
+    /// </summary>
+    private async Task AbandonConnectionAsync(Task pending, string reason)
+    {
+        lock (_stateGate)
+        {
+            _master?.Dispose();
+            _client?.Dispose();
+            _master = null;
+            _client = null;
+            _state = DeviceConnectionState.Faulted;
+            _error = reason;
+        }
+        try { await pending.WaitAsync(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false); }
+        catch { /* 旧操作的失败被隔离在旧连接上；这里观察后丢弃，主流程抛出的是超时/取消语义。 */ }
     }
 
     public async Task<DeviceTagSample> ReadAsync(string tagId, CancellationToken cancellationToken = default)
@@ -274,15 +334,15 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
                     throw new DeviceAddressException($"Coil tag '{item.Tag.Id}' must be Boolean.");
             var values = group.Select(x => (bool)DeviceValueConversion.ConvertTo(DeviceTagDataType.Boolean, x.Value)!).ToArray();
             if (values.Length == 1)
-                await master.WriteSingleCoilAsync(_options.UnitId, group[0].Point.Address, values[0]);
+                await RunProtocolAsync(() => master.WriteSingleCoilAsync(_options.UnitId, group[0].Point.Address, values[0]), ct, $"write coil {group[0].Point.Address}");
             else
-                await master.WriteMultipleCoilsAsync(_options.UnitId, group[0].Point.Address, values);
+                await RunProtocolAsync(() => master.WriteMultipleCoilsAsync(_options.UnitId, group[0].Point.Address, values), ct, $"write coils {group[0].Point.Address}+{values.Length}");
         }
 
         async Task FlushRegistersAsync(List<(DeviceTagDefinition Tag, object? Value, ModbusAddress Point)> group)
         {
             var payload = group.SelectMany(x => EncodeRegisters(x.Tag, DeviceValueConversion.ConvertTo(x.Tag.DataType, x.Value), _options.RegisterOrder)).ToArray();
-            await master.WriteMultipleRegistersAsync(_options.UnitId, group[0].Point.Address, payload);
+            await RunProtocolAsync(() => master.WriteMultipleRegistersAsync(_options.UnitId, group[0].Point.Address, payload), ct, $"write registers {group[0].Point.Address}+{payload.Length}");
         }
     }
 
@@ -293,10 +353,10 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
         var point = ModbusAddress.Parse(tag.Address);
         return point.Area switch
         {
-            ModbusArea.Coil => DecodeBoolean(tag, (await master.ReadCoilsAsync(_options.UnitId, point.Address, 1))[0]),
-            ModbusArea.DiscreteInput => DecodeBoolean(tag, (await master.ReadInputsAsync(_options.UnitId, point.Address, 1))[0]),
-            ModbusArea.HoldingRegister => DecodeRegisters(tag, await master.ReadHoldingRegistersAsync(_options.UnitId, point.Address, RegisterCount(tag)), _options.RegisterOrder),
-            ModbusArea.InputRegister => DecodeRegisters(tag, await master.ReadInputRegistersAsync(_options.UnitId, point.Address, RegisterCount(tag)), _options.RegisterOrder),
+            ModbusArea.Coil => DecodeBoolean(tag, (await RunProtocolAsync(() => master.ReadCoilsAsync(_options.UnitId, point.Address, 1), ct, $"read coils {tag.Address}"))[0]),
+            ModbusArea.DiscreteInput => DecodeBoolean(tag, (await RunProtocolAsync(() => master.ReadInputsAsync(_options.UnitId, point.Address, 1), ct, $"read discrete inputs {tag.Address}"))[0]),
+            ModbusArea.HoldingRegister => DecodeRegisters(tag, await RunProtocolAsync(() => master.ReadHoldingRegistersAsync(_options.UnitId, point.Address, RegisterCount(tag)), ct, $"read holding registers {tag.Address}"), _options.RegisterOrder),
+            ModbusArea.InputRegister => DecodeRegisters(tag, await RunProtocolAsync(() => master.ReadInputRegistersAsync(_options.UnitId, point.Address, RegisterCount(tag)), ct, $"read input registers {tag.Address}"), _options.RegisterOrder),
             _ => throw new DeviceAddressException($"Unsupported Modbus area for '{tag.Address}'.")
         };
     }
@@ -311,12 +371,12 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
         {
             if (tag.DataType != DeviceTagDataType.Boolean)
                 throw new DeviceAddressException($"Coil tag '{tag.Id}' must be Boolean.");
-            await master.WriteSingleCoilAsync(_options.UnitId, point.Address, (bool)converted!);
+            await RunProtocolAsync(() => master.WriteSingleCoilAsync(_options.UnitId, point.Address, (bool)converted!), ct, $"write coil {tag.Address}");
             return;
         }
         if (point.Area != ModbusArea.HoldingRegister)
             throw new DeviceWriteNotAllowedException($"Modbus area {point.Area} is read-only for tag '{tag.Id}'.");
-        await master.WriteMultipleRegistersAsync(_options.UnitId, point.Address, EncodeRegisters(tag, converted, _options.RegisterOrder));
+        await RunProtocolAsync(() => master.WriteMultipleRegistersAsync(_options.UnitId, point.Address, EncodeRegisters(tag, converted, _options.RegisterOrder)), ct, $"write registers {tag.Address}");
     }
 
     private sealed record ReadWindow(ModbusArea Area, ushort Start, ushort Count, IReadOnlyList<DeviceTagDefinition> Tags);
@@ -357,8 +417,8 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
         if (window.Area is ModbusArea.Coil or ModbusArea.DiscreteInput)
         {
             var bits = window.Area == ModbusArea.Coil
-                ? await master.ReadCoilsAsync(_options.UnitId, window.Start, window.Count)
-                : await master.ReadInputsAsync(_options.UnitId, window.Start, window.Count);
+                ? await RunProtocolAsync(() => master.ReadCoilsAsync(_options.UnitId, window.Start, window.Count), ct, $"read coils {window.Start}+{window.Count}")
+                : await RunProtocolAsync(() => master.ReadInputsAsync(_options.UnitId, window.Start, window.Count), ct, $"read discrete inputs {window.Start}+{window.Count}");
             foreach (var tag in window.Tags)
             {
                 var p = ModbusAddress.Parse(tag.Address);
@@ -368,8 +428,8 @@ public sealed class NModbusTcpDeviceDriver : IDeviceDriver, IDeviceBatchDriver, 
         }
 
         var regs = window.Area == ModbusArea.HoldingRegister
-            ? await master.ReadHoldingRegistersAsync(_options.UnitId, window.Start, window.Count)
-            : await master.ReadInputRegistersAsync(_options.UnitId, window.Start, window.Count);
+            ? await RunProtocolAsync(() => master.ReadHoldingRegistersAsync(_options.UnitId, window.Start, window.Count), ct, $"read holding registers {window.Start}+{window.Count}")
+            : await RunProtocolAsync(() => master.ReadInputRegistersAsync(_options.UnitId, window.Start, window.Count), ct, $"read input registers {window.Start}+{window.Count}");
         foreach (var tag in window.Tags)
         {
             var p = ModbusAddress.Parse(tag.Address);

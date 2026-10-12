@@ -6,6 +6,11 @@ $root = Split-Path -Parent $PSScriptRoot
 # regression tests (scripts/test-data-migration.ps1 dot-sources the same file).
 . (Join-Path $PSScriptRoot 'lib/DataMigration.ps1')
 
+# R08 smoke test spawns the staged host via Start-Process: normalize case-duplicate
+# environment entries first (a Git Bash/msys parent would otherwise break the spawn).
+. (Join-Path $PSScriptRoot 'lib/ProcessEnvironment.ps1')
+Remove-DuplicateProcessEnvironment
+
 # Native commands (dotnet / npm) do not fail the script through ErrorActionPreference:
 # every step must check its exit code explicitly and abort with a non-zero code.
 function Assert-LastExitCode([string]$step) {
@@ -86,6 +91,80 @@ if (-not (Test-Path (Join-Path $staging 'VisionStudio.Api.dll'))) {
     exit 1
 }
 
+# R08 (2026-10-12 review): smoke-start the staged candidate before swapping. A package that cannot
+# start must never replace the current version. The candidate runs on a loopback port with an
+# isolated data root (nothing touches production data); failure aborts with the old package intact.
+$smokeData = Join-Path ([System.IO.Path]::GetTempPath()) ("visionstudio-smoke-" + [Guid]::NewGuid().ToString("N"))
+New-Item $smokeData -ItemType Directory -Force | Out-Null
+$smokePort = Get-Random -Minimum 20000 -Maximum 40000
+$smokeOutLog = Join-Path $smokeData 'host.out.log'
+$smokeErrLog = Join-Path $smokeData 'host.err.log'
+$smokeProcess = $null
+$smokeHealthy = $false
+try {
+    $previousDataRoot = $env:VISIONSTUDIO_DATA_ROOT
+    $previousAspNetEnv = $env:ASPNETCORE_ENVIRONMENT
+    try {
+        $env:VISIONSTUDIO_DATA_ROOT = $smokeData
+        # Development keeps the smoke run free of production-only startup guards; it still proves
+        # the package boots, binds Kestrel and serves the health endpoint with the real binaries.
+        $env:ASPNETCORE_ENVIRONMENT = 'Development'
+        $smokeProcess = Start-Process -FilePath 'dotnet' `
+            -ArgumentList @("`"$(Join-Path $staging 'VisionStudio.Api.dll')`"", '--urls', "http://127.0.0.1:$smokePort") `
+            -PassThru -NoNewWindow -RedirectStandardOutput $smokeOutLog -RedirectStandardError $smokeErrLog
+    }
+    finally {
+        $env:VISIONSTUDIO_DATA_ROOT = $previousDataRoot
+        $env:ASPNETCORE_ENVIRONMENT = $previousAspNetEnv
+    }
+
+    $smokeDeadline = (Get-Date).AddSeconds(90)
+    while ((Get-Date) -lt $smokeDeadline) {
+        if ($smokeProcess.HasExited) { break }
+        try {
+            $smokeResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$smokePort/api/health" -UseBasicParsing -TimeoutSec 3
+            if ($smokeResponse.StatusCode -eq 200) { $smokeHealthy = $true; break }
+        }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+}
+finally {
+    if ($smokeProcess -and -not $smokeProcess.HasExited) {
+        Stop-Process -Id $smokeProcess.Id -Force
+        $smokeProcess.WaitForExit(10000) | Out-Null
+    }
+}
+if (-not $smokeHealthy) {
+    Write-Host "Candidate package smoke test FAILED: the staged host did not serve http://127.0.0.1:$smokePort/api/health within 90s. Keeping the current package." -ForegroundColor Red
+    if (Test-Path $smokeErrLog) {
+        Write-Host "--- staged host stderr (tail) ---"
+        Get-Content $smokeErrLog -Tail 20
+    }
+    Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    exit 1
+}
+Write-Host "Candidate package smoke test passed: health endpoint responded on the staged binaries."
+Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+
+# R08: pre-upgrade database checkpoint. The new host migrates the database forward, and an older
+# host refuses to start on a newer schema - rolling back the package alone is not enough. Snapshot
+# the live database BEFORE the swap; stop the runtime first (an active writer can leave the copy
+# inconsistent, this script warns by design and proceeds).
+$liveDb = Join-Path $fullDataRoot 'visionstudio.db'
+$checkpointDir = Join-Path $fullDataRoot 'upgrade-checkpoints'
+if (Test-Path $liveDb) {
+    $checkpoint = Join-Path $checkpointDir (Get-Date -Format yyyyMMddHHmmss)
+    New-Item $checkpoint -ItemType Directory -Force | Out-Null
+    Copy-Item $liveDb (Join-Path $checkpoint 'visionstudio.db') -Force
+    Get-ChildItem $fullDataRoot -Filter 'visionstudio.db-*' -File | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $checkpoint $_.Name) -Force
+    }
+    Write-Host "Pre-upgrade database checkpoint saved to: $checkpoint" -ForegroundColor Yellow
+} else {
+    Write-Host "No live database at '$liveDb'; nothing to checkpoint before the upgrade."
+}
+
 # 迁移旧包数据到外部数据根（在删除任何东西之前完成）：F07 先把数据复制到暂存目录，校验文件
 # 数量/字节数并写入完成标记，最后原子改名到最终数据根——中断重试只会留下可替换的暂存残留，
 # 绝不会把半份数据当作有效目标。已有数据（含上次完整迁移的标记）一律跳过、不覆盖。
@@ -119,3 +198,11 @@ Write-Host "Runtime published to: $fullOutput"
 Write-Host "Production data root (outside the package): $fullDataRoot"
 Write-Host "Previous version kept at: $previous"
 Write-Host "Start the runtime with: `$env:VISIONSTUDIO_DATA_ROOT='$fullDataRoot'; scripts/run-runtime.ps1"
+Write-Host ""
+Write-Host "Rollback procedure (R08):" -ForegroundColor Yellow
+Write-Host "  1. Stop the host, then restore the previous package: '$previous' -> '$fullOutput'."
+Write-Host "  2. Copy the pre-upgrade database checkpoint back over '$liveDb' BEFORE starting the old"
+Write-Host "     host (a database migrated by the new version is rejected by the old schema guard)."
+Write-Host "  3. Re-verify physical device state before resuming production - a data rollback NEVER"
+Write-Host "     replaces device reconciliation, and unresolved device-action intents must be resolved"
+Write-Host "     with recorded evidence (see the device-action safety gate)."

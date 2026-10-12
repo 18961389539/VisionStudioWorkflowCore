@@ -7,7 +7,8 @@ namespace VisionStudio.Engine.Runtime;
 
 public sealed class WorkflowCoreVisionRunner(
     WorkflowPlanCache plans,
-    ISyncWorkflowRunner syncRunner) : IVisionWorkflowRunner
+    ISyncWorkflowRunner syncRunner,
+    IVisionRunExceptionObserver? exceptionObserver = null) : IVisionWorkflowRunner
 {
 
     public async Task<WorkflowRunResult> RunAsync(
@@ -163,6 +164,10 @@ public sealed class WorkflowCoreVisionRunner(
         catch (Exception ex)
         {
             total.Stop();
+            // R10：统一运行边界的原始异常记录点——结果只承载简洁诊断（data.Error ?? ex.Message），
+            // 完整异常链（堆栈/InnerException）交给宿主观察者写入日志。
+            exceptionObserver?.OnRunException(
+                new VisionRunExceptionContext(effectiveRunId, data.HaltNodeId, workflow.Id, workflow.Name), ex);
             return new WorkflowRunResult(
                 effectiveRunId,
                 false,

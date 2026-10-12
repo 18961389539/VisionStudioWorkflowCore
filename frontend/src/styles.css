@@ -136,12 +136,9 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .workflow-dirty { flex: none; font-size: 11px; line-height: 16px; }
 /* 右组永不收缩：收缩由左组承担（工作流名截断），否则 flex-end + 溢出会把左侧子项（示例选择器）裁到起点侧而不可达 */
 .topbar-right { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-/* P0-3：窄窗口把顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见 */
+/* P0-3：窄窗口把顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见。
+   窄屏隐藏/显示的媒体查询在下方 .topbar-center 基础规则之后（P1：媒体查询不提升层叠优先级，置于此处会被 display:flex 覆盖） */
 .topbar-more { display: none; }
-@media (max-width: 1200px) {
-  .topbar-center { display: none; }
-  .topbar-more { display: inline-flex; }
-}
 .menu-caret { margin-left: 2px; font-size: 9px; opacity: .55; }
 .brand { flex: none; font-size: 16px; font-weight: 700; letter-spacing: .3px; }
 .brand span { color: var(--vs-text-brand); font-weight: 600; }
@@ -724,6 +721,11 @@ body.resizing-x, body.resizing-y { user-select: none; }
 
 /* 中段：模板 + 领域菜单 */
 .topbar-center { flex: none; display: flex; align-items: center; gap: 6px; }
+/* P1：窄屏收起中段并显示“更多”。媒体查询不提升层叠优先级，必须位于上方基础规则之后，否则 display:none 会被 display:flex 覆盖（勿前移） */
+@media (max-width: 1200px) {
+  .topbar-center { display: none; }
+  .topbar-more { display: inline-flex; }
+}
 .topbar-select-label { color: var(--vs-text-4); font-size: 12px; }
 /* 账号按钮（fixed 融入顶栏右端）让出空间，避免盖住“运行” */
 .topbar-right { padding-right: 108px; }

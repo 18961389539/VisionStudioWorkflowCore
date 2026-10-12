@@ -217,7 +217,8 @@ public sealed class JobStore
 
     public async Task<JobDescriptor> PublishAsync(string id, int version, string action, RuntimeDependencyManifest dependencyManifest, CancellationToken ct)
     {
-        await using var connection = await _db.OpenConnectionAsync(ct);
+        // R03：发布是不可重放的现场动作基准——发布事务必须能在断电后存活。
+        await using var connection = await _db.OpenConnectionAsync(ct, strongDurability: true);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var row = await LoadJobRowAsync(connection, id, transaction, ct)
             ?? throw new ApiNotFoundException($"Job '{id}' does not exist.");
