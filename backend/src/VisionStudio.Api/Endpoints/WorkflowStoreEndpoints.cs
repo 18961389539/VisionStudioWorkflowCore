@@ -31,12 +31,13 @@ public static class WorkflowStoreEndpoints
 
         app.MapGet("/api/workflows/{id}", async (string id, WorkflowStore store, HttpContext http, CancellationToken ct) =>
         {
-            var workflow = await store.LoadAsync(id, ct);
-            if (workflow is null) return Results.NotFound();
-            // R07：当前修订随 GET 输出——客户端保存时原样带回（expectedRevision），并发冲突可见。
-            if (await store.GetRevisionAsync(id, ct) is { } revision)
+            // R07/F04：内容与修订在同一临界区读取（同代）——响应头与 body 永远匹配；
+            // 修订漂移（保存中断/外部改动）以内容为权威自愈后再返回。
+            var loaded = await store.LoadWithRevisionAsync(id, ct);
+            if (loaded is not { } found) return Results.NotFound();
+            if (found.Revision is { } revision)
                 http.Response.Headers["X-Workflow-Revision"] = revision;
-            return Results.Ok(workflow);
+            return Results.Ok(found.Workflow);
         });
 
         return app;

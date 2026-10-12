@@ -1,4 +1,4 @@
-param([string]$Output = "", [string]$DataRoot = "")
+﻿param([string]$Output = "", [string]$DataRoot = "")
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
@@ -91,9 +91,19 @@ if (-not (Test-Path (Join-Path $staging 'VisionStudio.Api.dll'))) {
     exit 1
 }
 
-# R08 (2026-10-12 review): smoke-start the staged candidate before swapping. A package that cannot
-# start must never replace the current version. The candidate runs on a loopback port with an
-# isolated data root (nothing touches production data); failure aborts with the old package intact.
+# R08/F07 (2026-10-12 review): smoke-start the staged candidate before swapping. A package that
+# cannot start must never replace the current version. The candidate runs with ITS OWN content
+# root (WorkingDirectory=$staging) under the Production environment with an isolated data root and
+# the approved test configuration (security and simulators off), and the check verifies more than
+# an HTTP 200: required assets, health endpoint, the packaged frontend (wwwroot index) and a clean
+# plugin/dependency load in the host log.
+$smokeRequiredAssets = @('VisionStudio.Api.dll', 'appsettings.json', 'wwwroot/index.html', 'VisionStudio.Plugin.Worker.dll')
+$missingAssets = @($smokeRequiredAssets | Where-Object { -not (Test-Path (Join-Path $staging $_)) })
+if ($missingAssets.Count -gt 0) {
+    Write-Host "Candidate package is missing required assets: $($missingAssets -join ', '). Keeping the current package." -ForegroundColor Red
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    exit 1
+}
 $smokeData = Join-Path ([System.IO.Path]::GetTempPath()) ("visionstudio-smoke-" + [Guid]::NewGuid().ToString("N"))
 New-Item $smokeData -ItemType Directory -Force | Out-Null
 $smokePort = Get-Random -Minimum 20000 -Maximum 40000
@@ -101,21 +111,30 @@ $smokeOutLog = Join-Path $smokeData 'host.out.log'
 $smokeErrLog = Join-Path $smokeData 'host.err.log'
 $smokeProcess = $null
 $smokeHealthy = $false
+$smokeIndexOk = $false
 try {
     $previousDataRoot = $env:VISIONSTUDIO_DATA_ROOT
     $previousAspNetEnv = $env:ASPNETCORE_ENVIRONMENT
+    $previousSecurity = $env:Security__Enabled
+    $previousRobotSim = $env:RobotTcpSimulator__Enabled
     try {
         $env:VISIONSTUDIO_DATA_ROOT = $smokeData
-        # Development keeps the smoke run free of production-only startup guards; it still proves
-        # the package boots, binds Kestrel and serves the health endpoint with the real binaries.
-        $env:ASPNETCORE_ENVIRONMENT = 'Development'
+        # Production environment exercises the same configuration chain as the deploy target;
+        # the startup guards are satisfied through the approved test configuration (security off,
+        # simulators off; AutoStart stays off because the isolated data root has no config file).
+        $env:ASPNETCORE_ENVIRONMENT = 'Production'
+        $env:Security__Enabled = 'false'
+        $env:RobotTcpSimulator__Enabled = 'false'
         $smokeProcess = Start-Process -FilePath 'dotnet' `
             -ArgumentList @("`"$(Join-Path $staging 'VisionStudio.Api.dll')`"", '--urls', "http://127.0.0.1:$smokePort") `
+            -WorkingDirectory $staging `
             -PassThru -NoNewWindow -RedirectStandardOutput $smokeOutLog -RedirectStandardError $smokeErrLog
     }
     finally {
         $env:VISIONSTUDIO_DATA_ROOT = $previousDataRoot
         $env:ASPNETCORE_ENVIRONMENT = $previousAspNetEnv
+        $env:Security__Enabled = $previousSecurity
+        $env:RobotTcpSimulator__Enabled = $previousRobotSim
     }
 
     $smokeDeadline = (Get-Date).AddSeconds(90)
@@ -127,6 +146,14 @@ try {
         }
         catch { Start-Sleep -Milliseconds 500 }
     }
+    if ($smokeHealthy) {
+        # The packaged frontend must be served by the candidate's own content root.
+        try {
+            $indexResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$smokePort/" -UseBasicParsing -TimeoutSec 5
+            $smokeIndexOk = $indexResponse.StatusCode -eq 200 -and ([string]$indexResponse.Content) -match 'id="root"'
+        }
+        catch { $smokeIndexOk = $false }
+    }
 }
 finally {
     if ($smokeProcess -and -not $smokeProcess.HasExited) {
@@ -134,32 +161,36 @@ finally {
         $smokeProcess.WaitForExit(10000) | Out-Null
     }
 }
-if (-not $smokeHealthy) {
-    Write-Host "Candidate package smoke test FAILED: the staged host did not serve http://127.0.0.1:$smokePort/api/health within 90s. Keeping the current package." -ForegroundColor Red
-    if (Test-Path $smokeErrLog) {
-        Write-Host "--- staged host stderr (tail) ---"
-        Get-Content $smokeErrLog -Tail 20
+# Plugin/dependency load failures (including a missing worker DLL) fail the publish too - the
+# candidate package assets must be complete.
+$smokePluginFailure = if (Test-Path $smokeOutLog) { [bool](Select-String -Path $smokeOutLog -Pattern 'Failed to load VisionStudio plugin package' -Quiet) } else { $false }
+if (-not $smokeHealthy -or -not $smokeIndexOk -or $smokePluginFailure) {
+    Write-Host "Candidate package smoke test FAILED (health=$smokeHealthy, frontend=$smokeIndexOk, pluginLoadFailure=$smokePluginFailure). Keeping the current package." -ForegroundColor Red
+    foreach ($logPath in @($smokeOutLog, $smokeErrLog)) {
+        if (Test-Path $logPath) {
+            Write-Host "--- staged host log (tail): $logPath ---"
+            Get-Content $logPath -Tail 20
+        }
     }
     Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
     exit 1
 }
-Write-Host "Candidate package smoke test passed: health endpoint responded on the staged binaries."
+Write-Host "Candidate package smoke test passed: health + packaged frontend + clean plugin load on the staged binaries."
 Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
 
-# R08: pre-upgrade database checkpoint. The new host migrates the database forward, and an older
-# host refuses to start on a newer schema - rolling back the package alone is not enough. Snapshot
-# the live database BEFORE the swap; stop the runtime first (an active writer can leave the copy
-# inconsistent, this script warns by design and proceeds).
+# R08/F06 (2026-10-12 review): pre-upgrade database checkpoint via the SQLite Online Backup API
+# (consistent under an active writer/checkpoint - the old sequential file copy could tear), with
+# integrity + schema recorded in a manifest. The new host migrates the database forward and an
+# older host refuses a newer schema, so rolling back the package alone is not enough; restore the
+# checkpoint with the maintenance tool in a stop-the-world window (see the rollback notes below).
 $liveDb = Join-Path $fullDataRoot 'visionstudio.db'
 $checkpointDir = Join-Path $fullDataRoot 'upgrade-checkpoints'
 if (Test-Path $liveDb) {
     $checkpoint = Join-Path $checkpointDir (Get-Date -Format yyyyMMddHHmmss)
     New-Item $checkpoint -ItemType Directory -Force | Out-Null
-    Copy-Item $liveDb (Join-Path $checkpoint 'visionstudio.db') -Force
-    Get-ChildItem $fullDataRoot -Filter 'visionstudio.db-*' -File | ForEach-Object {
-        Copy-Item $_.FullName (Join-Path $checkpoint $_.Name) -Force
-    }
+    dotnet run --project "$root/backend/src/VisionStudio.SqliteSnapshot/VisionStudio.SqliteSnapshot.csproj" -c Release -- snapshot $liveDb $checkpoint
+    Assert-LastExitCode 'pre-upgrade database checkpoint (online backup API)'
     Write-Host "Pre-upgrade database checkpoint saved to: $checkpoint" -ForegroundColor Yellow
 } else {
     Write-Host "No live database at '$liveDb'; nothing to checkpoint before the upgrade."
@@ -199,10 +230,14 @@ Write-Host "Production data root (outside the package): $fullDataRoot"
 Write-Host "Previous version kept at: $previous"
 Write-Host "Start the runtime with: `$env:VISIONSTUDIO_DATA_ROOT='$fullDataRoot'; scripts/run-runtime.ps1"
 Write-Host ""
-Write-Host "Rollback procedure (R08):" -ForegroundColor Yellow
+Write-Host "Rollback procedure (R08/F06):" -ForegroundColor Yellow
 Write-Host "  1. Stop the host, then restore the previous package: '$previous' -> '$fullOutput'."
-Write-Host "  2. Copy the pre-upgrade database checkpoint back over '$liveDb' BEFORE starting the old"
-Write-Host "     host (a database migrated by the new version is rejected by the old schema guard)."
+Write-Host "  2. Restore the pre-upgrade database from its checkpoint with the maintenance tool"
+Write-Host "     (the tool verifies the checkpoint, cleans target WAL/SHM sidecars and replaces the"
+Write-Host "     database as one unit):"
+Write-Host "       dotnet run --project backend/src/VisionStudio.SqliteSnapshot -c Release -- restore <checkpointDir> '$liveDb'"
+Write-Host "     (a database migrated by the new version is rejected by the old schema guard, so the"
+Write-Host "     package rollback alone is not enough)."
 Write-Host "  3. Re-verify physical device state before resuming production - a data rollback NEVER"
 Write-Host "     replaces device reconciliation, and unresolved device-action intents must be resolved"
 Write-Host "     with recorded evidence (see the device-action safety gate)."

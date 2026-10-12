@@ -5,10 +5,25 @@ using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
 
+/// <summary>
+/// 工作流文档的持久化存储（data/workflows 下的 JSON 文件 + 旁路修订记录）。
+///
+/// R07：乐观并发基线——'{id}.revision.json' 保存内容的 SHA-256，保存方携带 expectedRevision
+/// 校验，不一致返回 409。
+/// F04（2026-10-12 复核）：**读-比-写必须在同一临界区**——多请求可同时通过同一预期修订产生
+/// 覆盖与共享临时文件竞争；GET 的"内容 + 修订"分离读取也可能返回两代数据。修复要点：
+///   · 进程内所有保存与一致性读取经同一个信号量串行（本产品单宿主部署；跨进程部署需另行约束）；
+///   · 临时文件带 GUID，消除共享写/删除竞争；
+///   · 读取时校验"修订 == 内容哈希"，不一致以**内容为权威**自愈修订记录——GET 返回的修订
+///     永远对应其 body；
+///   · 修订记录缺失（期望非空时）或损坏不再被当作"可覆盖的无基线"——一律 409，要求先核对/修复。
+/// </summary>
 public sealed class WorkflowStore
 {
     private readonly string _root;
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    /// <summary>F04：保存与一致性读取的进程内临界区（单宿主部署的并发契约）。</summary>
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public WorkflowStore(IWebHostEnvironment env)
     {
@@ -16,66 +31,112 @@ public sealed class WorkflowStore
         Directory.CreateDirectory(_root);
     }
 
-    /// <summary>R07：当前修订（旁路记录 '{id}.revision.json' 的内容哈希）；null = 尚无修订记录或记录不可读。</summary>
-    public async Task<string?> GetRevisionAsync(string id, CancellationToken cancellationToken)
+    /// <summary>R07：当前修订的轻量读取（不经内容校验）。一致性读取请用 <see cref="LoadWithRevisionAsync"/>。</summary>
+    public Task<string?> GetRevisionAsync(string id, CancellationToken cancellationToken)
     {
         string path;
         try { path = RevisionPath(ValidateId(id)); }
-        catch (ArgumentException) { return null; }
-        return await ReadRevisionAsync(path, cancellationToken);
+        catch (ArgumentException) { return Task.FromResult<string?>(null); }
+        var (_, readable, value) = ReadRevision(path);
+        return Task.FromResult(readable ? value : null);
     }
 
     /// <summary>
-    /// R07（2026-10-12 复审）：乐观并发校验与保存。
-    /// expectedRevision 为 null 时不校验（历史调用方的兼容路径）；显式提供时必须与磁盘当前修订
-    /// 一致（空串 = "期望尚无修订记录"），不一致抛 409——绝不静默覆盖另一编辑者已保存的修改。
-    /// 返回本次写入后的新修订值（同时写入 '{id}.revision.json'，供 GET 端点输出给客户端）。
+    /// R07/F04：乐观并发校验与保存。整个"读取当前修订 → 比较 → 写入内容与修订"在进程内串行执行。
+    /// expectedRevision 为 null 时不校验（历史调用方的兼容路径）；显式提供时：
+    ///   · 空串 = 期望尚无修订记录（文档从未保存或已一致迁移）；
+    ///   · 非空必须与磁盘当前修订一致；
+    ///   · 修订记录缺失但期望非空、或记录损坏 ⇒ 409（无法核对，绝不静默覆盖）。
+    /// 返回写入后的新修订（= 落盘内容的 SHA-256）。
     /// </summary>
     public async Task<string> SaveAsync(string id, WorkflowDefinition workflow, CancellationToken cancellationToken, string? expectedRevision = null)
     {
         var safeId = ValidateId(id);
         var finalPath = Path.Combine(_root, safeId + ".json");
         var revisionPath = RevisionPath(safeId);
-        if (expectedRevision is not null)
-        {
-            var current = await ReadRevisionAsync(revisionPath, cancellationToken) ?? string.Empty;
-            if (!string.Equals(expectedRevision.Trim(), current, StringComparison.Ordinal))
-                throw new ApiConflictException(
-                    $"Workflow '{safeId}' was modified by another session after it was loaded (expected revision '{expectedRevision.Trim()}', current '{current}'). " +
-                    "Load the latest version to review the other change before deciding to overwrite.");
-        }
 
-        // 原子写入：先写临时文件再整体替换。旧的 File.Create 直写方式在取消/异常时会留下截断的半截文件。
-        // R07：先序列化到字节、同一份字节既落盘又计算内容哈希——修订值与落盘内容严格一致。
-        var payload = JsonSerializer.SerializeToUtf8Bytes(workflow with { Id = id }, _json);
-        var revision = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
-        var tempPath = Path.Combine(_root, $".{safeId}.{Guid.NewGuid():N}.tmp");
+        await _gate.WaitAsync(cancellationToken);
         try
         {
-            await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            if (expectedRevision is not null)
             {
-                await stream.WriteAsync(payload, cancellationToken);
+                var expected = expectedRevision.Trim();
+                var (exists, readable, current) = ReadRevision(revisionPath);
+                if (!exists)
+                {
+                    if (expected.Length != 0)
+                        throw Conflict(safeId, expected, "no revision record exists",
+                            "The stored document has no revision record (fresh store or manual cleanup); a non-empty baseline cannot be verified.");
+                }
+                else if (!readable)
+                {
+                    throw Conflict(safeId, expected, "revision record unreadable",
+                        "The revision record exists but cannot be read; reconcile or repair it before saving (it cannot be treated as a safe no-baseline).");
+                }
+                else if (!string.Equals(expected, current, StringComparison.Ordinal))
+                {
+                    throw Conflict(safeId, expected, current ?? string.Empty,
+                        "Load the latest version to review the other change before deciding to overwrite.");
+                }
             }
-            File.Move(tempPath, finalPath, overwrite: true);
-        }
-        finally
-        {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* 尽力清理，不影响主流程 */ }
-        }
 
-        // 修订记录随内容一并更新（内容落盘成功后才写；原子写防止半截记录）。
-        var revisionTemp = revisionPath + ".tmp";
+            // 原子写入：先写临时文件再整体替换。旧的 File.Create 直写方式在取消/异常时会留下截断的半截文件。
+            // R07：先序列化到字节、同一份字节既落盘又计算内容哈希——修订值与落盘内容严格一致。
+            var payload = JsonSerializer.SerializeToUtf8Bytes(workflow with { Id = id }, _json);
+            var revision = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+            var tempPath = Path.Combine(_root, $".{safeId}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    await stream.WriteAsync(payload, cancellationToken);
+                }
+                File.Move(tempPath, finalPath, overwrite: true);
+            }
+            finally
+            {
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* 尽力清理，不影响主流程 */ }
+            }
+
+            // 修订记录随内容一并更新（内容落盘成功后才写；GUID 临时名 + 原子替换）。
+            // 若此处失败：内容已生效、修订短暂漂移——读取路径的"内容为权威"自愈会在下一次 GET
+            // 把修订对齐到内容哈希（不变量：修订 == 内容指纹）。
+            await WriteRevisionAsync(revisionPath, revision, cancellationToken);
+            return revision;
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// F04：一致性读取——返回与内容同代的修订。读取时校验"修订 == 内容哈希"（保存中断、
+    /// 外部改动会让旁路记录漂移），不一致时以**内容为权威**重写修订记录再返回；
+    /// 保证 GET 的 body 与 X-Workflow-Revision 永远同代。
+    /// </summary>
+    public async Task<(WorkflowDefinition Workflow, string? Revision)?> LoadWithRevisionAsync(string id, CancellationToken cancellationToken)
+    {
+        string safeId;
+        try { safeId = ValidateId(id); }
+        catch (ArgumentException) { return null; }
+        var path = Path.Combine(_root, safeId + ".json");
+        var revisionPath = RevisionPath(safeId);
+
+        await _gate.WaitAsync(cancellationToken);
         try
         {
-            await File.WriteAllBytesAsync(revisionTemp,
-                JsonSerializer.SerializeToUtf8Bytes(new WorkflowRevision(revision, DateTimeOffset.UtcNow), _json), cancellationToken);
-            File.Move(revisionTemp, revisionPath, overwrite: true);
+            if (!File.Exists(path)) return null;
+            var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+            var workflow = JsonSerializer.Deserialize<WorkflowDefinition>(bytes, _json);
+            if (workflow is null) return null;
+            var contentRevision = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var (_, readable, value) = ReadRevision(revisionPath);
+            if (!readable || !string.Equals(value, contentRevision, StringComparison.Ordinal))
+            {
+                try { await WriteRevisionAsync(revisionPath, contentRevision, cancellationToken); }
+                catch { /* 自愈写入失败：本次仍返回内容对应的修订，下一次读取重试 */ }
+            }
+            return (workflow, contentRevision);
         }
-        finally
-        {
-            try { if (File.Exists(revisionTemp)) File.Delete(revisionTemp); } catch { /* 尽力清理 */ }
-        }
-        return revision;
+        finally { _gate.Release(); }
     }
 
     public async Task<WorkflowDefinition?> LoadAsync(string id, CancellationToken cancellationToken)
@@ -94,6 +155,9 @@ public sealed class WorkflowStore
         return await JsonSerializer.DeserializeAsync<WorkflowDefinition>(stream, _json, cancellationToken);
     }
 
+    private static ApiConflictException Conflict(string safeId, string expected, string current, string guidance)
+        => new($"Workflow '{safeId}' revision check failed (expected '{expected}', current '{current}'). {guidance}");
+
     /// <summary>
     /// 严格校验工作流 ID：只允许字母、数字、连字符与下划线。
     /// 旧实现把非法字符“过滤掉”，会让 a.b 与 ab 落到同一个文件，存在相互覆盖的风险；
@@ -111,18 +175,33 @@ public sealed class WorkflowStore
 
     private string RevisionPath(string safeId) => Path.Combine(_root, safeId + ".revision.json");
 
-    /// <summary>R07：读取修订记录。损坏/缺失按"无基线"处理——并发保护是 best-effort，工作流 JSON 才是权威数据。</summary>
-    private async Task<string?> ReadRevisionAsync(string revisionPath, CancellationToken ct)
+    /// <summary>R07/F04：修订记录状态——存在性、可读性与值分离："损坏"不再等同于"无基线"。</summary>
+    private (bool Exists, bool Readable, string? Value) ReadRevision(string revisionPath)
     {
-        if (!File.Exists(revisionPath)) return null;
+        if (!File.Exists(revisionPath)) return (false, true, null);
         try
         {
-            var meta = JsonSerializer.Deserialize<WorkflowRevision>(await File.ReadAllBytesAsync(revisionPath, ct), _json);
-            return string.IsNullOrWhiteSpace(meta?.Revision) ? null : meta.Revision;
+            var meta = JsonSerializer.Deserialize<WorkflowRevision>(File.ReadAllBytes(revisionPath), _json);
+            return string.IsNullOrWhiteSpace(meta?.Revision) ? (true, false, null) : (true, true, meta.Revision);
         }
         catch
         {
-            return null;
+            return (true, false, null);
+        }
+    }
+
+    private async Task WriteRevisionAsync(string revisionPath, string revision, CancellationToken ct)
+    {
+        var temp = $"{revisionPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temp,
+                JsonSerializer.SerializeToUtf8Bytes(new WorkflowRevision(revision, DateTimeOffset.UtcNow), _json), ct);
+            File.Move(temp, revisionPath, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* 尽力清理 */ }
         }
     }
 

@@ -574,6 +574,13 @@ public sealed class ProductionRuntimeService
                 stopTimedOut = true;
                 _logger.LogError("Production runtime loop did not stop within configured timeout; the host will not claim Stopped while work may still be executing.");
             }
+            // R05/F02（2026-10-12 复核）：循环已结束但 Task 失败（例如 writer 释放时重抛追溯持久化
+            // 错误）——错误证据已在其边界记录；这里吸收后继续完成停止收尾，绝不以异常中断使状态
+            // 永久卡在 Stopping。设备所有权的释放仍由下方统一收尾点执行（未结束的循环不会走到这里）。
+            catch (Exception ex) when (loop.IsCompleted)
+            {
+                _logger.LogWarning(ex, "Production runtime loop task ended with an error during stop; completing the resource cleanup and releasing the lease.");
+            }
         }
 
         if (stopTimedOut && loop is { IsCompleted: false })
@@ -1030,7 +1037,7 @@ public sealed class ProductionRuntimeService
 
     private async Task LoopGuardedAsync(PublishedJobSnapshot locked, CancellationToken ct)
     {
-        await using var writer = new ProductionTraceWriter(_traces, _runs, _traceOptions, _logger);
+        var writer = new ProductionTraceWriter(_traces, _runs, _traceOptions, _logger);
         try
         {
             lock (_stateSync) _traceWriter = writer;
@@ -1054,6 +1061,15 @@ public sealed class ProductionRuntimeService
                 // R05：循环退出时若有在途提交未收尾（预算超时/存储挂起），保留引用以禁止新周期直到排空。
                 if (writer.PendingCount > 0) _drainingTraceWriter = writer;
                 _traceWriter = null;
+            }
+            // R05/F02（2026-10-12 复核）：writer 释放必须在本异常边界内——追溯 worker 失败时
+            // DisposeAsync 会重抛持久化异常；此前它在 try 之外（await using）逃出本方法，把 loop
+            // Task 变成 faulted，Stop 等待时吞不掉、状态永久卡在 Stopping。失败证据在此记录并吸收；
+            // 未闭合的设备动作意图不受影响（仍会阻断后续启动）。
+            try { await writer.DisposeAsync(); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Production trace writer drain surfaced a persistence failure during shutdown; the device-action intent gate remains in force.");
             }
         }
     }

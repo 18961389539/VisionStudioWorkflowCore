@@ -487,6 +487,10 @@ public sealed class StorageBackupService
                     // 使"旧备份中的旧账本"无法清空/覆盖未闭合动作（当前事实）。
                     RestoreSafetyLedgerPreserve(ledgerPreserve, ledgerRelativePaths);
                 }
+                // R01/F01（2026-10-12 复核）：提交前的最后一步——耐久登记"恢复后必须核对"事实。
+                // 写入失败**直接抛出**（进入失败/回滚路径），绝不在"核对标记缺失"的情况下提交；
+                // 提交点之后进程崩溃时该事实已在磁盘上（启动闸门据此持续阻断，直到提交核对证据）。
+                RegisterPostRestoreReconciliation(manifest.BackupId);
                 // Commit only after the installed generation matches the hashes captured in the
                 // durable intent. This makes the transaction record evidence, not just a list of paths.
                 // Q08：SQLite Backup API 产生的是**语义等价、字节不同**的文件（页布局/头部字段/空闲页），
@@ -608,38 +612,6 @@ public sealed class StorageBackupService
                         }
                     }
                 }
-            }
-
-            // R01（2026-10-12 复审）：系统恢复本身进入独立的"恢复后设备核对"状态——恢复替换了
-            // 设备/插件/配置资产，物理设备状态与恢复后配置的一致性必须现场确认后才能启动生产。
-            // 仅在当前**没有**未闭合动作时写入合成状态；已有未闭合动作保持不变（它本身已阻断
-            // 启动并要求核对，绝不能被合成状态覆盖——否则丢失原故障的设备/相机清单）。
-            try
-            {
-                var carriedOver = _safetyStore.Load();
-                if (carriedOver is null || !DeviceActionSafetyStore.IsUnresolved(carriedOver))
-                {
-                    var restoreRunId = $"storage-restore:{manifest.BackupId}";
-                    _safetyStore.Save(new DeviceActionSafetyState(
-                        restoreRunId, [], [], DateTimeOffset.UtcNow,
-                        $"a storage restore from backup '{manifest.BackupId}' replaced system assets (devices, plugins, configuration); " +
-                        "verify that the physical device state matches the restored configuration before starting production.",
-                        Phase: DeviceActionSafetyPhase.Unknown,
-                        RunId: restoreRunId,
-                        DeviceFingerprints: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-                        ProcessId: null, CameraIds: []));
-                }
-                else
-                {
-                    _logger?.LogWarning(
-                        "Storage restore completed while an unresolved device-action safety state was carried over (run {RunId}); the existing reconciliation gate remains in force.",
-                        carriedOver.RunId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex,
-                    "Storage restore completed but the post-restore device reconciliation state could not be persisted; manually verify device state before starting production.");
             }
 
             // R04：恢复正常完成（可能覆盖了之前一次失败的失败锁）后，解除协调器失败锁，
@@ -868,6 +840,34 @@ public sealed class StorageBackupService
             }
         }
         return relativePaths;
+    }
+
+    /// <summary>
+    /// R01/F01（2026-10-12 复核）：提交前的最后一步——耐久登记"恢复后设备核对"事实。
+    /// 若写入失败**直接抛出**（恢复进入失败/回滚路径），绝不出现"恢复已提交但核对标记缺失"
+    /// 的窗口：提交点之后进程崩溃时，该事实已在磁盘上（或恢复从未提交）。
+    /// 当前已有未闭合动作时保持原状态不变（它本身已阻断启动并要求核对，绝不能被合成状态覆盖，
+    /// 否则会丢失原故障的设备/相机清单）。
+    /// </summary>
+    private void RegisterPostRestoreReconciliation(string backupId)
+    {
+        var carriedOver = _safetyStore.Load();
+        if (carriedOver is not null && DeviceActionSafetyStore.IsUnresolved(carriedOver))
+        {
+            _logger?.LogWarning(
+                "Storage restore completed while an unresolved device-action safety state was carried over (run {RunId}); the existing reconciliation gate remains in force.",
+                carriedOver.RunId);
+            return;
+        }
+        var restoreRunId = $"storage-restore:{backupId}";
+        _safetyStore.Save(new DeviceActionSafetyState(
+            restoreRunId, [], [], DateTimeOffset.UtcNow,
+            $"a storage restore from backup '{backupId}' replaced system assets (devices, plugins, configuration); " +
+            "verify that the physical device state matches the restored configuration before starting production.",
+            Phase: DeviceActionSafetyPhase.Unknown,
+            RunId: restoreRunId,
+            DeviceFingerprints: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            ProcessId: null, CameraIds: []));
     }
 
     /// <summary>R01：系统资产切换完成后，把安全账本严格复刻回恢复前状态（先清备份带入的版本，再回拷快照）。</summary>

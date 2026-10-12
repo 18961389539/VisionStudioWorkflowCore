@@ -73,13 +73,45 @@ public sealed class RunErrorCodeTests
         Assert.Equal("run-ok-1", result.RunId);
     }
 
+    [Fact]
+    public async Task NodeFault_ReportsOriginalExceptionToObserver()
+    {
+        // R10/F08（2026-10-12 复核）：普通节点故障被 WorkflowCore 捕获后经结果返回路径——
+        // 观察者必须收到**原始异常**（完整链）与准确的节点标识，而不是漏报（此前 observer_calls=0）。
+        var observer = new RecordingObserver();
+        await using var provider = BuildProvider(new ThrowingExecutor(), observer);
+        var runner = provider.GetRequiredService<WorkflowCoreVisionRunner>();
+
+        var result = await runner.RunAsync(CreateWorkflow(), runId: "run-observer-1");
+
+        Assert.False(result.Success);
+        var call = Assert.Single(observer.Calls);
+        Assert.Equal("run-observer-1", call.Context.RunId);
+        Assert.Equal("n1", call.Context.NodeId);
+        Assert.Equal("lifecycle", call.Context.WorkflowId);
+        Assert.Contains("boom", call.Exception.Message);
+    }
+
+    [Fact]
+    public async Task SuccessfulRun_DoesNotNotifyObserver()
+    {
+        var observer = new RecordingObserver();
+        await using var provider = BuildProvider(new SuccessExecutor(), observer);
+        var runner = provider.GetRequiredService<WorkflowCoreVisionRunner>();
+
+        var result = await runner.RunAsync(CreateWorkflow(), runId: "run-observer-ok");
+
+        Assert.True(result.Success, result.Error);
+        Assert.Empty(observer.Calls);
+    }
+
     private static WorkflowDefinition CreateWorkflow() => new(
         "lifecycle",
         "Lifecycle",
         [new NodeDefinition("n1", SuccessExecutor.NodeType, null, null, null)],
         []);
 
-    private static ServiceProvider BuildProvider(IVisionNodeExecutor executor)
+    private static ServiceProvider BuildProvider(IVisionNodeExecutor executor, IVisionRunExceptionObserver? observer = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -95,8 +127,15 @@ public sealed class RunErrorCodeTests
         services.AddTransient<VisionNodeStep>();
         services.AddTransient<VisionPipelineStep>();
         services.AddSingleton<WorkflowPlanCache>();
+        if (observer is not null) services.AddSingleton(observer);
         services.AddTransient<WorkflowCoreVisionRunner>();
         return services.BuildServiceProvider();
+    }
+
+    private sealed class RecordingObserver : IVisionRunExceptionObserver
+    {
+        public List<(VisionRunExceptionContext Context, Exception Exception)> Calls { get; } = [];
+        public void OnRunException(VisionRunExceptionContext context, Exception exception) => Calls.Add((context, exception));
     }
 
     private static NodeCatalogItem Catalog(string type) => new(

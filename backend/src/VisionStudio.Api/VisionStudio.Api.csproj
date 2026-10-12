@@ -17,6 +17,14 @@
     <InternalsVisibleTo Include="VisionStudio.Api.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <!-- F07（2026-10-12 复核）：插件是**运行时**资产（现场经插件包管理器或手动安装到运行目录），
+         不随仓库/发布包分发。Web SDK 默认把 plugins 下的 *.json（plugin.json）作为 Content 复制到
+         输出——形成"有清单无 DLL"的孤儿插件目录，宿主启动时报加载失败（2026-10-12 发布演练实测；
+         本地 dotnet run 不受影响，它直接读项目目录）。显式排除，保证构建/发布输出干净。 -->
+    <Content Remove="plugins\**" />
+    <None Remove="plugins\**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="McMaster.NETCore.Plugins" Version="2.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />

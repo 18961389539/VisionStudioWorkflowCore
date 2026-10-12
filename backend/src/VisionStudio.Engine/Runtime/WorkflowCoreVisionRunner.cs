@@ -63,6 +63,12 @@ public sealed class WorkflowCoreVisionRunner(
 
             var workflowComplete = instance.Status == WorkflowStatus.Complete && data.Error is null;
             var success = workflowComplete && reachedTarget;
+            // R10/F08（2026-10-12 复核）：普通节点故障被 WorkflowCore 捕获后经**结果返回路径**——
+            // 在此向观察者报告原始异常（含 InnerException/堆栈）并关联准确的故障节点标识。
+            // 两条路径互斥（节点异常不会再冒泡到外层 catch），每次运行至多报告一次（首个故障）。
+            if (data.FaultedException is { } faultedException)
+                exceptionObserver?.OnRunException(
+                    new VisionRunExceptionContext(effectiveRunId, data.FaultedNodeId ?? data.HaltNodeId, workflow.Id, workflow.Name), faultedException);
             var error = data.Error;
             if (error is null && !reachedTarget)
                 error = $"Debug target '{options?.TargetNodeId}' was not reached on the executed control-flow path.";
@@ -167,7 +173,7 @@ public sealed class WorkflowCoreVisionRunner(
             // R10：统一运行边界的原始异常记录点——结果只承载简洁诊断（data.Error ?? ex.Message），
             // 完整异常链（堆栈/InnerException）交给宿主观察者写入日志。
             exceptionObserver?.OnRunException(
-                new VisionRunExceptionContext(effectiveRunId, data.HaltNodeId, workflow.Id, workflow.Name), ex);
+                new VisionRunExceptionContext(effectiveRunId, data.FaultedNodeId ?? data.HaltNodeId, workflow.Id, workflow.Name), ex);
             return new WorkflowRunResult(
                 effectiveRunId,
                 false,

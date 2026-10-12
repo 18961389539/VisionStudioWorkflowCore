@@ -4,6 +4,7 @@
   <Project Path="src/VisionStudio.Camera.Basler/VisionStudio.Camera.Basler.csproj" />
   <Project Path="src/VisionStudio.Camera.Hikrobot/VisionStudio.Camera.Hikrobot.csproj" />
   <Project Path="src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj" />
+  <Project Path="src/VisionStudio.SqliteSnapshot/VisionStudio.SqliteSnapshot.csproj" />
   <Project Path="src/VisionStudio.Api/VisionStudio.Api.csproj" />
   <Project Path="src/VisionStudio.Plugin.Sample/VisionStudio.Plugin.Sample.csproj" />
   <Project Path="src/VisionStudio.Plugin.Packager/VisionStudio.Plugin.Packager.csproj" />

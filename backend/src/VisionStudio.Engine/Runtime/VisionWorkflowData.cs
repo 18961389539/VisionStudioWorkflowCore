@@ -112,6 +112,14 @@ public sealed class VisionWorkflowData : IDisposable
     public string? QualityDisposition { get; set; }
     public string? Error { get; set; }
 
+    /// <summary>
+    /// R10/F08（2026-10-12 复核）：最近一次节点故障的**原始异常**与节点标识。WorkflowCore 会
+    /// 捕获节点异常并以 Suspended/Error 返回，运行器外层 catch 不会经过——结果返回路径据此向
+    /// 宿主观察者报告完整异常链（每次运行只记录首个故障，避免重复刷日志）。
+    /// </summary>
+    public Exception? FaultedException { get; set; }
+    public string? FaultedNodeId { get; set; }
+
     /// <summary>Branch-scoped disposition tracker; Empty unless the workflow contains Parallel regions.</summary>
     public ParallelDispositionTracker ParallelDispositions { get; private set; } = ParallelDispositionTracker.Empty;
 

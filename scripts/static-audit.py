@@ -1357,6 +1357,19 @@ if '--check' not in publish_sh or 'VisionStudio.CatalogExporter' not in publish_
     fail('Runtime publish path can bypass generated catalog staleness check')
 ok('V0.27 backend-authoritative runtime Catalog + generated offline fallback present')
 
+# PowerShell 5.1 契约（2026-10-12 复核 F07 教训）：含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM——
+# 无 BOM 时 PS 5.1 按 ANSI 解析，中文字节会吞掉相邻语法行（publish-runtime.ps1 实测：
+# 默认数据根赋值行被吞，GetFullPath("") 崩溃——发布链直到运行时才暴露）。
+for _ps1 in (ROOT/'scripts').rglob('*.ps1'):
+    _raw = _ps1.read_bytes()
+    try:
+        _text = _raw.decode('utf-8')
+    except UnicodeDecodeError:
+        _text = ''
+    if any(ord(_ch) > 127 for _ch in _text) and not _raw.startswith(b'\xef\xbb\xbf'):
+        fail(f'non-ASCII PowerShell script must carry a UTF-8 BOM: {_ps1.relative_to(ROOT).as_posix()}')
+ok('PowerShell scripts keep the PS 5.1 encoding contract (non-ASCII => UTF-8 BOM)')
+
 # Test inventory
 cs_tests = list((ROOT/'backend/tests').rglob('*.cs'))
 text='\n'.join(p.read_text(encoding='utf-8') for p in cs_tests)

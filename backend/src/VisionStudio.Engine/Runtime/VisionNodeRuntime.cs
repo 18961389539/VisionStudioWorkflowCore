@@ -109,6 +109,10 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         {
             sw.Stop();
             data.Error = $"{node.Id}: {ex.Message}";
+            // R10/F08：保留原始异常供统一结束阶段向观察者报告——本异常会被 WorkflowCore 捕获
+            // 并转为结果返回，运行器的 catch 边界不会经过，不能只依赖那里记录异常链。
+            data.FaultedException ??= ex;
+            data.FaultedNodeId ??= node.Id;
             data.AddReport(new NodeRunReport(
                 node.Id,
                 node.Type,

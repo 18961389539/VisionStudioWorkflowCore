@@ -225,10 +225,14 @@ function Editor() {
   const focusSnapshotRef = useRef<LayoutState | null>(null);
   // R06：保存请求在途标志——保存中禁止重复提交（Ctrl+S 连按 / 双击保存按钮）。
   const saveInFlightRef = useRef(false);
-  // R07（2026-10-12 复审）：并发基线修订——由 GET/PUT 响应头带回；undefined = 未知（不校验），
-  // '' = 已知后端尚无修订记录，字符串 = 上次读/写后的内容修订。
-  const workflowRevisionRef = useRef<string | undefined>(undefined);
+  // R07（2026-10-12 复审）/F05（2026-10-12 复核）：并发基线修订**必须绑定它所属的文档**——
+  // 单一字符串在切换文档（模板/Job/模块/草稿）后会携带错误修订产生误报 409。
+  // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
+  const workflowRevisionRef = useRef<{ id: string; revision: string } | undefined>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
+  // F05：保存/加载的迟到响应不得改动"新文档"的基线状态——用 ref 读取完成时刻的当前文档 ID。
+  const designerWorkflowIdRef = useRef(designerWorkflowId);
+  useEffect(() => { designerWorkflowIdRef.current = designerWorkflowId; }, [designerWorkflowId]);
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
   const [compiledDsl, setCompiledDsl] = useState<string>();
 
@@ -1032,6 +1036,19 @@ function Editor() {
     messageApi.success(`已将选中的模块调用升级到 ${version.moduleId} V${version.version}`);
   };
 
+  // R07/F05：保存前的基线探测——404 ⇒ ''（期望"后端尚无该文档"）；成功 ⇒ 修订头（缺失用 ''）；
+  // 其他失败 ⇒ null（中止保存，绝不无基线覆盖）。仅在未知基线（首次保存/切换文档后）时执行。
+  const probeRemoteRevision = async (id: string): Promise<string | null> => {
+    try {
+      const response = await fetch(`/api/workflows/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+      if (response.status === 404) return '';
+      if (!response.ok) return null;
+      return response.headers.get('X-Workflow-Revision') ?? '';
+    } catch {
+      return null;
+    }
+  };
+
   const save = async (): Promise<boolean> => {
     // R06：保存中禁止重复提交（Ctrl+S 连按 / 双击按钮）；失败绝不改变 dirty 与本地草稿。
     if (saveInFlightRef.current) {
@@ -1039,15 +1056,24 @@ function Editor() {
       return false;
     }
     saveInFlightRef.current = true;
+    const savedId = designerWorkflowId;
     try {
+      // R07/F05：基线只在"属于当前文档"时沿用；未知基线先探测后端——绝不携带其他文档的修订，
+      // 也不在没有基线的情况下静默跳过校验。
+      let baseline = workflowRevisionRef.current?.id === savedId ? workflowRevisionRef.current.revision : undefined;
+      if (baseline === undefined) {
+        const probed = await probeRemoteRevision(savedId);
+        if (probed === null) {
+          messageApi.error('保存已取消：无法确认后端当前版本（基线探测失败）。请检查后端连接后重试。');
+          return false;
+        }
+        baseline = probed;
+      }
       // 保存地址与显示的工作流 ID 单一事实源：不再绑定示例选择器，
       // 避免“编辑的是 A、保存进 B 的示例槽位”这类覆盖与后端改写 ID 的风险
       let response: Response;
       try {
-        // R07：只有拿到过并发基线时才携带 expectedRevision——未知基线保持历史行为（不校验）。
-        const revisionQuery = workflowRevisionRef.current === undefined
-          ? '' : `?expectedRevision=${encodeURIComponent(workflowRevisionRef.current)}`;
-        response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}${revisionQuery}`, {
+        response = await fetch(`/api/workflows/${encodeURIComponent(savedId)}?expectedRevision=${encodeURIComponent(baseline)}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflowPayload),
           signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS)
         });
@@ -1060,10 +1086,12 @@ function Editor() {
         return false;
       }
       if (response.ok) {
-        // R07：记住写入后的新修订，作为下一次保存的并发基线。
-        workflowRevisionRef.current = response.headers.get('X-Workflow-Revision') ?? '';
-        setSavedSnapshot(workflowSnapshot);
-        setLastSavedAt(new Date());
+        // R07/F05：迟到响应不得污染新文档——仅当仍停留在此文档时更新基线与保存状态。
+        if (designerWorkflowIdRef.current === savedId) {
+          workflowRevisionRef.current = { id: savedId, revision: response.headers.get('X-Workflow-Revision') ?? '' };
+          setSavedSnapshot(workflowSnapshot);
+          setLastSavedAt(new Date());
+        }
         messageApi.success('工作流已保存为后端 JSON');
         return true;
       }
@@ -1110,8 +1138,8 @@ function Editor() {
       messageApi.error('加载失败：响应不是有效的工作流 JSON。当前画布保持不变。');
       return;
     }
-    // R07：记录加载到的并发基线（响应头缺失 = 后端尚无修订记录，用空串表达"期望无"）。
-    workflowRevisionRef.current = response.headers.get('X-Workflow-Revision') ?? '';
+    // R07/F05：记录加载到的并发基线，并绑定它所属的文档 ID（响应头缺失 = 后端尚无修订记录，用空串表达"期望无"）。
+    workflowRevisionRef.current = { id: designerWorkflowId, revision: response.headers.get('X-Workflow-Revision') ?? '' };
     restoreWorkflow(workflow);
     messageApi.success('工作流已加载');
   };
