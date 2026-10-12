@@ -478,9 +478,14 @@ camera_appsettings = json.loads(read_safe('backend/src/VisionStudio.Api/appsetti
 if 'CameraAdapters' not in camera_appsettings or not all(k in camera_appsettings['CameraAdapters'] for k in ['BaslerAssemblyPath','HikrobotAssemblyPath','Cameras']):
     fail('V0.33 CameraAdapters configuration section missing')
 # Vendor binaries are site-installed; source/runtime package must not include them.
+# A08（2026-10-12 第三轮）：白名单**项目自有的适配器程序集**（API 直接项目引用），规则只拒绝
+# 厂商 SDK；并排除构建/发布产物区（artifacts/runtime-publish 等）——干净 checkout 与有合法
+# 发布产物的工作区结果必须一致（靠删除产物让门禁偶然通过是不可接受的）。
+_self_adapters = {'visionstudio.camera.basler.dll', 'visionstudio.camera.hikrobot.dll'}
 vendor_dlls=[x for x in ROOT.rglob('*.dll')
              if any(k in x.name.lower() for k in ['basler','pylon','mvcam','hikrobot','mvs'])
-             and not any(part in ('bin','obj','.artifacts') for part in x.parts)]
+             and x.name.lower() not in _self_adapters
+             and not any(part.lower() in ('bin','obj','.artifacts','artifacts') for part in x.parts)]
 if vendor_dlls: fail(f'V0.33 package contains vendor camera DLLs: {[str(x.relative_to(ROOT)) for x in vendor_dlls]}')
 ok('V0.33 runtime-loaded Basler/Hikrobot acquisition + trigger/buffer/telemetry path present')
 

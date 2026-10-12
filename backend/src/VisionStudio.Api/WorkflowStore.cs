@@ -43,9 +43,12 @@ public sealed class WorkflowStore
 
     /// <summary>
     /// R07/F04：乐观并发校验与保存。整个"读取当前修订 → 比较 → 写入内容与修订"在进程内串行执行。
-    /// expectedRevision 为 null 时不校验（历史调用方的兼容路径）；显式提供时：
-    ///   · 空串 = 期望尚无修订记录（文档从未保存或已一致迁移）；
-    ///   · 非空必须与磁盘当前修订一致；
+    /// expectedRevision 为 null 时**不校验**（历史调用方的兼容路径）——该路径的明确语义是
+    /// **显式强制覆盖**：仅限管理/迁移类后台操作使用（A02，2026-10-12 第三轮：语义在此明确）；
+    /// 交互式编辑器入口（前端）始终携带基线，服务端不使用该兼容路径。
+    /// expectedRevision 显式提供时：
+    ///   · 空串 = 期望尚无修订记录（文档从未保存或已一致迁移；同时核实内容文件不存在——A02）；
+    ///   · 非空必须与磁盘当前修订一致，且修订必须与当前内容哈希同代（A02）；
     ///   · 修订记录缺失但期望非空、或记录损坏 ⇒ 409（无法核对，绝不静默覆盖）。
     /// 返回写入后的新修订（= 落盘内容的 SHA-256）。
     /// </summary>
@@ -62,11 +65,17 @@ public sealed class WorkflowStore
             {
                 var expected = expectedRevision.Trim();
                 var (exists, readable, current) = ReadRevision(revisionPath);
+                var contentHash = File.Exists(finalPath) ? ComputeContentSha256(finalPath) : null;
                 if (!exists)
                 {
                     if (expected.Length != 0)
                         throw Conflict(safeId, expected, "no revision record exists",
                             "The stored document has no revision record (fresh store or manual cleanup); a non-empty baseline cannot be verified.");
+                    // A02（2026-10-12 第三轮）：期望"新建"必须同时核实内容文件不存在——
+                    // "缺修订但有内容"是不一致态，绝不能当作新建来覆盖。
+                    if (contentHash is not null)
+                        throw Conflict(safeId, expected, "content exists without a revision record",
+                            "The stored document has no revision record; reconcile or repair the revision metadata before overwriting it as a new document.");
                 }
                 else if (!readable)
                 {
@@ -77,6 +86,13 @@ public sealed class WorkflowStore
                 {
                     throw Conflict(safeId, expected, current ?? string.Empty,
                         "Load the latest version to review the other change before deciding to overwrite.");
+                }
+                // A02：修订必须与当前内容同代——上一次保存"内容已替换、修订写入失败"会留下漂移；
+                // 旧修订绝不能通过检查去覆盖新代内容（内容为权威，须重新加载后再保存）。
+                else if (contentHash is null || !string.Equals(current, contentHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw Conflict(safeId, expected, current ?? string.Empty,
+                        "The revision record does not match the stored content (a previous save was interrupted); reload the latest version before saving.");
                 }
             }
 
@@ -174,6 +190,13 @@ public sealed class WorkflowStore
     }
 
     private string RevisionPath(string safeId) => Path.Combine(_root, safeId + ".revision.json");
+
+    /// <summary>A02：当前内容文件的内容哈希（不存在时由调用方判空）——修订与内容必须同代。</summary>
+    private static string ComputeContentSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
 
     /// <summary>R07/F04：修订记录状态——存在性、可读性与值分离："损坏"不再等同于"无基线"。</summary>
     private (bool Exists, bool Readable, string? Value) ReadRevision(string revisionPath)

@@ -30,18 +30,29 @@ scripts/run-runtime.ps1
 
 1. 预检：`dotnet restore` + 生成目录（catalog）一致性——失败即中止。
 2. 前端构建 → 打入 wwwroot。
-3. `dotnet publish` 到 staging，**候选包启动烟雾验证**：隔离数据根 + 环回端口启动候选宿主，
-   90 秒内必须响应 `/api/health`；无法启动的候选包绝不替换当前版本。
-4. **升级前数据库检查点**：把 `visionstudio.db`（含 WAL/SHM）快照到
-   `<数据根>/upgrade-checkpoints/<时间戳>/`。⚠ 执行前应停止运行时——活动写入可能使快照不一致。
+3. `dotnet publish` 到 staging，**候选包启动烟雾验证**：以候选包自身为内容根、Production 环境 +
+   隔离数据根启动候选宿主，90 秒内 `/api/health` 必须返回 **`status=ok` 且 `ready=true`**
+   （仅 HTTP 200 不算通过；degraded/未就绪会列出阻断原因），并校验资产清单、打包前端与插件加载
+   日志；通过时记录候选包哈希与允许的测试配置项（安全/模拟器关闭）。
+4. **升级前数据库检查点**：用 `VisionStudio.SqliteSnapshot`（SQLite Online Backup API）生成
+   一致性快照到 `<数据根>/upgrade-checkpoints/<时间戳>/`，附 integrity/schema/哈希清单
+   （manifest.json）。活动写者下亦安全；仍建议停止运行时以缩短风险窗口。
 5. 事务式目录切换（失败自动还原旧目录）；旧版本保留在 `<输出>.previous`。
 
 **回滚步骤（顺序不可颠倒）**：
 
 1. 停止宿主。
 2. 恢复旧包：`<输出>.previous` → `<输出>`。
-3. **先恢复检查点数据库**：把检查点里的 `visionstudio.db*` 拷回数据根，再启动旧版本——
+3. **先恢复检查点数据库**（停机状态）：用维护工具做事务化恢复——校验 manifest 哈希与 schema、
+   拒绝活跃 sidecar、建立保护副本、原子替换并验证；任一失败自动从保护副本回滚：
+
+   ```powershell
+   dotnet run --project backend/src/VisionStudio.SqliteSnapshot -c Release -- restore <检查点目录> <数据根>\visionstudio.db
+   ```
+
    被新版本迁移过的数据库会触发旧版本的 schema 前瞻保护而拒绝启动（包回滚 ≠ 数据回滚）。
+   若宿主未停或目标存在非空 WAL/SHM，工具会**拒绝执行**（`--force` 仅限异常场景的显式逃生口，
+   责任自负）。
 4. **设备重新核对**：数据回滚不改变物理设备事实。启动后按第 3.3 节闸门完成核对，未闭合的
    设备动作意图只能以现场核对证据解除，绝不能用数据回滚消除。
 
@@ -61,8 +72,16 @@ scripts/run-runtime.ps1
 
 ### 3.2 数据根手动恢复
 
-停宿主后可从 `upgrade-checkpoints/` 或备份副本恢复 `visionstudio.db`，媒体 / 附件按目录恢复。
-启动时若检测到未完成的恢复事务标记，宿主进入**失败锁**：按提示重跑恢复或人工核对后清除。
+停宿主后，用维护工具恢复数据库（校验检查点清单 → 保护副本 → 原子替换 → 验证；失败自动回滚，
+中断有自动恢复路径）：
+
+```powershell
+dotnet run --project backend/src/VisionStudio.SqliteSnapshot -c Release -- restore <检查点目录> <数据根>\visionstudio.db
+```
+
+媒体 / 附件按目录恢复。启动时若检测到未完成的恢复事务标记，宿主进入**失败锁**：按提示重跑恢复
+或人工核对后清除。工具的保护副本（`.visionstudio-restore-backup/`）在恢复成功后保留，供审计与
+最坏情况取用（其内容永远不含设备动作安全账本——见 3.3）。
 
 ### 3.3 设备动作安全闸门（不随数据回退的事实）
 

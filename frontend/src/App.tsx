@@ -39,6 +39,7 @@ import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './
 import { clearDraft, readDraft, writeDraft, type WorkflowDraft } from './draft';
 import { connectionVerdict, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
 import { responseErrorMessage } from './apiErrors';
+import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
 import { onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { useRunImages } from './useRunImages';
@@ -228,11 +229,14 @@ function Editor() {
   // R07（2026-10-12 复审）/F05（2026-10-12 复核）：并发基线修订**必须绑定它所属的文档**——
   // 单一字符串在切换文档（模板/Job/模块/草稿）后会携带错误修订产生误报 409。
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
-  const workflowRevisionRef = useRef<{ id: string; revision: string } | undefined>(undefined);
+  const workflowRevisionRef = useRef<DocumentBaseline>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
   // F05：保存/加载的迟到响应不得改动"新文档"的基线状态——用 ref 读取完成时刻的当前文档 ID。
   const designerWorkflowIdRef = useRef(designerWorkflowId);
   useEffect(() => { designerWorkflowIdRef.current = designerWorkflowId; }, [designerWorkflowId]);
+  // A03（2026-10-12 第三轮）：文档代次——每次整块替换文档（模板/加载/草稿/模块注入）递增；
+  // 在途的加载/保存响应据此作废（A→B→A 仅比较文档 ID 无法区分不同加载代次）。
+  const documentEpochRef = useRef(0);
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
   const [compiledDsl, setCompiledDsl] = useState<string>();
 
@@ -259,6 +263,8 @@ function Editor() {
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
   const { screenToFlowPosition, getZoom, getViewport, setCenter, fitView } = useReactFlow();
   const [messageApi, contextHolder] = message.useMessage();
+  // A04：远端已存在同名文档时，覆盖必须由用户显式确认（绝不静默覆盖他人修改）。
+  const [modalApi, modalContextHolder] = Modal.useModal();
 
   // 缩放分级（far/mid/near）：直接写画布容器 dataset，不经 React 状态——拖画布不会触发整树重渲；
   // CSS 按级别显隐端口文字/类型/摘要（Handle 恒在，连线落点不受影响）
@@ -876,6 +882,9 @@ function Editor() {
   };
 
   const applyDemo = (key: DemoKey) => {
+    // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效（下次保存显式重建）。
+    documentEpochRef.current += 1;
+    workflowRevisionRef.current = undefined;
     endDebugSessionSilently();
     const rawGraph = demos[key]();
     const graph = { ...rawGraph, nodes: hydrateNodesFromCatalog(rawGraph.nodes, catalog) };
@@ -953,6 +962,10 @@ function Editor() {
   };
 
   const restoreWorkflow = useCallback((workflow: WorkflowPayload, options?: { markClean?: boolean }) => {
+    // A03/A04：整块替换文档即新代次——在途旧响应作废；并发基线失效。
+    // 调用方如需绑定"本次实际加载"的修订基线，必须在 restore 之后重新设置（load 即如此）。
+    documentEpochRef.current += 1;
+    workflowRevisionRef.current = undefined;
     endDebugSessionSilently();
     setDesignerWorkflowId(workflow.id);
     setDesignerWorkflowName(workflow.name);
@@ -1036,16 +1049,17 @@ function Editor() {
     messageApi.success(`已将选中的模块调用升级到 ${version.moduleId} V${version.version}`);
   };
 
-  // R07/F05：保存前的基线探测——404 ⇒ ''（期望"后端尚无该文档"）；成功 ⇒ 修订头（缺失用 ''）；
-  // 其他失败 ⇒ null（中止保存，绝不无基线覆盖）。仅在未知基线（首次保存/切换文档后）时执行。
-  const probeRemoteRevision = async (id: string): Promise<string | null> => {
+  // R07/F05 + A04（2026-10-12 第三轮）：保存前的基线探测——区分"远端不存在 / 已存在 / 探测失败"。
+  // "仅探测到"的版本**不得**直接作为编辑基线：远端已存在时必须由用户显式确认覆盖，
+  // 或先加载核对（绝不因刚拿到最新版本就静默覆盖其他编辑者的修改）。决策见 documentSync.decideSaveBaseline。
+  const probeRemoteBaseline = async (id: string): Promise<RemoteBaselineProbe> => {
     try {
       const response = await fetch(`/api/workflows/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
-      if (response.status === 404) return '';
-      if (!response.ok) return null;
-      return response.headers.get('X-Workflow-Revision') ?? '';
+      if (response.status === 404) return { kind: 'missing' };
+      if (!response.ok) return { kind: 'failed' };
+      return { kind: 'exists', revision: response.headers.get('X-Workflow-Revision') ?? '' };
     } catch {
-      return null;
+      return { kind: 'failed' };
     }
   };
 
@@ -1057,17 +1071,37 @@ function Editor() {
     }
     saveInFlightRef.current = true;
     const savedId = designerWorkflowId;
+    const saveEpoch = documentEpochRef.current;
     try {
-      // R07/F05：基线只在"属于当前文档"时沿用；未知基线先探测后端——绝不携带其他文档的修订，
-      // 也不在没有基线的情况下静默跳过校验。
-      let baseline = workflowRevisionRef.current?.id === savedId ? workflowRevisionRef.current.revision : undefined;
+      // R07/F05：基线只在"属于当前文档"时沿用；未知基线先探测后端——绝不携带其他文档的修订。
+      let baseline = pickExpectedRevision(workflowRevisionRef.current, savedId);
       if (baseline === undefined) {
-        const probed = await probeRemoteRevision(savedId);
-        if (probed === null) {
-          messageApi.error('保存已取消：无法确认后端当前版本（基线探测失败）。请检查后端连接后重试。');
+        const decision = decideSaveBaseline(undefined, await probeRemoteBaseline(savedId), savedId);
+        if (decision.action === 'abort') {
+          messageApi.error(`保存已取消：${decision.reason}`);
           return false;
         }
-        baseline = probed;
+        if (decision.action === 'confirm-overwrite') {
+          // A04：远端已存在、而本地没有"本次实际加载"的基线——覆盖必须是用户的显式选择。
+          const confirmed = await new Promise<boolean>((resolve) => {
+            modalApi.confirm({
+              title: '后端已存在该工作流',
+              content: `后端已保存工作流 '${savedId}'，而当前编辑器内容不是从该版本加载的（模板/草稿/其他来源）。继续保存将覆盖后端版本；也可取消并「打开已有流程」加载核对后再保存。`,
+              okText: '确认覆盖',
+              cancelText: '取消保存',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false)
+            });
+          });
+          if (!confirmed) {
+            messageApi.info('已取消保存（未覆盖后端已有版本）。');
+            return false;
+          }
+          baseline = decision.revision;
+        } else {
+          // 远端不存在：明确以"期望新建"提交——后端会核实内容文件确实不存在（A02）。
+          baseline = decision.baseline;
+        }
       }
       // 保存地址与显示的工作流 ID 单一事实源：不再绑定示例选择器，
       // 避免“编辑的是 A、保存进 B 的示例槽位”这类覆盖与后端改写 ID 的风险
@@ -1086,11 +1120,14 @@ function Editor() {
         return false;
       }
       if (response.ok) {
-        // R07/F05：迟到响应不得污染新文档——仅当仍停留在此文档时更新基线与保存状态。
-        if (designerWorkflowIdRef.current === savedId) {
+        // R07/F05 + A03：迟到响应不得污染新文档——除文档 ID 外还必须核对**文档代次**
+        // （A→B→A 仅比较 ID 无法区分不同加载代次）；不满足时当前基线/保存状态保持不变。
+        if (shouldApplySaveResult({ epoch: saveEpoch, id: savedId }, { epoch: documentEpochRef.current, id: designerWorkflowIdRef.current })) {
           workflowRevisionRef.current = { id: savedId, revision: response.headers.get('X-Workflow-Revision') ?? '' };
           setSavedSnapshot(workflowSnapshot);
           setLastSavedAt(new Date());
+        } else {
+          messageApi.info('先前文档的保存已完成，但当前文档的基线未更新（保存期间已切换文档）。');
         }
         messageApi.success('工作流已保存为后端 JSON');
         return true;
@@ -1112,9 +1149,14 @@ function Editor() {
 
   const load = async () => {
     // R06：加载失败原因可定位（状态码/业务码/关联号）；失败路径不触碰当前画布。
+    // A03（2026-10-12 第三轮）：捕获请求代次与画布引用——迟到的响应不得替换新文档或新编辑。
+    const loadEpoch = documentEpochRef.current;
+    const nodesAtStart = nodesRef.current;
+    const edgesAtStart = edgesRef.current;
+    const loadedId = designerWorkflowId;
     let response: Response;
     try {
-      response = await fetch(`/api/workflows/${encodeURIComponent(designerWorkflowId)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+      response = await fetch(`/api/workflows/${encodeURIComponent(loadedId)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
     } catch (error) {
       const reason = error instanceof DOMException && error.name === 'TimeoutError'
         ? `请求超时（>${WORKFLOW_IO_TIMEOUT_MS / 1000}s）`
@@ -1122,8 +1164,22 @@ function Editor() {
       messageApi.error(`加载失败：${reason}。请检查后端服务与网络后重试。`);
       return;
     }
+    // A03：迟到响应判定（documentSync.isLateLoadResponse——行为测试固化见 documentSync.test.ts）。
+    const loadVerdict = () => isLateLoadResponse(
+      { epoch: loadEpoch, nodes: nodesAtStart, edges: edgesAtStart },
+      { epoch: documentEpochRef.current, nodes: nodesRef.current, edges: edgesRef.current }
+    );
+    const firstVerdict = loadVerdict();
+    if (firstVerdict === 'discard-switched') {
+      messageApi.warning('加载结果已放弃：加载期间文档已切换。');
+      return;
+    }
+    if (firstVerdict === 'discard-edited') {
+      messageApi.warning('加载结果已放弃：加载期间画布发生了新的编辑。');
+      return;
+    }
     if (response.status === 404) {
-      messageApi.warning(`后端尚未保存工作流 '${designerWorkflowId}'（404）。先保存一次，之后即可作为加载基线。`);
+      messageApi.warning(`后端尚未保存工作流 '${loadedId}'（404）。先保存一次，之后即可作为加载基线。`);
       return;
     }
     if (!response.ok) {
@@ -1138,9 +1194,15 @@ function Editor() {
       messageApi.error('加载失败：响应不是有效的工作流 JSON。当前画布保持不变。');
       return;
     }
-    // R07/F05：记录加载到的并发基线，并绑定它所属的文档 ID（响应头缺失 = 后端尚无修订记录，用空串表达"期望无"）。
-    workflowRevisionRef.current = { id: designerWorkflowId, revision: response.headers.get('X-Workflow-Revision') ?? '' };
+    // A03：解析后再次核对（解析期间同样可能发生切换/编辑）。
+    if (loadVerdict() !== 'apply') {
+      messageApi.warning('加载结果已放弃：加载期间文档或画布发生了变化。');
+      return;
+    }
+    // A03/A04：restoreWorkflow 会递增文档代次并失效旧基线——先应用文档，再绑定其修订基线
+    // （绑定必须晚于 restore，否则会被 restore 的失效清掉）。
     restoreWorkflow(workflow);
+    workflowRevisionRef.current = { id: workflow.id, revision: response.headers.get('X-Workflow-Revision') ?? '' };
     messageApi.success('工作流已加载');
   };
 
@@ -1415,7 +1477,7 @@ function Editor() {
         '--vs-image-height': imageViewerSource.url ? `${layout.image}%` : '44px'
       } as CSSProperties}
     >
-      {contextHolder}
+      {contextHolder}{modalContextHolder}
       <header className="topbar">
         <div className="topbar-left">
           <div className="brand">VisionStudio <span>V{APP_VERSION}</span></div>

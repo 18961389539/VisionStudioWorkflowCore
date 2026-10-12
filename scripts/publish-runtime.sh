@@ -113,10 +113,20 @@ trap 'smoke_stop; rm -rf "$SMOKE_DATA"; cleanup_staging' EXIT
 ) &
 SMOKE_PID=$!
 SMOKE_HEALTHY=0
+SMOKE_BLOCKERS=""
 SMOKE_DEADLINE=$(( SECONDS + 90 ))
 while [ "$SECONDS" -lt "$SMOKE_DEADLINE" ]; do
   if ! kill -0 "$SMOKE_PID" 2>/dev/null; then break; fi
-  if curl -fsS --max-time 3 "http://127.0.0.1:$SMOKE_PORT/api/health" >/dev/null 2>&1; then SMOKE_HEALTHY=1; break; fi
+  # A06（2026-10-12 第三轮）：HTTP 200 不等于健康——解析正文的 status/ready，degraded/未就绪
+  # 一律判失败并记录阻断原因（与 Windows 侧同一契约）。
+  health_body="$(curl -fsS --max-time 3 "http://127.0.0.1:$SMOKE_PORT/api/health" 2>/dev/null)" || true
+  if [ -n "$health_body" ]; then
+    if printf '%s' "$health_body" | grep -q '"status":"ok"' && printf '%s' "$health_body" | grep -q '"ready":true'; then
+      SMOKE_HEALTHY=1
+      break
+    fi
+    SMOKE_BLOCKERS="$(printf '%s' "$health_body" | head -c 400)"
+  fi
   sleep 0.5
 done
 SMOKE_INDEX_OK=0
@@ -130,11 +140,64 @@ fi
 smoke_stop
 if [ "$SMOKE_HEALTHY" -ne 1 ] || [ "$SMOKE_INDEX_OK" -ne 1 ] || [ "$SMOKE_PLUGIN_FAILURE" -ne 0 ]; then
   echo "ERROR: candidate smoke test FAILED (health=$SMOKE_HEALTHY, frontend=$SMOKE_INDEX_OK, pluginLoadFailure=$SMOKE_PLUGIN_FAILURE). Keeping the current package." >&2
+  if [ -n "$SMOKE_BLOCKERS" ]; then echo "health body (truncated): $SMOKE_BLOCKERS" >&2; fi
   tail -n 20 "$SMOKE_DATA/host.out.log" 2>/dev/null || true
   exit 1
 fi
-echo "Candidate package smoke test passed: health + packaged frontend + clean plugin load."
+echo "Candidate package smoke test passed: health (status=ok, ready=true) + packaged frontend + clean plugin load."
+echo "candidate VisionStudio.Api.dll sha256: $(sha256sum "$STAGING/VisionStudio.Api.dll" | cut -c1-16)"
+echo "approved test-configuration blockers for this smoke run: isolated data root, Security disabled, simulators disabled, AutoStart off. Target-config validation (security enabled, site config, real dependencies) stays on the field acceptance checklist."
 rm -rf "$SMOKE_DATA"
+
+# A06 stage 2（2026-10-12 第三轮）：候选包还必须在**目标安全姿态**下启动——Security 启用、
+# AutoLoginAdmin 关、loopback 绑定（Production 守卫要求）+ 全新隔离数据根；验证 health ok/ready、
+# 打包前端可服务、受保护端点拒绝匿名（401）——证明安全管道确实生效（与 Windows 侧同一契约）。
+SECURE_DATA="$(mktemp -d "${TMPDIR:-/tmp}/visionstudio-secsmoke-XXXXXX")"
+SECURE_PORT=$(( (RANDOM % 20000) + 20000 ))
+SECURE_PID=""
+secure_stop() {
+  if [ -n "$SECURE_PID" ] && kill -0 "$SECURE_PID" 2>/dev/null; then
+    kill "$SECURE_PID" 2>/dev/null || true
+    wait "$SECURE_PID" 2>/dev/null || true
+  fi
+}
+trap 'secure_stop; rm -rf "$SECURE_DATA"; smoke_stop; rm -rf "$SMOKE_DATA"; cleanup_staging' EXIT
+(
+  cd "$STAGING" || exit 1
+  VISIONSTUDIO_DATA_ROOT="$SECURE_DATA" \
+  ASPNETCORE_ENVIRONMENT=Production \
+  Security__Enabled=true \
+  Security__AutoLoginAdmin=false \
+  RobotTcpSimulator__Enabled=false \
+  exec dotnet "$STAGING/VisionStudio.Api.dll" --urls "http://127.0.0.1:$SECURE_PORT" >"$SECURE_DATA/host.out.log" 2>&1
+) &
+SECURE_PID=$!
+SECURE_HEALTHY=0
+SECURE_DEADLINE=$(( SECONDS + 90 ))
+while [ "$SECONDS" -lt "$SECURE_DEADLINE" ]; do
+  if ! kill -0 "$SECURE_PID" 2>/dev/null; then break; fi
+  health_body="$(curl -fsS --max-time 3 "http://127.0.0.1:$SECURE_PORT/api/health" 2>/dev/null)" || true
+  if [ -n "$health_body" ] && printf '%s' "$health_body" | grep -q '"status":"ok"' && printf '%s' "$health_body" | grep -q '"ready":true'; then
+    SECURE_HEALTHY=1
+    break
+  fi
+  sleep 0.5
+done
+SECURE_FRONTEND_OK=0
+SECURE_AUTH_OK=0
+if [ "$SECURE_HEALTHY" -eq 1 ]; then
+  if curl -fsS --max-time 5 "http://127.0.0.1:$SECURE_PORT/" 2>/dev/null | grep -q 'id="root"'; then SECURE_FRONTEND_OK=1; fi
+  auth_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$SECURE_PORT/api/modules" 2>/dev/null)"
+  if [ "$auth_code" = "401" ]; then SECURE_AUTH_OK=1; fi
+fi
+secure_stop
+if [ "$SECURE_HEALTHY" -ne 1 ] || [ "$SECURE_FRONTEND_OK" -ne 1 ] || [ "$SECURE_AUTH_OK" -ne 1 ]; then
+  echo "ERROR: secure-configuration smoke stage FAILED (health=$SECURE_HEALTHY, frontend=$SECURE_FRONTEND_OK, anonymous-401=$SECURE_AUTH_OK). Keeping the current package." >&2
+  tail -n 20 "$SECURE_DATA/host.out.log" 2>/dev/null || true
+  exit 1
+fi
+echo "Secure-configuration smoke stage passed: health ok/ready with Security enabled + anonymous access rejected (401) + packaged frontend served."
+rm -rf "$SECURE_DATA"
 
 # 3.4) R08/F06：升级前数据库检查点——SQLite Online Backup API 一致性快照 + integrity/schema
 #      清单（与 Windows 侧同一工具与契约）；活动写者下也安全。已有数据库时才执行。

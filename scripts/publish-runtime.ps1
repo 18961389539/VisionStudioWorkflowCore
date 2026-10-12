@@ -142,7 +142,14 @@ try {
         if ($smokeProcess.HasExited) { break }
         try {
             $smokeResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$smokePort/api/health" -UseBasicParsing -TimeoutSec 3
-            if ($smokeResponse.StatusCode -eq 200) { $smokeHealthy = $true; break }
+            if ($smokeResponse.StatusCode -eq 200) {
+                # A06 (2026-10-12 review): HTTP 200 is not health - parse the body. The release must
+                # not treat "degraded" or "not ready" as a passing candidate; blockers are recorded
+                # and reported so the operator sees WHY the candidate was rejected.
+                $health = [string]$smokeResponse.Content | ConvertFrom-Json
+                if ($health.status -eq 'ok' -and $health.ready -eq $true) { $smokeHealthy = $true; break }
+                $smokeBlockers = (@($health.degradedReasons) + @($health.productionBlockers)) -join '; '
+            }
         }
         catch { Start-Sleep -Milliseconds 500 }
     }
@@ -166,6 +173,7 @@ finally {
 $smokePluginFailure = if (Test-Path $smokeOutLog) { [bool](Select-String -Path $smokeOutLog -Pattern 'Failed to load VisionStudio plugin package' -Quiet) } else { $false }
 if (-not $smokeHealthy -or -not $smokeIndexOk -or $smokePluginFailure) {
     Write-Host "Candidate package smoke test FAILED (health=$smokeHealthy, frontend=$smokeIndexOk, pluginLoadFailure=$smokePluginFailure). Keeping the current package." -ForegroundColor Red
+    if ($smokeBlockers) { Write-Host "health blockers: $smokeBlockers" -ForegroundColor Red }
     foreach ($logPath in @($smokeOutLog, $smokeErrLog)) {
         if (Test-Path $logPath) {
             Write-Host "--- staged host log (tail): $logPath ---"
@@ -176,8 +184,97 @@ if (-not $smokeHealthy -or -not $smokeIndexOk -or $smokePluginFailure) {
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
     exit 1
 }
-Write-Host "Candidate package smoke test passed: health + packaged frontend + clean plugin load on the staged binaries."
+Write-Host "Candidate package smoke test passed: health (status=ok, ready=true) + packaged frontend + clean plugin load on the staged binaries."
+Write-Host ("candidate VisionStudio.Api.dll sha256: {0}" -f (Get-FileHash (Join-Path $staging 'VisionStudio.Api.dll') -Algorithm SHA256).Hash.Substring(0, 16).ToLowerInvariant())
+Write-Host "approved test-configuration blockers for this smoke run: isolated data root, Security disabled, simulators disabled, AutoStart off. Target-config validation (security enabled, site config, real dependencies) stays on the field acceptance checklist."
 Remove-Item $smokeData -Recurse -Force -ErrorAction SilentlyContinue
+
+# A06 stage 2 (2026-10-12 review): the candidate must also boot under the TARGET security
+# posture - Security enabled, AutoLoginAdmin off, loopback bind (the Production guards reject
+# anything else), fresh isolated data root. The check proves more than "the process started":
+# health must be ok/ready, the packaged frontend must still be served, and a protected endpoint
+# must reject anonymous access (401) - i.e. the security pipeline is actually engaged.
+$secureData = Join-Path ([System.IO.Path]::GetTempPath()) ("visionstudio-secsmoke-" + [Guid]::NewGuid().ToString("N"))
+New-Item $secureData -ItemType Directory -Force | Out-Null
+$securePort = Get-Random -Minimum 20000 -Maximum 40000
+$secureOutLog = Join-Path $secureData 'host.out.log'
+$secureErrLog = Join-Path $secureData 'host.err.log'
+$secureProcess = $null
+$secureHealthy = $false
+$secureAuthOk = $false
+$secureFrontendOk = $false
+try {
+    $previousDataRoot = $env:VISIONSTUDIO_DATA_ROOT
+    $previousAspNetEnv = $env:ASPNETCORE_ENVIRONMENT
+    $previousSecurity = $env:Security__Enabled
+    $previousAutoLogin = $env:Security__AutoLoginAdmin
+    $previousRobotSim = $env:RobotTcpSimulator__Enabled
+    try {
+        $env:VISIONSTUDIO_DATA_ROOT = $secureData
+        $env:ASPNETCORE_ENVIRONMENT = 'Production'
+        $env:Security__Enabled = 'true'
+        $env:Security__AutoLoginAdmin = 'false'
+        $env:RobotTcpSimulator__Enabled = 'false'
+        $secureProcess = Start-Process -FilePath 'dotnet' `
+            -ArgumentList @("`"$(Join-Path $staging 'VisionStudio.Api.dll')`"", '--urls', "http://127.0.0.1:$securePort") `
+            -WorkingDirectory $staging `
+            -PassThru -NoNewWindow -RedirectStandardOutput $secureOutLog -RedirectStandardError $secureErrLog
+    }
+    finally {
+        $env:VISIONSTUDIO_DATA_ROOT = $previousDataRoot
+        $env:ASPNETCORE_ENVIRONMENT = $previousAspNetEnv
+        $env:Security__Enabled = $previousSecurity
+        $env:Security__AutoLoginAdmin = $previousAutoLogin
+        $env:RobotTcpSimulator__Enabled = $previousRobotSim
+    }
+
+    $secureDeadline = (Get-Date).AddSeconds(90)
+    while ((Get-Date) -lt $secureDeadline) {
+        if ($secureProcess.HasExited) { break }
+        try {
+            $secureHealthResponse = Invoke-WebRequest -Uri "http://127.0.0.1:$securePort/api/health" -UseBasicParsing -TimeoutSec 3
+            if ($secureHealthResponse.StatusCode -eq 200) {
+                $secureHealth = [string]$secureHealthResponse.Content | ConvertFrom-Json
+                if ($secureHealth.status -eq 'ok' -and $secureHealth.ready -eq $true) { $secureHealthy = $true; break }
+            }
+        }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    if ($secureHealthy) {
+        try {
+            $secureIndex = Invoke-WebRequest -Uri "http://127.0.0.1:$securePort/" -UseBasicParsing -TimeoutSec 5
+            $secureFrontendOk = $secureIndex.StatusCode -eq 200 -and ([string]$secureIndex.Content) -match 'id="root"'
+        }
+        catch { $secureFrontendOk = $false }
+        # 受保护端点必须拒绝匿名访问（PowerShell 5.1 对 401 抛异常，从响应取状态码）。
+        try {
+            $null = Invoke-WebRequest -Uri "http://127.0.0.1:$securePort/api/modules" -UseBasicParsing -TimeoutSec 5
+        }
+        catch {
+            if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { $secureAuthOk = $true }
+        }
+    }
+}
+finally {
+    if ($secureProcess -and -not $secureProcess.HasExited) {
+        Stop-Process -Id $secureProcess.Id -Force
+        $secureProcess.WaitForExit(10000) | Out-Null
+    }
+}
+if (-not $secureHealthy -or -not $secureFrontendOk -or -not $secureAuthOk) {
+    Write-Host "Secure-configuration smoke stage FAILED (health=$secureHealthy, frontend=$secureFrontendOk, anonymous-401=$secureAuthOk). Keeping the current package." -ForegroundColor Red
+    foreach ($logPath in @($secureOutLog, $secureErrLog)) {
+        if (Test-Path $logPath) {
+            Write-Host "--- secure-stage host log (tail): $logPath ---"
+            Get-Content $logPath -Tail 20
+        }
+    }
+    Remove-Item $secureData -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    exit 1
+}
+Write-Host "Secure-configuration smoke stage passed: health ok/ready with Security enabled + anonymous access rejected (401) + packaged frontend served."
+Remove-Item $secureData -Recurse -Force -ErrorAction SilentlyContinue
 
 # R08/F06 (2026-10-12 review): pre-upgrade database checkpoint via the SQLite Online Backup API
 # (consistent under an active writer/checkpoint - the old sequential file copy could tear), with
