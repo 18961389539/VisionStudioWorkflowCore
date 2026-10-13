@@ -116,6 +116,15 @@ public sealed class RuntimeBootstrapHostedService(
                 logger.LogWarning(ex, "Failed to restore device profile {DeviceId}", profile.Id);
             }
         }
+
+        // R3-04（2026-10-13 R3 审查）：损坏/不可读的配置文件不再静默跳过——逐条记录文件名
+        // （即设备 ID 提示）与解析原因，原文件保留供修复；健康接口把该状态表达为配置完整性降级。
+        foreach (var problem in profiles.Problems)
+        {
+            logger.LogError(
+                "Device profile '{File}' could not be loaded ({Error}); the device was NOT registered and the file was preserved for repair.",
+                problem.FileName, problem.Error);
+        }
     }
 
     private void RegisterBuiltInNodes()

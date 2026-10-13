@@ -1535,6 +1535,8 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
     private readonly string _root = Path.Combine(Path.GetTempPath(), "visionstudio-storage-tests", Guid.NewGuid().ToString("N"));
     private readonly long _maxArtifactBytes;
     private readonly bool _securityEnabled;
+    /// <summary>R3 回归：显式内容根归调用方所有（"重启"测试共用一个数据目录），Dispose 不删除它。</summary>
+    private readonly bool _ownsRoot = true;
 
     /// <summary>测试数据根（contentRoot）。启动前写入标记（失败锁/中断意图）的测试需要它——
     /// 宿主管线构建时协调器即被构造，事后写标记不会生效。</summary>
@@ -1544,13 +1546,26 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
 
     public StorageVisionStudioApiFactory(long? maxArtifactBytes) : this(maxArtifactBytes, siteConfigJson: null) { }
 
+    /// <summary>R3 回归：复用指定内容根——模拟"同一数据目录上的重启"（设备/配置持久化验收）。</summary>
+    public StorageVisionStudioApiFactory(string contentRoot)
+        : this(maxArtifactBytes: null, siteConfigJson: null, securityEnabled: false, contentRoot: contentRoot) { }
+
     public StorageVisionStudioApiFactory(long? maxArtifactBytes, string? siteConfigJson)
         : this(maxArtifactBytes, siteConfigJson, securityEnabled: false) { }
 
     public StorageVisionStudioApiFactory(long? maxArtifactBytes, string? siteConfigJson, bool securityEnabled)
+        : this(maxArtifactBytes, siteConfigJson, securityEnabled, contentRoot: null) { }
+
+    public StorageVisionStudioApiFactory(long? maxArtifactBytes, string? siteConfigJson, bool securityEnabled, string? contentRoot)
     {
         _maxArtifactBytes = maxArtifactBytes ?? 1073741824;
         _securityEnabled = securityEnabled;
+        // R3 回归：可选复用内容根（"重启"场景）；显式根归调用方所有，Dispose 不删除。
+        if (!string.IsNullOrWhiteSpace(contentRoot))
+        {
+            _root = Path.GetFullPath(contentRoot);
+            _ownsRoot = false;
+        }
         Directory.CreateDirectory(_root);
         if (siteConfigJson is not null)
         {
@@ -1579,7 +1594,8 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing)
+        // R3 回归：仅删除本工厂自建的内容根；显式传入的根（"重启"共用）归调用方清理。
+        if (disposing && _ownsRoot)
         {
             try { Directory.Delete(_root, recursive: true); } catch { }
         }

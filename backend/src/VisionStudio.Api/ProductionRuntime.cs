@@ -105,6 +105,13 @@ public sealed record ProductionDeviceActionPendingState(
 
 public sealed class ProductionRuntimeConfigStore
 {
+    /// <summary>
+    /// R3-05（2026-10-13 R3 审查）：自动恢复预算的上限。0 = 不自动恢复（失败立即 Faulted 等人工），
+    /// 上限 100——配合 RecoveryDelayMs 的最大值仍让"有限重试"的等待时长可控；负数与极大值是
+    /// 未定义语义（负数立即耗尽预算、极大值让约束失效），保存与读取都必须收敛到 [0, 100]。
+    /// </summary>
+    public const int MaxRecoveryAttemptsLimit = 100;
+
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web)
@@ -174,6 +181,10 @@ public sealed class ProductionRuntimeConfigStore
                     SynchronizationGuardMaximumResynchronizations = defaults.SynchronizationGuardMaximumResynchronizations
                 };
             }
+            // R3-05：旧文件可能带着越界的恢复预算（负数立即耗尽预算 / 极大值让"有限重试"失效）——
+            // 读取时收敛到合法区间（保存路径严格校验并 400），让运行语义始终受约束。
+            if (config.MaxRecoveryAttempts < 0 || config.MaxRecoveryAttempts > MaxRecoveryAttemptsLimit)
+                config = config with { MaxRecoveryAttempts = Math.Clamp(config.MaxRecoveryAttempts, 0, MaxRecoveryAttemptsLimit) };
             return config;
         }
         finally { _gate.Release(); }
@@ -202,6 +213,11 @@ public sealed class ProductionRuntimeConfigStore
         if (config.CycleDelayMs < 0 || config.CycleDelayMs > 60000) throw new ApiValidationException("CycleDelayMs must be 0..60000.");
         if (config.MaxCycleMs < 100 || config.MaxCycleMs > 600000) throw new ApiValidationException("MaxCycleMs must be 100..600000.");
         if (config.MaxConsecutiveFailures < 1 || config.MaxConsecutiveFailures > 1000) throw new ApiValidationException("MaxConsecutiveFailures must be 1..1000.");
+        // R3-05（2026-10-13 R3 审查）：自动恢复预算此前遗漏范围校验——负数立即耗尽预算、
+        // 极大值让"有限重试"失去实际意义（探针实测 -1 与 int.MaxValue 均被 200 保存）。
+        // 0 = 不自动恢复（失败立即 Faulted）；上限见 MaxRecoveryAttemptsLimit。
+        if (config.MaxRecoveryAttempts < 0 || config.MaxRecoveryAttempts > MaxRecoveryAttemptsLimit)
+            throw new ApiValidationException($"MaxRecoveryAttempts must be 0..{MaxRecoveryAttemptsLimit} (0 disables automatic recovery; failures lock Faulted for manual recovery).");
         if (config.RecoveryDelayMs < 0 || config.RecoveryDelayMs > 600000) throw new ApiValidationException("RecoveryDelayMs must be 0..600000.");
         if (config.StopTimeoutMs < 100 || config.StopTimeoutMs > 60000) throw new ApiValidationException("StopTimeoutMs must be 100..60000.");
         if (config.PtpGuardWindowRuns < 5 || config.PtpGuardWindowRuns > 500) throw new ApiValidationException("PtpGuardWindowRuns must be 5..500.");

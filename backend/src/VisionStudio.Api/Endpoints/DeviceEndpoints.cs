@@ -20,29 +20,27 @@ public static class DeviceEndpoints
             ModbusTcpRegistrationRequest request,
             DeviceManager devices,
             DeviceProfileStore profiles,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var profile = new DeviceProfile(
                 request.Id, "modbus-tcp", request.Name, request.Host, request.Port, request.TimeoutMs,
                 request.UnitId, request.RegisterOrder, Tags: request.Tags ?? Array.Empty<DeviceTagDefinition>());
-            devices.Register(DeviceDriverFactory.Create(profile));
-            await profiles.SaveAsync(profile, ct);
-            return Results.Ok(devices.Get(request.Id));
+            return await RegisterDeviceAsync(profile, devices, profiles, loggerFactory.CreateLogger("DeviceRegistration"), ct);
         }).RequireEngineer("device.register.modbus", "device");
 
         app.MapPost("/api/devices/register/s7", async (
             S7NetPlusRegistrationRequest request,
             DeviceManager devices,
             DeviceProfileStore profiles,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var profile = new DeviceProfile(
                 request.Id, "s7", request.Name, request.Host, request.Port, request.TimeoutMs,
                 CpuType: request.CpuType, Rack: request.Rack, Slot: request.Slot,
                 Tags: request.Tags ?? Array.Empty<DeviceTagDefinition>());
-            devices.Register(DeviceDriverFactory.Create(profile));
-            await profiles.SaveAsync(profile, ct);
-            return Results.Ok(devices.Get(request.Id));
+            return await RegisterDeviceAsync(profile, devices, profiles, loggerFactory.CreateLogger("DeviceRegistration"), ct);
         }).RequireEngineer("device.register.s7", "device");
 
         app.MapGet("/api/device-profiles", async (DeviceProfileStore profiles, CancellationToken ct) =>
@@ -53,6 +51,24 @@ public static class DeviceEndpoints
             production.EnsureDependencyMutationAllowed("device", id);
             if (string.Equals(id, "virtual-modbus-1", StringComparison.OrdinalIgnoreCase))
                 throw new ApiConflictException("The bundled virtual device is retained as the offline test baseline.");
+            // R3-01：先核对持久配置归属（在任何副作用之前）——清洗后的路径可能命中另一台设备的
+            // 遗留文件（如 audit.a 与 audit_a），删除绝不能误伤别人；归属不符即拒绝且不改变状态。
+            DeviceProfile? persisted;
+            try
+            {
+                persisted = await profiles.FindAsync(id, ct);
+            }
+            catch (Exception ex)
+            {
+                throw new ApiConflictException(
+                    $"The persisted profile for '{id}' cannot be read ({ex.Message}). Repair or remove that file explicitly before deleting the device.", ex);
+            }
+            if (persisted is not null && !string.Equals(persisted.Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ApiConflictException(
+                    $"Refusing to delete device '{id}': its profile file holds device '{persisted.Id}'. " +
+                    $"Delete '{persisted.Id}' instead, or repair the profile file after verification.");
+            }
             if (!await devices.RemoveAsync(id, ct)) return Results.NotFound();
             await profiles.DeleteAsync(id, ct);
             return Results.NoContent();
@@ -133,5 +149,54 @@ public static class DeviceEndpoints
         }).RequireEngineer("device.tag.write", "device");
 
         return app;
+    }
+
+    /// <summary>
+    /// R3-03（2026-10-13 R3 审查）：注册的成功/失败语义必须与状态一致。
+    /// 旧实现先 <c>devices.Register(...)</c> 再持久化：驱动构造会把端口夹取到合法范围，
+    /// 持久层随后拒绝原始非法端口——接口报 409 但设备已留在运行时列表（界面说失败、系统已变化），
+    /// 且用修正参数重试会得到 "already registered"。现在：
+    ///   1. 统一前置校验（<see cref="DeviceProfileStore.ValidateRegistration"/>）在任何副作用之前；
+    ///   2. 内存注册后持久化失败（写盘拒绝 / ID 碰撞）⇒ **补偿回滚**内存注册（断开并释放驱动），
+    ///      再如实报 409；失败后内存与文件均保持原状态，合法重试可直接成功。
+    /// </summary>
+    private static async Task<IResult> RegisterDeviceAsync(
+        DeviceProfile profile, DeviceManager devices, DeviceProfileStore profiles, ILogger logger, CancellationToken ct)
+    {
+        DeviceProfileStore.ValidateRegistration(profile);   // 400（ID 契约）或 409（端口/kind 等结构校验）——无副作用
+        var driver = DeviceDriverFactory.Create(profile);
+        devices.Register(driver);                           // 重复 ID → 409（此前无任何持久化副作用）
+        try
+        {
+            await profiles.SaveAsync(profile, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            await RollBackRegistrationAsync(profile.Id, devices, logger);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await RollBackRegistrationAsync(profile.Id, devices, logger);
+            throw new ApiConflictException(
+                $"Device '{profile.Id}' was not registered: its profile could not be persisted ({ex.Message}). " +
+                "The runtime registration was rolled back; fix the cause and register again.", ex);
+        }
+        return Results.Ok(devices.Get(profile.Id));
+    }
+
+    /// <summary>R3-03：撤销一次内存注册（断开 + 释放驱动）；补偿自身失败必须留下日志而不是吞掉。</summary>
+    private static async Task RollBackRegistrationAsync(string id, DeviceManager devices, ILogger logger)
+    {
+        try
+        {
+            await devices.RemoveAsync(id, CancellationToken.None);
+        }
+        catch (Exception cleanupError)
+        {
+            logger.LogError(cleanupError,
+                "Failed to roll back device registration '{DeviceId}' after a persistence failure; the runtime entry may remain until restart.",
+                id);
+        }
     }
 }

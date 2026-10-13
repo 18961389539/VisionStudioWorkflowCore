@@ -28,7 +28,8 @@ public static class SystemEndpoints
         }).RequireAdministrator("lease.release", "lease");
 
         app.MapGet("/api/health", (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
-            ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization) =>
+            ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization,
+            DeviceProfileStore deviceProfiles) =>
         {
             var reasons = new List<string>();
             if (audits.PersistFailures > 0) reasons.Add("audit persistence failures");
@@ -41,6 +42,15 @@ public static class SystemEndpoints
                 reasons.Add($"storage failure lock engaged: {maintenance.Reason ?? "unspecified"}");
             if (maintenance.IsRestartPending)
                 reasons.Add($"restart pending after storage restore: {maintenance.Reason ?? "unspecified"}");
+            // R3-04（2026-10-13 R3 审查）：损坏的设备配置让设备从运行时列表消失——必须表达为
+            // **配置完整性降级**（现场可查询"为什么缺设备"），而不是与"设备被删除"混同后仍报 ok。
+            var profileProblems = deviceProfiles.Problems;
+            if (profileProblems.Count > 0)
+            {
+                var details = string.Join("; ", profileProblems.Take(3).Select(p => $"{p.FileName}: {p.Error}"));
+                if (profileProblems.Count > 3) details += $"; +{profileProblems.Count - 3} more";
+                reasons.Add($"device profile integrity: {profileProblems.Count} unreadable file(s) ({details})");
+            }
             var degraded = reasons.Count > 0;
 
             // R07：生产动作就绪——阻断原因必须可直接操作（现场据此决定能否下发设备动作）。

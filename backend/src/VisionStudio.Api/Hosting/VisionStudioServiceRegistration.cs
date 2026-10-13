@@ -26,41 +26,75 @@ namespace VisionStudio.Api.Hosting;
 public static class VisionStudioServiceRegistration
 {
     /// <summary>
-    /// C08：实际有效监听端点的枚举——ASPNETCORE_URLS / urls 与 Kestrel:Endpoints:*:Url 一并检查。
-    /// 通配形式（* / + / 0.0.0.0 / [::] / 仅端口）无法用 Uri.TryCreate 解析，必须显式识别为
-    /// "非 loopback"（此前这些形式被静默跳过，等于放过真正的远程明文监听入口）。
+    /// R3-02（2026-10-13 R3 审查）：生产明文监听边界的**完整来源枚举**。
+    ///
+    /// 实测监听优先级（本机实验，2026-10-13，.NET 10 Kestrel）：
+    ///   `Kestrel:Endpoints:*:Url` ＞ `urls`（--urls / ASPNETCORE_URLS / 配置 urls）＞ `HTTP_PORTS`/`HTTPS_PORTS`
+    ///   · Kestrel 端点存在时 urls 与 HTTP_PORTS 均不生效；urls 存在时 HTTP_PORTS 不生效；
+    ///   · HTTP_PORTS 只承载端口，**恒为 0.0.0.0 通配明文监听**（旧实现未枚举它：
+    ///     仅设 ASPNETCORE_HTTP_PORTS 即可让生产环境以明文远程监听启动，探针复现）；
+    ///   · 无 scheme 的 `--urls 0.0.0.0:5080` 会被 Kestrel 直接拒绝启动（无监听，无需本守卫）。
+    ///
+    /// 策略（fail-closed）：**任一来源**——包括被更高优先级来源压住、当前未生效的冲突来源——
+    /// 出现未豁免的远程明文 HTTP 即拒绝。配置冲突属于必须显式清理的交付错误，本守卫不把安全性
+    /// 押在"推断哪个来源生效"上（推断依赖框架版本行为，冲突配置本身也说明现场配置失控）。
+    /// HTTPS 端点/端口是 TLS，始终合规；unix socket 等非 HTTP 监听跳过。
     /// </summary>
-    private static IEnumerable<string> EffectiveRemoteHttpEndpoints(IConfiguration configuration)
+    /// <summary>来源枚举的实现体；internal 以便回归测试直接覆盖各来源组合（见 ListenBoundaryTests）。</summary>
+    internal static IReadOnlyList<string> InsecurePlaintextListenSources(IConfiguration configuration)
     {
-        var candidates = new List<string>();
-        var urls = configuration["ASPNETCORE_URLS"] ?? configuration["urls"];
-        if (!string.IsNullOrWhiteSpace(urls))
-            candidates.AddRange(urls.Split(';', StringSplitOptions.RemoveEmptyEntries));
+        var insecure = new List<string>();
         foreach (var endpoint in configuration.GetSection("Kestrel:Endpoints").GetChildren())
         {
             var url = endpoint["Url"];
-            if (!string.IsNullOrWhiteSpace(url)) candidates.Add(url);
+            if (!string.IsNullOrWhiteSpace(url) && IsInsecurePlaintextHttp(url))
+                insecure.Add($"Kestrel:Endpoints:{endpoint.Key}:Url={url}");
         }
 
-        foreach (var raw in candidates.Select(x => x.Trim()).Where(x => x.Length > 0))
+        var urls = new List<string>();
+        foreach (var key in new[] { "ASPNETCORE_URLS", "urls" })
         {
-            if (raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue; // TLS 端点合规
-            if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) continue; // unix socket 等非 HTTP 监听
-            var authority = raw["http://".Length..].TrimEnd('/');
-            var host = authority.Split('/', 2)[0];
-            if (host.StartsWith('['))
-            {
-                var bracketEnd = host.IndexOf(']');
-                host = bracketEnd > 0 ? host[1..bracketEnd] : host;
-            }
-            else
-            {
-                host = host.Split(':', 2)[0];
-            }
-            if (host.Length == 0) host = "*"; // http://:5080 ⇒ 所有网卡
-            if (IsLoopbackHost(host)) continue;
-            yield return raw;
+            var value = configuration[key];
+            if (!string.IsNullOrWhiteSpace(value))
+                urls.AddRange(value.Split(';', StringSplitOptions.RemoveEmptyEntries));
         }
+        foreach (var url in urls.Select(x => x.Trim()).Where(x => x.Length > 0))
+        {
+            if (IsInsecurePlaintextHttp(url)) insecure.Add($"urls={url}");
+        }
+
+        // HTTP_PORTS / ASPNETCORE_HTTP_PORTS：端口列表无法表达 loopback（恒为通配明文）。
+        foreach (var key in new[] { "HTTP_PORTS", "ASPNETCORE_HTTP_PORTS" })
+        {
+            var value = configuration[key];
+            if (!string.IsNullOrWhiteSpace(value)) insecure.Add($"{key}={value} (binds 0.0.0.0 plaintext)");
+        }
+        // HTTPS_PORTS / ASPNETCORE_HTTPS_PORTS 为 TLS 端点，合规；不列入拒绝来源。
+        return insecure;
+    }
+
+    /// <summary>
+    /// 判定单个监听 URL 是否为"未豁免的远程明文"。
+    /// 通配形式（* / + / 0.0.0.0 / [::] / 仅端口）无法用 Uri.TryCreate 解析，必须显式识别为
+    /// "非 loopback"（此前这些形式被静默跳过，等于放过真正的远程明文监听入口）。
+    /// </summary>
+    private static bool IsInsecurePlaintextHttp(string raw)
+    {
+        if (raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return false; // TLS 端点合规
+        if (!raw.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) return false; // unix socket / 无 scheme（Kestrel 拒绝启动）
+        var authority = raw["http://".Length..].TrimEnd('/');
+        var host = authority.Split('/', 2)[0];
+        if (host.StartsWith('['))
+        {
+            var bracketEnd = host.IndexOf(']');
+            host = bracketEnd > 0 ? host[1..bracketEnd] : host;
+        }
+        else
+        {
+            host = host.Split(':', 2)[0];
+        }
+        if (host.Length == 0) host = "*"; // http://:5080 ⇒ 所有网卡
+        return !IsLoopbackHost(host);
     }
 
     /// <summary>R08：loopback 判定（含 IPv6 字面量与 localhost 通配）。</summary>
@@ -90,16 +124,18 @@ public static class VisionStudioServiceRegistration
         // R08：网络交付边界。默认监听 loopback；把控制端口暴露到网络必须使用 HTTPS——
         // 明文 HTTP 会同时泄露账户口令与会话 cookie（Secure 无法在 HTTP 上生效）。
         // 隔离测试网络如需明文，可显式设置 Security:AllowInsecureRemoteTransport=true。
+        // R3-02：来源枚举覆盖 urls / Kestrel 端点 / HTTP_PORTS（含冲突来源，fail-closed）。
         if (environment.IsProduction() && securityOptions.Enabled && !securityOptions.AllowInsecureRemoteTransport)
         {
-            var insecure = EffectiveRemoteHttpEndpoints(configuration).ToArray();
-            if (insecure.Length > 0)
+            var insecure = InsecurePlaintextListenSources(configuration);
+            if (insecure.Count > 0)
             {
                 throw new InvalidOperationException(
-                    $"Refusing to start: plaintext HTTP is bound to a non-loopback address ({string.Join(", ", insecure)}). " +
+                    $"Refusing to start: plaintext HTTP is configured for a non-loopback address ({string.Join("; ", insecure)}). " +
                     "Account passwords and session cookies would travel unprotected (a Secure cookie cannot be set over HTTP). " +
-                    "Bind to loopback (http://127.0.0.1:5080) or terminate TLS in front of the host (HTTPS endpoint / trusted reverse proxy), " +
-                    "or set Security:AllowInsecureRemoteTransport=true for an isolated test network.");
+                    "Bind to loopback (http://127.0.0.1:5080), terminate TLS in front of the host (HTTPS endpoint / trusted reverse proxy), " +
+                    "or set Security:AllowInsecureRemoteTransport=true for an isolated test network. " +
+                    "Remove conflicting sources instead of relying on which one would win.");
             }
         }
 
