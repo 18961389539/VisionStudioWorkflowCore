@@ -79,6 +79,9 @@ host_registration = read_safe('backend/src/VisionStudio.Api/Hosting/VisionStudio
 host_bootstrap = read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs')
 endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Api/Endpoints').glob('*.cs'))
 catalog = read_safe('backend/src/VisionStudio.Engine/NodeCatalog.cs')
+# NodeCatalog composes batch catalogs; inspect only helpers actually referenced by Items.
+for helper in sorted(set(re.findall(r'\b(Batch\w+Catalog)\.Items\b', catalog))):
+    catalog += '\n' + read_safe(f'backend/src/VisionStudio.Engine/{helper}.cs')
 frontend_catalog_source = read_safe('frontend/src/catalog.ts')
 generated_catalog_doc = json.loads(read_safe('frontend/src/generated/catalog.generated.json'))
 generated_catalog_items = generated_catalog_doc.get('items', [])
@@ -343,7 +346,7 @@ recursive_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/RecursiveStru
 frontend_app=read_safe('frontend/src/App.tsx')
 for token in ['StructuredWorkflowIrBuilder','FindNearestCommonJoin','excludedBoundaryJoinId','StructuredControlRegion','ValidateNoCrossBranchData']:
     if token not in structured_ir: fail(f'V0.29 structured IR token missing: {token}')
-for token in ['new StructuredWorkflowIrBuilder','CompileSequence','GetBranchCondition','ControlRegions']:
+for token in ['new StructuredWorkflowIrBuilder','CompileSequence','BranchConditions','ControlRegions']:
     if token not in compiler: fail(f'V0.29 recursive compiler token missing: {token}')
 if 'data.BranchCondition == false' in compiler or '["Condition"] = "data.BranchCondition"' in compiler:
     fail('V0.29 compiler still consumes global BranchCondition')

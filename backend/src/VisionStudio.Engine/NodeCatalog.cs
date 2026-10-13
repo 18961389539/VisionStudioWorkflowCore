@@ -5,7 +5,7 @@ public static class BuiltInNodeCatalog
     private static readonly PortDescriptor ExecIn = new("exec", VisionDataType.Control);
     private static readonly PortDescriptor Next = new("next", VisionDataType.Control);
 
-    public static readonly IReadOnlyList<NodeCatalogItem> Items =
+    private static readonly IReadOnlyList<NodeCatalogItem> RawItems =
     [
         new(
             "image.acquire",
@@ -102,6 +102,185 @@ public static class BuiltInNodeCatalog
             [new("threshold", "Threshold", "number", 128, 0, 255, 1)],
             "Binary threshold using OpenCvSharp.",
             "builtin"),
+        // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
+        new(
+            "image.grayscale",
+            "Grayscale",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("mode", "Mode", "select", "luminance", Options:
+                [
+                    new("Luminance (BT.601)", "luminance"),
+                    new("Average", "average"),
+                    new("Max", "max")
+                ])
+            ],
+            "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through).",
+            "builtin",
+            new VisionToolCapabilities(EmitsOverlay: false)),
+        new(
+            "image.channel",
+            "Channel Extract",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("channel", "Channel", "select", "gray", Options:
+                [
+                    new("Gray", "gray"),
+                    new("Blue", "blue"),
+                    new("Green", "green"),
+                    new("Red", "red"),
+                    new("Hue", "hue"),
+                    new("Saturation", "saturation"),
+                    new("Value", "value")
+                ])
+            ],
+            "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
+            "builtin",
+            new VisionToolCapabilities(EmitsOverlay: false)),
+        new(
+            "image.blur.gaussian",
+            "Gaussian Blur",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2),
+                new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5, Description: "0 derives sigma from the kernel size."),
+                new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5, Description: "0 mirrors sigmaX.")
+            ],
+            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value.",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new(
+            "image.blur.median",
+            "Median Blur",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2)],
+            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required).",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new(
+            "image.morphology",
+            "Morphology",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("operation", "Operation", "select", "open", Options:
+                [
+                    new("Erode", "erode"),
+                    new("Dilate", "dilate"),
+                    new("Open (erode then dilate)", "open"),
+                    new("Close (dilate then erode)", "close")
+                ]),
+                new("kernelSize", "Kernel Size", "number", 3, 1, 31, 2),
+                new("iterations", "Iterations", "number", 1, 1, 10, 1),
+                new("shape", "Kernel Shape", "select", "rect", Options:
+                [
+                    new("Rectangle", "rect"),
+                    new("Ellipse", "ellipse"),
+                    new("Cross", "cross")
+                ])
+            ],
+            "Morphological erode/dilate/open/close: remove burrs, fill pinholes and stabilize blobs.",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new(
+            "image.threshold.adaptive",
+            "Adaptive Threshold",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("blockSize", "Block Size", "number", 31, 3, 99, 2, Description: "Local window size (coerced to odd)."),
+                new("c", "C Constant", "number", 5, 0, 50, 1),
+                new("method", "Method", "select", "mean", Options:
+                [
+                    new("Mean", "mean"),
+                    new("Gaussian", "gaussian")
+                ]),
+                new("invert", "Invert", "boolean", false)
+            ],
+            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray).",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new(
+            "image.threshold.otsu",
+            "Otsu Threshold",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), Next],
+            [new("invert", "Invert", "boolean", false)],
+            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring.",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new(
+            "measure.blobs",
+            "Multi Blob",
+            "Measurement",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [
+                new("count", VisionDataType.Integer),
+                new("detections", VisionDataType.DetectionList),
+                new("x", VisionDataType.Double, Required: false),
+                new("y", VisionDataType.Double, Required: false),
+                new("area", VisionDataType.Double, Required: false),
+                new("radius", VisionDataType.Double, Required: false),
+                new("center", VisionDataType.Point2D, Required: false),
+                new("circle", VisionDataType.Circle, Required: false),
+                Next
+            ],
+            [
+                new("minArea", "Min Area", "number", 100, 0, 99999999, 10),
+                new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Description: "0 disables the upper bound."),
+                new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Description: "4*pi*A/P^2, 1 = perfect circle."),
+                new("maxCount", "Max Count", "number", 20, 1, 200, 1),
+                new("sortBy", "Sort By", "select", "area", Options:
+                [
+                    new("Area", "area"),
+                    new("X (left to right)", "x"),
+                    new("Y (top to bottom)", "y")
+                ]),
+                new("descending", "Descending", "boolean", true)
+            ],
+            "Detect/filter/sort/count multiple blobs; outputs a DetectionList plus the first (sorted) target's geometry. Zero blobs is a normal result (count=0).",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+        new(
+            "match.template",
+            "Template Match",
+            "Matching",
+            [ExecIn, new("image", VisionDataType.Image), new("template", VisionDataType.Image, Required: false)],
+            [
+                new("found", VisionDataType.Boolean),
+                new("score", VisionDataType.Double),
+                new("angle", VisionDataType.Double, Required: false),
+                new("x", VisionDataType.Double, Required: false),
+                new("y", VisionDataType.Double, Required: false),
+                new("center", VisionDataType.Point2D, Required: false),
+                new("rectangle", VisionDataType.Rectangle2D, Required: false),
+                Next
+            ],
+            [
+                new("templatePath", "Template File", "text", string.Empty, Description: "Used when the template input port is not connected (absolute path, or relative to the host working directory)."),
+                new("angleRangeDeg", "Angle Range (deg)", "number", 0, 0, 180, 1, Description: "0 = no rotation search."),
+                new("angleStepDeg", "Angle Step (deg)", "number", 5, 0.5, 30, 0.5),
+                new("minScore", "Min Score", "number", 0.5, 0, 1, 0.01),
+                new("method", "Method", "select", "ccoeff-normed", Options:
+                [
+                    new("Normalized cross-correlation", "ccoeff-normed"),
+                    new("Normalized squared difference", "sqdiff-normed")
+                ])
+            ],
+            "Locate a template in the image (optional coarse rotation search); outputs position, angle and score. angle = rotation applied to the template to align with the image (positive = counter-clockwise).",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
         new(
             "measure.blob",
             "Largest Blob",
@@ -620,6 +799,63 @@ public static class BuiltInNodeCatalog
             ],
             "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
             "builtin"),
+        // ===== 批次一（2026-10-13 节点补齐）：通用数值 / 布尔判定族 =====
+        new(
+            "value.number",
+            "Number Constant",
+            "Value",
+            [ExecIn],
+            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), Next],
+            [new("value", "Value", "number", 0, -1000000000, 1000000000, 1)],
+            "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+            "builtin"),
+        new(
+            "value.arithmetic",
+            "Arithmetic",
+            "Value",
+            [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double)],
+            [new("result", VisionDataType.Double), Next],
+            [
+                new("op", "Operation", "select", "add", Options:
+                [
+                    new("Add (a + b)", "add"),
+                    new("Subtract (a - b)", "subtract"),
+                    new("Multiply (a * b)", "multiply"),
+                    new("Divide (a / b)", "divide")
+                ])
+            ],
+            "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+            "builtin"),
+        new(
+            "value.range",
+            "Range Check",
+            "Value",
+            [ExecIn, new("value", VisionDataType.Double)],
+            [new("pass", VisionDataType.Boolean), Next],
+            [
+                new("min", "Min", "number", 0, -1000000000, 1000000000, 1),
+                new("max", "Max", "number", 100, -1000000000, 1000000000, 1),
+                new("invert", "Invert", "boolean", false)
+            ],
+            "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+            "builtin"),
+        new(
+            "logic.boolean",
+            "Boolean Logic",
+            "Logic",
+            [ExecIn, new("a", VisionDataType.Boolean), new("b", VisionDataType.Boolean, Required: false)],
+            [new("result", VisionDataType.Boolean), Next],
+            [
+                new("op", "Operation", "select", "and", Options:
+                [
+                    new("AND", "and"),
+                    new("OR", "or"),
+                    new("XOR", "xor"),
+                    new("NOT (a)", "not")
+                ])
+            ],
+            "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+            "builtin"),
         new(
             "flow.if",
             "If",
@@ -663,6 +899,11 @@ public static class BuiltInNodeCatalog
             [],
             "Start two Workflow Core parallel paths.",
             "builtin"),
+        .. Batch2ImageCatalog.Items.Select(item => item with { PluginId = "builtin" }),
+        .. Batch2UtilityCatalog.Items,
+        .. Batch3GeometryCatalog.Items.Select(item => item with { PluginId = "builtin" }),
+        .. Batch3RecognitionCatalog.Items,
+        .. Batch4IterationCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         new(
             "flow.join",
             "Join",
@@ -673,6 +914,15 @@ public static class BuiltInNodeCatalog
             "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
             "builtin")
     ];
+
+    // Compute-only built-ins explicitly declare absence of device actions, including for Try validation.
+    // File-backed template matching stays outside automatic retry because its file can change between attempts.
+    public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems.Select(item =>
+        item.Type == "match.template"
+            ? item with { Capabilities = (item.Capabilities ?? new VisionToolCapabilities()) with { Deterministic = false } }
+            : item.Actions is null && Runtime.VisionExecutionPolicy.IsPipelineEligible(item)
+                ? item with { Actions = [] }
+                : item).ToArray();
 
     public static NodeCatalogItem Require(string type) =>
         Items.FirstOrDefault(x => x.Type.Equals(type, StringComparison.OrdinalIgnoreCase))

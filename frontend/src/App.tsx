@@ -75,6 +75,8 @@ const WORKFLOW_IO_TIMEOUT_MS = 15_000;
 
 // 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
 const DEMO_LABELS: Record<DemoKey, string> = {
+  forEach: '逐目标顺序执行',
+  inspection: '多目标检测与判定',
   camera: '相机示例', cameraTrigger: '触发式相机', frameSet: '同步帧组',
   measurement: '测量示例', calibration: '标定示例',
   robotEyeToHand: '眼在手外示例', robotEyeInHand: '眼在手上示例', robotRuntime: '机器人运行时',
@@ -83,10 +85,10 @@ const DEMO_LABELS: Record<DemoKey, string> = {
 };
 const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
   { group: '相机采集', keys: ['camera', 'cameraTrigger', 'frameSet'] },
-  { group: '测量与标定', keys: ['measurement', 'calibration'] },
+  { group: '测量与标定', keys: ['inspection', 'measurement', 'calibration'] },
   { group: '机器人', keys: ['robotEyeToHand', 'robotEyeInHand', 'robotRuntime', 'robotPlc', 'robotTcp'] },
   { group: '设备 / PLC', keys: ['devicePlc'] },
-  { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested'] }
+  { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested', 'forEach'] }
 ];
 
 // 节点紧凑模式：全局显示偏好（压缩标题 / 端口间距 / 页脚），持久化在 localStorage

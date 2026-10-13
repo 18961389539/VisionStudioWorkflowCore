@@ -161,6 +161,8 @@ public sealed class WorkflowDebugSessionService(
             throw new InvalidOperationException("Breakpoint debug requires at least one breakpoint node.");
         if (workflow.Nodes.Any(n => n.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Debug sessions do not support workflows containing Parallel yet.");
+        if (VisionExecutionPolicy.HasIterativeOrRetryControl(workflow.Nodes))
+            throw new InvalidOperationException("Breakpoint debug sessions are disabled for workflows containing flow.forEach or flow.try because cached node state cannot resume iteration or retry progress safely.");
 
         // 会话是交互式调试通道：始终捕获逐节点图像（运行期编码一次，供前端按节点查看中间结果）
         options = options with { CaptureNodeImages = true };

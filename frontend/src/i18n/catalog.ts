@@ -14,6 +14,24 @@ import type { NodeCatalogItem } from '../types';
 import type { Lang } from './lang';
 
 const nodeNames: Record<string, string> = {
+  'recognition.barcode': '条码 / 二维码识别', 'recognition.ocr': '文字识别 / OCR',
+  'inference.classification': 'ONNX 图像分类', 'inference.detection': 'ONNX 目标检测',
+  'inference.segmentation': 'ONNX 图像分割', 'inference.anomaly': 'ONNX 异常检测',
+  'flow.forEach': '逐目标执行', 'flow.loopEnd': '循环体结束', 'flow.try': '异常分支 / 重试',
+  'calibration.cameraIntrinsics': '相机内参标定', 'image.undistort': '畸变校正', 'calibration.handEye2D': '二维手眼标定',
+  'collection.detections.filter': '筛选检测目标', 'collection.detections.sort': '目标排序',
+  'collection.detections.at': '按索引提取目标', 'collection.detections.count': '目标计数',
+  'flow.delay': '延时', 'flow.ifBoolean': '布尔条件分支', 'flow.switch': '多路分支', 'flow.merge': '多路汇合',
+  'output.saveImage': '保存图像', 'output.exportResult': '导出结果', 'output.httpRequest': 'HTTP 请求',
+  'image.crop': '图像裁剪', 'image.resize': '图像缩放', 'image.rotate': '图像旋转',
+  'image.perspective': '透视矫正', 'measure.pointLineDistance': '点线距离',
+  'measure.circleSpacing': '圆间距', 'measure.fitLine': '多点拟合直线', 'measure.fitCircle': '多点拟合圆',
+  'image.grayscale': '灰度转换', 'image.channel': '通道提取',
+  'image.blur.gaussian': '高斯滤波', 'image.blur.median': '中值滤波',
+  'image.morphology': '形态学处理', 'image.threshold.adaptive': '自适应阈值',
+  'image.threshold.otsu': 'Otsu 自动阈值', 'measure.blobs': '多目标连通区域',
+  'match.template': '模板匹配 / 旋转定位', 'value.number': '数值常量',
+  'value.arithmetic': '四则运算', 'value.range': '范围判定', 'logic.boolean': '布尔运算',
   'image.acquire': '采集图像', 'frameset.image': '帧组图像', 'camera.syncCapture': '同步采集', 'image.synthetic': '生成测试图像',
   'calibration.planar': '平面标定', 'coordinate.transformCompose': '组合坐标变换', 'coordinate.transformConstant': '固定坐标变换',
   'coordinate.distance': '坐标点距离', 'coordinate.point': '坐标点', 'coordinate.pose': '坐标位姿', 'coordinate.frameTree': '坐标系树',
@@ -31,10 +49,39 @@ const nodeNames: Record<string, string> = {
 
 const categories: Record<string, string> = {
   Acquisition: '图像采集', Calibration: '标定', Coordinate: '坐标变换', Device: '设备通信', Feature: '特征检测',
-  Flow: '流程控制', Geometry: '几何计算', Measurement: '测量', Preprocess: '图像处理', Robot: '机器人'
+  Flow: '流程控制', Geometry: '几何计算', Measurement: '测量', Preprocess: '图像处理', Robot: '机器人',
+  Output: '结果输出', Matching: '定位匹配', Value: '数值运算', Logic: '逻辑判定', Collection: '集合处理', Recognition: '识别', AI: 'AI 检测', Inference: '模型推理'
 };
 
 const parameterNames: Record<string, string> = {
+  'Minimum Confidence (-1=unlimited)': '最低置信度（-1 为不限）', 'Class ID (-1=unlimited)': '类别 ID（-1 为不限）',
+  'Class Labels': '类别标签', 'Source Unit': '源单位', 'Transform Source Frame': '变换源坐标系',
+  'Transform Target Frame': '变换目标坐标系', 'URL': '请求地址',
+  'Response Size Limit': '响应大小上限', 'Maximum Items': '最大目标数',
+  'ONNX Model File': 'ONNX 模型路径', 'Output Name': '输出名称',
+  'Input Width': '输入宽度', 'Input Height': '输入高度', 'Normalization Scale': '归一化缩放',
+  'Mean B': 'B 通道均值', 'Mean G': 'G 通道均值', 'Mean R': 'R 通道均值',
+  'Swap Red and Blue': '交换红蓝通道', 'Center Crop After Resize': '缩放后居中裁剪',
+  'Formats': '识别码类型', 'Try Harder': '加强搜索', 'Decode Multiple': '识别多个码',
+  'Tessdata Directory': 'OCR 语言包目录', 'Language(s)': '识别语言', 'Apply Softmax': '应用 Softmax',
+  'Top K': '前 K 个类别', 'Labels JSON': '类别标签 JSON', 'Coordinate Units': '坐标单位',
+  'Confidence Threshold': '置信度阈值', 'NMS IoU Threshold': '重叠抑制阈值', 'Max Detections': '最大检测数',
+  'Binary Threshold': '二值阈值', 'Anomaly Threshold': '异常分数阈值',
+  'Views JSON': '标定视图 JSON', 'Calibration JSON': '相机标定 JSON', 'Setup': '安装方式',
+  'Pose Pairs JSON': '位姿对 JSON', 'Minimum Area': '最小面积', 'Maximum Area (0=unlimited)': '最大面积（0 为不限）',
+  'Minimum Circularity': '最小圆度', 'Maximum Circularity': '最大圆度', 'Zero-based Index': '索引（从 0 开始）',
+  'Mode': '模式', 'Channel': '通道', 'Kernel Size': '滤波核大小', 'Sigma X': 'X 标准差', 'Sigma Y': 'Y 标准差',
+  'Operation': '运算', 'Iterations': '迭代次数', 'Kernel Shape': '核形状', 'Block Size': '局部窗口大小',
+  'C Constant': '阈值偏移', 'Invert': '反向', 'Max Area': '最大面积', 'Min Circularity': '最小圆度',
+  'Max Count': '最大目标数', 'Sort By': '排序字段', 'Descending': '降序', 'Template Path': '模板图像路径',
+  'Angle Range': '角度搜索范围', 'Angle Step': '角度步长', 'Min Score': '最小匹配分数',
+  'Value': '数值', 'Minimum': '下限', 'Maximum': '上限', 'Interpolation': '插值方法', 'Angle': '角度',
+  'Expand Canvas': '扩展画布', 'Output Width': '输出宽度', 'Output Height': '输出高度',
+  'Clamp to Segment': '限制在线段内', 'Delay': '延时', 'Cases (JSON string array)': '分支值 JSON 数组',
+  'Image Path': '图像保存路径', 'Result Path': '结果保存路径', 'Format': '格式', 'Overwrite Existing': '覆盖已有文件',
+  'Method': '方法', 'Request Body': '请求内容', 'Content Type': '内容类型',
+  'Top Left X': '左上 X', 'Top Left Y': '左上 Y', 'Top Right X': '右上 X', 'Top Right Y': '右上 Y',
+  'Bottom Left X': '左下 X', 'Bottom Left Y': '左下 Y', 'Bottom Right X': '右下 X', 'Bottom Right Y': '右下 Y',
   Action: '操作', 'Angle Offset': '角度偏移', 'Auto Ack': '自动确认', 'Auto Connect': '自动连接', 'Auto Start': '自动启动',
   'Calibration Asset ID': '标定资产 ID', 'Calibration Asset Version': '标定资产版本', 'Calibration Pairs JSON': '标定点 JSON',
   'Camera ID': '相机 ID', 'Center Threshold': '中心阈值', 'Circle X': '圆心 X', 'Circle Y': '圆心 Y', 'Compare Value': '比较值',
@@ -66,6 +113,16 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  classId: '类别 ID',
+  classIndex: '类别索引', label: '类别名称', confidence: '置信度', mask: '类别掩膜', isAnomaly: '异常',
+  results: '识别结果', text: '识别文字', format: '码格式', repeat: '下一轮', done: '完成',
+  succeeded: '尝试成功', errorMessage: '异常信息',
+  calibrationJson: '相机标定 JSON', rms: '标定均方根误差', translationRms: '平移均方根误差', angleRmsDeg: '角度均方根误差',
+  index: '索引', width: '宽度', height: '高度', perimeter: '周长', circularity: '圆度',
+  detections: '目标列表', count: '数量', found: '找到目标', score: '匹配分数', template: '模板图像',
+  integer: '整数值', result: '运算结果', a: '输入 A', b: '输入 B', selected: '选中分支', default: '默认分支',
+  elapsedMs: '延时时长', bytesWritten: '写入字节数', statusCode: 'HTTP 状态码', body: '响应内容', success: '成功',
+  closestPoint: '最近点', circleA: '圆 A', circleB: '圆 B', centerDistance: '圆心距', gap: '边缘间距',
   image: '图像', exec: '执行', next: '下一步', true: '真分支', false: '假分支', branch1: '分支 1', branch2: '分支 2',
   center: '中心点', radius: '半径', area: '面积', circle: '圆', rectangle: '矩形', angle: '角度', distance: '距离',
   line: '直线', lineA: '直线 A', lineB: '直线 B', point: '点', pointA: '点 A', pointB: '点 B',
@@ -81,6 +138,13 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
+  'flow.ifBoolean': '根据布尔条件选择真或假分支，再在汇合节点继续执行。',
+  'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；未匹配走默认路径，各路径在多路汇合节点汇合。',
+  'flow.forEach': '按输入目标列表逐个执行循环体，提供当前目标位置、索引及可选的类别和置信度；完成后走 done 路径。',
+  'flow.try': '捕获计算体异常并选择成功或错误路径。仅支持线性纯计算体，最多重试三次；取消会停止执行。',
+  'output.saveImage': '按文件扩展名编码保存图像，默认拒绝覆盖已有文件。',
+  'output.exportResult': '将输入结果导出为 JSON 或 CSV，默认拒绝覆盖已有文件。',
+  'output.httpRequest': '发送 HTTP 请求，支持超时、取消和响应大小上限；非成功状态会使节点失败。',
   'image.acquire': '从连续采集的相机帧流中获取一帧。选择“最新帧”会复用最新图像；选择“下一帧”会等待新图像。',
   'frameset.image': '从同步帧组中选取一台相机的图像，不复制底层图像数据。',
   'camera.syncCapture': '向同步组发送一次触发命令，收集每台成员相机的新图像，并输出包含实测时差的帧组。',
@@ -178,8 +242,8 @@ export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): No
     displayName: nodeNames[item.type] ?? item.displayName,
     category: categories[item.category] ?? item.category,
     description: descriptions[item.type] ?? item.description,
-    inputs: item.inputs.map((port) => ({ ...port, label: portNames[port.name] ?? port.name })),
-    outputs: item.outputs.map((port) => ({ ...port, label: portNames[port.name] ?? port.name })),
+    inputs: item.inputs.map((port) => ({ ...port, label: localizePortName(port.name) })),
+    outputs: item.outputs.map((port) => ({ ...port, label: localizePortName(port.name) })),
     parameters: item.parameters.map((parameter) => ({
       ...parameter,
       label: parameterNames[parameter.label] ?? parameter.label,
@@ -187,6 +251,13 @@ export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): No
       options: parameter.options?.map((option) => ({ ...option, label: optionNames[option.label] ?? option.label }))
     }))
   }));
+}
+
+function localizePortName(name: string): string {
+  if (portNames[name]) return portNames[name];
+  const numbered = /^(case|point)(\d+)$/.exec(name);
+  if (numbered) return `${numbered[1] === 'case' ? '分支' : '点'} ${numbered[2]}`;
+  return name;
 }
 
 /** Localize a backend status word (role, health, lifecycle, diff kind, ...). English is a pass-through.

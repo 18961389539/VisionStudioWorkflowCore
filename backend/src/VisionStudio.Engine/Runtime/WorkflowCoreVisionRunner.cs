@@ -217,6 +217,9 @@ public sealed class WorkflowCoreVisionRunner(
 
         if (options.Mode != DebugRunMode.Full && workflow.Nodes.Any(n => n.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("V0.29 node debugging remains intentionally disabled for workflows containing Parallel. Parallel-safe stepping requires a stateful debug session and will be added later.");
+
+        if (options.Mode != DebugRunMode.Full && VisionExecutionPolicy.HasIterativeOrRetryControl(workflow.Nodes))
+            throw new InvalidOperationException("Node debugging is disabled for workflows containing flow.forEach or flow.try because cached node state cannot resume iteration or retry progress safely. Run in Full mode instead.");
     }
 
     private static void EnsureDebugSideEffectsAllowed(

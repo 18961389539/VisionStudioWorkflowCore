@@ -19,6 +19,20 @@ public static class VisionExecutionPolicy
         var type = catalog.Type;
         if (type.Equals("image.synthetic", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.threshold", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.grayscale", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.channel", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("image.blur.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("image.threshold.", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.morphology", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.crop", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.resize", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.undistort", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("match.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("value.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("logic.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("collection.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("feature.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("measure.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("geometry.", StringComparison.OrdinalIgnoreCase) ||
@@ -33,4 +47,9 @@ public static class VisionExecutionPolicy
 
     public static bool IsPipelineEligible(NodeCatalogItem catalog) =>
         Resolve(catalog) == VisionExecutionMode.Pipeline;
+
+    /// <summary>Non-Full debug modes cannot safely resume a cached node graph across loop iterations or Try retries.</summary>
+    public static bool HasIterativeOrRetryControl(IEnumerable<NodeDefinition> nodes) =>
+        nodes.Any(node => node.Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase) ||
+                          node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase));
 }

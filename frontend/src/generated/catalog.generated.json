@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "7e7af35bed5300a2d7eeee5e77f61b451fc9d86585c4a1eea043c7f2c4b8cd76",
+  "hash": "6653313e158efefce11334273eac11f5ab8eeabc048c4ce5d1ab7341f548b677",
   "items": [
     {
       "type": "image.acquire",
@@ -345,7 +345,143 @@
       ],
       "description": "Generate a deterministic test image for MVP validation.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "calibration.handEye2D",
+      "displayName": "2D Hand-Eye Calibration",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "translationRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleRmsDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Setup",
+          "type": "select",
+          "defaultValue": "eyeInHand",
+          "options": [
+            {
+              "label": "Eye in hand (camera on tool)",
+              "value": "eyeInHand"
+            },
+            {
+              "label": "Eye to hand (fixed camera)",
+              "value": "eyeToHand"
+            }
+          ]
+        },
+        {
+          "name": "samplesJson",
+          "label": "Pose Pairs JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs."
+        },
+        {
+          "name": "sourceFrame",
+          "label": "Transform Source Frame",
+          "type": "text",
+          "defaultValue": "Camera"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Transform Target Frame",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand."
+        },
+        {
+          "name": "sourceUnit",
+          "label": "Source Unit",
+          "type": "text",
+          "defaultValue": "mm"
+        },
+        {
+          "name": "unit",
+          "label": "Target Unit",
+          "type": "text",
+          "defaultValue": "mm"
+        }
+      ],
+      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Outputs a Pose2D and composable Transform2D. This node does not implement 3D hand-eye calibration.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "calibration.cameraIntrinsics",
+      "displayName": "Camera Intrinsic Calibration",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "calibrationJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "rms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "calibrationDataJson",
+          "label": "Views JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views."
+        }
+      ],
+      "description": "OpenCV pinhole/radial-tangential intrinsic calibration from supplied 3D object and 2D image correspondences. No corner detector is included.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "calibration.planar",
@@ -453,7 +589,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformCompose",
@@ -491,7 +628,8 @@
       "parameters": [],
       "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformConstant",
@@ -588,7 +726,8 @@
       ],
       "description": "Create a rigid 2D transform between named engineering coordinate frames.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.distance",
@@ -631,7 +770,8 @@
       "parameters": [],
       "description": "Distance between two points only when frame and unit match.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.point",
@@ -710,7 +850,8 @@
       ],
       "description": "Create a constant coordinate-aware reference point.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.pose",
@@ -798,7 +939,8 @@
       ],
       "description": "Create a constant frame-aware 2D pose.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.frameTree",
@@ -835,7 +977,8 @@
       ],
       "description": "Build a bidirectional frame graph and resolve transforms by named frame path.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformInverse",
@@ -868,7 +1011,8 @@
       "parameters": [],
       "description": "Invert a Transform2D and swap source/target frame and units.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.poseToTransform",
@@ -909,7 +1053,8 @@
       ],
       "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.frameResolve",
@@ -962,7 +1107,8 @@
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformCoordinatePoint",
@@ -1000,7 +1146,8 @@
       "parameters": [],
       "description": "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformCoordinatePose",
@@ -1038,7 +1185,8 @@
       "parameters": [],
       "description": "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformLine",
@@ -1086,7 +1234,8 @@
       "parameters": [],
       "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformPoint",
@@ -1134,7 +1283,8 @@
       "parameters": [],
       "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "coordinate.transformPose",
@@ -1172,7 +1322,8 @@
       "parameters": [],
       "description": "Transform X/Y and local orientation into a named target frame.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "device.readTag",
@@ -1818,7 +1969,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "feature.edge",
@@ -1887,7 +2039,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "feature.line",
@@ -1975,6 +2128,320 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "flow.ifBoolean",
+      "displayName": "Boolean If",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "condition",
+          "dataType": "Boolean",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "true",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "false",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "condition",
+          "dataType": "Boolean",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Choose the true or false path from the Boolean condition input, then converge the paths at a Join.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "flow.delay",
+      "displayName": "Delay",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "elapsedMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "delayMs",
+          "label": "Delay",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 0,
+          "max": 600000,
+          "step": 10,
+          "unit": "ms"
+        }
+      ],
+      "description": "Wait for the configured duration; cancellation stops the wait immediately.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "flow.merge",
+      "displayName": "Flow Merge",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "case1",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case2",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case3",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case4",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case5",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case6",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case7",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case8",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case9",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case10",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case11",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case12",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case13",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case14",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case15",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "case16",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "default",
+          "dataType": "Control",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Converge selected If/Switch branches. A real incoming branch is required by structured workflow compilation.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "flow.forEach",
+      "displayName": "For Each Detection",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "repeat",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "body",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "done",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": false
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "classId",
+          "dataType": "Integer",
+          "required": false
+        }
+      ],
+      "parameters": [
+        {
+          "name": "maxItems",
+          "label": "Maximum Items",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 500,
+          "step": 1
+        }
+      ],
+      "description": "Sequentially execute the structured body once for each DetectionList item in input order. The body receives current index/center/circle/rectangle/x/y and optional confidence/classId; the loop fails when item count exceeds maxItems.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false
     },
@@ -2087,6 +2554,37 @@
       "declaresActions": false
     },
     {
+      "type": "flow.loopEnd",
+      "displayName": "Loop End",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "repeat",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "declaresActions": false
+    },
+    {
       "type": "flow.parallel",
       "displayName": "Parallel",
       "category": "Flow",
@@ -2153,6 +2651,212 @@
       "declaresActions": false
     },
     {
+      "type": "flow.switch",
+      "displayName": "Switch",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "selected",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "case1",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case2",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case3",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case4",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case5",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case6",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case7",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case8",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case9",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case10",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case11",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case12",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case13",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case14",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case15",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "case16",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "default",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "casesJson",
+          "label": "Cases (JSON string array)",
+          "type": "textarea",
+          "defaultValue": "[\"OK\",\"NG\"]"
+        }
+      ],
+      "description": "Choose one matching path. casesJson entries map in order to case1-case16; unmatched values take the default path. Converge all configured paths at Flow Merge.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "flow.try",
+      "displayName": "Try / Catch",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "body",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "success",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "error",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "succeeded",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "errorMessage",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "attempts",
+          "dataType": "Integer",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "maxRetries",
+          "label": "Max Retries",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 3,
+          "step": 1
+        },
+        {
+          "name": "retryDelayMs",
+          "label": "Retry Delay",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 5000,
+          "step": 10,
+          "unit": "ms"
+        }
+      ],
+      "description": "Catch body failures and route to success or error. Automatic retries are limited to linear deterministic built-in Pipeline compute nodes with no declared actions; cancellation is never retried. Connect body/success/error to flow.merge case1/case2/default.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
       "type": "geometry.angle",
       "displayName": "Line Angle",
       "category": "Geometry",
@@ -2196,7 +2900,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "geometry.intersection",
@@ -2242,7 +2947,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "geometry.distance",
@@ -2284,6 +2990,810 @@
         "supportsRoi": false,
         "emitsOverlay": true,
         "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "inference.anomaly",
+      "displayName": "ONNX Anomaly Score",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "score",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "isAnomaly",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "threshold",
+          "label": "Anomaly Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01
+        }
+      ],
+      "description": "Run an ONNX anomaly model with a single scalar float32 output tensor; compare its score with the configured threshold.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.classification",
+      "displayName": "ONNX Classification",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "label",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "classIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "labels",
+          "label": "Class Labels",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional comma-separated labels in model class order."
+        },
+        {
+          "name": "applySoftmax",
+          "label": "Apply Softmax",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "topK",
+          "label": "Top K",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 100,
+          "step": 1
+        }
+      ],
+      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Supported output layouts: [1,C] and [1,C,1,1]; output result is JSON.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.detection",
+      "displayName": "ONNX Detection",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "normalized",
+          "options": [
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            },
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            }
+          ]
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "NMS IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Detections",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        }
+      ],
+      "description": "Run an ONNX detector with output rows [x1,y1,x2,y2,score,classId], as [N,6] or [1,N,6]. Coordinates can be normalized or input-image pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.segmentation",
+      "displayName": "ONNX Segmentation",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mask",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 224,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "binaryThreshold",
+          "label": "Binary Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01,
+          "description": "Used only when the output has one channel; multi-class output uses per-pixel argmax."
+        }
+      ],
+      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "logic.boolean",
+      "displayName": "Boolean Logic",
+      "category": "Logic",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "b",
+          "dataType": "Boolean",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "op",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "and",
+          "options": [
+            {
+              "label": "AND",
+              "value": "and"
+            },
+            {
+              "label": "OR",
+              "value": "or"
+            },
+            {
+              "label": "XOR",
+              "value": "xor"
+            },
+            {
+              "label": "NOT (a)",
+              "value": "not"
+            }
+          ]
+        }
+      ],
+      "description": "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "match.template",
+      "displayName": "Template Match",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "template",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "score",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "templatePath",
+          "label": "Template File",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Used when the template input port is not connected (absolute path, or relative to the host working directory)."
+        },
+        {
+          "name": "angleRangeDeg",
+          "label": "Angle Range (deg)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "description": "0 = no rotation search."
+        },
+        {
+          "name": "angleStepDeg",
+          "label": "Angle Step (deg)",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 30,
+          "step": 0.5
+        },
+        {
+          "name": "minScore",
+          "label": "Min Score",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "method",
+          "label": "Method",
+          "type": "select",
+          "defaultValue": "ccoeff-normed",
+          "options": [
+            {
+              "label": "Normalized cross-correlation",
+              "value": "ccoeff-normed"
+            },
+            {
+              "label": "Normalized squared difference",
+              "value": "sqdiff-normed"
+            }
+          ]
+        }
+      ],
+      "description": "Locate a template in the image (optional coarse rotation search); outputs position, angle and score. angle = rotation applied to the template to align with the image (positive = counter-clockwise).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
@@ -2432,7 +3942,492 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.circleSpacing",
+      "displayName": "Circle Spacing",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "circleA",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "circleB",
+          "dataType": "Circle",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "centerDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "gap",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "measurement",
+          "dataType": "Measurement",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Return center distance and signed edge-to-edge gap; overlap produces a negative gap.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "collection.detections.count",
+      "displayName": "Count Detections",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Return the number of items in a DetectionList.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "collection.detections.at",
+      "displayName": "Detection At Index",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "perimeter",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "circularity",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": false
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "classId",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 199,
+          "step": 1
+        }
+      ],
+      "description": "Extract one DetectionList item as typed scalar and geometry outputs, including optional confidence and classId; an out-of-range index returns found=false.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "collection.detections.filter",
+      "displayName": "Filter Detections",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Minimum Area",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999999,
+          "step": 1
+        },
+        {
+          "name": "maxArea",
+          "label": "Maximum Area (0=unlimited)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999999,
+          "step": 1
+        },
+        {
+          "name": "minCircularity",
+          "label": "Minimum Circularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "maxCircularity",
+          "label": "Maximum Circularity",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "minConfidence",
+          "label": "Minimum Confidence (-1=unlimited)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "classId",
+          "label": "Class ID (-1=unlimited)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 999999999,
+          "step": 1
+        }
+      ],
+      "description": "Filter DetectionList items by area, circularity, optional confidence and class ID; missing optional values do not match configured filters.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.fitCircle",
+      "displayName": "Fit Circle",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point1",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point2",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point3",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point4",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point5",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point6",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point7",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point8",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point9",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point10",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point11",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point12",
+          "dataType": "Point2D",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Algebraic least-squares circle fit from at least three connected Point2D inputs (up to 12).",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.fitLine",
+      "displayName": "Fit Line",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point1",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point2",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point3",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point4",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point5",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point6",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point7",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point8",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point9",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point10",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point11",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "point12",
+          "dataType": "Point2D",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Orthogonal least-squares line fit from two or more connected Point2D inputs (up to 12).",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "measure.blob",
@@ -2505,7 +4500,201 @@
       ],
       "description": "Find the largest contour and return typed geometry.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.blobs",
+      "displayName": "Multi Blob",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 99999999,
+          "step": 10
+        },
+        {
+          "name": "maxArea",
+          "label": "Max Area",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 10,
+          "description": "0 disables the upper bound."
+        },
+        {
+          "name": "minCircularity",
+          "label": "Min Circularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "description": "4*pi*A/P^2, 1 = perfect circle."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Count",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 1,
+          "max": 200,
+          "step": 1
+        },
+        {
+          "name": "sortBy",
+          "label": "Sort By",
+          "type": "select",
+          "defaultValue": "area",
+          "options": [
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "X (left to right)",
+              "value": "x"
+            },
+            {
+              "label": "Y (top to bottom)",
+              "value": "y"
+            }
+          ]
+        },
+        {
+          "name": "descending",
+          "label": "Descending",
+          "type": "boolean",
+          "defaultValue": true
+        }
+      ],
+      "description": "Detect/filter/sort/count multiple blobs; outputs a DetectionList plus the first (sorted) target's geometry. Zero blobs is a normal result (count=0).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.pointLineDistance",
+      "displayName": "Point to Line Distance",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "distance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "closestPoint",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "segment",
+          "label": "Clamp to Segment",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Measure perpendicular distance to an infinite line or its finite segment.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "measure.rotatedRect",
@@ -2578,7 +4767,1176 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "collection.detections.sort",
+      "displayName": "Sort Detections",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sortBy",
+          "label": "Sort By",
+          "type": "select",
+          "defaultValue": "area",
+          "options": [
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "X",
+              "value": "x"
+            },
+            {
+              "label": "Y",
+              "value": "y"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
+            },
+            {
+              "label": "Perimeter",
+              "value": "perimeter"
+            }
+          ]
+        },
+        {
+          "name": "descending",
+          "label": "Descending",
+          "type": "boolean",
+          "defaultValue": true
+        }
+      ],
+      "description": "Sort a DetectionList by a selected numeric field and refresh result indices.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "output.exportResult",
+      "displayName": "Export Result",
+      "category": "Output",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "path",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "bytesWritten",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "path",
+          "label": "Result Path",
+          "type": "text",
+          "defaultValue": "artifacts/result.json"
+        },
+        {
+          "name": "format",
+          "label": "Format",
+          "type": "select",
+          "defaultValue": "json",
+          "options": [
+            {
+              "label": "JSON",
+              "value": "json"
+            },
+            {
+              "label": "CSV",
+              "value": "csv"
+            }
+          ]
+        },
+        {
+          "name": "overwrite",
+          "label": "Overwrite Existing",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Write one typed result value to JSON or a quoted CSV row.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "output.httpRequest",
+      "displayName": "HTTP Request",
+      "category": "Output",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "statusCode",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "body",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "success",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "url",
+          "label": "URL",
+          "type": "text",
+          "defaultValue": "https://example.invalid/"
+        },
+        {
+          "name": "method",
+          "label": "Method",
+          "type": "select",
+          "defaultValue": "GET",
+          "options": [
+            {
+              "label": "GET",
+              "value": "GET"
+            },
+            {
+              "label": "POST",
+              "value": "POST"
+            },
+            {
+              "label": "PUT",
+              "value": "PUT"
+            },
+            {
+              "label": "DELETE",
+              "value": "DELETE"
+            },
+            {
+              "label": "HEAD",
+              "value": "HEAD"
+            }
+          ]
+        },
+        {
+          "name": "body",
+          "label": "Request Body",
+          "type": "textarea",
+          "defaultValue": ""
+        },
+        {
+          "name": "contentType",
+          "label": "Content Type",
+          "type": "text",
+          "defaultValue": "application/json"
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 10000,
+          "min": 1,
+          "max": 120000,
+          "step": 100,
+          "unit": "ms"
+        },
+        {
+          "name": "maxResponseBytes",
+          "label": "Response Size Limit",
+          "type": "number",
+          "defaultValue": 1048576,
+          "min": 1,
+          "max": 67108864,
+          "step": 1024,
+          "unit": "bytes"
+        }
+      ],
+      "description": "Send an HTTP request. Cancellation/deadline abort the request; any non-2xx response fails the node.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "output.saveImage",
+      "displayName": "Save Image",
+      "category": "Output",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "path",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "bytesWritten",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "path",
+          "label": "Image Path",
+          "type": "text",
+          "defaultValue": "artifacts/output.png"
+        },
+        {
+          "name": "overwrite",
+          "label": "Overwrite Existing",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Encode and persist an image using the extension-selected OpenCV codec. Paths are resolved by the host process.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.threshold.adaptive",
+      "displayName": "Adaptive Threshold",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "blockSize",
+          "label": "Block Size",
+          "type": "number",
+          "defaultValue": 31,
+          "min": 3,
+          "max": 99,
+          "step": 2,
+          "description": "Local window size (coerced to odd)."
+        },
+        {
+          "name": "c",
+          "label": "C Constant",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0,
+          "max": 50,
+          "step": 1
+        },
+        {
+          "name": "method",
+          "label": "Method",
+          "type": "select",
+          "defaultValue": "mean",
+          "options": [
+            {
+              "label": "Mean",
+              "value": "mean"
+            },
+            {
+              "label": "Gaussian",
+              "value": "gaussian"
+            }
+          ]
+        },
+        {
+          "name": "invert",
+          "label": "Invert",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Local adaptive threshold for uneven illumination (color input is auto-converted to gray).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.channel",
+      "displayName": "Channel Extract",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "channel",
+          "label": "Channel",
+          "type": "select",
+          "defaultValue": "gray",
+          "options": [
+            {
+              "label": "Gray",
+              "value": "gray"
+            },
+            {
+              "label": "Blue",
+              "value": "blue"
+            },
+            {
+              "label": "Green",
+              "value": "green"
+            },
+            {
+              "label": "Red",
+              "value": "red"
+            },
+            {
+              "label": "Hue",
+              "value": "hue"
+            },
+            {
+              "label": "Saturation",
+              "value": "saturation"
+            },
+            {
+              "label": "Value",
+              "value": "value"
+            }
+          ]
+        }
+      ],
+      "description": "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.crop",
+      "displayName": "Crop Image",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "width",
+          "label": "Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "height",
+          "label": "Height",
+          "type": "number",
+          "defaultValue": 480,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        }
+      ],
+      "description": "Extract a bounds-checked rectangular image region.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.blur.gaussian",
+      "displayName": "Gaussian Blur",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "kernelSize",
+          "label": "Kernel Size",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 3,
+          "max": 31,
+          "step": 2
+        },
+        {
+          "name": "sigmaX",
+          "label": "Sigma X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "0 derives sigma from the kernel size."
+        },
+        {
+          "name": "sigmaY",
+          "label": "Sigma Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "0 mirrors sigmaX."
+        }
+      ],
+      "description": "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.grayscale",
+      "displayName": "Grayscale",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Mode",
+          "type": "select",
+          "defaultValue": "luminance",
+          "options": [
+            {
+              "label": "Luminance (BT.601)",
+              "value": "luminance"
+            },
+            {
+              "label": "Average",
+              "value": "average"
+            },
+            {
+              "label": "Max",
+              "value": "max"
+            }
+          ]
+        }
+      ],
+      "description": "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.blur.median",
+      "displayName": "Median Blur",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "kernelSize",
+          "label": "Kernel Size",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 3,
+          "max": 31,
+          "step": 2
+        }
+      ],
+      "description": "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.morphology",
+      "displayName": "Morphology",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operation",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "open",
+          "options": [
+            {
+              "label": "Erode",
+              "value": "erode"
+            },
+            {
+              "label": "Dilate",
+              "value": "dilate"
+            },
+            {
+              "label": "Open (erode then dilate)",
+              "value": "open"
+            },
+            {
+              "label": "Close (dilate then erode)",
+              "value": "close"
+            }
+          ]
+        },
+        {
+          "name": "kernelSize",
+          "label": "Kernel Size",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 31,
+          "step": 2
+        },
+        {
+          "name": "iterations",
+          "label": "Iterations",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "name": "shape",
+          "label": "Kernel Shape",
+          "type": "select",
+          "defaultValue": "rect",
+          "options": [
+            {
+              "label": "Rectangle",
+              "value": "rect"
+            },
+            {
+              "label": "Ellipse",
+              "value": "ellipse"
+            },
+            {
+              "label": "Cross",
+              "value": "cross"
+            }
+          ]
+        }
+      ],
+      "description": "Morphological erode/dilate/open/close: remove burrs, fill pinholes and stabilize blobs.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.threshold.otsu",
+      "displayName": "Otsu Threshold",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "threshold",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "invert",
+          "label": "Invert",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.perspective",
+      "displayName": "Perspective Correction",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x1",
+          "label": "Top Left X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "y1",
+          "label": "Top Left Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "x2",
+          "label": "Top Right X",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "y2",
+          "label": "Top Right Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "x3",
+          "label": "Bottom Right X",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "y3",
+          "label": "Bottom Right Y",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "x4",
+          "label": "Bottom Left X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "y4",
+          "label": "Bottom Left Y",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "width",
+          "label": "Output Width",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "height",
+          "label": "Output Height",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        }
+      ],
+      "description": "Rectify a four-corner quadrilateral into a rectangular image.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.resize",
+      "displayName": "Resize Image",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "width",
+          "label": "Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "height",
+          "label": "Height",
+          "type": "number",
+          "defaultValue": 480,
+          "min": 1,
+          "max": 16384,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "interpolation",
+          "label": "Interpolation",
+          "type": "select",
+          "defaultValue": "linear",
+          "options": [
+            {
+              "label": "Nearest",
+              "value": "nearest"
+            },
+            {
+              "label": "Linear",
+              "value": "linear"
+            },
+            {
+              "label": "Cubic",
+              "value": "cubic"
+            },
+            {
+              "label": "Area",
+              "value": "area"
+            }
+          ]
+        }
+      ],
+      "description": "Resize an image using an explicit interpolation method.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.rotate",
+      "displayName": "Rotate Image",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "angleDeg",
+          "label": "Angle",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -360,
+          "max": 360,
+          "step": 1,
+          "unit": "deg"
+        },
+        {
+          "name": "expand",
+          "label": "Expand Canvas",
+          "type": "boolean",
+          "defaultValue": true
+        }
+      ],
+      "description": "Rotate around the image center; optionally expand the canvas to retain all pixels.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "image.threshold",
@@ -2621,6 +5979,214 @@
       ],
       "description": "Binary threshold using OpenCvSharp.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.undistort",
+      "displayName": "Undistort Image",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "calibrationJson",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "calibrationJson",
+          "label": "Calibration JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "description": "Optional fallback when calibrationJson is not connected; accepts CameraCalibrationModel JSON from calibration.cameraIntrinsics."
+        }
+      ],
+      "description": "Correct lens distortion with OpenCV using supplied intrinsics. Intrinsics are scaled when image resolution differs.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "recognition.barcode",
+      "displayName": "Barcode / QR Decode",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "results",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "format",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Formats",
+          "type": "select",
+          "defaultValue": "all",
+          "options": [
+            {
+              "label": "All Supported",
+              "value": "all"
+            },
+            {
+              "label": "QR Code",
+              "value": "qr"
+            },
+            {
+              "label": "1D Barcodes",
+              "value": "1d"
+            }
+          ]
+        },
+        {
+          "name": "tryHarder",
+          "label": "Try Harder",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "multiple",
+          "label": "Decode Multiple",
+          "type": "boolean",
+          "defaultValue": true
+        }
+      ],
+      "description": "Decode QR Code and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "recognition.ocr",
+      "displayName": "OCR",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "dataPath",
+          "label": "Tessdata Directory",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Directory containing language .traineddata files."
+        },
+        {
+          "name": "language",
+          "label": "Language(s)",
+          "type": "text",
+          "defaultValue": "eng",
+          "description": "Tesseract language codes, e.g. eng or eng+chi_sim."
+        }
+      ],
+      "description": "Run Tesseract 5 OCR on the image. The configured tessdata directory must include each requested language model.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "declaresActions": false
     },
     {
@@ -2890,7 +6456,8 @@
       ],
       "description": "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "robot.currentPose",
@@ -3114,7 +6681,175 @@
       ],
       "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
       "pluginId": "builtin",
-      "declaresActions": false
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "value.arithmetic",
+      "displayName": "Arithmetic",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "b",
+          "dataType": "Double",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "op",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "add",
+          "options": [
+            {
+              "label": "Add (a + b)",
+              "value": "add"
+            },
+            {
+              "label": "Subtract (a - b)",
+              "value": "subtract"
+            },
+            {
+              "label": "Multiply (a * b)",
+              "value": "multiply"
+            },
+            {
+              "label": "Divide (a / b)",
+              "value": "divide"
+            }
+          ]
+        }
+      ],
+      "description": "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "value.number",
+      "displayName": "Number Constant",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "integer",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "value",
+          "label": "Value",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 1
+        }
+      ],
+      "description": "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "value.range",
+      "displayName": "Range Check",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "min",
+          "label": "Min",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 1
+        },
+        {
+          "name": "max",
+          "label": "Max",
+          "type": "number",
+          "defaultValue": 100,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 1
+        },
+        {
+          "name": "invert",
+          "label": "Invert",
+          "type": "boolean",
+          "defaultValue": false
+        }
+      ],
+      "description": "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     }
   ]
 }

@@ -442,7 +442,54 @@ export const frameSetDemo = (): DemoGraph => ({
   ]
 });
 
+export const inspectionDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 30, 150),
+    node('gray', 'image.grayscale', 300, 150),
+    node('blur', 'image.blur.gaussian', 570, 150, { kernelSize: 5 }),
+    node('binary', 'image.threshold.otsu', 840, 150),
+    node('clean', 'image.morphology', 1110, 150, { operation: 'open', kernelSize: 3 }),
+    node('objects', 'measure.blobs', 1380, 150, { minArea: 1000 }),
+    node('check', 'value.range', 1650, 150, { min: 1, max: 5 }),
+    node('result', 'flow.result', 1920, 150)
+  ],
+  edges: [
+    control('c1', 'source', 'next', 'gray', 'exec'), data('d1', 'source', 'image', 'gray', 'image'),
+    control('c2', 'gray', 'next', 'blur', 'exec'), data('d2', 'gray', 'image', 'blur', 'image'),
+    control('c3', 'blur', 'next', 'binary', 'exec'), data('d3', 'blur', 'image', 'binary', 'image'),
+    control('c4', 'binary', 'next', 'clean', 'exec'), data('d4', 'binary', 'image', 'clean', 'image'),
+    control('c5', 'clean', 'next', 'objects', 'exec'), data('d5', 'clean', 'image', 'objects', 'image'),
+    control('c6', 'objects', 'next', 'check', 'exec'), data('d6', 'objects', 'count', 'check', 'value'),
+    control('c7', 'check', 'next', 'result', 'exec'), data('d7', 'check', 'pass', 'result', 'pass')
+  ]
+});
+
+export const forEachDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 30, 180),
+    node('binary', 'image.threshold', 300, 180, { threshold: 80 }),
+    node('objects', 'measure.blobs', 570, 180, { minArea: 100 }),
+    node('offset', 'value.number', 840, 180, { value: 0 }),
+    node('loop', 'flow.forEach', 1110, 180, { maxItems: 100 }),
+    node('position', 'value.arithmetic', 1410, 30, { op: 'add' }),
+    node('end', 'flow.loopEnd', 1700, 30),
+    node('count', 'collection.detections.count', 1410, 420)
+  ],
+  edges: [
+    control('c1', 'source', 'next', 'binary', 'exec'), data('d1', 'source', 'image', 'binary', 'image'),
+    control('c2', 'binary', 'next', 'objects', 'exec'), data('d2', 'binary', 'image', 'objects', 'image'),
+    control('c3', 'objects', 'next', 'offset', 'exec'),
+    control('c4', 'offset', 'next', 'loop', 'exec'), data('d3', 'objects', 'detections', 'loop', 'detections'),
+    control('c5', 'loop', 'body', 'position', 'exec'), data('d4', 'loop', 'x', 'position', 'a'),
+    data('d5', 'offset', 'value', 'position', 'b'), control('c6', 'position', 'next', 'end', 'exec'),
+    control('c7', 'end', 'repeat', 'loop', 'repeat'),
+    control('c8', 'loop', 'done', 'count', 'exec'), data('d6', 'loop', 'detections', 'count', 'detections')
+  ]
+});
+
 export const demos = {
+  forEach: forEachDemo,
+  inspection: inspectionDemo,
   camera: cameraDemo,
   cameraTrigger: triggeredCameraDemo,
   frameSet: frameSetDemo,
@@ -465,6 +512,8 @@ export type DemoKey = keyof typeof demos;
 
 /** 每个示例的一句话用途说明：让用户在打开前就知道“这个示例是干什么的、适合谁” */
 export const demoDescriptions: Record<DemoKey, string> = {
+  forEach: '检测多个目标后逐个读取中心 X 坐标，循环结束继续计数，演示有界顺序迭代。',
+  inspection: '灰度 → 滤波 → 自动阈值 → 形态学 → 多目标计数 → 范围判定，演示新增节点的完整检测流程。',
   camera: '从虚拟相机取图 → 阈值分割 → 斑点计数，演示最基本的采集-处理链路。',
   cameraTrigger: 'PLC 触发信号到来才取图，演示触发式采集与取图超时控制。',
   frameSet: '同步帧组一次采集多台相机图像并分别处理，适用于多面同步检测。',

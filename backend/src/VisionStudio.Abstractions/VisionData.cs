@@ -139,6 +139,24 @@ public readonly record struct VisionMeasurement(double Value, string Unit, strin
 public readonly record struct VisionRectangle2D(double X, double Y, double Width, double Height, double AngleDeg = 0);
 public readonly record struct VisionCircle(double X, double Y, double Radius);
 
+/// <summary>
+/// 批次一（2026-10-13 节点补齐）：多目标检测结果条目——DetectionList 的负载元素。
+/// Index 为**排序后的 0 基序号**（筛选/排序之后的顺序即下游看到的目标次序）。
+/// </summary>
+public readonly record struct VisionDetection(
+    int Index,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    double Area,
+    double Perimeter,
+    double Circularity,
+    VisionCircle Circle,
+    VisionRectangle2D BoundingBox,
+    double? Confidence = null,
+    int? ClassId = null);
+
 /// <summary>Runtime payload tagged with its graph-visible type.</summary>
 public sealed record VisionValue(VisionDataType Type, object? Value)
 {
@@ -161,6 +179,9 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
     public static VisionValue RobotTarget(VisionRobotTarget2D value) => new(VisionDataType.RobotTarget2D, value);
     public static VisionValue DeviceTag(VisionDeviceTagValue value) => new(VisionDataType.DeviceTagValue, value);
     public static VisionValue Measurement(VisionMeasurement value) => new(VisionDataType.Measurement, value);
+
+    /// <summary>批次一：多目标检测列表（DetectionList）。</summary>
+    public static VisionValue Detections(IReadOnlyList<VisionDetection> value) => new(VisionDataType.DetectionList, value);
 
     public T Require<T>(string port)
     {

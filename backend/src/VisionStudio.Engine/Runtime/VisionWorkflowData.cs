@@ -19,6 +19,13 @@ public sealed class VisionWorkflowData : IDisposable
     private readonly ConcurrentQueue<NodeRunReport> _nodeReports = new();
     private readonly ConcurrentQueue<VisionOverlay> _overlays = new();
     private readonly ConcurrentDictionary<string, bool> _branchConditions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _switchSelections = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _trySucceeded = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _tryRegionGate = new();
+    private readonly object _tryAttemptGate = new();
+    private IReadOnlyDictionary<string, IReadOnlyList<string>>? _tryBodyNodeIds;
+    private string? _activeTryNodeId;
+    private int _activeTryAttempt;
     private readonly ConcurrentDictionary<string, ControlFlowDecision> _controlFlowDecisions = new(StringComparer.OrdinalIgnoreCase);
     private long _timelineOrigin;
     private long _executionSequence;
@@ -78,6 +85,10 @@ public sealed class VisionWorkflowData : IDisposable
     public ConcurrentDictionary<string, IReadOnlyDictionary<string, VisionValue>> OutputsByNode { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Bounded, frozen per-node lists consumed by the structured Workflow Core Foreach primitive.</summary>
+    public ConcurrentDictionary<string, IReadOnlyList<VisionDetection>> ForEachCollections { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyDictionary<string, IReadOnlyList<string>> PipelineSegments { get; set; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
 
@@ -85,13 +96,13 @@ public sealed class VisionWorkflowData : IDisposable
     // this global value because nested If nodes must not overwrite their parent's condition.
     public bool BranchCondition { get; set; }
 
-    public void SetBranchCondition(string nodeId, bool condition)
+    public void SetBranchCondition(string nodeId, bool condition, string nodeType = "flow.if")
     {
         BranchCondition = condition;
         _branchConditions[nodeId] = condition;
         _controlFlowDecisions[nodeId] = new ControlFlowDecision(
             nodeId,
-            "flow.if",
+            nodeType,
             [condition ? "true" : "false"],
             condition ? "true" : "false",
             condition);
@@ -100,6 +111,82 @@ public sealed class VisionWorkflowData : IDisposable
     public bool GetBranchCondition(string nodeId) => _branchConditions.TryGetValue(nodeId, out var value)
         ? value
         : throw new InvalidOperationException($"Branch condition for If node '{nodeId}' has not been evaluated.");
+
+    /// <summary>Read-only view for Workflow Core's expression evaluator, which restricts arbitrary method calls.</summary>
+    public IReadOnlyDictionary<string, bool> BranchConditions => _branchConditions;
+
+    public void SetSwitchSelection(string nodeId, string selectedPort)
+    {
+        if (!selectedPort.Equals("default", StringComparison.OrdinalIgnoreCase) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(selectedPort, "^case([1-9]|1[0-6])$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            throw new InvalidOperationException($"Switch '{nodeId}' selected invalid branch '{selectedPort}'.");
+        _switchSelections[nodeId] = selectedPort;
+        _controlFlowDecisions[nodeId] = new ControlFlowDecision(nodeId, "flow.switch", [selectedPort], selectedPort);
+    }
+
+    public string GetSwitchSelection(string nodeId) => _switchSelections.TryGetValue(nodeId, out var value)
+        ? value
+        : throw new InvalidOperationException($"Branch selection for Switch node '{nodeId}' has not been evaluated.");
+
+    public IReadOnlyDictionary<string, string> SwitchSelections => _switchSelections;
+
+    public IReadOnlyDictionary<string, bool> TrySucceeded => _trySucceeded;
+
+    public IReadOnlyList<string> GetTryBodyNodeIds(string nodeId)
+    {
+        lock (_tryRegionGate)
+        {
+            _tryBodyNodeIds ??= new StructuredWorkflowIrBuilder(
+                Definition,
+                Definition.Edges.Where(WorkflowGraph.IsControlEdge).ToArray()).Build().TryBodies;
+            return _tryBodyNodeIds.TryGetValue(nodeId, out var ids)
+                ? ids
+                : throw new InvalidOperationException($"Try region '{nodeId}' is missing from the compiled workflow structure.");
+        }
+    }
+
+    public void SetTryOutcome(string nodeId, bool succeeded, string? error, int attempts)
+    {
+        _trySucceeded[nodeId] = succeeded;
+        _controlFlowDecisions[nodeId] = new ControlFlowDecision(nodeId, "flow.try", [succeeded ? "success" : "error"], succeeded ? "success" : "error", succeeded);
+    }
+
+    public void BeginTryAttempt(string nodeId, int attempt, IReadOnlyList<string> bodyNodeIds)
+    {
+        // A previous attempt may have produced early body outputs before a later node failed.
+        // Drop the entire attempt's cached values before retrying; data edges into the error region
+        // are rejected by the compiler, so failed/partial results cannot leak into recovery logic.
+        foreach (var bodyNodeId in bodyNodeIds)
+            OutputsByNode.TryRemove(bodyNodeId, out _);
+        lock (_tryAttemptGate) { _activeTryNodeId = nodeId; _activeTryAttempt = attempt; }
+    }
+
+    public void ClearTryBodyOutputs(IEnumerable<string> bodyNodeIds)
+    {
+        foreach (var bodyNodeId in bodyNodeIds)
+            OutputsByNode.TryRemove(bodyNodeId, out _);
+    }
+
+    public (string NodeId, int Attempt)? CurrentTryAttempt
+    {
+        get { lock (_tryAttemptGate) return _activeTryNodeId is null ? null : (_activeTryNodeId, _activeTryAttempt); }
+    }
+
+    public void EndTryAttempt()
+    {
+        lock (_tryAttemptGate) { _activeTryNodeId = null; _activeTryAttempt = 0; }
+    }
+
+    public void ClearHandledTryError(string nodeId)
+    {
+        if (Error?.StartsWith($"{nodeId}: ", StringComparison.OrdinalIgnoreCase) == true)
+            Error = null;
+        if (FaultedNodeId?.Equals(nodeId, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            FaultedException = null;
+            FaultedNodeId = null;
+        }
+    }
 
     public void MarkParallelBranches(string nodeId)
         => _controlFlowDecisions[nodeId] = new ControlFlowDecision(
@@ -119,17 +206,26 @@ public sealed class VisionWorkflowData : IDisposable
     /// </summary>
     public Exception? FaultedException { get; set; }
     public string? FaultedNodeId { get; set; }
+    public string? LastFaultedNodeId { get; set; }
 
     /// <summary>Branch-scoped disposition tracker; Empty unless the workflow contains Parallel regions.</summary>
     public ParallelDispositionTracker ParallelDispositions { get; private set; } = ParallelDispositionTracker.Empty;
+    private HashSet<string> _forEachBodyNodeIds = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Configures Parallel branch disposition scoping from the compiled structured regions.</summary>
+    /// <summary>Configures Parallel branch scoping and ForEach any-NG aggregation from structured regions.</summary>
     public void ConfigureParallelDispositions(IReadOnlyList<StructuredControlRegion> regions)
-        => ParallelDispositions = ParallelDispositionTracker.FromRegions(regions);
+    {
+        ParallelDispositions = ParallelDispositionTracker.FromRegions(regions);
+        _forEachBodyNodeIds = regions
+            .Where(region => region.Kind.Equals("ForEach", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(region => region.BranchNodeIds.TryGetValue("body", out var nodes) ? nodes : [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Records one flow.result. Inside a Parallel branch the value is held in the branch slot
-    /// (any-NG) until the paired Join merges it; otherwise it sets the run disposition directly.
+    /// (any-NG) until the paired Join merges it. Results in a ForEach body also use any-NG across
+    /// iterations, while an unscoped result elsewhere keeps its explicit overwrite semantics.
     /// </summary>
     public DispositionContribution RecordDisposition(string nodeId, string disposition)
     {
@@ -139,7 +235,12 @@ public sealed class VisionWorkflowData : IDisposable
             return new DispositionContribution(disposition, ScopedToBranch: true, regionId, branchName, branchDisposition);
         }
 
-        QualityDisposition = disposition;
+        if (_forEachBodyNodeIds.Contains(nodeId))
+            QualityDisposition = QualityDisposition is null
+                ? disposition
+                : ParallelDispositionTracker.Combine(QualityDisposition, disposition);
+        else
+            QualityDisposition = disposition;
         return new DispositionContribution(disposition, ScopedToBranch: false);
     }
 

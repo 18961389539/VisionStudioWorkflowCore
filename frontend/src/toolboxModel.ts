@@ -15,7 +15,9 @@ export function nodeCategory(type: string): NodeCategory {
   if (['image.acquire', 'image.synthetic', 'camera.syncCapture', 'frameset.image'].includes(type)) return 'acquisition';
   const prefix = type.split('.')[0];
   return ({ image: 'preprocess', feature: 'feature', measure: 'measurement', geometry: 'geometry',
-    calibration: 'calibration', coordinate: 'coordinate', flow: 'flow', device: 'device', robot: 'robot' } as Record<string, NodeCategory>)[prefix] ?? 'plugin';
+    calibration: 'calibration', coordinate: 'coordinate', flow: 'flow', device: 'device', robot: 'robot',
+    match: 'feature', value: 'flow', logic: 'flow', output: 'device', http: 'device',
+    recognition: 'feature', ai: 'feature', inference: 'feature', collection: 'flow' } as Record<string, NodeCategory>)[prefix] ?? 'plugin';
 }
 export function nodePresentation(type: string) {
   const category = nodeCategory(type);

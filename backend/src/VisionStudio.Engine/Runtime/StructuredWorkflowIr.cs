@@ -1,3 +1,5 @@
+using VisionStudio.Abstractions;
+
 namespace VisionStudio.Engine.Runtime;
 
 /// <summary>
@@ -26,6 +28,28 @@ internal sealed record StructuredIfIr(
         [Node.Id, .. TrueBranch.NodeIds, .. FalseBranch.NodeIds];
 }
 
+internal sealed record StructuredSwitchBranch(string Port, string Label, StructuredSequenceIr Sequence);
+
+internal sealed record StructuredSwitchIr(
+    NodeDefinition Node,
+    IReadOnlyList<StructuredSwitchBranch> Branches,
+    string JoinNodeId,
+    int Depth) : StructuredIrItem
+{
+    public override IReadOnlyList<string> NodeIds => [Node.Id, .. Branches.SelectMany(x => x.Sequence.NodeIds)];
+}
+
+internal sealed record StructuredTryIr(
+    NodeDefinition Node,
+    StructuredSequenceIr Body,
+    StructuredSequenceIr Success,
+    StructuredSequenceIr Error,
+    string JoinNodeId,
+    int Depth) : StructuredIrItem
+{
+    public override IReadOnlyList<string> NodeIds => [Node.Id, .. Body.NodeIds, .. Success.NodeIds, .. Error.NodeIds];
+}
+
 internal sealed record StructuredParallelIr(
     NodeDefinition Node,
     StructuredSequenceIr Branch1,
@@ -35,6 +59,15 @@ internal sealed record StructuredParallelIr(
 {
     public override IReadOnlyList<string> NodeIds =>
         [Node.Id, .. Branch1.NodeIds, .. Branch2.NodeIds];
+}
+
+internal sealed record StructuredForEachIr(
+    NodeDefinition Node,
+    StructuredSequenceIr Body,
+    string LoopEndNodeId,
+    int Depth) : StructuredIrItem
+{
+    public override IReadOnlyList<string> NodeIds => [Node.Id, .. Body.NodeIds];
 }
 
 internal sealed record StructuredSequenceIr(IReadOnlyList<StructuredIrItem> Items)
@@ -52,7 +85,8 @@ public sealed record StructuredControlRegion(
 internal sealed record StructuredWorkflowIr(
     StructuredSequenceIr Root,
     IReadOnlyList<string> VisualOrder,
-    IReadOnlyList<StructuredControlRegion> Regions);
+    IReadOnlyList<StructuredControlRegion> Regions,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> TryBodies);
 
 /// <summary>
 /// Parses explicit Control edges into a strict structured tree. Each If/Parallel owns one distinct
@@ -64,8 +98,10 @@ internal sealed class StructuredWorkflowIrBuilder
     private readonly HashSet<string> _claimed = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>已配对的 If/Parallel Join：其块被处理后由外层序列直接消费，不再视为“意外 Join”。</summary>
     private readonly HashSet<string> _pairedJoins = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pairedLoopEnds = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _visualOrder = [];
     private readonly List<StructuredControlRegion> _regions = [];
+    private readonly Dictionary<string, IReadOnlyList<string>> _tryBodies = new(StringComparer.OrdinalIgnoreCase);
 
     public StructuredWorkflowIrBuilder(WorkflowDefinition workflow, IReadOnlyList<EdgeDefinition> controlEdges)
         => _graph = new StructuredControlGraph(workflow, controlEdges);
@@ -83,10 +119,11 @@ internal sealed class StructuredWorkflowIrBuilder
             throw new InvalidOperationException($"Every executable node must belong to the control-flow graph. Unreachable: {string.Join(", ", missing)}");
         }
 
-        return new StructuredWorkflowIr(root, _visualOrder.ToArray(), _regions.ToArray());
+        return new StructuredWorkflowIr(root, _visualOrder.ToArray(), _regions.ToArray(),
+            new Dictionary<string, IReadOnlyList<string>>(_tryBodies, StringComparer.OrdinalIgnoreCase));
     }
 
-    private StructuredSequenceIr BuildSequence(string startId, string? stopJoinId, string ownerId, int depth)
+    private StructuredSequenceIr BuildSequence(string startId, string? stopJoinId, string ownerId, int depth, string? stopLoopEndId = null)
     {
         var items = new List<StructuredIrItem>();
         var currentId = startId;
@@ -96,11 +133,22 @@ internal sealed class StructuredWorkflowIrBuilder
             if (stopJoinId is not null && currentId.Equals(stopJoinId, StringComparison.OrdinalIgnoreCase))
                 return new StructuredSequenceIr(items);
 
+            if (stopLoopEndId is not null && currentId.Equals(stopLoopEndId, StringComparison.OrdinalIgnoreCase))
+            {
+                var loopEnd = _graph.Node(currentId);
+                if (!loopEnd.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"ForEach body '{ownerId}' expected flow.loopEnd '{stopLoopEndId}'.");
+                Claim(loopEnd.Id, ownerId);
+                _visualOrder.Add(loopEnd.Id);
+                items.Add(new StructuredNodeIr(loopEnd));
+                return new StructuredSequenceIr(items);
+            }
+
             var node = _graph.Node(currentId);
             // 分支内部的合法 Join 只有本层边界（stopJoinId，上一行已处理）与刚处理完的嵌套块
             // 自己的配对 Join（_pairedJoins，下一轮循环会把它作为汇合点正常消费）。
             // 其余任何 Join 都属于越界/共享结构，必须拒绝。
-            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase)
+            if (IsMergeNode(node)
                 && stopJoinId is not null
                 && !_pairedJoins.Contains(node.Id))
                 throw new InvalidOperationException(
@@ -109,7 +157,46 @@ internal sealed class StructuredWorkflowIrBuilder
             Claim(node.Id, ownerId);
             _visualOrder.Add(node.Id);
 
-            if (node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase))
+            if (node.Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase))
+            {
+                var outgoing = _graph.Outgoing(node.Id);
+                var expectedPorts = new[] { "body", "done" };
+                var unexpected = outgoing.Where(e => !expectedPorts.Contains(e.SourcePort, StringComparer.OrdinalIgnoreCase)).ToArray();
+                if (unexpected.Length > 0)
+                    throw new InvalidOperationException($"ForEach '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
+                var bodyEdge = SinglePort(outgoing, "body", node.Id);
+                var doneEdge = SinglePort(outgoing, "done", node.Id);
+                var pairedEnds = _graph.Workflow.Nodes.Where(candidate => candidate.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase) &&
+                    _graph.Outgoing(candidate.Id).Count == 1 &&
+                    _graph.Outgoing(candidate.Id)[0].SourcePort.Equals("repeat", StringComparison.OrdinalIgnoreCase) &&
+                    _graph.Outgoing(candidate.Id)[0].TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (pairedEnds.Length != 1)
+                    throw new InvalidOperationException($"ForEach '{node.Id}' requires exactly one paired flow.loopEnd repeat edge; found {pairedEnds.Length}.");
+                var loopEndId = pairedEnds[0].Id;
+                var loopEndIncoming = _graph.Incoming(loopEndId);
+                if (loopEndIncoming.Count != 1 || !_graph.Outgoing(loopEndId).Single().TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' must have exactly one body predecessor and one repeat edge to ForEach '{node.Id}'.");
+                if (!_pairedLoopEnds.Add(loopEndId))
+                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' is paired with more than one ForEach.");
+
+                var body = BuildSequence(bodyEdge.TargetNodeId, stopJoinId: null, ownerId: $"{node.Id}.body", depth: depth + 1, stopLoopEndId: loopEndId);
+                if (body.Items.Count == 0 || !body.NodeIds.Contains(loopEndId, StringComparer.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"ForEach '{node.Id}' body does not reach paired flow.loopEnd '{loopEndId}'.");
+                var doneStart = _graph.Node(doneEdge.TargetNodeId);
+                if (_claimed.Contains(doneStart.Id))
+                    throw new InvalidOperationException($"ForEach '{node.Id}' done route overlaps an already claimed node '{doneStart.Id}'.");
+                ValidateDynamicLoopOutputs(node, body.NodeIds);
+                items.Add(new StructuredForEachIr(node, body, loopEndId, depth));
+                _regions.Add(new StructuredControlRegion(node.Id, "ForEach", loopEndId, depth,
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase) { ["body"] = body.NodeIds, ["done"] = [] }));
+                currentId = doneEdge.TargetNodeId;
+                continue;
+            }
+
+            if (node.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"flow.loopEnd '{node.Id}' is not paired with its active flow.forEach body.");
+
+            if (IsIfNode(node))
             {
                 var outgoing = _graph.Outgoing(node.Id);
                 var trueEdge = SinglePort(outgoing, "true", node.Id);
@@ -129,7 +216,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 items.Add(new StructuredIfIr(node, trueBranch, falseBranch, joinId, depth));
                 _regions.Add(new StructuredControlRegion(
                     node.Id,
-                    "If",
+                    node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase) ? "IfBoolean" : "If",
                     joinId,
                     depth,
                     new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
@@ -139,6 +226,91 @@ internal sealed class StructuredWorkflowIrBuilder
                     }));
                 // 自己的 Join 已配对：下一轮循环直接消费它（嵌套块位于外层分支内时，
                 // 内层 Join 是合法路径点，而不是“意外 Join”）
+                _pairedJoins.Add(joinId);
+                currentId = joinId;
+                continue;
+            }
+
+            if (node.Type.Equals("flow.switch", StringComparison.OrdinalIgnoreCase))
+            {
+                var cases = ReadSwitchCases(node);
+                var outgoing = _graph.Outgoing(node.Id);
+                var expectedPorts = cases.Select((_, index) => $"case{index + 1}").Append("default").ToArray();
+                var unexpected = outgoing.Where(edge => !expectedPorts.Contains(edge.SourcePort, StringComparer.OrdinalIgnoreCase)).ToArray();
+                if (unexpected.Length > 0)
+                    throw new InvalidOperationException($"Switch '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
+                var branchEdges = expectedPorts.Select(port => SinglePort(outgoing, port, node.Id)).ToArray();
+                var joinId = _graph.FindNearestCommonJoin(branchEdges.Select(x => x.TargetNodeId).ToArray(), stopJoinId, node.Id);
+                var merge = _graph.Node(joinId);
+                if (!merge.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Switch '{node.Id}' requires a flow.merge convergence node; found '{merge.Type}' at '{joinId}'.");
+                var mergeEdges = _graph.Incoming(joinId);
+                var mergePorts = expectedPorts.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (mergeEdges.Count != expectedPorts.Length || mergeEdges.Any(edge => !mergePorts.Contains(edge.TargetPort)) ||
+                    expectedPorts.Any(port => mergeEdges.Count(edge => edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase)) != 1))
+                    throw new InvalidOperationException($"Switch '{node.Id}' casesJson must match exactly one incoming flow.merge control port per configured case and default (case1..caseN, default).");
+                var branches = new List<StructuredSwitchBranch>(branchEdges.Length);
+                for (var index = 0; index < branchEdges.Length; index++)
+                {
+                    var edge = branchEdges[index];
+                    var port = expectedPorts[index];
+                    EnsureNonEmptyBranch(node.Id, port, edge.TargetNodeId, joinId);
+                    var branch = BuildSequence(edge.TargetNodeId, joinId, $"{node.Id}.{port}", depth + 1);
+                    var matchingMergeEdge = mergeEdges.Single(x => x.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
+                    if (!branch.NodeIds.Contains(matchingMergeEdge.SourceNodeId, StringComparer.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Switch '{node.Id}' branch '{port}' must converge through the matching flow.merge input '{port}'.");
+                    branches.Add(new StructuredSwitchBranch(port, index < cases.Length ? cases[index] : "default", branch));
+                }
+                for (var i = 0; i < branches.Count; i++)
+                for (var j = i + 1; j < branches.Count; j++)
+                    ValidateNoCrossBranchData(node.Id, branches[i].Sequence.NodeIds, branches[j].Sequence.NodeIds);
+
+                items.Add(new StructuredSwitchIr(node, branches, joinId, depth));
+                _regions.Add(new StructuredControlRegion(node.Id, "Switch", joinId, depth,
+                    branches.ToDictionary(x => x.Port, x => x.Sequence.NodeIds, StringComparer.OrdinalIgnoreCase)));
+                _pairedJoins.Add(joinId);
+                currentId = joinId;
+                continue;
+            }
+
+            if (node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase))
+            {
+                var outgoing = _graph.Outgoing(node.Id);
+                var expected = new[] { "body", "success", "error" };
+                var unexpected = outgoing.Where(edge => !expected.Contains(edge.SourcePort, StringComparer.OrdinalIgnoreCase)).ToArray();
+                if (unexpected.Length > 0)
+                    throw new InvalidOperationException($"Try '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
+                var edges = expected.Select(port => SinglePort(outgoing, port, node.Id)).ToArray();
+                var joinId = _graph.FindNearestCommonJoin(edges.Select(x => x.TargetNodeId).ToArray(), stopJoinId, node.Id);
+                var merge = _graph.Node(joinId);
+                if (!merge.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Try '{node.Id}' requires a flow.merge convergence node; found '{merge.Type}' at '{joinId}'.");
+                var incoming = _graph.Incoming(joinId);
+                var targetPorts = new[] { "case1", "case2", "default" };
+                if (incoming.Count != targetPorts.Length || targetPorts.Any(port => incoming.Count(edge => edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase)) != 1) ||
+                    incoming.Any(edge => !targetPorts.Contains(edge.TargetPort, StringComparer.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Try '{node.Id}' requires flow.merge inputs case1 (body), case2 (success), and default (error), exactly once each.");
+
+                var body = BuildSequence(edges[0].TargetNodeId, joinId, $"{node.Id}.body", depth + 1);
+                var success = BuildSequence(edges[1].TargetNodeId, joinId, $"{node.Id}.success", depth + 1);
+                var error = BuildSequence(edges[2].TargetNodeId, joinId, $"{node.Id}.error", depth + 1);
+                ValidateNoCrossBranchData(node.Id, body.NodeIds, error.NodeIds);
+                ValidateNoCrossBranchData(node.Id, success.NodeIds, error.NodeIds);
+                var branches = new[] { body, success, error };
+                for (var index = 0; index < branches.Length; index++)
+                {
+                    var port = targetPorts[index];
+                    var matching = incoming.Single(x => x.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
+                    if (!branches[index].NodeIds.Contains(matching.SourceNodeId, StringComparer.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Try '{node.Id}' branch '{expected[index]}' must converge through flow.merge input '{port}'.");
+                }
+                items.Add(new StructuredTryIr(node, body, success, error, joinId, depth));
+                _tryBodies[node.Id] = body.NodeIds;
+                _regions.Add(new StructuredControlRegion(node.Id, "Try", joinId, depth,
+                    new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["body"] = body.NodeIds, ["success"] = success.NodeIds, ["error"] = error.NodeIds
+                    }));
                 _pairedJoins.Add(joinId);
                 currentId = joinId;
                 continue;
@@ -194,6 +366,17 @@ internal sealed class StructuredWorkflowIrBuilder
         }
     }
 
+    private void ValidateDynamicLoopOutputs(NodeDefinition loop, IReadOnlyList<string> bodyNodeIds)
+    {
+        var body = bodyNodeIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dynamicPorts = new HashSet<string>(["index", "center", "circle", "rectangle", "x", "y", "confidence", "classId"], StringComparer.OrdinalIgnoreCase);
+        var external = _graph.Workflow.Edges.FirstOrDefault(edge => !WorkflowGraph.IsControlEdge(edge) &&
+            edge.SourceNodeId.Equals(loop.Id, StringComparison.OrdinalIgnoreCase) &&
+            dynamicPorts.Contains(edge.SourcePort) && !body.Contains(edge.TargetNodeId));
+        if (external is not null)
+            throw new InvalidOperationException($"ForEach '{loop.Id}' dynamic output '{external.SourcePort}' may only be consumed inside its body (edge '{external.Id}').");
+    }
+
     private void Claim(string nodeId, string ownerId)
     {
         if (!_claimed.Add(nodeId))
@@ -222,6 +405,25 @@ internal sealed class StructuredWorkflowIrBuilder
         if (matches.Length != 1)
             throw new InvalidOperationException($"Node '{nodeId}' requires exactly one '{port}' control edge; found {matches.Length}.");
         return matches[0];
+    }
+
+    private static bool IsIfNode(NodeDefinition node) =>
+        node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) ||
+        node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsMergeNode(NodeDefinition node) =>
+        node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) ||
+        node.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase);
+
+    private static string[] ReadSwitchCases(NodeDefinition node)
+    {
+        var raw = node.GetString("casesJson", "[]");
+        string[] cases;
+        try { cases = System.Text.Json.JsonSerializer.Deserialize<string[]>(raw) ?? []; }
+        catch (System.Text.Json.JsonException ex) { throw new InvalidOperationException($"Switch '{node.Id}' casesJson must be a JSON string array.", ex); }
+        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(StringComparer.Ordinal).Count() != cases.Length)
+            throw new InvalidOperationException($"Switch '{node.Id}' requires 1-16 non-empty unique case labels.");
+        return cases;
     }
 
     private static void EnsureNonEmptyBranch(string nodeId, string branchName, string targetId, string joinId)
@@ -313,7 +515,8 @@ internal sealed class StructuredControlGraph
                 continue;
 
             var node = Node(id);
-            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase))
+            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) ||
+                node.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
                 result.TryAdd(id, d);
 
             foreach (var edge in Outgoing(id))

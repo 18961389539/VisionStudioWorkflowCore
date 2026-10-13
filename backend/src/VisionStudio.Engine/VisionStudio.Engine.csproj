@@ -13,5 +13,9 @@
     <PackageReference Include="WorkflowCore.DSL" Version="3.21.0" />
     <PackageReference Include="NModbus" Version="3.0.83" />
     <PackageReference Include="S7netplus" Version="0.20.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+    <PackageReference Include="TesseractOCR" Version="5.5.2" />
   </ItemGroup>
 </Project>

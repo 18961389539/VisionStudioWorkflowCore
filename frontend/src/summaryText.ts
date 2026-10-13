@@ -13,6 +13,11 @@ export function formatScalar(value: string | number | boolean | null) {
 /** 各节点类型的“关键结果”字段顺序：先展示用户真正关心的测量量，而不是摘要里的前 N 个键。
  *  键取自后端各节点 Summary（backend/src/VisionStudio.Engine/Nodes/*.cs）；未列出的类型走通用排序。 */
 const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
+  'measure.blobs': ['count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
+  'value.arithmetic': ['result'], 'value.range': ['pass', 'value'], 'logic.boolean': ['result'],
+  'flow.ifBoolean': ['condition'], 'flow.switch': ['selected'],
+  'output.saveImage': ['path', 'bytesWritten'], 'output.exportResult': ['path', 'bytesWritten'],
+  'recognition.barcode': ['count'], 'recognition.ocr': ['text', 'confidence'],
   'image.acquire': ['size', 'camera', 'sequence'],
   'frameset.image': ['cameraId', 'sequence', 'triggerSkewUs'],
   'camera.syncCapture': ['withinTolerance', 'triggerSkewUs', 'cameraCount'],
