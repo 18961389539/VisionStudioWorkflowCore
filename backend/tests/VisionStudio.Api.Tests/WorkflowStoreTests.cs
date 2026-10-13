@@ -64,7 +64,7 @@ public sealed class WorkflowStoreTests : IDisposable
     {
         // A02（2026-10-12 第三轮）：内容已替换、修订写入失败会留下"旧修订 + 新内容"的漂移——
         // 旧修订绝不能通过检查去覆盖新代内容。
-        var baseline = await _store.SaveAsync("lag", new WorkflowDefinition("lag", "V1", [], []), CancellationToken.None);
+        var baseline = (await _store.SaveAsync("lag", new WorkflowDefinition("lag", "V1", [], []), CancellationToken.None)).Revision;
         // 模拟"内容已更新、修订未更新"的保存中断中间态（注入必须指向真实存储根）。
         await File.WriteAllTextAsync(Path.Combine(_storeRoot, "lag.json"),
             "{\"id\":\"lag\",\"name\":\"V2-content\",\"nodes\":[],\"edges\":[]}");
@@ -95,7 +95,7 @@ public sealed class WorkflowStoreTests : IDisposable
         // A02（2026-10-12 第三轮）：无 expectedRevision 的兼容路径语义 = **显式强制覆盖**
         // （管理/迁移类后台操作）；交互式编辑器入口始终携带基线。此测试把该语义锁定为契约。
         await _store.SaveAsync("forced", new WorkflowDefinition("forced", "V1", [], []), CancellationToken.None);
-        var v2 = await _store.SaveAsync("forced", new WorkflowDefinition("forced", "V2", [], []), CancellationToken.None);
+        var v2 = (await _store.SaveAsync("forced", new WorkflowDefinition("forced", "V2", [], []), CancellationToken.None)).Revision;
 
         Assert.False(string.IsNullOrWhiteSpace(v2));
         Assert.Equal("V2", (await _store.LoadAsync("forced", CancellationToken.None))!.Name);
@@ -105,8 +105,8 @@ public sealed class WorkflowStoreTests : IDisposable
     public async Task Save_SameContentTwice_KeepsRevisionAndBaseline()
     {
         // A07 补充：明确"同内容幂等保存"语义——修订即内容哈希，重复保存同一内容成功且修订不变。
-        var baseline = await _store.SaveAsync("idem", new WorkflowDefinition("idem", "V1", [], []), CancellationToken.None);
-        var again = await _store.SaveAsync("idem", new WorkflowDefinition("idem", "V1", [], []), CancellationToken.None, expectedRevision: baseline);
+        var baseline = (await _store.SaveAsync("idem", new WorkflowDefinition("idem", "V1", [], []), CancellationToken.None)).Revision;
+        var again = (await _store.SaveAsync("idem", new WorkflowDefinition("idem", "V1", [], []), CancellationToken.None, expectedRevision: baseline)).Revision;
 
         Assert.Equal(baseline, again);
         Assert.Equal(baseline, await _store.GetRevisionAsync("idem", CancellationToken.None));
@@ -117,12 +117,12 @@ public sealed class WorkflowStoreTests : IDisposable
     {
         // R07（2026-10-12 复审）：乐观并发——A 读取后被 B 覆盖，A 的旧基线保存必须 409，
         // 绝不静默覆盖；不传基线保持历史兼容路径；空串表示"期望尚无修订记录"。
-        var first = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V1", [], []), CancellationToken.None);
+        var first = (await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V1", [], []), CancellationToken.None)).Revision;
         Assert.False(string.IsNullOrWhiteSpace(first));
         Assert.Equal(first, await _store.GetRevisionAsync("wf", CancellationToken.None));
 
         // 以最新基线保存 → 成功且修订变化。
-        var second = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V2", [], []), CancellationToken.None, expectedRevision: first);
+        var second = (await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V2", [], []), CancellationToken.None, expectedRevision: first)).Revision;
         Assert.NotEqual(first, second);
 
         // 会话仍持有旧基线 → 冲突，磁盘保持"胜者"内容。
@@ -131,13 +131,13 @@ public sealed class WorkflowStoreTests : IDisposable
         Assert.Equal("V2", (await _store.LoadAsync("wf", CancellationToken.None))!.Name);
 
         // 不传基线 = 兼容路径（旧调用方）：允许覆盖。
-        var third = await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V3", [], []), CancellationToken.None);
+        var third = (await _store.SaveAsync("wf", new WorkflowDefinition("wf", "V3", [], []), CancellationToken.None)).Revision;
         Assert.NotEqual(second, third);
 
         // 空串 = 期望"尚无修订记录"：已有记录时冲突；全新 ID 则匹配成功。
         await Assert.ThrowsAsync<ApiConflictException>(() =>
             _store.SaveAsync("wf", new WorkflowDefinition("wf", "V4", [], []), CancellationToken.None, expectedRevision: ""));
-        var fresh = await _store.SaveAsync("wf-new", new WorkflowDefinition("wf-new", "N", [], []), CancellationToken.None, expectedRevision: "");
+        var fresh = (await _store.SaveAsync("wf-new", new WorkflowDefinition("wf-new", "N", [], []), CancellationToken.None, expectedRevision: "")).Revision;
         Assert.False(string.IsNullOrWhiteSpace(fresh));
     }
 
@@ -146,7 +146,7 @@ public sealed class WorkflowStoreTests : IDisposable
     {
         // F04（2026-10-12 复核）：读-比-写必须原子——真实并发（同一屏障起跑）下只允许一个成功，
         // 其余明确 409；旧实现 24 个请求全部越过检查，产生 I/O 竞争与覆盖。
-        var baseline = await _store.SaveAsync("race", new WorkflowDefinition("race", "V0", [], []), CancellationToken.None);
+        var baseline = (await _store.SaveAsync("race", new WorkflowDefinition("race", "V0", [], []), CancellationToken.None)).Revision;
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         // 任务内容一律不同于基线（V1..V16）：若某个候选内容与基线**完全相同**，其写入不改动
         // 修订哈希，会为下一个候选继续放行（Expected 1 / Actual 2 的间歇失败即由此而来）。
@@ -205,6 +205,43 @@ public sealed class WorkflowStoreTests : IDisposable
             _store.SaveAsync("broken", new WorkflowDefinition("broken", "V2", [], []), CancellationToken.None, expectedRevision: ""));
         await Assert.ThrowsAsync<ApiConflictException>(() =>
             _store.SaveAsync("broken", new WorkflowDefinition("broken", "V2", [], []), CancellationToken.None, expectedRevision: "some-hash"));
+    }
+
+    [Fact]
+    public async Task Save_WhenRevisionFinalizeFails_CommitsContentAndReportsDeferred()
+    {
+        // Q06（2026-10-13 审查）：修订落定失败（文件被占用）时内容已提交——旧实现返回 500，
+        // 前端据此提示"未写入后端"，实际文档已被覆盖。现在如实报告"延迟落定"，
+        // 且读取路径按"内容为权威"自愈，修订与内容始终可核对。
+        var baseline = (await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V1", [], []), CancellationToken.None)).Revision;
+        var revisionPath = Path.Combine(_storeRoot, "defer.revision.json");
+        // 允许读取、阻止写入/替换——精确命中"修订落定失败"（与审查探针的锁模式一致）。
+        using var lockHandle = new FileStream(revisionPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var outcome = await _store.SaveAsync("defer", new WorkflowDefinition("defer", "V2", [], []), CancellationToken.None, expectedRevision: baseline);
+
+        Assert.True(outcome.RevisionRecordDeferred);
+        // 内容已提交：文档确实是 V2，而不是"未写入"。
+        Assert.Equal("V2", (await _store.LoadAsync("defer", CancellationToken.None))!.Name);
+
+        lockHandle.Dispose();
+        // 自愈后：读取返回的修订与保存返回的修订一致（内容为权威）。
+        var loaded = await _store.LoadWithRevisionAsync("defer", CancellationToken.None);
+        Assert.Equal(outcome.Revision, loaded!.Value.Revision);
+        Assert.Equal(outcome.Revision, await _store.GetRevisionAsync("defer", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Save_CancelledBeforeCommit_LeavesNothingOnDiskAndReportsFailure()
+    {
+        // Q06 对照面：保存在任何落盘之前被取消 ⇒ 无内容、无临时文件残留，失败反馈是真实的。
+        var baseline = (await _store.SaveAsync("defer-temp", new WorkflowDefinition("defer-temp", "V1", [], []), CancellationToken.None)).Revision;
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _store.SaveAsync("defer-temp", new WorkflowDefinition("defer-temp", "V2", [], []), cancelled.Token, expectedRevision: baseline));
+        Assert.Equal("V1", (await _store.LoadAsync("defer-temp", CancellationToken.None))!.Name);
+        Assert.Empty(Directory.GetFiles(_storeRoot, ".*.tmp"));
     }
 
     [Fact]

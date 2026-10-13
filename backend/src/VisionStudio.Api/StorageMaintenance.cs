@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 using System.Text.Json;
 using VisionStudio.Api.Infrastructure;
 
@@ -177,6 +178,12 @@ public sealed class StorageMaintenanceCoordinator
     private readonly string? _failureLockPath;
     private readonly string? _restartPendingPath;
     private readonly string? _restoreTransactionPath;
+    /// <summary>Q01（2026-10-13 审查）：旧版离线工具（VisionStudio.SqliteSnapshot）按数据根固定的
+    /// 意图文件路径。现场可能残留旧版标记——宿主必须同样识别（非 committed ⇒ 启动即锁）。</summary>
+    private readonly string? _legacyRestoreIntentPath;
+    /// <summary>Q04（2026-10-13 审查）：跨进程"维护进行中"标记路径。宿主排他维护与离线 CLI
+    /// 切换期都会写它，对方据此拒绝并发维护（pid + 进程启动时间判定残留）。</summary>
+    private readonly string? _maintenanceActivePath;
     private readonly ILogger<StorageMaintenanceCoordinator>? _logger;
 
     /// <param name="failureLockPath">
@@ -190,15 +197,27 @@ public sealed class StorageMaintenanceCoordinator
     /// Q08：恢复事务意图路径（null = 仅内存）。恢复开始即写入、成功才删除；启动时发现未完成事务
     /// ⇒ 上次进程在恢复中途被终止（DB/目录可能处于混合状态）⇒ 直接进入失败锁，需人工核对。
     /// </param>
+    /// <param name="legacyRestoreIntentPath">
+    /// Q01：旧版 CLI 意图文件路径（null = 不识别）。与 <paramref name="restoreTransactionPath"/>
+    /// 同一判定语义：committed ⇒ 只做清理退役；其余 ⇒ 启动即失败锁。
+    /// </param>
+    /// <param name="maintenanceActivePath">
+    /// Q04：跨进程维护活跃标记路径（null = 仅进程内互斥）。BeginExclusiveAsync 写入、
+    /// EndExclusive 删除；另一进程持锁时排他维护直接拒绝。
+    /// </param>
     public StorageMaintenanceCoordinator(
         string? failureLockPath = null,
         ILogger<StorageMaintenanceCoordinator>? logger = null,
         string? restartPendingPath = null,
-        string? restoreTransactionPath = null)
+        string? restoreTransactionPath = null,
+        string? legacyRestoreIntentPath = null,
+        string? maintenanceActivePath = null)
     {
         _failureLockPath = failureLockPath;
         _restartPendingPath = restartPendingPath;
         _restoreTransactionPath = restoreTransactionPath;
+        _legacyRestoreIntentPath = legacyRestoreIntentPath;
+        _maintenanceActivePath = maintenanceActivePath;
         _logger = logger;
 
         // Q08：进程启动时若存在未完成的恢复事务，说明上次恢复在"数据库已替换、目录未全部切换"、
@@ -219,6 +238,36 @@ public sealed class StorageMaintenanceCoordinator
                 _failureReason = "an interrupted storage restore transaction was detected on startup; " +
                                  "the database and on-disk assets may be in a mixed state";
                 logger?.LogError("Interrupted restore transaction detected at {Path}; the host stays locked until manual verification.", restoreTransactionPath);
+            }
+        }
+        // Q01：旧版离线 CLI 的中断意图同样必须阻断启动——两套契约同一判定语义。
+        if (legacyRestoreIntentPath is not null && File.Exists(legacyRestoreIntentPath))
+        {
+            var legacy = ReadLegacyIntent(legacyRestoreIntentPath);
+            if (string.Equals(legacy?.Stage, "committed", StringComparison.OrdinalIgnoreCase))
+            {
+                TryDeleteMarker(legacyRestoreIntentPath, "legacy restore intent", logger);
+                logger?.LogInformation("A committed legacy restore intent at {Path} was retired on startup.", legacyRestoreIntentPath);
+            }
+            else
+            {
+                _failureLocked = true;
+                _failureReason ??= "an interrupted offline (CLI) restore intent was detected on startup; " +
+                                  "the database may be in a mixed state - complete or verify the restore before serving";
+                logger?.LogError("Interrupted offline restore intent detected at {Path}; the host stays locked until manual verification.", legacyRestoreIntentPath);
+            }
+        }
+        // Q04：启动时清理上一进程残留的"维护进行中"标记——新进程不可能继承旧进程的排他维护。
+        if (maintenanceActivePath is not null && File.Exists(maintenanceActivePath))
+        {
+            if (IsForeignMaintenanceActive(maintenanceActivePath, out var detail))
+            {
+                logger?.LogWarning("A maintenance-active marker at {Path} still belongs to a running process ({Detail}); it was left in place.", maintenanceActivePath, detail);
+            }
+            else
+            {
+                TryDeleteMarker(maintenanceActivePath, "maintenance-active marker", logger);
+                logger?.LogInformation("A stale maintenance-active marker at {Path} was retired on startup.", maintenanceActivePath);
             }
         }
         // Q08：待重启标记在"新进程启动"时自动解除——恢复后的资产已随本次启动重新加载。
@@ -397,7 +446,99 @@ public sealed class StorageMaintenanceCoordinator
 
     private sealed record FailureLockState(string Reason, DateTimeOffset SetAt);
 
-    /// <summary>Q08：恢复事务的耐久意图/阶段记录（跨进程恢复审计的最小载体）。</summary>
+    /// <summary>Q01：旧版 CLI 意图文件的最小读取（snake_case；只取 stage 判定启动语义）。</summary>
+    private sealed record LegacyRestoreIntent([property: System.Text.Json.Serialization.JsonPropertyName("stage")] string? Stage);
+
+    private static LegacyRestoreIntent? ReadLegacyIntent(string path)
+    {
+        try { return JsonSerializer.Deserialize<LegacyRestoreIntent>(File.ReadAllText(path)); }
+        catch { return null; }
+    }
+
+    private static void TryDeleteMarker(string path, string label, ILogger? logger)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception ex) { logger?.LogWarning(ex, "Could not delete the {Label} at {Path}.", label, path); }
+    }
+
+    /// <summary>Q04：跨进程"维护进行中"标记——pid + 进程启动时间用于残留判定（进程复用 pid 也不会误判）。</summary>
+    public sealed record MaintenanceActiveMarker(int Pid, DateTimeOffset ProcessStartedAt, DateTimeOffset At, string? Reason = null);
+
+    /// <summary>
+    /// Q04：判定维护活跃标记是否属于**仍在运行**的另一进程。不可读/无法判定时保守视为活跃。
+    /// </summary>
+    private static bool IsForeignMaintenanceActive(string path, out string detail)
+    {
+        detail = string.Empty;
+        try
+        {
+            var marker = JsonSerializer.Deserialize<MaintenanceActiveMarker>(File.ReadAllText(path));
+            if (marker is null) { detail = "unreadable marker"; return true; }
+            Process? process;
+            try { process = Process.GetProcessById(marker.Pid); }
+            catch (ArgumentException) { process = null; }
+            catch (Exception) { process = null; }
+            if (process is null)
+            {
+                detail = $"stale marker from pid {marker.Pid} (process not running)";
+                return false;
+            }
+            try
+            {
+                var startedAt = process.StartTime.ToUniversalTime();
+                if (Math.Abs((startedAt - marker.ProcessStartedAt).TotalSeconds) > 2)
+                {
+                    detail = $"stale marker from pid {marker.Pid} (start time mismatch)";
+                    return false;
+                }
+            }
+            catch (Exception)
+            {
+                // 无法读取进程启动时间（权限等）：保守视为活跃。
+            }
+            detail = $"pid {marker.Pid} since {marker.ProcessStartedAt:O}";
+            return true;
+        }
+        catch
+        {
+            detail = "unreadable marker";
+            return true;
+        }
+    }
+
+    /// <summary>Q04：排他维护开始前确认没有其他进程正在维护（CLI 或另一宿主）。</summary>
+    private void EnsureNoForeignMaintenanceActive()
+    {
+        if (_maintenanceActivePath is not { } path || !File.Exists(path)) return;
+        if (IsForeignMaintenanceActive(path, out var detail))
+            throw new ApiConflictException(
+                $"Another storage maintenance process is active for this data root ({detail}). " +
+                "Wait for it to finish; concurrent maintenance could tear the database and on-disk assets.");
+    }
+
+    /// <summary>Q04：登记本进程的排他维护（原子写；失败仅告警——进程内互斥与 sidecar 检查仍在）。</summary>
+    private void WriteMaintenanceActiveMarker(string reason)
+    {
+        if (_maintenanceActivePath is not { } path) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(new MaintenanceActiveMarker(
+                Environment.ProcessId, Process.GetCurrentProcess().StartTime.ToUniversalTime(), DateTimeOffset.UtcNow, reason)));
+            File.Move(temp, path, true);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Could not write the maintenance-active marker at {Path}; cross-process maintenance exclusion relies on the sidecar checks.", path);
+        }
+    }
+
+    /// <summary>
+    /// Q08：恢复事务的耐久意图/阶段记录（跨进程恢复审计的最小载体）。
+    /// Q04（2026-10-13 审查）：TargetDatabase 记录意图的目标数据库——中断恢复前必须与当前
+    /// 目标核对，绝不错消费属于另一个目标的意图（离线 CLI 与 API 共用本协议）。
+    /// </summary>
     public sealed record RestoreTransaction(
         string BackupId,
         DateTimeOffset StartedAt,
@@ -412,6 +553,7 @@ public sealed class StorageMaintenanceCoordinator
         string ExpectedDatabaseSha256,
         IReadOnlyDictionary<string, string> ExpectedAssetSha256,
         IReadOnlyList<RestoreProtectionAsset> ProtectedAssets,
+        string? TargetDatabase = null,
         RestoreTransaction? PreviousTransaction = null);
 
     public sealed record RestoreProtectionAsset(string Target, string PreservedPath, bool Existed, string? Sha256);
@@ -458,11 +600,13 @@ public sealed class StorageMaintenanceCoordinator
     /// <summary>
     /// Q08：恢复事务意图登记——恢复开始即耐久写入（backupId + 阶段）。若进程在恢复中途被终止，
     /// 启动检查会读到该文件并进入失败锁；成功完成时由 <see cref="CompleteRestoreTransaction"/> 删除。
+    /// Q04（2026-10-13 审查）：targetDatabase 一并登记——中断恢复前必须与当前目标核对。
     /// </summary>
     public void BeginRestoreTransaction(string backupId, IReadOnlyList<string> plannedStages, string safetyDatabase,
         string safetyDatabaseSha256, string sourceDatabaseSha256, int sourceSchemaVersion, string expectedDatabaseSha256,
         IReadOnlyDictionary<string, string> expectedAssetSha256,
-        IReadOnlyList<RestoreProtectionAsset> protectedAssets)
+        IReadOnlyList<RestoreProtectionAsset> protectedAssets,
+        string? targetDatabase = null)
     {
         var previous = ReadTransaction();
         // A retry may replace an unresolved intent only while retaining a verified rollback anchor.
@@ -490,7 +634,7 @@ public sealed class StorageMaintenanceCoordinator
         }
         WriteTransaction(new RestoreTransaction(backupId, DateTimeOffset.UtcNow, "starting", plannedStages, DateTimeOffset.UtcNow, null,
             safetyDatabase, safetyDatabaseSha256, sourceDatabaseSha256, sourceSchemaVersion,
-            expectedDatabaseSha256, expectedAssetSha256, protectedAssets, previous));
+            expectedDatabaseSha256, expectedAssetSha256, protectedAssets, targetDatabase, previous));
     }
 
     /// <summary>推进事务阶段（每个 DB/目录切换边界调用）。</summary>
@@ -584,6 +728,9 @@ public sealed class StorageMaintenanceCoordinator
     public async Task<IAsyncDisposable> BeginExclusiveAsync(string reason, CancellationToken ct, bool allowFailureLockedRestore = false)
     {
         Task wait;
+        // Q04：跨进程互斥——另一维护进程（离线 CLI 或另一宿主）持活跃标记时拒绝，
+        // 避免两个维护流同时替换数据库/系统资产。
+        EnsureNoForeignMaintenanceActive();
         lock (_sync)
         {
             if (_failureLocked && !allowFailureLockedRestore) throw new ApiConflictException($"Storage is locked after a failed restore ({_failureReason}). Complete recovery or clear the lock before running maintenance.");
@@ -598,6 +745,8 @@ public sealed class StorageMaintenanceCoordinator
                 wait = _drained.Task;
             }
         }
+        // 进程内互斥已取得：登记跨进程标记（失败仅告警，不放弃本次维护）。
+        WriteMaintenanceActiveMarker(reason);
         try { await wait.WaitAsync(ct); }
         catch { EndExclusive(); throw; }
         return new ExclusiveLease(this);
@@ -623,6 +772,8 @@ public sealed class StorageMaintenanceCoordinator
             _maintenance = false;
             if (!_failureLocked) { _reason = null; _drained = null; }
         }
+        // Q04：排他维护结束即撤销跨进程标记（尽力删除——崩溃残留由启动清理兜底）。
+        DeleteMarkerFile(_maintenanceActivePath, "maintenance-active marker");
     }
 
     private sealed class RequestLease(StorageMaintenanceCoordinator owner) : IDisposable

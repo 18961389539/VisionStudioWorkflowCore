@@ -442,10 +442,11 @@ public sealed class StorageBackupService
                 }
             // Intent must be durable before the first live database or asset replacement. A failed write
             // aborts here; the safety snapshot is still in the disposable workspace.
+            // Q04（2026-10-13 审查）：一并登记目标数据库——中断恢复前必须与当前目标核对。
             _maintenance.BeginRestoreTransaction(manifest.BackupId,
                 ["database-replaced", "artifacts-installed", "system-assets-installed", "committed"], safetyDb,
                 ComputeFileSha256(safetyDb), sourceDatabaseHash, sourceSchemaVersion,
-                preparedDatabaseHash, expectedAssets, protectedAssets);
+                preparedDatabaseHash, expectedAssets, protectedAssets, _database.DatabasePath);
             var movedOldArtifacts = false;
             var installedArtifacts = false;
             var rollbackFailed = false;

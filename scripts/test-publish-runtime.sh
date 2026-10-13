@@ -45,6 +45,29 @@ if vs_normalize_publish_paths "$ROOT" "$RUN_ROOT/path-check/out" "$RUN_ROOT/path
 else
   check true 'data root nested inside package is rejected after normalization'
 fi
+# Q03 (2026-10-13 review): the swap archives/renames <output>.previous, so the data root must
+# not be it, sit inside it, or contain it - otherwise the publish deletes production data.
+mkdir -p -- "$RUN_ROOT/path-check/previous-target"
+if vs_normalize_publish_paths "$ROOT" "$RUN_ROOT/path-check/out" "$RUN_ROOT/path-check/out.previous" >/dev/null 2>&1; then
+  check false 'data root equal to the previous package path is rejected'
+else
+  check true 'data root equal to the previous package path is rejected'
+fi
+if vs_normalize_publish_paths "$ROOT" "$RUN_ROOT/path-check/out" "$RUN_ROOT/path-check/out.previous/upgrade-checkpoints" >/dev/null 2>&1; then
+  check false 'data root inside the previous package path is rejected'
+else
+  check true 'data root inside the previous package path is rejected'
+fi
+if vs_normalize_publish_paths "$ROOT" "$RUN_ROOT/path-check/out" "$RUN_ROOT/path-check" >/dev/null 2>&1; then
+  check false 'data root containing the previous package path is rejected'
+else
+  check true 'data root containing the previous package path is rejected'
+fi
+if vs_normalize_publish_paths "$ROOT" "$RUN_ROOT/path-check/out" "$RUN_ROOT/path-check/out.staging-deadbeef" >/dev/null 2>&1; then
+  check false 'data root on the staging prefix is rejected'
+else
+  check true 'data root on the staging prefix is rejected'
+fi
 mkdir -p -- "$RUN_ROOT/path-check/symlink-target"
 printf 'must-stay' > "$RUN_ROOT/path-check/symlink-target/sentinel"
 if ln -s "$RUN_ROOT/path-check/symlink-target" "$RUN_ROOT/path-check/output-link" 2>/dev/null \

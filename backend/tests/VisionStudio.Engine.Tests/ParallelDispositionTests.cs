@@ -143,7 +143,10 @@ public sealed class ParallelDispositionTests
     [Fact]
     public async Task ParallelBranches_ExecuteConcurrently()
     {
-        // 两条分支各阻塞 200ms：顺序执行时区间不可能重叠、总时长约 400ms。
+        // 两条分支各阻塞 200ms：语义证据是**执行区间重叠**（串行执行时区间不可能重叠）。
+        // Q08（2026-10-13 审查）：不再用"整体总耗时 < 380ms"这类绝对阈值断言并发——总耗时包含
+        // 计划编译、运行器启动与报告开销，CI 负载下会漂移（518ms/558ms 的误报即由此而来），
+        // 且"suggests sequentially"无法从该数值推出。性能预算另在固定宿主、预热后按分布测量。
         var workflow = new WorkflowDefinition(
             "par-concurrent",
             "Parallel Concurrent",
@@ -165,13 +168,17 @@ public sealed class ParallelDispositionTests
         Assert.True(result.Success, result.Error);
         var first = Report(result, "s1");
         var second = Report(result, "s2");
+        // 健全性：两条分支都真实阻塞了（否则"重叠"会因节点瞬间完成而变得毫无意义）。
+        Assert.True(first.EndOffsetMs - first.StartOffsetMs >= 150,
+            $"branch s1 did not block as configured: [{first.StartOffsetMs:F1},{first.EndOffsetMs:F1}]");
+        Assert.True(second.EndOffsetMs - second.StartOffsetMs >= 150,
+            $"branch s2 did not block as configured: [{second.StartOffsetMs:F1},{second.EndOffsetMs:F1}]");
+        // 语义证据：区间重叠至少为单分支时长的一半。人为改回串行执行时重叠≈0，本断言必失败。
         var overlapMs = Math.Min(first.EndOffsetMs, second.EndOffsetMs) - Math.Max(first.StartOffsetMs, second.StartOffsetMs);
         Assert.True(
-            overlapMs > 0,
-            $"parallel branches did not overlap: s1=[{first.StartOffsetMs:F1},{first.EndOffsetMs:F1}] s2=[{second.StartOffsetMs:F1},{second.EndOffsetMs:F1}]");
-        Assert.True(
-            result.TotalDurationMs < 380,
-            $"total duration {result.TotalDurationMs:F1}ms suggests the branches ran sequentially");
+            overlapMs > 100,
+            $"parallel branches did not overlap (expected > 100ms, actual {overlapMs:F1}ms): " +
+            $"s1=[{first.StartOffsetMs:F1},{first.EndOffsetMs:F1}] s2=[{second.StartOffsetMs:F1},{second.EndOffsetMs:F1}]");
     }
 
     private static async Task<WorkflowRunResult> RunAsync(WorkflowDefinition workflow)

@@ -175,12 +175,18 @@ public static class VisionStudioServiceRegistration
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
         // Q08：同一目录下另存两个标记——restore-transaction.json（恢复中途被终止 → 启动即锁）
         // 与 restart-pending.json（恢复成功但未重启 → 业务 503 直到重启）。
-        var maintenanceDir = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), ".storage-maintenance");
+        // Q01（2026-10-13 审查）：同时识别旧版离线 CLI 的 .visionstudio-restore-intent.json
+        // （现场可能残留；与 restore-transaction.json 同一判定语义），并登记跨进程维护活跃标记
+        // maintenance-active.json（Q04：与离线 CLI 的维护互斥）。
+        var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath);
+        var maintenanceDir = Path.Combine(dataRoot, ".storage-maintenance");
         services.AddSingleton(sp => new StorageMaintenanceCoordinator(
             Path.Combine(maintenanceDir, "failure-lock.json"),
             sp.GetRequiredService<ILogger<StorageMaintenanceCoordinator>>(),
             Path.Combine(maintenanceDir, "restart-pending.json"),
-            Path.Combine(maintenanceDir, "restore-transaction.json")));
+            Path.Combine(maintenanceDir, "restore-transaction.json"),
+            Path.Combine(dataRoot, ".visionstudio-restore-intent.json"),
+            Path.Combine(maintenanceDir, "maintenance-active.json")));
         services.AddSingleton<StorageCapacityService>();
 
         services.AddSingleton<VisionNodeRegistry>();

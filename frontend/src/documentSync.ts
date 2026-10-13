@@ -49,6 +49,19 @@ export type RemoteBaselineProbe =
   | { kind: 'failed' };
 
 /**
+ * Q07（2026-10-13 审查）：重命名决策。**只改名称的编辑也是完整文档编辑**——旧实现的加载
+ * 响应保护只比较文档代次与 nodes/edges 引用，重命名三者都不变，加载在途期间的重命名会被
+ * 迟到响应覆盖（复现：RENAMED-WHILE-LOADING 被 REMOTE-OLD 覆盖）。任何用户编辑都必须递增
+ * 文档代次，本函数把"是否真的改了名"收敛为可单测的纯决策。
+ */
+export function renameDecision(value: string, currentName: string): { changed: boolean; name: string } {
+  const name = value.trim();
+  return name.length > 0 && name !== currentName
+    ? { changed: true, name }
+    : { changed: false, name: currentName };
+}
+
+/**
  * A04：保存基线决策。**"仅探测到"的版本不得直接当作编辑基线**：
  *  · 本地有"本次实际加载"的基线 → 直接沿用；
  *  · 远端不存在 → 以"期望新建"提交（后端会核实内容文件确实不存在，A02）；

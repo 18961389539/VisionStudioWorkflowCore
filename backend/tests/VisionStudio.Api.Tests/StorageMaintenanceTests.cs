@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.IO.Compression;
@@ -1078,6 +1079,159 @@ SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_
     }
 
     [Fact]
+    public async Task CliWrittenSwitchingMarker_BlocksOrdinaryWritesAndListsReasonInHealth()
+    {
+        // Q01（2026-10-13 审查）端到端：离线 CLI 按统一协议留下的 switching 标记（中断的恢复）
+        // 必须在宿主启动时进入失败锁——普通变更 503、健康正文列出原因。旧实现只认自己的
+        // restore-transaction.json，对 CLI 的 .visionstudio-restore-intent.json 视而不见。
+        using var factory = new StorageVisionStudioApiFactory();
+        // 协调器在宿主管线构建时即构造——标记必须在首个请求之前落到数据根。
+        var marker = Path.Combine(factory.ContentRoot, "data", ".storage-maintenance", "restore-transaction.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+        File.WriteAllText(marker, JsonSerializer.Serialize(new StorageMaintenanceCoordinator.RestoreTransaction(
+            "cli:20261013000000000", DateTimeOffset.UtcNow, "switching", ["database-replaced", "committed"],
+            DateTimeOffset.UtcNow, null,
+            Path.Combine(factory.ContentRoot, "data", ".visionstudio-restore-backup", "x", "visionstudio.db"), "safety-hash",
+            "source-hash", 20, "target-hash", new Dictionary<string, string>(), [],
+            Path.Combine(factory.ContentRoot, "data", "visionstudio.db"))));
+
+        using var client = factory.CreateClient();
+        var health = await client.GetAsync("/api/health");
+        Assert.Equal(System.Net.HttpStatusCode.OK, health.StatusCode);
+        var body = await health.Content.ReadAsStringAsync();
+        Assert.Contains("interrupted storage restore transaction", body, StringComparison.OrdinalIgnoreCase);
+
+        var write = await client.PutAsJsonAsync("/api/workflows/cli-blocked",
+            new { id = "cli-blocked", name = "X", nodes = Array.Empty<object>(), edges = Array.Empty<object>() });
+        Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, write.StatusCode);
+    }
+
+    [Fact]
+    public void LegacyCliInterruptedIntent_EngagesFailureLockOnStartup()
+    {
+        // Q01（2026-10-13 审查）：旧版离线 CLI 写在数据根的 .visionstudio-restore-intent.json
+        // 也必须被宿主识别——非 committed 一律启动即锁，普通变更/设备动作持续阻断。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-legacy-cli-intent", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var legacyPath = Path.Combine(dir, ".visionstudio-restore-intent.json");
+        try
+        {
+            File.WriteAllText(legacyPath, """
+{"target_database":"C:/data/visionstudio.db","backup_dir":"C:/data/.visionstudio-restore-backup/x","protected_files":["visionstudio.db"],"checkpoint_dir":"C:/ck","checkpoint_sha256":"abc","stage":"switching","created_at":"2026-10-13T00:00:00Z"}
+""");
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: null,
+                legacyRestoreIntentPath: legacyPath);
+
+            Assert.True(coordinator.IsFailureLocked);
+            Assert.Contains("offline", coordinator.Reason ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            // 意图文件保留供人工核对，不被启动流程删除。
+            Assert.True(File.Exists(legacyPath));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void LegacyCliCommittedIntent_IsRetiredOnStartup()
+    {
+        // Q01：committed 残留只做清理退役，绝不锁定主机。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-legacy-cli-committed", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var legacyPath = Path.Combine(dir, ".visionstudio-restore-intent.json");
+        try
+        {
+            File.WriteAllText(legacyPath, """
+{"target_database":"C:/data/visionstudio.db","backup_dir":"","protected_files":[],"checkpoint_dir":"C:/ck","checkpoint_sha256":"abc","stage":"committed","created_at":"2026-10-13T00:00:00Z"}
+""");
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: null,
+                legacyRestoreIntentPath: legacyPath);
+
+            Assert.False(coordinator.IsFailureLocked);
+            Assert.False(File.Exists(legacyPath));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ForeignMaintenanceProcess_RejectsExclusiveMaintenance_AndStaleMarkerIsTakenOver()
+    {
+        // Q04（2026-10-13 审查）：另一进程持维护活跃标记时排他维护必须拒绝；
+        // 进程已死的残留标记允许接管（不会因一次崩溃永久阻塞维护）。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-maintenance-active", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var markerPath = Path.Combine(dir, "maintenance-active.json");
+        try
+        {
+            File.WriteAllText(markerPath, JsonSerializer.Serialize(new
+            {
+                Pid = Environment.ProcessId,
+                ProcessStartedAt = Process.GetCurrentProcess().StartTime.ToUniversalTime(),
+                At = DateTimeOffset.UtcNow,
+                Reason = "live holder"
+            }));
+            var blocked = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: null,
+                legacyRestoreIntentPath: null, maintenanceActivePath: markerPath);
+            await Assert.ThrowsAsync<ApiConflictException>(async () => await blocked.BeginExclusiveAsync("restore", CancellationToken.None));
+
+            // 残留标记（pid 不存在）：协调器启动时即清理，排他维护可以继续。
+            File.WriteAllText(markerPath, JsonSerializer.Serialize(new
+            {
+                Pid = int.MaxValue,
+                ProcessStartedAt = DateTimeOffset.UtcNow.AddHours(-1),
+                At = DateTimeOffset.UtcNow.AddHours(-1),
+                Reason = "dead holder"
+            }));
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: null,
+                legacyRestoreIntentPath: null, maintenanceActivePath: markerPath);
+            Assert.False(File.Exists(markerPath)); // 启动时已退役残留
+            var lease = await coordinator.BeginExclusiveAsync("restore", CancellationToken.None);
+            Assert.True(File.Exists(markerPath)); // 维护期间跨进程标记在位
+            await lease.DisposeAsync();
+            Assert.False(File.Exists(markerPath)); // 维护结束即撤销
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void BeginRestoreTransaction_RecordsTargetDatabaseForInterruptedRecoveryChecks()
+    {
+        // Q04：目标数据库随意图持久化——中断恢复前与当前目标核对，绝不错消费别人的意图。
+        var dir = Path.Combine(Path.GetTempPath(), "visionstudio-restore-target", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var transactionPath = Path.Combine(dir, "restore-transaction.json");
+        try
+        {
+            var coordinator = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            var target = Path.Combine(dir, "visionstudio.db");
+            coordinator.BeginRestoreTransaction("backup-1", ["database-replaced", "committed"],
+                Path.Combine(dir, "safety.db"), "safety-hash", "source-hash", 1, "target-hash",
+                new Dictionary<string, string>(), [], target);
+
+            var reloaded = new StorageMaintenanceCoordinator(
+                failureLockPath: null, logger: null, restartPendingPath: null, restoreTransactionPath: transactionPath);
+            Assert.Equal(Path.GetFullPath(target), reloaded.ReadTransaction()!.TargetDatabase);
+            Assert.True(reloaded.IsFailureLocked); // 未完成事务依旧启动即锁
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task RestoreIntentWriteFailure_LeavesLiveDatabaseAndAssetsUntouched()
     {
         using var factory = new StorageVisionStudioApiFactory();
@@ -1381,6 +1535,10 @@ public sealed class StorageVisionStudioApiFactory : WebApplicationFactory<Progra
     private readonly string _root = Path.Combine(Path.GetTempPath(), "visionstudio-storage-tests", Guid.NewGuid().ToString("N"));
     private readonly long _maxArtifactBytes;
     private readonly bool _securityEnabled;
+
+    /// <summary>测试数据根（contentRoot）。启动前写入标记（失败锁/中断意图）的测试需要它——
+    /// 宿主管线构建时协调器即被构造，事后写标记不会生效。</summary>
+    public string ContentRoot => _root;
 
     public StorageVisionStudioApiFactory() : this(maxArtifactBytes: null, siteConfigJson: null) { }
 

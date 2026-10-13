@@ -39,7 +39,7 @@ import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './
 import { clearDraft, readDraft, writeDraft, type WorkflowDraft } from './draft';
 import { connectionVerdict, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
 import { responseErrorMessage } from './apiErrors';
-import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
+import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, renameDecision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
 import { onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { useRunImages } from './useRunImages';
@@ -1113,23 +1113,33 @@ function Editor() {
         });
       } catch (error) {
         // 网络层失败（连接拒绝 / 请求超时 / 会话中断）：修改仍留在本地草稿，修复连接后可重试。
+        // Q06（2026-10-13 审查）：超时/中断时**提交结果不确定**——请求可能已被后端提交。
+        // 如实说明：重试若命中"其实已提交"会被基线校验拒绝（409），按指引重新加载即可，
+        // 绝不再把不确定的失败反馈成确定的"未写入"。
         const reason = error instanceof DOMException && error.name === 'TimeoutError'
           ? `请求超时（>${WORKFLOW_IO_TIMEOUT_MS / 1000}s）`
           : error instanceof Error ? error.message : '网络不可达';
-        messageApi.error(`保存失败：${reason}。修改仍保留在本地，可修复连接后重试（Ctrl+S）。`);
+        messageApi.error(`保存未确认（${reason}）：修改仍保留在本地，但后端可能已收到本次保存。请修复连接后重试（Ctrl+S）——若已写入，重试会因版本基线不符被拒绝，按提示重新加载最新版本即可。`);
         return false;
       }
       if (response.ok) {
+        // Q06：修订记录延迟落定（内容已提交、版本基线短暂未对齐）时如实通告，
+        // 不再把"内容已写入"报告成"未写入后端"。
+        const revisionDeferred = response.headers.get('X-Workflow-Revision-Deferred') === 'true';
         // R07/F05 + A03：迟到响应不得污染新文档——除文档 ID 外还必须核对**文档代次**
         // （A→B→A 仅比较 ID 无法区分不同加载代次）；不满足时当前基线/保存状态保持不变。
         if (shouldApplySaveResult({ epoch: saveEpoch, id: savedId }, { epoch: documentEpochRef.current, id: designerWorkflowIdRef.current })) {
           workflowRevisionRef.current = { id: savedId, revision: response.headers.get('X-Workflow-Revision') ?? '' };
           setSavedSnapshot(workflowSnapshot);
           setLastSavedAt(new Date());
+          if (revisionDeferred) {
+            messageApi.warning('工作流已保存，但版本基线记录延迟落定（读取时将自动对齐）；如随后出现并发冲突，请重新加载最新版本后再保存。');
+          } else {
+            messageApi.success('工作流已保存为后端 JSON');
+          }
         } else {
           messageApi.info('先前文档的保存已完成，但当前文档的基线未更新（保存期间已切换文档）。');
         }
-        messageApi.success('工作流已保存为后端 JSON');
         return true;
       }
       // R07：并发冲突优先给出可操作指引（另一会话已保存；绝不静默覆盖）。
@@ -1488,8 +1498,14 @@ function Editor() {
               className="workflow-name"
               editable={{
                 onChange: (value) => {
-                  const name = value.trim();
-                  if (name && name !== designerWorkflowName) setDesignerWorkflowName(name);
+                  // Q07（2026-10-13 审查）：重命名是完整文档编辑——递增文档代次，
+                  // 使在途的加载响应被丢弃（旧实现只比较 epoch/nodes/edges 引用，
+                  // 漏掉名称编辑，加载期间的重命名会被迟到响应覆盖）。
+                  const decision = renameDecision(value, designerWorkflowName);
+                  if (decision.changed) {
+                    setDesignerWorkflowName(decision.name);
+                    documentEpochRef.current += 1;
+                  }
                 },
                 tooltip: '点击重命名工作流',
                 icon: <span className="workflow-rename-icon">✎</span>

@@ -6,6 +6,10 @@ $root = Split-Path -Parent $PSScriptRoot
 # regression tests (scripts/test-data-migration.ps1 dot-sources the same file).
 . (Join-Path $PSScriptRoot 'lib/DataMigration.ps1')
 
+# Q03 (2026-10-13 review): shared publish-path safety helpers - the data root must never
+# overlap any package lifecycle path (the swap deletes <output>.previous).
+. (Join-Path $PSScriptRoot 'lib/PublishPaths.ps1')
+
 # R08 smoke test spawns the staged host via Start-Process: normalize case-duplicate
 # environment entries first (a Git Bash/msys parent would otherwise break the spawn).
 . (Join-Path $PSScriptRoot 'lib/ProcessEnvironment.ps1')
@@ -38,13 +42,22 @@ if ($fullDataRoot.StartsWith($fullOutput + [System.IO.Path]::DirectorySeparatorC
     Write-Host "DataRoot must live outside the version package '$fullOutput' (got '$fullDataRoot')." -ForegroundColor Red
     exit 1
 }
-New-Item $fullDataRoot -ItemType Directory -Force | Out-Null
 
 $catalogPath = Join-Path $root 'frontend/src/generated/catalog.generated.json'
 $distPath = Join-Path $root 'frontend/dist'
 $wwwroot = Join-Path $root 'backend/src/VisionStudio.Api/wwwroot'
 $staging = "$fullOutput.staging-$(Get-Date -Format yyyyMMddHHmmss)"
 $previous = "$fullOutput.previous"
+
+# Q03 (2026-10-13 review): the previous check only rejected a data root INSIDE the output.
+# `-DataRoot artifacts/runtime-publish.previous` passed it - and the transactional swap ends
+# with `Remove-Item previous -Recurse -Force`, deleting the operator's production data root
+# (database, upgrade checkpoints) with it. Reject every overlap (both directions, reparse
+# points resolved) BEFORE anything is created, copied or deleted.
+if (-not (Test-PublishPathsSeparated -Output $fullOutput -Staging $staging -Previous $previous -DataRoot $fullDataRoot)) {
+    exit 1
+}
+New-Item $fullDataRoot -ItemType Directory -Force | Out-Null
 
 
 # 1) Preflight: restore + generated-catalog staleness. Nothing is deleted before this passes.
@@ -305,7 +318,14 @@ switch ($migrationResult) {
 
 # 4) 事务式切换：切换失败自动回滚旧目录，绝不留下"旧包已改名、新包未就位"的中间态。
 $swapped = $false
-if (Test-Path $previous) { Remove-Item $previous -Recurse -Force }
+if (Test-Path $previous) {
+    # Q03：清理前再次确认 previous 不是（也不包含）数据根——纵深防御，绝不删除生产数据。
+    if (-not (Test-PublishPathsSeparated -Output $fullOutput -Staging $staging -Previous $previous -DataRoot $fullDataRoot)) {
+        Write-Host "Refusing to remove the previous package directory: it overlaps the data root." -ForegroundColor Red
+        exit 1
+    }
+    Remove-Item $previous -Recurse -Force
+}
 try {
     if (Test-Path $fullOutput) {
         Rename-Item $fullOutput $previous

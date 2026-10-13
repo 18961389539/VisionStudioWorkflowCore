@@ -579,7 +579,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 235  # 234 + POST /api/leases/{kind}/{id}/release (N04 explicit abandoned-lease release, RequireAdministrator)
+expected_routes = 236  # 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')

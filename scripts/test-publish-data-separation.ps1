@@ -80,6 +80,26 @@ try {
     $after = Get-Content (Join-Path $fullOutput 'VisionStudio.Api.dll') -Raw
     Assert-True ($before -eq $after) "failed swap restored the previous package (no data loss window)"
     Assert-True (Test-Path (Join-Path $fullDataRoot 'recipes.json')) "data root untouched by a failed swap"
+
+    # 4) Q03 (2026-10-13 review): the data root must never overlap a package lifecycle path.
+    #    The swap ends with Remove-Item previous -Recurse -Force, so -DataRoot pointing at
+    #    <output>.previous would delete the production database and its upgrade checkpoints.
+    . (Join-Path $PSScriptRoot 'lib/PublishPaths.ps1')
+    $q03Output = Join-Path $work 'q03-runtime-publish'
+    $q03Staging = "$q03Output.staging-test"
+    $q03Previous = "$q03Output.previous"
+    $q03SafeData = Join-Path $work 'safe-data'
+    Assert-True (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot $q03SafeData) "sibling data root passes the Q03 pre-flight"
+    Assert-True (-not (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot $q03Previous)) "data root equal to the previous package path is rejected"
+    Assert-True (-not (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot (Join-Path $q03Previous 'upgrade-checkpoints'))) "data root inside the previous package path is rejected"
+    Assert-True (-not (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot $work)) "data root containing the package is rejected"
+    Assert-True (-not (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot (Join-Path $q03Output 'data'))) "data root inside the package is still rejected"
+    # Reparse point (junction) aliasing the previous directory must not smuggle the data root in.
+    New-Item $q03Previous -ItemType Directory -Force | Out-Null
+    $q03Junction = Join-Path $work 'data-junction'
+    New-Item $q03Junction -ItemType Junction -Target $q03Previous | Out-Null
+    Assert-True (-not (Test-PublishPathsSeparated -Output $q03Output -Staging $q03Staging -Previous $q03Previous -DataRoot $q03Junction)) "junction aliasing the previous package path is rejected"
+    Assert-True (-not (Test-Path $q03Output)) "the Q03 guard itself creates nothing"
 }
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue

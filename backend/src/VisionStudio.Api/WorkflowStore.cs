@@ -17,6 +17,13 @@ namespace VisionStudio.Api;
 ///   · 读取时校验"修订 == 内容哈希"，不一致以**内容为权威**自愈修订记录——GET 返回的修订
 ///     永远对应其 body；
 ///   · 修订记录缺失（期望非空时）或损坏不再被当作"可覆盖的无基线"——一律 409，要求先核对/修复。
+/// Q06（2026-10-13 审查）：**保存事实与反馈必须一致**。旧实现"先内容后修订"分两步，修订写失败
+/// 时内容已提交却返回 500，前端据此提示"未写入后端"——实际文档已被覆盖。现在：
+///   · 写序调整为"修订临时文件 → 内容提交 → 修订落定"，任何一步失败都可判定事实；
+///   · 修订**落定**失败（内容已提交）不再抛 500，而是返回 <see cref="SaveOutcome.RevisionRecordDeferred"/>
+///     =true——读取路径的"内容为权威"自愈会把修订对齐到内容哈希，反馈如实报告"已保存、版本
+///     记录延迟"；
+///   · 修订**临时文件**或**内容**提交失败 ⇒ 什么都不曾落盘，仍如实按失败处理。
 /// </summary>
 public sealed class WorkflowStore
 {
@@ -44,15 +51,15 @@ public sealed class WorkflowStore
     /// <summary>
     /// R07/F04：乐观并发校验与保存。整个"读取当前修订 → 比较 → 写入内容与修订"在进程内串行执行。
     /// expectedRevision 为 null 时**不校验**（历史调用方的兼容路径）——该路径的明确语义是
-    /// **显式强制覆盖**：仅限管理/迁移类后台操作使用（A02，2026-10-12 第三轮：语义在此明确）；
-    /// 交互式编辑器入口（前端）始终携带基线，服务端不使用该兼容路径。
+    /// **显式强制覆盖**：仅限管理员专用覆盖端点（Q05，2026-10-13 审查：交互保存必须携带基线，
+    /// 强制覆盖另设授权 + 原因 + 审计入口）使用。
     /// expectedRevision 显式提供时：
     ///   · 空串 = 期望尚无修订记录（文档从未保存或已一致迁移；同时核实内容文件不存在——A02）；
     ///   · 非空必须与磁盘当前修订一致，且修订必须与当前内容哈希同代（A02）；
     ///   · 修订记录缺失但期望非空、或记录损坏 ⇒ 409（无法核对，绝不静默覆盖）。
-    /// 返回写入后的新修订（= 落盘内容的 SHA-256）。
+    /// 返回写入结果：修订（= 落盘内容的 SHA-256）与"修订记录是否延迟落定"（Q06）。
     /// </summary>
-    public async Task<string> SaveAsync(string id, WorkflowDefinition workflow, CancellationToken cancellationToken, string? expectedRevision = null)
+    public async Task<SaveOutcome> SaveAsync(string id, WorkflowDefinition workflow, CancellationToken cancellationToken, string? expectedRevision = null)
     {
         var safeId = ValidateId(id);
         var finalPath = Path.Combine(_root, safeId + ".json");
@@ -101,24 +108,35 @@ public sealed class WorkflowStore
             var payload = JsonSerializer.SerializeToUtf8Bytes(workflow with { Id = id }, _json);
             var revision = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
             var tempPath = Path.Combine(_root, $".{safeId}.{Guid.NewGuid():N}.tmp");
+            // Q06：修订临时文件先落盘（与内容同代的第一证物），内容提交后再把它原子落定。
+            var revisionTemp = $"{revisionPath}.{Guid.NewGuid():N}.tmp";
+            var revisionDeferred = false;
             try
             {
+                await File.WriteAllBytesAsync(revisionTemp,
+                    JsonSerializer.SerializeToUtf8Bytes(new WorkflowRevision(revision, DateTimeOffset.UtcNow), _json), cancellationToken);
                 await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     await stream.WriteAsync(payload, cancellationToken);
                 }
                 File.Move(tempPath, finalPath, overwrite: true);
+                // 修订落定：失败（文件被占用/权限）时内容与版本事实均已成立——读取路径会按
+                // "内容为权威"把修订对齐到内容哈希。此时如实报告"延迟"而不是谎报失败。
+                try
+                {
+                    File.Move(revisionTemp, revisionPath, overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    revisionDeferred = true;
+                }
             }
             finally
             {
                 try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* 尽力清理，不影响主流程 */ }
+                try { if (File.Exists(revisionTemp)) File.Delete(revisionTemp); } catch { /* 尽力清理，不影响主流程 */ }
             }
-
-            // 修订记录随内容一并更新（内容落盘成功后才写；GUID 临时名 + 原子替换）。
-            // 若此处失败：内容已生效、修订短暂漂移——读取路径的"内容为权威"自愈会在下一次 GET
-            // 把修订对齐到内容哈希（不变量：修订 == 内容指纹）。
-            await WriteRevisionAsync(revisionPath, revision, cancellationToken);
-            return revision;
+            return new SaveOutcome(revision, revisionDeferred);
         }
         finally { _gate.Release(); }
     }
@@ -229,4 +247,11 @@ public sealed class WorkflowStore
     }
 
     private sealed record WorkflowRevision(string Revision, DateTimeOffset SavedAt);
+
+    /// <summary>
+    /// Q06（2026-10-13 审查）：保存结果——修订（= 落盘内容哈希）与"修订记录是否延迟落定"。
+    /// RevisionRecordDeferred=true 表示内容已提交、旁路修订文件短暂未对齐（读取路径自愈），
+    /// 调用方必须如实反馈"已保存、版本基线将自动对齐"，不得声称失败或声称未写入。
+    /// </summary>
+    public sealed record SaveOutcome(string Revision, bool RevisionRecordDeferred);
 }

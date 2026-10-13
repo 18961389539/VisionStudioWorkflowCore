@@ -21,6 +21,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VisionStudio.Api\VisionStudio.Api.csproj" />
     <ProjectReference Include="..\..\src\VisionStudio.Plugin.Sample\VisionStudio.Plugin.Sample.csproj" />
+    <!-- Q01/Q02/Q04（2026-10-13 审查）：离线维护工具的集成测试以真实子进程运行本 DLL。
+         引用项目保证 dotnet test 总会构建它（含 artifacts-path 隔离布局）。 -->
+    <ProjectReference Include="..\..\src\VisionStudio.SqliteSnapshot\VisionStudio.SqliteSnapshot.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\..\contracts\api-required-endpoints.json" Link="contracts\api-required-endpoints.json" CopyToOutputDirectory="PreserveNewest" />

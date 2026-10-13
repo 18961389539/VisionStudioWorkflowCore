@@ -3,6 +3,7 @@ import {
   decideSaveBaseline,
   isLateLoadResponse,
   pickExpectedRevision,
+  renameDecision,
   shouldApplySaveResult
 } from '../documentSync';
 
@@ -72,5 +73,28 @@ describe('document sync decisions (A03/A04/F05)', () => {
     // 本地有"本次实际加载"的基线时，即使远端探测到别的修订也不改变行为（由服务端 409 兜底并发）。
     expect(decideSaveBaseline('rev-a', { kind: 'exists', revision: 'other' }, 'A'))
       .toEqual({ action: 'save', baseline: 'rev-a' });
+  });
+});
+
+// Q07（2026-10-13 审查）：加载响应保护必须覆盖"完整文档已编辑、图引用未变化"的场景——
+// 重命名只改名称，旧实现因此漏放行了迟到响应（RENAMED-WHILE-LOADING 被 REMOTE-OLD 覆盖）。
+describe('rename edits advance the document generation (Q07)', () => {
+  it('rename decision detects real name changes only', () => {
+    expect(renameDecision('RENAMED-WHILE-LOADING', 'REMOTE-OLD')).toEqual({ changed: true, name: 'RENAMED-WHILE-LOADING' });
+    // 同名（含仅空白差异）不算编辑；空名称被拒绝（保留当前名）。
+    expect(renameDecision('  REMOTE-OLD  ', 'REMOTE-OLD')).toEqual({ changed: false, name: 'REMOTE-OLD' });
+    expect(renameDecision('   ', 'REMOTE-OLD')).toEqual({ changed: false, name: 'REMOTE-OLD' });
+  });
+
+  it('a rename during the load invalidates the late response even though the graph is untouched', () => {
+    // 复现探针场景：加载在途期间重命名——nodes/edges 引用都没变，但文档代次已递增。
+    const nodes = { v: 1 };
+    const edges = { v: 1 };
+    const captured = { epoch: 5, nodes, edges };
+    // 重命名后：代次 +1，图引用不变（renameDecision.changed 为 true 时调用方递增代次）。
+    const afterRename = { epoch: 6, nodes, edges };
+    expect(isLateLoadResponse(captured, afterRename)).toBe('discard-switched');
+    // 保存结果同样不得用旧内容污染重命名后的文档基线。
+    expect(shouldApplySaveResult({ epoch: 5, id: 'A' }, { epoch: 6, id: 'A' })).toBe(false);
   });
 });

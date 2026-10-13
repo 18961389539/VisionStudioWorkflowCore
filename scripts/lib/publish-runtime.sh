@@ -28,6 +28,18 @@ vs_normalize_publish_paths() {
     echo "ERROR: output '$out' and data root '$data' must be separate, non-overlapping directories." >&2
     return 1
   fi
+  # Q03 (2026-10-13 review): the rollback package path and the staging prefix are package
+  # lifecycle paths too - the swap archives/renames them. A data root that IS, is inside, or
+  # CONTAINS them would be moved or deleted together with the package. Reject every overlap
+  # (the Windows side enforces the same contract via scripts/lib/PublishPaths.ps1).
+  local previous="${out}.previous"
+  # Staging variants: "<out>.staging" exactly, "<out>.staging.<pid>" (this script) and
+  # "<out>.staging-<timestamp>" (the Windows script) - all are package lifecycle paths.
+  if [[ "$data" == "$previous" || "$data" == "$previous"/* || "$previous" == "$data"/* ]] \
+    || [[ "$data" == "${out}.staging" || "$data" == "${out}.staging".* || "$data" == "${out}.staging"-* ]]; then
+    echo "ERROR: data root '$data' overlaps the package lifecycle path '$previous' (or its staging prefix); the publish would rename or delete the data root." >&2
+    return 1
+  fi
 
   printf '%s\n%s\n' "$out" "$data"
 }

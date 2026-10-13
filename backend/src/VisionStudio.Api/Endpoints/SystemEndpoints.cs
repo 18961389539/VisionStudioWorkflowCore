@@ -35,8 +35,12 @@ public static class SystemEndpoints
             if (logs.DroppedEntries > 0) reasons.Add("log entries dropped");
             if (logs.WriteFailures > 0) reasons.Add("log write failures");
             if (logs.FlushFailures > 0) reasons.Add("log flush failures");
-            if (maintenance.IsFailureLocked) reasons.Add("storage failure lock engaged");
-            if (maintenance.IsRestartPending) reasons.Add("restart pending after storage restore");
+            // Q01（2026-10-13 审查）：维护门的原因必须进入健康正文——现场据此判断"为什么被阻断、
+            // 核对什么才能放行"，而不是只看到一句"storage failure lock engaged"。
+            if (maintenance.IsFailureLocked)
+                reasons.Add($"storage failure lock engaged: {maintenance.Reason ?? "unspecified"}");
+            if (maintenance.IsRestartPending)
+                reasons.Add($"restart pending after storage restore: {maintenance.Reason ?? "unspecified"}");
             var degraded = reasons.Count > 0;
 
             // R07：生产动作就绪——阻断原因必须可直接操作（现场据此决定能否下发设备动作）。
@@ -58,7 +62,7 @@ public static class SystemEndpoints
             // 每个故障都必须表达为"生产动作未就绪"（只报第一个会掩盖其余故障）。
             foreach (var processFailure in authorization.StateTransitionFailures)
                 productionBlockers.Add($"in-process device-action failure lock engaged: {processFailure}");
-            if (maintenance.IsMaintenanceActive) productionBlockers.Add("storage maintenance is active");
+            if (maintenance.IsMaintenanceActive) productionBlockers.Add($"storage maintenance is active: {maintenance.Reason ?? "unspecified"}");
             if (maintenance.IsRestartPending) productionBlockers.Add("restart required after storage restore");
             var productionStatus = production.Status;
             if (productionStatus.State == ProductionRuntimeState.Faulted)
