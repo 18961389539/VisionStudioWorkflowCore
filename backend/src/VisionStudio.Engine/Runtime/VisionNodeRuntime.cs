@@ -49,7 +49,9 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             data.AddOverlays(node.Id, result.Overlays);
             if (data.CaptureNodeImages) data.CaptureNodeImage(node.Id, result.Outputs);
 
-            var reportSummary = result.Summary;
+            var reportSummary = Algorithms.VisionAlgorithmRuntime.BackendFor(node.Type) is { } algorithmBackend
+                ? new Dictionary<string, object?>(result.Summary) { ["algorithmBackend"] = algorithmBackend }
+                : result.Summary;
 
             if ((node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) || node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase)) &&
                 result.Outputs.TryGetValue("condition", out var condition) &&

@@ -325,12 +325,10 @@ public static class Batch5PrecisionCatalog
                 new("angleRangeDeg", "Angle Range", "number", 180, 0, 180, 1, Unit: "deg", Group: "Matching"),
                 new("angleStepDeg", "Angle Step", "number", 1, 0.1, 30, 0.1, Unit: "deg", Group: "Matching"),
                 new("minScore", "Min Score", "number", 0.6, 0, 1, 0.01, Group: "Matching"),
-                new("signatureSamples", "Signature Samples", "number", 180, 16, 720, 4, Group: "Matching",
-                    Description: "Angular bins of the polar radius signature; more bins = finer shape detail."),
                 new("maxTargets", "Max Targets", "number", 5, 1, 100, 1, Group: "Multi-target"),
                 new("minCenterDistance", "Min Center Distance", "number", 20, 0, 10000, 1, Unit: "px", Group: "Multi-target")
             ],
-            "Rotation-and-translation shape matching over external contours using a polar radius signature (centroid-relative, rotation from a cyclic shift search). First version assumes a star-shaped target around its centroid and a fixed scale; a low score means the shape/scale does not match. angle = rotate the template by this amount (CCW) to align with the scene.",
+            "JLVision native shape-model matching with subpixel translation and rotation, fixed scale, bounded multi-target suppression and cached models. angle rotates the template CCW to align with the scene.",
             "builtin",
             new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true)),
         new(

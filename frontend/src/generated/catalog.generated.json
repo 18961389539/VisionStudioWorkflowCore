@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "0231cd4d2aff7b5008678a88ccd02df2286af776294a0f4086bab433808128c6",
+  "hash": "e29e545118a4604c940c84597ba886e9a47a9833d48085c61114d04d6f5ff325",
   "items": [
     {
       "type": "image.acquire",
@@ -478,7 +478,7 @@
           "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views."
         }
       ],
-      "description": "OpenCV pinhole/radial-tangential intrinsic calibration from supplied 3D object and 2D image correspondences. No corner detector is included.",
+      "description": "JLVision native polynomial camera calibration from supplied 3D object and 2D image correspondences. No corner detector is included.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2406,7 +2406,7 @@
           "group": "Detection"
         }
       ],
-      "description": "Hough circle finder returning Circle + Point2D geometry.",
+      "description": "JLVision subpixel contour segmentation and geometric circle fitting.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -2535,7 +2535,7 @@
       "parameters": [
         {
           "name": "houghThreshold",
-          "label": "Hough Threshold",
+          "label": "Minimum Edge Evidence",
           "type": "number",
           "defaultValue": 45,
           "min": 1,
@@ -2566,7 +2566,7 @@
           "group": "Detection"
         }
       ],
-      "description": "Find the longest Hough line and return a strongly typed Line2D.",
+      "description": "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -4501,17 +4501,6 @@
           "group": "Matching"
         },
         {
-          "name": "signatureSamples",
-          "label": "Signature Samples",
-          "type": "number",
-          "defaultValue": 180,
-          "min": 16,
-          "max": 720,
-          "step": 4,
-          "group": "Matching",
-          "description": "Angular bins of the polar radius signature; more bins = finer shape detail."
-        },
-        {
           "name": "maxTargets",
           "label": "Max Targets",
           "type": "number",
@@ -4533,7 +4522,7 @@
           "group": "Multi-target"
         }
       ],
-      "description": "Rotation-and-translation shape matching over external contours using a polar radius signature (centroid-relative, rotation from a cyclic shift search). First version assumes a star-shaped target around its centroid and a fixed scale; a low score means the shape/scale does not match. angle = rotate the template by this amount (CCW) to align with the scene.",
+      "description": "JLVision native shape-model matching with subpixel translation and rotation, fixed scale, bounded multi-target suppression and cached models. angle rotates the template CCW to align with the scene.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4637,6 +4626,16 @@
           "step": 0.5
         },
         {
+          "name": "pyramidLevels",
+          "label": "Pyramid Levels (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 8,
+          "step": 1,
+          "description": "0 derives a coarse-to-fine pyramid from the template size. 1 forces single-level search; models are cached by pixel content and levels."
+        },
+        {
           "name": "minScore",
           "label": "Min Score",
           "type": "number",
@@ -4662,7 +4661,7 @@
           ]
         }
       ],
-      "description": "Locate a template in the image (optional coarse rotation search); outputs position, angle and score. angle = rotation applied to the template to align with the image (positive = counter-clockwise).",
+      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -7570,7 +7569,7 @@
           "step": 1
         }
       ],
-      "description": "Binary threshold using OpenCvSharp.",
+      "description": "Binary threshold using JLVision native regions.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7617,7 +7616,7 @@
           "description": "Optional fallback when calibrationJson is not connected; accepts CameraCalibrationModel JSON from calibration.cameraIntrinsics."
         }
       ],
-      "description": "Correct lens distortion with OpenCV using supplied intrinsics. Intrinsics are scaled when image resolution differs.",
+      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

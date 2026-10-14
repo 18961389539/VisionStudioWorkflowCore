@@ -54,7 +54,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
 
 /** 低信息量的元数据键（单位 / 类型标注 / 时间戳 …）：没有主字段命中时才兜底展示。 */
 const META_SUMMARY_KEYS = new Set([
-  'roi', 'unit', 'source', 'frame', 'pixelFormat', 'frameMode', 'timestamp', 'timestampBasis',
+  'algorithmBackend', 'modelCacheHit', 'roi', 'unit', 'source', 'frame', 'pixelFormat', 'frameMode', 'timestamp', 'timestampBasis',
   'centerType', 'circleType', 'resultReadyTag', 'tagId', 'dataType', 'writeOrder', 'replay'
 ]);
 

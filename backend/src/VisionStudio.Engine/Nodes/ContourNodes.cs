@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -40,21 +41,21 @@ internal static class ContourNodesHelper
             if (mode == "fixed")
             {
                 binary = new Mat();
-                Cv2.Threshold(gray, binary, Math.Clamp(threshold, 0, 255), 255,
+                JLVisionOperators.Threshold(gray, binary, Math.Clamp(threshold, 0, 255), 255,
                     invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary);
                 effectiveMode = "fixed";
             }
             else if (mode == "direct")
             {
                 binary = new Mat();
-                Cv2.Threshold(gray, binary, 0, 255, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary);
+                JLVisionOperators.Threshold(gray, binary, 0, 255, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary);
                 effectiveMode = "direct";
             }
             else
             {
                 binary = new Mat();
-                Cv2.Threshold(gray, binary, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
-                if (invert) Cv2.BitwiseNot(binary, binary);
+                JLVisionOperators.Threshold(gray, binary, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu);
+                if (invert) JLVisionOperators.BitwiseNot(binary, binary);
                 effectiveMode = "otsu";
             }
 
@@ -90,11 +91,11 @@ internal static class ContourNodesHelper
     public static VisionContour ToContour(Point[] points, int index, int parent, bool isHole, int maxPoints)
     {
         var sampled = Subsample(points, maxPoints);
-        var area = Cv2.ContourArea(points);
-        var perimeter = Cv2.ArcLength(points, closed: true);
+        var area = JLVisionOperators.ContourArea(points);
+        var perimeter = JLVisionOperators.ArcLength(points, closed: true);
         var circularity = perimeter > 1e-9 ? Math.Min(1.0, 4 * Math.PI * area / (perimeter * perimeter)) : 0;
-        Cv2.MinEnclosingCircle(points, out var center, out var radius);
-        var rect = Cv2.BoundingRect(points);
+        JLVisionOperators.MinEnclosingCircle(points, out var center, out var radius);
+        var rect = JLVisionOperators.BoundingRect(points);
         return new VisionContour(
             index,
             sampled,
@@ -152,7 +153,7 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
                 "holes" or "hole" => RetrievalModes.CComp,
                 _ => RetrievalModes.External
             };
-            Cv2.FindContours(analysis, out Point[][] contours, out HierarchyIndex[]? hierarchy, retrieval, ContourApproximationModes.ApproxSimple);
+            JLVisionOperators.FindContours(analysis, out Point[][] contours, out HierarchyIndex[]? hierarchy, retrieval, ContourApproximationModes.ApproxSimple);
 
             var candidates = new List<(int SourceIndex, int SourceParent, bool IsHole, Point[] Points)>();
             for (var i = 0; i < contours.Length; i++)
@@ -161,7 +162,7 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
                 var parent = retrieval == RetrievalModes.External ? -1 : hierarchy?[i].Parent ?? -1;
                 var isHole = parent >= 0;
                 if (mode is "holes" or "hole" && !isHole) continue;
-                if (Cv2.ContourArea(contours[i]) < minArea) continue;
+                if (JLVisionOperators.ContourArea(contours[i]) < minArea) continue;
                 candidates.Add((i, parent, isHole, contours[i]));
             }
 
@@ -395,17 +396,17 @@ public sealed class ContourPropertiesNode : IVisionNodeExecutor
 
     private static VisionContourProperties Compute(int index, VisionContour contour)
     {
-        var moments = Cv2.Moments(contour.Points.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray(), binaryImage: false);
+        var moments = JLVisionOperators.Moments(contour.Points.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray(), binaryImage: false);
         var centroid = moments.M00 > 1e-9
             ? new VisionPoint2D(moments.M10 / moments.M00, moments.M01 / moments.M00)
             : new VisionPoint2D(contour.BoundingBox.X + contour.BoundingBox.Width / 2d, contour.BoundingBox.Y + contour.BoundingBox.Height / 2d);
 
         var points = contour.Points.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray();
-        var minAreaRect = Cv2.MinAreaRect(points);
+        var minAreaRect = JLVisionOperators.MinAreaRect(points);
         var rotated = new VisionRectangle2D(minAreaRect.Center.X, minAreaRect.Center.Y, minAreaRect.Size.Width, minAreaRect.Size.Height, minAreaRect.Angle);
 
-        var hull = Cv2.ConvexHull(contour.Points.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray());
-        var hullArea = Cv2.ContourArea(hull);
+        var hull = JLVisionOperators.ConvexHull(contour.Points.Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray());
+        var hullArea = JLVisionOperators.ContourArea(hull);
         var solidity = hullArea > 1e-9 ? Math.Min(1.0, contour.Area / hullArea) : 0;
         var boxArea = Math.Max(1e-9, contour.BoundingBox.Width * contour.BoundingBox.Height);
         var extent = Math.Min(1.0, contour.Area / boxArea);

@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -40,20 +41,20 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 analysis = masked;
             }
 
-            Cv2.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
 
             var candidates = new List<VisionDetection>();
             foreach (var contour in contours)
             {
-                var area = Cv2.ContourArea(contour);
+                var area = JLVisionOperators.ContourArea(contour);
                 if (area < minArea) continue;
                 if (maxArea > 0 && area > maxArea) continue;
-                var perimeter = Cv2.ArcLength(contour, closed: true);
+                var perimeter = JLVisionOperators.ArcLength(contour, closed: true);
                 var circularity = perimeter > 0 ? Math.Min(1, 4 * Math.PI * area / (perimeter * perimeter)) : 0;
                 if (circularity < minCircularity) continue;
 
-                Cv2.MinEnclosingCircle(contour, out Point2f center, out float radius);
-                var rect = Cv2.BoundingRect(contour);
+                JLVisionOperators.MinEnclosingCircle(contour, out Point2f center, out float radius);
+                var rect = JLVisionOperators.BoundingRect(contour);
                 candidates.Add(new VisionDetection(
                     Index: 0,
                     X: rect.X,

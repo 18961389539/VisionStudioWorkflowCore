@@ -6,6 +6,7 @@ using VisionStudio.Api.Provenance;
 using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Nodes;
 using VisionStudio.Engine.Robot;
+using VisionStudio.Engine.Algorithms;
 
 namespace VisionStudio.Api.Hosting;
 
@@ -32,6 +33,8 @@ public sealed class RuntimeBootstrapHostedService(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        var algorithms = VisionAlgorithmRuntime.Initialize();
+        logger.LogInformation("Vision algorithms: {Backend} {Version}; inference: {InferenceBackend} {InferenceVersion}", algorithms.TraditionalBackend, algorithms.NativeVersion, algorithms.InferenceBackend, algorithms.InferenceVersion);
         await RegisterCamerasAsync(cancellationToken);
         await RegisterRobotsAsync(cancellationToken);
         await RegisterDevicesAsync(cancellationToken);
@@ -39,7 +42,11 @@ public sealed class RuntimeBootstrapHostedService(
         LoadPlugins();
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        VisionAlgorithmRuntime.ClearModelCache();
+        return Task.CompletedTask;
+    }
 
     private async Task RegisterCamerasAsync(CancellationToken cancellationToken)
     {

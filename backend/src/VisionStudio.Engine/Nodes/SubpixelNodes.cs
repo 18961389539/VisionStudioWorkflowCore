@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -53,25 +54,7 @@ internal static class SubpixelEdgeCore
             profile[i] = count > 0 ? sum / count : double.NaN;
         }
 
-        FillGaps(profile);
         return profile;
-    }
-
-    /// <summary>NaN 缺口用最近有效值（沿剖面方向）填充，避免梯度在缺口处伪峰。</summary>
-    private static void FillGaps(double[] profile)
-    {
-        var last = double.NaN;
-        for (var i = 0; i < profile.Length; i++)
-        {
-            if (double.IsFinite(profile[i])) last = profile[i];
-            else if (double.IsFinite(last)) profile[i] = last;
-        }
-        var next = double.NaN;
-        for (var i = profile.Length - 1; i >= 0; i--)
-        {
-            if (double.IsFinite(profile[i])) next = profile[i];
-            else if (double.IsFinite(next)) profile[i] = next;
-        }
     }
 
     /// <summary>
@@ -92,85 +75,9 @@ internal static class SubpixelEdgeCore
 
     public static EdgeResult FindEdge(double[] profile, double spacing, string polarity, double minContrast, string direction, string refine)
     {
-        var gradients = new double[profile.Length];
-        var finite = 0;
-        for (var i = 1; i < profile.Length; i++)
-        {
-            var g = profile[i] - profile[i - 1];
-            gradients[i] = double.IsFinite(g) ? g : 0;
-            if (double.IsFinite(g)) finite++;
-        }
-
-        double Score(double g) => polarity.ToLowerInvariant() switch
-        {
-            "rising" => g,
-            "falling" => -g,
-            _ => Math.Abs(g)
-        };
-
-        if (finite == 0) return EdgeResult.NotFound("profile-has-no-finite-samples");
-
-        var candidates = new List<int>();
-        for (var i = 1; i < gradients.Length; i++)
-        {
-            if (Score(gradients[i]) >= minContrast)
-                candidates.Add(i);
-        }
-        if (candidates.Count == 0)
-            return EdgeResult.NotFound("no-edge-above-threshold");
-
-        int peak;
-        switch (direction.ToLowerInvariant())
-        {
-            case "firstfromstart":
-                peak = candidates[0];
-                break;
-            case "firstfromend":
-                peak = candidates[^1];
-                break;
-            default:
-                peak = candidates.OrderByDescending(i => Score(gradients[i])).First();
-                break;
-        }
-
-        var strength = Score(gradients[peak]);
-        var position = (peak - 0.5) * spacing; // 梯度定义在相邻样本中点，位置已换算为像素距离
-        var fitError = -1d;
-
-        if (peak >= 2 && peak < gradients.Length - 2)
-        {
-            // 对以峰顶为中心的五点窗做二次最小二乘。五点残差具有至少两个自由度，
-            // 能反映峰形偏离抛物线的程度，避免三点拟合对三点数据必然零残差。
-            var ys = Enumerable.Range(-2, 5).Select(offset => Score(gradients[peak + offset])).ToArray();
-            var sumY = ys.Sum();
-            var sumXY = 0d;
-            var sumX2Y = 0d;
-            for (var j = 0; j < ys.Length; j++)
-            {
-                var x = j - 2;
-                sumXY += x * ys[j];
-                sumX2Y += x * x * ys[j];
-            }
-            var a = (sumX2Y - 2 * sumY) / 14d;
-            var b = sumXY / 10d;
-            var c = (sumY - 10 * a) / 5d;
-            var residuals = Enumerable.Range(-2, 5).Select(x => Residual(a, b, c, ys[x + 2], x)).ToArray();
-            fitError = Math.Sqrt(residuals.Sum(r => r * r) / residuals.Length);
-
-            // 只对向下开口、非平坦峰做亚像素顶点细化。
-            if (refine != "none" && a < -1e-9)
-            {
-                var offset = Math.Clamp(-b / (2 * a), -0.5, 0.5);
-                position = (peak - 0.5 + offset) * spacing;
-            }
-            else if (a >= -1e-9) fitError = -1;
-        }
-
-        return new EdgeResult(true, position, strength, double.IsNaN(fitError) ? -1 : fitError, finite, "ok");
+        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine);
+        return new(edge.Found, edge.Position, edge.Strength, edge.Error, edge.Count, edge.Reason);
     }
-
-    private static double Residual(double a, double b, double c, double actual, double x) =>
-        actual - (a * x * x + b * x + c);
 
     /// <summary>沿搜索线的坐标 → 图像点。</summary>
     public static VisionPoint2D Locate(VisionPoint2D start, VisionPoint2D end, double position)
@@ -426,9 +333,9 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         var yy = points.Sum(p => (p.Y - cy) * (p.Y - cy));
         var xy = points.Sum(p => (p.X - cx) * (p.Y - cy));
         if (xx + yy < 1e-8) return null;
-        var angle = 0.5 * Math.Atan2(2 * xy, xx - yy);
-        var ux = Math.Cos(angle);
-        var uy = Math.Sin(angle);
+        var fitted = JLVisionPointFitting.Line(points.ToArray());
+        var ux = (fitted.End.X - fitted.Start.X) / fitted.Length;
+        var uy = (fitted.End.Y - fitted.Start.Y) / fitted.Length;
         var nx = -uy;
         var ny = ux;
         var residuals = points.Select(p => (p.X - cx) * nx + (p.Y - cy) * ny).ToArray();
@@ -628,7 +535,7 @@ public sealed class FitEllipseNode : IVisionNodeExecutor
         RotatedRect ellipse;
         try
         {
-            ellipse = Cv2.FitEllipse(points);
+            ellipse = JLVisionOperators.FitEllipse(points);
         }
         catch (Exception ex)
         {

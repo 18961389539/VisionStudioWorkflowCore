@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -160,7 +161,7 @@ internal static class RecognitionImageHelpers
                     4 => ColorConversionCodes.BGRA2GRAY,
                     _ => throw new InvalidOperationException($"Recognition supports 1, 3, or 4 channel images; received {source.Channels()}.")
                 };
-                Cv2.CvtColor(source, gray = new Mat(), code);
+                JLVisionOperators.CvtColor(source, gray = new Mat(), code);
             }
 
             if (gray.Depth() == MatType.CV_8U) return gray;

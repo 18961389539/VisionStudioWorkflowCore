@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -22,7 +23,7 @@ internal static class PreprocessImageHelpers
         owned = null;
         if (source.Channels() == 1) return source;
         var gray = new Mat();
-        Cv2.CvtColor(source, gray, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+        JLVisionOperators.CvtColor(source, gray, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         converted = true;
         owned = gray;
         return gray;
@@ -67,12 +68,12 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
         {
             using var bgr = new Mat();
             var color = source.Channels() == 4 ? Convert(source, bgr, ColorConversionCodes.BGRA2BGR) : source;
-            Cv2.Split(color, out var channels);
+            JLVisionOperators.Split(color, out var channels);
             try
             {
                 using var sum = new Mat();
-                Cv2.AddWeighted(channels[0], 1d / 3, channels[1], 1d / 3, 0, sum);
-                Cv2.AddWeighted(sum, 1, channels[2], 1d / 3, 0, mat);
+                JLVisionOperators.AddWeighted(channels[0], 1d / 3, channels[1], 1d / 3, 0, sum);
+                JLVisionOperators.AddWeighted(sum, 1, channels[2], 1d / 3, 0, mat);
             }
             finally
             {
@@ -83,11 +84,11 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
         {
             using var bgr = new Mat();
             var color = source.Channels() == 4 ? Convert(source, bgr, ColorConversionCodes.BGRA2BGR) : source;
-            Cv2.Split(color, out var channels);
+            JLVisionOperators.Split(color, out var channels);
             try
             {
-                Cv2.Max(channels[0], channels[1], mat);
-                Cv2.Max(mat, channels[2], mat);
+                JLVisionOperators.Max(channels[0], channels[1], mat);
+                JLVisionOperators.Max(mat, channels[2], mat);
             }
             finally
             {
@@ -97,7 +98,7 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
         else
         {
             // luminance：BT.601 加权（OpenCV 默认 BGR2GRAY）。
-            Cv2.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         }
 
         converted = source.Channels() != 1;
@@ -113,7 +114,7 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
 
     private static Mat Convert(Mat source, Mat scratch, ColorConversionCodes code)
     {
-        Cv2.CvtColor(source, scratch, code);
+        JLVisionOperators.CvtColor(source, scratch, code);
         return scratch;
     }
 }
@@ -135,8 +136,8 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
             using var bgr = new Mat();
             var color = source.Channels() == 4 ? Bgr(source, bgr) : source;
             using var hsv = new Mat();
-            Cv2.CvtColor(color, hsv, ColorConversionCodes.BGR2HSV);
-            Cv2.ExtractChannel(hsv, mat, channel switch { "hue" => 0, "saturation" => 1, _ => 2 });
+            JLVisionOperators.CvtColor(color, hsv, ColorConversionCodes.BGR2HSV);
+            JLVisionOperators.ExtractChannel(hsv, mat, channel switch { "hue" => 0, "saturation" => 1, _ => 2 });
         }
         else if (channel is "blue" or "green" or "red")
         {
@@ -144,13 +145,13 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"Channel '{channel}' requires a color image; the input is single-channel (use 'gray' for the only channel).");
             using var bgr = new Mat();
             var color = source.Channels() == 4 ? Bgr(source, bgr) : source;
-            Cv2.ExtractChannel(color, mat, channel switch { "blue" => 0, "green" => 1, _ => 2 });
+            JLVisionOperators.ExtractChannel(color, mat, channel switch { "blue" => 0, "green" => 1, _ => 2 });
         }
         else
         {
             // gray
             if (source.Channels() == 1) source.CopyTo(mat);
-            else Cv2.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            else JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         }
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -159,7 +160,7 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
 
         static Mat Bgr(Mat source, Mat scratch)
         {
-            Cv2.CvtColor(source, scratch, ColorConversionCodes.BGRA2BGR);
+            JLVisionOperators.CvtColor(source, scratch, ColorConversionCodes.BGRA2BGR);
             return scratch;
         }
     }
@@ -178,7 +179,7 @@ public sealed class GaussianBlurNode : IVisionNodeExecutor
         var roi = node.GetRoi();
 
         var blurred = new Mat();
-        Cv2.GaussianBlur(source, blurred, new Size(kernel, kernel), sigmaX, sigmaY);
+        JLVisionOperators.GaussianBlur(source, blurred, new Size(kernel, kernel), sigmaX, sigmaY);
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi);
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -205,7 +206,7 @@ public sealed class MedianBlurNode : IVisionNodeExecutor
         var roi = node.GetRoi();
 
         var blurred = new Mat();
-        Cv2.MedianBlur(source, blurred, kernel);
+        JLVisionOperators.MedianBlur(source, blurred, kernel);
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi);
 
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -233,22 +234,22 @@ public sealed class MorphologyNode : IVisionNodeExecutor
             "cross" => MorphShapes.Cross,
             _ => MorphShapes.Rect
         };
-        using var element = Cv2.GetStructuringElement(morphShape, new Size(kernel, kernel));
+        using var element = JLVisionOperators.GetStructuringElement(morphShape, new Size(kernel, kernel));
         var morphed = new Mat();
         switch (operation)
         {
             case "erode":
-                Cv2.Erode(source, morphed, element, iterations: iterations);
+                JLVisionOperators.Erode(source, morphed, element, iterations: iterations);
                 break;
             case "dilate":
-                Cv2.Dilate(source, morphed, element, iterations: iterations);
+                JLVisionOperators.Dilate(source, morphed, element, iterations: iterations);
                 break;
             case "close":
-                Cv2.MorphologyEx(source, morphed, MorphTypes.Close, element, iterations: iterations);
+                JLVisionOperators.MorphologyEx(source, morphed, MorphTypes.Close, element, iterations: iterations);
                 break;
             default:
                 operation = "open";
-                Cv2.MorphologyEx(source, morphed, MorphTypes.Open, element, iterations: iterations);
+                JLVisionOperators.MorphologyEx(source, morphed, MorphTypes.Open, element, iterations: iterations);
                 break;
         }
         var output = PreprocessImageHelpers.ApplyRoiMask(morphed, roi);
@@ -284,7 +285,7 @@ public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
         try
         {
             var binary = new Mat();
-            Cv2.AdaptiveThreshold(
+            JLVisionOperators.AdaptiveThreshold(
                 gray, binary, 255,
                 method == "gaussian" ? AdaptiveThresholdTypes.GaussianC : AdaptiveThresholdTypes.MeanC,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary,
@@ -325,7 +326,7 @@ public sealed class OtsuThresholdNode : IVisionNodeExecutor
         {
             var binary = new Mat();
             // Otsu：由直方图自动求全局阈值——输出阈值供追溯与"光照漂移"监控。
-            var computed = Cv2.Threshold(gray, binary, 0, 255,
+            var computed = JLVisionOperators.Threshold(gray, binary, 0, 255,
                 ThresholdTypes.Otsu | (invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             var output = PreprocessImageHelpers.ApplyRoiMask(binary, roi);
 

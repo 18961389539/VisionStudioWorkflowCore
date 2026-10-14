@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
@@ -47,7 +48,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         var roi = node.GetRoi();
 
         var thresholded = new Mat();
-        Cv2.Threshold(source, thresholded, threshold, 255, ThresholdTypes.Binary);
+        JLVisionOperators.Threshold(source, thresholded, threshold, 255, ThresholdTypes.Binary);
 
         Mat outputMat;
         if (roi is null)
@@ -95,9 +96,9 @@ public sealed class LargestBlobNode : IVisionNodeExecutor
                 analysis = masked;
             }
 
-            Cv2.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
             var best = contours
-                .Select(c => (Contour: c, Area: Cv2.ContourArea(c)))
+                .Select(c => (Contour: c, Area: JLVisionOperators.ContourArea(c)))
                 .Where(x => x.Area >= minArea)
                 .OrderByDescending(x => x.Area)
                 .FirstOrDefault();
@@ -105,7 +106,7 @@ public sealed class LargestBlobNode : IVisionNodeExecutor
             if (best.Contour is null)
                 throw new InvalidOperationException($"No blob found with area >= {minArea:0.##}.");
 
-            Cv2.MinEnclosingCircle(best.Contour, out Point2f center, out float radius);
+            JLVisionOperators.MinEnclosingCircle(best.Contour, out Point2f center, out float radius);
             var typedCenter = new VisionPoint2D(center.X, center.Y);
             var typedCircle = new VisionCircle(center.X, center.Y, radius);
 

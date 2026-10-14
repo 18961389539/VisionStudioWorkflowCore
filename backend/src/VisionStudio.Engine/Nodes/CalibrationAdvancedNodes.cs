@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -8,7 +9,7 @@ namespace VisionStudio.Engine.Nodes;
 
 public sealed record CameraCalibrationView(List<List<double>> ObjectPoints, List<List<double>> ImagePoints);
 public sealed record CameraCalibrationRequest(int ImageWidth, int ImageHeight, List<CameraCalibrationView> Views);
-public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms);
+public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms, string? NativeCameraType = null, double[]? NativeCameraParameters = null);
 
 /// <summary>Intrinsic pinhole calibration from user-provided corresponding chessboard object/image points.</summary>
 public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
@@ -39,15 +40,13 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             objects.Add(view.ObjectPoints.Select(p => new Point3f((float)p[0], (float)p[1], (float)p[2])).ToArray());
             images.Add(ip);
         }
-        var camera = new double[,] { { request.ImageWidth, 0, request.ImageWidth / 2d }, { 0, request.ImageWidth, request.ImageHeight / 2d }, { 0, 0, 1 } };
-        var distortion = new double[8];
-        double rms;
-        try { rms = Cv2.CalibrateCamera(objects, images, new Size(request.ImageWidth, request.ImageHeight), camera, distortion, out _, out _, CalibrationFlags.None, new TermCriteria(CriteriaTypes.Count | CriteriaTypes.Eps, 100, 1e-10)); }
-        catch (OpenCvSharpException ex) { throw new InvalidOperationException($"OpenCV intrinsic calibration failed: {ex.Message}", ex); }
-        if (!double.IsFinite(rms) || !double.IsFinite(camera[0,0]) || !double.IsFinite(camera[1,1]) || camera[0,0] <= 0 || camera[1,1] <= 0) throw new InvalidOperationException("Calibration produced invalid intrinsics; check point correspondences and view diversity.");
-        var model = new CameraCalibrationModel(request.ImageWidth, request.ImageHeight, [[camera[0,0],camera[0,1],camera[0,2]],[camera[1,0],camera[1,1],camera[1,2]],[camera[2,0],camera[2,1],camera[2,2]]], distortion, rms);
+        CameraCalibrationModel model;
+        try { model = JLVisionCalibration.Calibrate(request, cancellationToken); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { throw new InvalidOperationException($"JLVision intrinsic calibration failed: {ex.Message}", ex); }
+        var rms = model.Rms;
         var resultJson = JsonSerializer.Serialize(model);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms) }, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["model"] = "pinhole-radtan" }));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms) }, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
     }
 }
 
@@ -66,15 +65,10 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid camera calibration JSON: {ex.Message}", ex); }
         if (model.ImageWidth < 1 || model.ImageHeight < 1 || model.CameraMatrix is not { Length: 3 } || model.CameraMatrix.Any(r => r is not { Length: 3 } || r.Any(x => !double.IsFinite(x))) || model.DistCoeffs is null || model.DistCoeffs.Length is not (4 or 5 or 8 or 12 or 14) || model.DistCoeffs.Any(x => !double.IsFinite(x)) || model.CameraMatrix[0][0] <= 0 || model.CameraMatrix[1][1] <= 0 || Math.Abs(model.CameraMatrix[2][0]) > 1e-12 || Math.Abs(model.CameraMatrix[2][1]) > 1e-12 || Math.Abs(model.CameraMatrix[2][2]-1) > 1e-9)
             throw new InvalidOperationException("Calibration JSON must contain a finite 3x3 cameraMatrix, positive focal lengths, and 4/5/8/12/14 finite distCoeffs.");
-        var scaleX = (double)source.Width / model.ImageWidth; var scaleY = (double)source.Height / model.ImageHeight;
-        using var camera = new Mat(3, 3, MatType.CV_64FC1);
-        for (var r = 0; r < 3; r++) for (var c = 0; c < 3; c++) camera.Set(r,c,model.CameraMatrix[r][c]);
-        camera.Set(0,0,camera.At<double>(0,0)*scaleX); camera.Set(0,2,camera.At<double>(0,2)*scaleX);
-        camera.Set(1,1,camera.At<double>(1,1)*scaleY); camera.Set(1,2,camera.At<double>(1,2)*scaleY);
-        using var distortion = Mat.FromArray(model.DistCoeffs);
-        var output = new Mat();
-        try { Cv2.Undistort(source, output, camera, distortion, camera); }
-        catch (OpenCvSharpException ex) { output.Dispose(); throw new InvalidOperationException($"OpenCV undistortion failed: {ex.Message}", ex); }
+        Mat output;
+        try { output = JLVisionCalibration.Undistort(source, model, cancellationToken); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { throw new InvalidOperationException($"JLVision undistortion failed: {ex.Message}", ex); }
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight }));
     }
 }

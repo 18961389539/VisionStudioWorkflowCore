@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
@@ -12,7 +13,7 @@ internal static class VisionGeometryHelpers
             return source.Clone();
 
         var gray = new Mat();
-        Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+        JLVisionOperators.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
         return gray;
     }
 
@@ -51,8 +52,8 @@ public sealed class EdgeNode : IVisionNodeExecutor
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
         var edges = new Mat();
-        Cv2.Canny(analysis, edges, low, high);
-        var edgePixels = Cv2.CountNonZero(edges);
+        JLVisionOperators.Canny(analysis, edges, low, high);
+        var edgePixels = JLVisionOperators.CountNonZero(edges);
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
@@ -85,9 +86,9 @@ public sealed class LineNode : IVisionNodeExecutor
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
         using var edges = new Mat();
-        Cv2.Canny(analysis, edges, 50, 150);
+        JLVisionOperators.Canny(analysis, edges, 50, 150);
 
-        var lines = Cv2.HoughLinesP(edges, 1, Math.PI / 180.0, houghThreshold, minLength, maxGap);
+        var lines = JLVisionOperators.HoughLinesP(edges, 1, Math.PI / 180.0, houghThreshold, minLength, maxGap);
         if (lines.Length == 0)
             throw new InvalidOperationException("No line found. Adjust ROI/Hough threshold/minimum length.");
 
@@ -138,9 +139,9 @@ public sealed class CircleNode : IVisionNodeExecutor
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
         using var blurred = new Mat();
-        Cv2.GaussianBlur(analysis, blurred, new Size(9, 9), 2);
+        JLVisionOperators.GaussianBlur(analysis, blurred, new Size(9, 9), 2);
 
-        var circles = Cv2.HoughCircles(blurred, HoughModes.Gradient, 1, minDist, param1, param2, minRadius, maxRadius);
+        var circles = JLVisionOperators.HoughCircles(blurred, HoughModes.Gradient, 1, minDist, param1, param2, minRadius, maxRadius);
         if (circles.Length == 0)
             throw new InvalidOperationException("No circle found. Adjust ROI/radius/threshold parameters.");
 
@@ -281,9 +282,9 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
 
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
         using var analysis = VisionGeometryHelpers.ApplyRoi(gray, roi);
-        Cv2.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
         var best = contours
-            .Select(c => (Contour: c, Area: Cv2.ContourArea(c)))
+            .Select(c => (Contour: c, Area: JLVisionOperators.ContourArea(c)))
             .Where(x => x.Area >= minArea)
             .OrderByDescending(x => x.Area)
             .FirstOrDefault();
@@ -291,7 +292,7 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
         if (best.Contour is null)
             throw new InvalidOperationException($"No contour found with area >= {minArea:0.##}.");
 
-        var rr = Cv2.MinAreaRect(best.Contour);
+        var rr = JLVisionOperators.MinAreaRect(best.Contour);
         var rectangle = new VisionRectangle2D(rr.Center.X, rr.Center.Y, rr.Size.Width, rr.Size.Height, rr.Angle);
         var points = rr.Points().Select(p => new VisionOverlayPoint(p.X, p.Y)).ToArray();
         var overlays = new[]

@@ -1,131 +1,12 @@
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using OpenCvSharp;
-using OpenCvSharp.Dnn;
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
-
-/// <summary>
-/// Shared OpenCV DNN ONNX path. Input is always a single BGR image converted to float NCHW [1,3,H,W].
-/// Each invocation owns its Net and temporary Mats, so concurrent node executions do not share mutable DNN state.
-/// </summary>
-internal static class OnnxInferenceHelpers
-{
-    public static Net LoadNet(NodeDefinition node)
-    {
-        var modelPath = node.GetString("modelPath", string.Empty).Trim();
-        if (modelPath.Length == 0)
-            throw new InvalidOperationException($"Node '{node.Type}' requires modelPath to an ONNX model file.");
-        var resolved = Path.GetFullPath(modelPath);
-        if (!File.Exists(resolved))
-            throw new InvalidOperationException($"ONNX model '{resolved}' does not exist.");
-        try
-        {
-            var net = Cv2.Dnn.ReadNetFromONNX(resolved);
-            if (net is null || net.Empty())
-            {
-                net?.Dispose();
-                throw new InvalidOperationException($"ONNX model '{resolved}' could not be loaded or contains no network.");
-            }
-            return net;
-        }
-        catch (InvalidOperationException) { throw; }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Could not load ONNX model '{resolved}': {ex.Message}", ex);
-        }
-    }
-
-    public static (Mat Blob, string OutputName, int Width, int Height) PrepareInput(
-        Net net, Mat source, NodeDefinition node)
-    {
-        if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
-        var width = node.GetInt("inputWidth", 224);
-        var height = node.GetInt("inputHeight", 224);
-        if (width is < 1 or > 4096 || height is < 1 or > 4096)
-            throw new InvalidOperationException("ONNX inputWidth and inputHeight must be between 1 and 4096.");
-        var scale = node.GetDouble("scale", 1d / 255);
-        var meanB = node.GetDouble("meanB", 0);
-        var meanG = node.GetDouble("meanG", 0);
-        var meanR = node.GetDouble("meanR", 0);
-        if (!double.IsFinite(scale) || !double.IsFinite(meanB) || !double.IsFinite(meanG) || !double.IsFinite(meanR))
-            throw new InvalidOperationException("ONNX normalization scale and mean values must be finite.");
-
-        Mat? bgr = null;
-        Mat? blob = null;
-        try
-        {
-            if (source.Channels() == 3)
-                bgr = source;
-            else
-            {
-                bgr = new Mat();
-                var conversion = source.Channels() switch
-                {
-                    1 => ColorConversionCodes.GRAY2BGR,
-                    4 => ColorConversionCodes.BGRA2BGR,
-                    _ => throw new InvalidOperationException($"ONNX inference supports 1, 3, or 4 channel images; received {source.Channels()}.")
-                };
-                Cv2.CvtColor(source, bgr, conversion);
-            }
-
-            blob = Cv2.Dnn.BlobFromImage(
-                bgr,
-                scale,
-                new Size(width, height),
-                new Scalar(meanB, meanG, meanR),
-                node.GetBool("swapRB", false),
-                node.GetBool("crop", false));
-            net.SetInput(blob);
-            var result = blob;
-            blob = null;
-            return (result, node.GetString("outputName", string.Empty).Trim(), width, height);
-        }
-        finally
-        {
-            if (!ReferenceEquals(bgr, source)) bgr?.Dispose();
-            blob?.Dispose();
-        }
-    }
-
-    public static Mat Forward(Net net, string outputName, string modelPath)
-    {
-        try
-        {
-            return net.Forward(string.IsNullOrEmpty(outputName) ? null : outputName);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"ONNX model '{modelPath}' inference failed for output '{(string.IsNullOrEmpty(outputName) ? "<default>" : outputName)}': {ex.Message}", ex);
-        }
-    }
-
-    public static float[] ReadFloatTensor(Mat tensor, string contract)
-    {
-        if (tensor.Empty()) throw new InvalidOperationException($"ONNX output for {contract} is empty.");
-        if (tensor.Type() != MatType.CV_32FC1)
-            throw new InvalidOperationException($"ONNX output for {contract} must be float32 single-channel; received {tensor.Type()}.");
-        if (!tensor.IsContinuous())
-            throw new InvalidOperationException($"ONNX output for {contract} is not contiguous.");
-        var values = new float[checked((int)tensor.Total())];
-        Marshal.Copy(tensor.Data, values, 0, values.Length);
-        if (values.Length != tensor.Total())
-            throw new InvalidOperationException($"ONNX output for {contract} could not be read as a contiguous float tensor.");
-        if (values.Any(x => !float.IsFinite(x)))
-            throw new InvalidOperationException($"ONNX output for {contract} contains a non-finite value.");
-        return values;
-    }
-
-    public static int[] Shape(Mat tensor)
-        => Enumerable.Range(0, tensor.Dims).Select(tensor.Size).ToArray();
-
-    public static string ResolvePath(NodeDefinition node)
-        => Path.GetFullPath(node.GetString("modelPath", string.Empty).Trim());
-}
 
 /// <summary>Runs a configured ONNX image classification head: [1,C] or [1,C,1,1] float32 logits/scores.</summary>
 public sealed class OnnxClassificationNode : IVisionNodeExecutor
@@ -140,7 +21,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath);
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
         var valid = shape.Length == 2 && shape[0] == 1 && shape[1] > 0
@@ -192,7 +73,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath);
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
         var rows = shape.Length == 2 && shape[1] == 6
@@ -297,7 +178,7 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath);
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
         if (shape.Length != 4 || shape[0] != 1 || shape[1] is < 1 or > 256 || shape[2] < 1 || shape[3] < 1)
@@ -330,7 +211,7 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
             modelMask.Set(y, x, label);
         }
         var mask = new Mat();
-        try { Cv2.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest); }
+        try { JLVisionOperators.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest); }
         catch { mask.Dispose(); throw; }
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["mask"] = VisionValue.Image(VisionImage.Own(mask)) },
@@ -351,7 +232,7 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath);
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
         var count = shape.Aggregate(1L, (a, b) => a * b);

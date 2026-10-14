@@ -1384,6 +1384,22 @@ text='\n'.join(p.read_text(encoding='utf-8') for p in cs_tests)
 facts=len(re.findall(r'\[Fact\]',text)); theories=len(re.findall(r'\[Theory\]',text)); soaks=len(re.findall(r'Trait\("Category",\s*"Soak"\)',text))
 ok(f'Test source: Fact={facts}, Theory={theories}, SoakTraits={soaks}')
 
+# Traditional image processing must use JLVision; OpenCV is retained only at IO,
+# synthetic-image drawing and legacy camera/plugin buffer boundaries.
+allowed_cv_node_calls = {'ImRead', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line'}
+for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
+    body = source.read_text(encoding='utf-8-sig')
+    for call in re.findall(r'\bCv2\.(\w+)', body):
+        if call not in allowed_cv_node_calls:
+            fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call}')
+    if 'OpenCvSharp.Dnn' in body:
+        fail(f'OpenCV DNN dependency remains in node: {source.name}')
+algorithm_project = read_safe('backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj')
+for package in ['JLVisionLib', 'Microsoft.ML.OnnxRuntime']:
+    if f'Include="{package}"' not in algorithm_project:
+        fail(f'Missing algorithm backend dependency: {package}')
+ok('JLVision traditional algorithms + ONNX Runtime; no OpenCV algorithm/DNN fallback in nodes')
+
 if errors:
     print('STATIC AUDIT FAILED')
     for e in errors: print(' -',e)

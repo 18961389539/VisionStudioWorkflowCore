@@ -59,6 +59,7 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Pyramid Levels (0=auto)': '金字塔层数（0 为自动）',
   'Retrieval': '轮廓范围', 'Binarize': '二值化方式', 'Dark Objects': '暗色目标',
   'Max Contours': '最大轮廓数', 'Point Budget': '轮廓点上限', 'Hierarchy': '层级',
   'Window X (-1=off)': '筛选窗口 X（-1 为关闭）', 'Window Y (-1=off)': '筛选窗口 Y（-1 为关闭）',
@@ -105,7 +106,7 @@ const parameterNames: Record<string, string> = {
   Condition: '条件', 'Device ID': '设备 ID', 'Edge Threshold': '边缘阈值', 'End X': '终点 X', 'End Y': '终点 Y',
   'Expected Frame': '目标坐标系', 'Fallback Type': '备用值类型', 'Fallback Value': '备用值', Frame: '坐标系', 'Frame Mode': '取帧模式',
   'Frame Timeout': '帧等待超时', 'Fresh Read': '强制读取最新值', 'Guidance Mode': '引导模式', Height: '高度',
-  'High Threshold': '高阈值', 'Hough Threshold': '霍夫阈值', 'J4 Angle Zero Offset': 'J4 角度零点偏移',
+  'High Threshold': '高阈值', 'Hough Threshold': '边缘证据阈值', 'Minimum Edge Evidence': '最小边缘证据', 'J4 Angle Zero Offset': 'J4 角度零点偏移',
   'J4 Pivot Offset X': 'J4 旋转中心偏移 X', 'J4 Pivot Offset Y': 'J4 旋转中心偏移 Y', 'Low Threshold': '低阈值',
   'Max Gap': '最大间隔', 'Max Radius': '最大半径', 'Max Retries': '最大重试次数', 'Min Area': '最小面积',
   'Min Center Distance': '最小圆心间距', 'Min Length': '最小长度', 'Min Radius': '最小半径', Operator: '运算符',
@@ -169,7 +170,7 @@ const descriptions: Record<string, string> = {
   'measure.caliperLine': '沿多条平行搜索线采集边缘点，拟合真实边缘直线并报告误差。',
   'measure.caliperCircle': '围绕标称圆进行径向边缘采样，拟合圆心和半径。',
   'measure.fitEllipse': '对至少含五个有效点的轮廓拟合椭圆，输出长短轴和方向。',
-  'match.shape': '根据外轮廓进行固定尺度的平移及旋转匹配，适用于关于质心呈星形的目标。',
+  'match.shape': '使用 JLVision 原生形状模型进行固定尺度的亚像素定位与旋转匹配，模型可复用。',
   'roi.transform': '根据基准与当前位姿移动、旋转 ROI，供后续测量跟随工件。',
   'flow.ifBoolean': '根据布尔条件选择真或假分支，再在汇合节点继续执行。',
   'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；未匹配走默认路径，各路径在多路汇合节点汇合。',
@@ -200,16 +201,16 @@ const descriptions: Record<string, string> = {
   'device.waitTag': '等待设备标签满足条件或超时。适用于 PLC 触发和就绪握手。',
   'device.writeTag': '写入通用设备标签。若已连接输入，则优先使用输入；否则使用指定类型的备用值。',
   'device.writeVisionResult': '按顺序向 PLC 写入 OK/NG 和可选的 X/Y/R 结果：就绪位清零、写入数据、就绪位置位。',
-  'feature.circle': '使用霍夫圆检测，返回圆和二维中心点。',
+  'feature.circle': '使用 JLVision 亚像素轮廓分段及圆拟合，返回圆和中心点。',
   'feature.edge': '提取 Canny 边缘。支持图像感兴趣区域，并返回二值边缘图。',
-  'feature.line': '查找最长的霍夫直线，并返回直线数据。', 'flow.if': '流程条件分支。',
+  'feature.line': '使用 JLVision 轮廓分段与直线拟合，返回最长直线。', 'flow.if': '流程条件分支。',
   'flow.join': '结构化分支的汇合节点。', 'flow.parallel': '启动两条并行流程分支。',
   'flow.result': '设置用于追溯的自动检测判定（OK/NG）。', 'geometry.angle': '计算两条二维直线之间的锐角，单位为度。',
   'geometry.intersection': '计算两条无限延长直线的交点，并返回二维点。',
   'geometry.distance': '计算两个二维点之间的欧氏距离。',
   'measure.caliper': '沿可配置搜索线进行一维灰度卡尺测量，并返回响应最强的边缘点。',
   'measure.blob': '查找最大轮廓并返回几何数据。', 'measure.rotatedRect': '计算符合面积条件的最大轮廓的最小外接旋转矩形。',
-  'image.threshold': '使用 OpenCvSharp 进行二值阈值处理。',
+  'image.threshold': '使用 JLVision 原生阈值算子生成二值图像。',
   'robot.executeTarget': '通过通用二维机器人目标执行移动，支持标准工业握手、超时和重试策略。',
   'robot.j4TcpCompensation': '补偿 J4 旋转中心或 TCP 偏心，输出补偿后的机器人目标，不会直接向硬件发送指令。',
   'robot.currentPose': '从机器人管理器读取当前平面位姿和通用握手状态。',
@@ -220,6 +221,7 @@ const descriptions: Record<string, string> = {
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'match.template.pyramidLevels': '0 按模板尺寸选择金字塔层数并缓存模型。增大可加快大图搜索，但过多层会丢失细小纹理；可设为 1 进行单层搜索。',
   'measure.caliperLine.edgeLength': '沿边缘方向分布搜索剖面的跨度；0 时使用搜索线长度。跨度过小会降低角度测量的稳定性。',
   'measure.caliperLine.caliperCount': '平行搜索剖面的数量；至少找到三个有效边缘点才能拟合直线。',
   'match.shape.signatureSamples': '按角度采样外轮廓的数量。目标应关于质心呈星形，匹配按固定尺度进行。',

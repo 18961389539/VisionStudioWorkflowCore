@@ -1,3 +1,4 @@
+using VisionStudio.Engine.Algorithms;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
@@ -50,33 +51,9 @@ internal static class MultiPointFit
         return points;
     }
 
-    // Orthogonal least-squares fit: principal eigenvector of the centered 2x2 covariance matrix.
-    public static VisionLine2D Line(VisionPoint2D[] p)
-    {
-        if (p.Length < 2) throw new InvalidOperationException("A line fit requires at least two points.");
-        var mx = p.Average(x => x.X); var my = p.Average(x => x.Y);
-        var xx = p.Sum(x => (x.X - mx) * (x.X - mx)); var yy = p.Sum(x => (x.Y - my) * (x.Y - my)); var xy = p.Sum(x => (x.X - mx) * (x.Y - my));
-        if (xx + yy < 1e-18) throw new InvalidOperationException("A line cannot be fit when all points coincide.");
-        var angle = 0.5 * Math.Atan2(2 * xy, xx - yy); var ux = Math.Cos(angle); var uy = Math.Sin(angle);
-        var projections = p.Select(x => (x.X - mx) * ux + (x.Y - my) * uy).ToArray();
-        var min = projections.Min(); var max = projections.Max();
-        return new VisionLine2D(new(mx + min * ux, my + min * uy), new(mx + max * ux, my + max * uy));
-    }
+    public static VisionLine2D Line(VisionPoint2D[] p) => JLVisionPointFitting.Line(p);
+    public static VisionCircle Circle(VisionPoint2D[] p) => JLVisionPointFitting.Circle(p);
 
-    // Algebraic least-squares circle fit: solve [x y 1] [A B C]' = -(x²+y²), center=(-A/2,-B/2).
-    public static VisionCircle Circle(VisionPoint2D[] p)
-    {
-        if (p.Length < 3) throw new InvalidOperationException("A circle fit requires at least three points.");
-        var mx = p.Average(x => x.X); var my = p.Average(x => x.Y);
-        var xx = p.Sum(v => (v.X-mx)*(v.X-mx)); var yy = p.Sum(v => (v.Y-my)*(v.Y-my)); var xy = p.Sum(v => (v.X-mx)*(v.Y-my));
-        var bx = p.Sum(v => (v.X-mx)*((v.X-mx)*(v.X-mx)+(v.Y-my)*(v.Y-my))); var by = p.Sum(v => (v.Y-my)*((v.X-mx)*(v.X-mx)+(v.Y-my)*(v.Y-my)));
-        var det = xx*yy-xy*xy;
-        if (Math.Abs(det) < 1e-12 * Math.Max(1, xx*yy)) throw new InvalidOperationException("Circle fit is singular; points may be collinear or too close together.");
-        var cx = mx + (bx*yy-by*xy)/(2*det); var cy = my + (by*xx-bx*xy)/(2*det);
-        var radius = p.Average(v => MeasurementMath.Hypot(v.X-cx,v.Y-cy));
-        if (!double.IsFinite(radius) || radius <= 0) throw new InvalidOperationException("Circle fit produced an invalid radius.");
-        return new VisionCircle(cx, cy, radius);
-    }
 }
 
 internal static class MeasurementMath

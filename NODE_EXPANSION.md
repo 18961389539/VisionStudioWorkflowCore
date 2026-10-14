@@ -27,13 +27,13 @@
 
 ## 第三批：标定、集合与识别／推理
 
-- `calibration.cameraIntrinsics`：输入多视图 3D 标定板点与对应 2D 像点 JSON，解算针孔相机内参与径向／切向畸变；至少三个有效视图。对应点需要提前准备。
+- `calibration.cameraIntrinsics`：输入多视图 3D 标定板点与对应 2D 像点 JSON，通过 JLVision 原生相机模型解算内参与畸变；至少三个有效视图。对应点需要提前准备；原生畸变参数保存在 `NativeCameraParameters`。
 - `image.undistort`：接收标定 JSON 输入端口或参数；不同图像分辨率按比例缩放内参。
 - `calibration.handEye2D`：二维 SE(2) 眼在手上／眼在手外标定，至少四组有平移和旋转变化的位姿对。输出 pose 和可连接坐标变换节点的 Transform2D。仅适用于二维，输入单位必须一致。
 - `collection.detections.filter`、`.sort`、`.at`、`.count`：检测列表筛选、排序、索引提取和计数；保留 AI 类别与置信度，可按类别和置信度筛选。索引从 0 开始；提取越界返回 found=false。
 - `recognition.barcode`：ZXing 一维条码／二维码解码，支持单码和多码。
 - `recognition.ocr`：Tesseract OCR，需要配置语言模型目录 `dataPath` 与 `language`（如 eng、eng+chi_sim）。目录内须有对应 `.traineddata`。
-- `inference.classification`、`.detection`、`.segmentation`、`.anomaly`：OpenCV DNN 加载 ONNX 模型并推理；模型路径、图像尺寸、归一化、通道顺序按模型训练方式配置。
+- `inference.classification`、`.detection`、`.segmentation`、`.anomaly`：ONNX Runtime 加载 ONNX 模型并推理；模型路径、图像尺寸、归一化、通道顺序按模型训练方式配置。
 
 推理输出契约：分类 `[1,C]` 或 `[1,C,1,1]`；检测 `[N,6]` 或 `[1,N,6]`，每行 `[x1,y1,x2,y2,score,classId]`；分割 `[1,C,H,W]`；异常检测单个 float32 分数。模型原始输出不符合这些布局时需先转换模型或增加专用解码器。节点不内置业务模型或训练功能。
 
@@ -56,7 +56,7 @@
 - `feature.edgeSubpixel`：搜索剖面的亚像素边缘定位。五点二次最小二乘窗口提供梯度峰形的 RMS 残差（灰度单位），不是定位精度承诺；窗口不足或峰形不适合拟合时输出 -1。
 - `measure.caliperLine`：沿搜索线的垂直方向分布多条平行剖面，至少找到三个边缘点后进行正交直线拟合。`caliperCount` 默认 9；`edgeLength` 表示卡尺分布跨度，0 时取搜索线长度。`fitError` 为点到拟合线的 RMS 距离（像素），`sampleCount` 为有效边缘点数；短于 2 px 的搜索线明确报错。
 - `measure.caliperCircle`：径向搜索边缘并拟合圆；`measure.fitEllipse`：对至少五个有效轮廓点拟合椭圆。无可用边缘返回 found=false；空轮廓等输入错误报错。
-- `match.shape`：以质心为原点，按固定角度取射线与完整外轮廓的交点构造半径签名，支持固定尺度的平移、旋转和多目标匹配。适用于关于质心呈星形的完整目标，孔洞不参与匹配；遮挡与尺度适配不在首版范围。角度为图像坐标中的逆时针旋转，旋转对称目标的方向存在固有歧义，并列分数优先报告绝对值较小的角度。
+- `match.shape`：使用 JLVision 原生形状模型及亚像素位姿搜索，支持固定尺度的平移、旋转和多目标匹配；模型按模板像素和角度配置缓存。旧 signatureSamples 参数不再参与计算。角度为图像坐标中的逆时针旋转，旋转对称目标的方向存在固有歧义，并列分数优先报告绝对值较小的角度。
 - `roi.transform`：根据基准及当前位姿刚性修正 ROI，旋转矩形转换为多边形；Roi 和 ContourProperties 在运行报告中保留结构化值。
 
 轮廓提取、亚像素边缘、卡尺找线／找圆、形状匹配的 image 输出均为独立图像副本，成功与未命中路径都可连接下游处理；检测标注通过 overlays 展示，不修改图像像素。
@@ -70,3 +70,5 @@
 最终验收同时检查实际节点算法、完整运行链路、宿主注册、类型化结果快照、目录生成一致性、静态审查和前端测试／构建。
 
 最终结果：内置目录 41 → 85（批次一～四，+44）→ 94（第五批，+9）；Release 后端测试 574/574（Engine 236、API 338，排除 Soak）→ 624/624（Engine 286、API 338），前端 39/39，生产构建通过。目录一致性、静态审查和警告基线通过，无新增编译警告。真实英文 OCR、二维码／CODE_128 和四类 ONNX 推理均通过；新增 JSON 示例实际运行通过。
+
+算法后端已迁移为 JLVision／ONNX Runtime；版本、兼容边界和速度／精度对照见 [算法后端迁移说明](ALGORITHM_BACKEND_MIGRATION.md)。

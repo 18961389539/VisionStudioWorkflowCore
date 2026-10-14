@@ -100,7 +100,7 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [new("image", VisionDataType.Image), Next],
             [new("threshold", "Threshold", "number", 128, 0, 255, 1)],
-            "Binary threshold using OpenCvSharp.",
+            "Binary threshold using JLVision native regions.",
             "builtin"),
         // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
         new(
@@ -271,6 +271,7 @@ public static class BuiltInNodeCatalog
                 new("templatePath", "Template File", "text", string.Empty, Description: "Used when the template input port is not connected (absolute path, or relative to the host working directory)."),
                 new("angleRangeDeg", "Angle Range (deg)", "number", 0, 0, 180, 1, Description: "0 = no rotation search."),
                 new("angleStepDeg", "Angle Step (deg)", "number", 5, 0.5, 30, 0.5),
+                new("pyramidLevels", "Pyramid Levels (0=auto)", "number", 0, 0, 8, 1, Description: "0 derives a coarse-to-fine pyramid from the template size. 1 forces single-level search; models are cached by pixel content and levels."),
                 new("minScore", "Min Score", "number", 0.5, 0, 1, 0.01),
                 new("method", "Method", "select", "ccoeff-normed", Options:
                 [
@@ -278,7 +279,7 @@ public static class BuiltInNodeCatalog
                     new("Normalized squared difference", "sqdiff-normed")
                 ])
             ],
-            "Locate a template in the image (optional coarse rotation search); outputs position, angle and score. angle = rotation applied to the template to align with the image (positive = counter-clockwise).",
+            "JLVision cached NCC pyramid matching with subpixel translation and rotation. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
         new(
@@ -325,11 +326,11 @@ public static class BuiltInNodeCatalog
                 Next
             ],
             [
-                new("houghThreshold", "Hough Threshold", "number", 45, 1, 500, 1, Group: "Detection"),
+                new("houghThreshold", "Minimum Edge Evidence", "number", 45, 1, 500, 1, Group: "Detection"),
                 new("minLength", "Min Length", "number", 60, 1, 4000, 1, Unit: "px", Group: "Detection"),
                 new("maxGap", "Max Gap", "number", 12, 0, 1000, 1, Unit: "px", Group: "Detection")
             ],
-            "Find the longest Hough line and return a strongly typed Line2D.",
+            "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -351,7 +352,7 @@ public static class BuiltInNodeCatalog
                 new("edgeThreshold", "Edge Threshold", "number", 100, 1, 500, 1, Group: "Detection"),
                 new("centerThreshold", "Center Threshold", "number", 24, 1, 500, 1, Group: "Detection")
             ],
-            "Hough circle finder returning Circle + Point2D geometry.",
+            "JLVision subpixel contour segmentation and geometric circle fitting.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(

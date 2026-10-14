@@ -9,6 +9,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />
+    <PackageReference Include="JLVisionLib" Version="1.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.12" />
     <PackageReference Include="WorkflowCore" Version="3.21.0" />
     <PackageReference Include="WorkflowCore.DSL" Version="3.21.0" />
     <PackageReference Include="NModbus" Version="3.0.83" />
