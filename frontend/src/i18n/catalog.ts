@@ -14,6 +14,11 @@ import type { NodeCatalogItem } from '../types';
 import type { Lang } from './lang';
 
 const nodeNames: Record<string, string> = {
+  'image.flatFieldCorrect': '明暗场校正', 'image.dynamicThreshold': '动态缺陷阈值',
+  'image.difference': '图像差分', 'defect.referenceCompare': '标准图缺陷比对', 'measure.regionIntensity': '区域灰度统计',
+  'region.fromThreshold': '阈值生成区域', 'region.connectedComponents': '连通域拆分',
+  'region.filter': '区域属性筛选', 'region.boolean': '区域交并差',
+  'region.fillHoles': '区域填孔', 'image.reduceDomain': '限定图像处理域',
   'contour.extract': '轮廓提取', 'contour.filter': '轮廓筛选', 'contour.properties': '轮廓属性',
   'feature.edgeSubpixel': '亚像素边缘', 'measure.caliperLine': '卡尺找线',
   'measure.caliperCircle': '卡尺找圆', 'measure.fitEllipse': '椭圆拟合',
@@ -52,6 +57,8 @@ const nodeNames: Record<string, string> = {
 };
 
 const categories: Record<string, string> = {
+  Defect: '缺陷检测',
+  Region: '区域处理',
   Contour: '轮廓处理',
   Acquisition: '图像采集', Calibration: '标定', Coordinate: '坐标变换', Device: '设备通信', Feature: '特征检测',
   Flow: '流程控制', Geometry: '几何计算', Measurement: '测量', Preprocess: '图像处理', Robot: '机器人',
@@ -59,6 +66,12 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Target Gray (0=auto)': '目标灰度（0 为自动）', 'Minimum Bright-dark Gain': '最小明暗场增益',
+  'Correction Output': '校正输出类型', 'Defect Polarity': '缺陷明暗方向', 'Defect Contrast': '缺陷对比度',
+  'Background Window': '背景均值窗口', 'Difference Mode': '差分模式',
+  'Reference Difference Threshold': '标准图差异阈值', 'Minimum Defect Area': '最小缺陷面积',
+  'Minimum Gray': '灰度下限（包含）', 'Maximum Gray': '灰度上限（包含）',
+  'Region Feature': '区域属性', 'Minimum Feature': '属性下限', 'Maximum Feature': '属性上限', 'Region Operation': '区域运算',
   'Pyramid Levels (0=auto)': '金字塔层数（0 为自动）',
   'Retrieval': '轮廓范围', 'Binarize': '二值化方式', 'Dark Objects': '暗色目标',
   'Max Contours': '最大轮廓数', 'Point Budget': '轮廓点上限', 'Hierarchy': '层级',
@@ -122,6 +135,11 @@ const parameterNames: Record<string, string> = {
 };
 
 const optionNames: Record<string, string> = {
+  'Byte (0-255)': '8 位灰度（0–255）', 'Real (unclipped)': '浮点灰度（不截断）',
+  'Bright defects': '亮缺陷', 'Dark defects': '暗缺陷', 'Both polarities': '亮暗缺陷',
+  'Absolute difference': '绝对差分', 'Signed image-reference': '带符号差分（图像减参考图）',
+  'Rectangularity': '矩形度', 'Anisometry': '等效椭圆轴比',
+  'Union': '并集', 'Intersection': '交集', 'A minus B': 'A 减去 B', 'Exclusive OR': '对称差集',
   'External only': '仅外轮廓', 'External + holes': '外轮廓及孔洞', 'Holes only': '仅孔洞',
   'Otsu (auto)': 'Otsu 自动阈值', 'Fixed threshold': '固定阈值', 'Non-zero pixels': '非零像素',
   'Largest area': '最大面积', 'Smallest area': '最小面积', 'First': '第一个', 'Last': '最后一个', 'By index': '按索引',
@@ -136,6 +154,9 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  dark: '暗场参考图', bright: '亮场参考图', background: '背景参考图', reference: '标准参考图',
+  mean: '平均灰度', stdDev: '灰度标准差', range: '灰度极差', min: '最小值', max: '最大值',
+  region: '像素区域', domainImage: '限定域图像',
   contours: '轮廓列表', properties: '轮廓属性', roi: '感兴趣区域',
   fitError: '拟合误差', sampleCount: '有效采样数', radiusMin: '最小半径', radiusMax: '最大半径',
   classId: '类别 ID',
@@ -163,6 +184,17 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
+  'Grayscale flat-field correction: (image-dark)/(bright-dark)*target. Auto target is mean bright-dark. All gain pixels must exceed minGain. References must match dimensions; byte output clips, real output preserves range.': '按（图像−暗场）÷（亮场−暗场）×目标灰度进行校正；彩色转灰度。自动目标取明暗场差值均值。每个像素增益须超过最小值；参考图尺寸一致。8 位输出截断，浮点输出保留数值范围。',
+  'Detect local bright/dark deviations using JLVision dynamic threshold. Background comes from the input or a local mean with an odd window. Connect image or domainImage; optional region further limits detection. Output objects are not split.': '与输入背景图或局部均值比较，检测亮暗缺陷。普通图像与限定域图像只连接一个；可再用区域限制检测范围。输出区域需通过连通域节点拆分目标。',
+  'Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.': '对已对齐的灰度图进行差分；输出为浮点图，带符号模式保留负值。输入须先完成定位对齐，曝光变化也会产生差异。',
+  'Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.': '与对齐的良品图比较，按差异阈值提取缺陷、拆分连通域并筛选像素面积。亮缺陷取当前图减标准图，暗缺陷方向相反；可限定区域或处理域。阈值包含端点。',
+  'Grayscale mean, population deviation, min/max and range over the union of region pixels intersected with the image domain. Overlapping objects count once. Empty selection returns found=false and omits statistics; check found before consuming them.': '统计区域并集与处理域交集内的平均灰度、总体标准差、最小最大值和极差。重叠像素只计一次。空区域返回未找到，不输出灰度统计值；下游先判断 found。',
+  'JLVision inclusive gray-range region. Connect exactly one image or domainImage. Color is converted to gray. Disconnected objects remain one region until connectedComponents.': '按包含端点的灰度范围生成区域。普通图像和限定域图像只连接一个；彩色自动转灰度。多个目标需用连通域拆分节点分开。',
+  'Union input region objects and split with JLVision native connectivity. Object indices are not tracking IDs. Empty input returns zero objects.': '合并输入区域后按原生连通性拆分。序号不表示跨帧目标身份；空区域正常返回零个目标。',
+  'JLVision attribute selection on existing objects; does not split objects. Chain filters for multiple criteria. Area counts pixels; anisometry is the equivalent-ellipse axis ratio.': '筛选已有区域对象，不自动拆分。多条件可串联筛选节点。面积按像素计数；轴比取等效椭圆长短轴比。',
+  'Set operations on the unions of A and B. Both must use the same image dimensions and coordinate system. Difference is A minus B; split the result explicitly if needed.': '对 A、B 各自并集进行运算。尺寸和坐标系须一致；差集为 A 减去 B。运算后可继续拆分连通域。',
+  'Fill enclosed holes in each JLVision region object without bridging disconnected objects or altering input runs.': '填充每个区域对象的封闭孔洞，不连接分离目标，不修改输入区域。',
+  'Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.': '保留原始像素并附加处理域；重复限定取交集。输出连接阈值生成区域的限定域图像端口。普通图像端口拒绝此类型，防止丢失处理域。',
   'contour.extract': '提取外轮廓及孔洞，支持动态 ROI；无目标时返回空列表。',
   'contour.filter': '按面积、圆度、层级及位置筛选已有轮廓。',
   'contour.properties': '计算轮廓几何属性，并输出供筛选和循环使用的目标列表。',

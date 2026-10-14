@@ -30,7 +30,9 @@ public enum VisionDataType
     Measurement,
     // Append new types to preserve numeric values used by existing compiled plugins.
     ContourProperties,
-    Roi
+    Roi,
+    Region,
+    DomainImage
 }
 
 /// <summary>
@@ -194,6 +196,9 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
 
     /// <summary>第五批：感兴趣区域作为图形数据（roi.transform 输出，可经 roi 端口驱动下游测量节点）。</summary>
     public static VisionValue Roi(VisionRoi value) => new(VisionDataType.Roi, value);
+
+    public static VisionValue Region(VisionRegion value) => new(VisionDataType.Region, value);
+    public static VisionValue DomainImage(IVisionDomainImage value) => new(VisionDataType.DomainImage, value);
 
     public T Require<T>(string port)
     {

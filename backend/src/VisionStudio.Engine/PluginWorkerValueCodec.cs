@@ -36,6 +36,7 @@ public static class PluginWorkerValueCodec
 
         return value.Type switch
         {
+            VisionDataType.Region => JsonValue(value.Type, value.Require<VisionRegion>("region")),
             VisionDataType.Double => JsonValue(value.Type, Convert.ToDouble(value.Value)),
             VisionDataType.Integer => JsonValue(value.Type, Convert.ToInt64(value.Value)),
             VisionDataType.Boolean => JsonValue(value.Type, Convert.ToBoolean(value.Value)),
@@ -79,6 +80,7 @@ public static class PluginWorkerValueCodec
         var json = wire.Json ?? throw new InvalidOperationException($"Worker payload for {wire.Type} has no JSON value.");
         return wire.Type switch
         {
+            VisionDataType.Region => VisionValue.Region(json.Deserialize<VisionRegion>(Json) ?? throw new InvalidOperationException("Invalid Region payload.")),
             VisionDataType.Double => VisionValue.Double(json.GetDouble()),
             VisionDataType.Integer => VisionValue.Integer(json.GetInt64()),
             VisionDataType.Boolean => VisionValue.Boolean(json.GetBoolean()),

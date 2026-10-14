@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "e29e545118a4604c940c84597ba886e9a47a9833d48085c61114d04d6f5ff325",
+  "hash": "1b03be3a4f65d01f2ac92438320ded79626e65ba65dfe9c691bbb89f3ac7fe0c",
   "items": [
     {
       "type": "image.acquire",
@@ -1769,6 +1769,471 @@
       "parameters": [],
       "description": "Transform X/Y and local orientation into a named target frame.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.dynamicThreshold",
+      "displayName": "Dynamic Defect Threshold",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        },
+        {
+          "name": "background",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "polarity",
+          "label": "Defect Polarity",
+          "type": "select",
+          "defaultValue": "both",
+          "options": [
+            {
+              "label": "Bright defects",
+              "value": "bright"
+            },
+            {
+              "label": "Dark defects",
+              "value": "dark"
+            },
+            {
+              "label": "Both polarities",
+              "value": "both"
+            }
+          ]
+        },
+        {
+          "name": "offset",
+          "label": "Defect Contrast",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 0.001,
+          "max": 65535,
+          "step": 1
+        },
+        {
+          "name": "windowSize",
+          "label": "Background Window",
+          "type": "number",
+          "defaultValue": 31,
+          "min": 3,
+          "max": 255,
+          "step": 2
+        }
+      ],
+      "description": "Detect local bright/dark deviations using JLVision dynamic threshold. Background comes from the input or a local mean with an odd window. Connect image or domainImage; optional region further limits detection. Output objects are not split.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.flatFieldCorrect",
+      "displayName": "Flat-field Correction",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "dark",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "bright",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "targetMean",
+          "label": "Target Gray (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1
+        },
+        {
+          "name": "minGain",
+          "label": "Minimum Bright-dark Gain",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1E-06,
+          "max": 65535,
+          "step": 0.1
+        },
+        {
+          "name": "outputType",
+          "label": "Correction Output",
+          "type": "select",
+          "defaultValue": "byte",
+          "options": [
+            {
+              "label": "Byte (0-255)",
+              "value": "byte"
+            },
+            {
+              "label": "Real (unclipped)",
+              "value": "real"
+            }
+          ]
+        }
+      ],
+      "description": "Grayscale flat-field correction: (image-dark)/(bright-dark)*target. Auto target is mean bright-dark. All gain pixels must exceed minGain. References must match dimensions; byte output clips, real output preserves range.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.difference",
+      "displayName": "Image Difference",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "reference",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Difference Mode",
+          "type": "select",
+          "defaultValue": "absolute",
+          "options": [
+            {
+              "label": "Absolute difference",
+              "value": "absolute"
+            },
+            {
+              "label": "Signed image-reference",
+              "value": "signed"
+            }
+          ]
+        }
+      ],
+      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "defect.referenceCompare",
+      "displayName": "Reference Defect Compare",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        },
+        {
+          "name": "reference",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "polarity",
+          "label": "Defect Polarity",
+          "type": "select",
+          "defaultValue": "both",
+          "options": [
+            {
+              "label": "Bright defects",
+              "value": "bright"
+            },
+            {
+              "label": "Dark defects",
+              "value": "dark"
+            },
+            {
+              "label": "Both polarities",
+              "value": "both"
+            }
+          ]
+        },
+        {
+          "name": "threshold",
+          "label": "Reference Difference Threshold",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 0.001,
+          "max": 65535,
+          "step": 1
+        },
+        {
+          "name": "minArea",
+          "label": "Minimum Defect Area",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
+        }
+      ],
+      "description": "Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.regionIntensity",
+      "displayName": "Region Gray Statistics",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "mean",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "stdDev",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "min",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "max",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "range",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "parameters": [],
+      "description": "Grayscale mean, population deviation, min/max and range over the union of region pixels intersected with the image domain. Overlapping objects count once. Empty selection returns found=false and omits statistics; check found before consuming them.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true
     },
@@ -7780,6 +8245,475 @@
         "executionMode": "Auto"
       },
       "declaresActions": false
+    },
+    {
+      "type": "region.connectedComponents",
+      "displayName": "Connected Regions",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Union input region objects and split with JLVision native connectivity. Object indices are not tracking IDs. Empty input returns zero objects.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "region.fillHoles",
+      "displayName": "Fill Region Holes",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Fill enclosed holes in each JLVision region object without bridging disconnected objects or altering input runs.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "region.filter",
+      "displayName": "Filter Regions",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "feature",
+          "label": "Region Feature",
+          "type": "select",
+          "defaultValue": "area",
+          "options": [
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
+            },
+            {
+              "label": "Width",
+              "value": "width"
+            },
+            {
+              "label": "Height",
+              "value": "height"
+            },
+            {
+              "label": "Rectangularity",
+              "value": "rectangularity"
+            },
+            {
+              "label": "Anisometry",
+              "value": "anisometry"
+            }
+          ]
+        },
+        {
+          "name": "min",
+          "label": "Minimum Feature",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 0.01
+        },
+        {
+          "name": "max",
+          "label": "Maximum Feature",
+          "type": "number",
+          "defaultValue": 99999999,
+          "min": 0,
+          "max": 99999999,
+          "step": 0.01
+        }
+      ],
+      "description": "JLVision attribute selection on existing objects; does not split objects. Chain filters for multiple criteria. Area counts pixels; anisometry is the equivalent-ellipse axis ratio.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "image.reduceDomain",
+      "displayName": "Reduce Image Domain",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "region.boolean",
+      "displayName": "Region Boolean",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "b",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operation",
+          "label": "Region Operation",
+          "type": "select",
+          "defaultValue": "union",
+          "options": [
+            {
+              "label": "Union",
+              "value": "union"
+            },
+            {
+              "label": "Intersection",
+              "value": "intersection"
+            },
+            {
+              "label": "A minus B",
+              "value": "difference"
+            },
+            {
+              "label": "Exclusive OR",
+              "value": "xor"
+            }
+          ]
+        }
+      ],
+      "description": "Set operations on the unions of A and B. Both must use the same image dimensions and coordinate system. Difference is A minus B; split the result explicitly if needed.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "region.fromThreshold",
+      "displayName": "Threshold Region",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minGray",
+          "label": "Minimum Gray",
+          "type": "number",
+          "defaultValue": 128,
+          "min": -65536,
+          "max": 65536,
+          "step": 1
+        },
+        {
+          "name": "maxGray",
+          "label": "Maximum Gray",
+          "type": "number",
+          "defaultValue": 255,
+          "min": -65536,
+          "max": 65536,
+          "step": 1
+        }
+      ],
+      "description": "JLVision inclusive gray-range region. Connect exactly one image or domainImage. Color is converted to gray. Disconnected objects remain one region until connectedComponents.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "robot.executeTarget",

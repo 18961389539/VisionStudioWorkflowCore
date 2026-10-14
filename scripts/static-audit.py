@@ -80,7 +80,7 @@ host_bootstrap = read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHosted
 endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Api/Endpoints').glob('*.cs'))
 catalog = read_safe('backend/src/VisionStudio.Engine/NodeCatalog.cs')
 # NodeCatalog composes batch catalogs; inspect only helpers actually referenced by Items.
-for helper in sorted(set(re.findall(r'\b(Batch\w+Catalog)\.Items\b', catalog))):
+for helper in sorted(set(re.findall(r'\b(\w+Catalog)\.Items\b', catalog))):
     catalog += '\n' + read_safe(f'backend/src/VisionStudio.Engine/{helper}.cs')
 frontend_catalog_source = read_safe('frontend/src/catalog.ts')
 generated_catalog_doc = json.loads(read_safe('frontend/src/generated/catalog.generated.json'))

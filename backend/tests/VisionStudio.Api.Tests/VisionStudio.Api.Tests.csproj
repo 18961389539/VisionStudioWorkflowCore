@@ -28,4 +28,8 @@
   <ItemGroup>
     <Content Include="..\..\..\contracts\api-required-endpoints.json" Link="contracts\api-required-endpoints.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../../samples/region-processing-workflow.json" Link="samples/region-processing-workflow.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../samples/defect-detection-workflow.json" Link="samples/defect-detection-workflow.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

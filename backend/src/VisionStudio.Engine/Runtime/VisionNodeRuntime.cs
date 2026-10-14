@@ -225,6 +225,8 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
     private static VisionValueSnapshot SnapshotValue(VisionValue value)
     {
         if (value.Value is null) return new VisionValueSnapshot(value.Type.ToString(), "null");
+        if (value.Value is IVisionDomainImage scoped)
+            return new VisionValueSnapshot(value.Type.ToString(), $"DomainImage {scoped.Width}x{scoped.Height}", new { scoped.Width, scoped.Height, scoped.Domain });
         if (value.Value is IVisionImage image)
             return new VisionValueSnapshot(value.Type.ToString(), $"Image {image.Width}x{image.Height}", new { image.Width, image.Height });
         if (value.Value is IVisionFrameSet frameSet)
@@ -245,7 +247,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             VisionDataType.Circle or VisionDataType.Transform2D or VisionDataType.CoordinatePoint2D or
             VisionDataType.CoordinateLine2D or VisionDataType.CoordinatePose2D or VisionDataType.RobotTarget2D or
             VisionDataType.DeviceTagValue or VisionDataType.Measurement or VisionDataType.DetectionList or
-            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Roi => value.Value,
+            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Roi or VisionDataType.Region => value.Value,
             _ => value.Value.ToString()
         };
         return new VisionValueSnapshot(value.Type.ToString(), value.Value.ToString() ?? value.Type.ToString(), payload);

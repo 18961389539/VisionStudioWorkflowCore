@@ -510,7 +510,89 @@ export const precisionDemo = (): DemoGraph => ({
   ]
 });
 
+export const regionDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 20, 180, {"width":640,"height":480,"centerX":320,"centerY":240,"radius":80}),
+    node('threshold', 'region.fromThreshold', 300, 180, {"minGray":200,"maxGray":255}),
+    node('connected', 'region.connectedComponents', 580, 180, {}),
+    node('filter', 'region.filter', 860, 180, {"feature":"area","min":1000,"max":50000}),
+    node('fill', 'region.fillHoles', 1140, 180, {}),
+    node('domain', 'image.reduceDomain', 1420, 180, {}),
+    node('selected', 'region.fromThreshold', 1700, 180, {"minGray":200,"maxGray":255}),
+    node('boolean', 'region.boolean', 1980, 180, {"operation":"intersection"}),
+    node('range', 'value.range', 2260, 180, {"min":1,"max":1}),
+    node('result', 'flow.result', 2540, 180, {})
+  ],
+  edges: [
+    control('c0', 'source', 'next', 'threshold', 'exec'),
+    control('c1', 'threshold', 'next', 'connected', 'exec'),
+    control('c2', 'connected', 'next', 'filter', 'exec'),
+    control('c3', 'filter', 'next', 'fill', 'exec'),
+    control('c4', 'fill', 'next', 'domain', 'exec'),
+    control('c5', 'domain', 'next', 'selected', 'exec'),
+    control('c6', 'selected', 'next', 'boolean', 'exec'),
+    control('c7', 'boolean', 'next', 'range', 'exec'),
+    control('c8', 'range', 'next', 'result', 'exec'),
+    data('d0', 'source', 'image', 'threshold', 'image'),
+    data('d1', 'threshold', 'region', 'connected', 'region'),
+    data('d2', 'connected', 'region', 'filter', 'region'),
+    data('d3', 'filter', 'region', 'fill', 'region'),
+    data('d4', 'source', 'image', 'domain', 'image'),
+    data('d5', 'fill', 'region', 'domain', 'region'),
+    data('d6', 'domain', 'domainImage', 'selected', 'domainImage'),
+    data('d7', 'fill', 'region', 'boolean', 'a'),
+    data('d8', 'selected', 'region', 'boolean', 'b'),
+    data('d9', 'boolean', 'count', 'range', 'value'),
+    data('d10', 'range', 'pass', 'result', 'pass')
+  ]
+});
+
+export const defectDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 20, 160, {"width":640,"height":480,"centerX":320,"centerY":240,"radius":80}),
+    node('reference', 'image.morphology', 300, 160, {"operation":"erode","kernelSize":9,"iterations":1}),
+    node('dark', 'image.threshold', 580, 160, {"threshold":250}),
+    node('bright', 'image.threshold', 860, 160, {"threshold":0}),
+    node('corrected', 'image.flatFieldCorrect', 1140, 160, {}),
+    node('difference', 'image.difference', 1420, 160, {"mode":"absolute"}),
+    node('dynamic', 'image.dynamicThreshold', 1420, 480, {"polarity":"both","offset":10,"windowSize":31}),
+    node('compare', 'defect.referenceCompare', 1140, 480, {"polarity":"both","threshold":20,"minArea":10}),
+    node('stats', 'measure.regionIntensity', 860, 480, {}),
+    node('range', 'value.range', 580, 480, {"min":0,"max":0}),
+    node('result', 'flow.result', 300, 480, {})
+  ],
+  edges: [
+    control('c0', 'source', 'next', 'reference', 'exec'),
+    control('c1', 'reference', 'next', 'dark', 'exec'),
+    control('c2', 'dark', 'next', 'bright', 'exec'),
+    control('c3', 'bright', 'next', 'corrected', 'exec'),
+    control('c4', 'corrected', 'next', 'difference', 'exec'),
+    control('c5', 'difference', 'next', 'dynamic', 'exec'),
+    control('c6', 'dynamic', 'next', 'compare', 'exec'),
+    control('c7', 'compare', 'next', 'stats', 'exec'),
+    control('c8', 'stats', 'next', 'range', 'exec'),
+    control('c9', 'range', 'next', 'result', 'exec'),
+    data('d0', 'reference', 'image', 'dark', 'image'),
+    data('d1', 'reference', 'image', 'bright', 'image'),
+    data('d2', 'source', 'image', 'corrected', 'image'),
+    data('d3', 'dark', 'image', 'corrected', 'dark'),
+    data('d4', 'bright', 'image', 'corrected', 'bright'),
+    data('d5', 'corrected', 'image', 'difference', 'image'),
+    data('d6', 'reference', 'image', 'difference', 'reference'),
+    data('d7', 'difference', 'image', 'dynamic', 'image'),
+    data('d8', 'corrected', 'image', 'compare', 'image'),
+    data('d9', 'reference', 'image', 'compare', 'reference'),
+    data('d10', 'difference', 'image', 'stats', 'image'),
+    data('d11', 'compare', 'region', 'stats', 'region'),
+    data('d12', 'compare', 'count', 'range', 'value'),
+    data('d13', 'range', 'pass', 'result', 'pass'),
+    data('d14', 'source', 'image', 'reference', 'image')
+  ]
+});
+
 export const demos = {
+  defects: defectDemo,
+  regions: regionDemo,
   precision: precisionDemo,
   forEach: forEachDemo,
   inspection: inspectionDemo,
@@ -536,6 +618,8 @@ export type DemoKey = keyof typeof demos;
 
 /** 每个示例的一句话用途说明：让用户在打开前就知道“这个示例是干什么的、适合谁” */
 export const demoDescriptions: Record<DemoKey, string> = {
+  defects: '明暗场校正 → 参考图差分与动态阈值 → 缺陷比对 → 区域灰度统计 → OK/NG；默认边界差异触发 NG，将参考图腐蚀核设为 1 可验证 OK。',
+  regions: '阈值区域 → 连通域 → 属性筛选 → 填孔 → 限定处理域 → 区域交集 → 数量判定，保留精确像素区域。',
   precision: '形状定位 → 动态 ROI → 卡尺找圆 → 公差判定 → JSON 导出，无需硬件即可运行。',
   forEach: '检测多个目标后逐个读取中心 X 坐标，循环结束继续计数，演示有界顺序迭代。',
   inspection: '灰度 → 滤波 → 自动阈值 → 形态学 → 多目标计数 → 范围判定，演示新增节点的完整检测流程。',

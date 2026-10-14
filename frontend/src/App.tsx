@@ -75,6 +75,8 @@ const WORKFLOW_IO_TIMEOUT_MS = 15_000;
 
 // 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
 const DEMO_LABELS: Record<DemoKey, string> = {
+  defects: '缺陷检测与良品比对',
+  regions: '区域处理与限定域',
   forEach: '逐目标顺序执行',
   inspection: '多目标检测与判定', precision: '定位与精密测量',
   camera: '相机示例', cameraTrigger: '触发式相机', frameSet: '同步帧组',
@@ -85,7 +87,7 @@ const DEMO_LABELS: Record<DemoKey, string> = {
 };
 const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
   { group: '相机采集', keys: ['camera', 'cameraTrigger', 'frameSet'] },
-  { group: '测量与标定', keys: ['precision', 'inspection', 'measurement', 'calibration'] },
+  { group: '测量与标定', keys: ['defects', 'regions', 'precision', 'inspection', 'measurement', 'calibration'] },
   { group: '机器人', keys: ['robotEyeToHand', 'robotEyeInHand', 'robotRuntime', 'robotPlc', 'robotTcp'] },
   { group: '设备 / PLC', keys: ['devicePlc'] },
   { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested', 'forEach'] }

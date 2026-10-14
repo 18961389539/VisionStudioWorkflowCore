@@ -18,6 +18,10 @@ public static class VisionExecutionPolicy
 
         var type = catalog.Type;
         if (type.Equals("image.synthetic", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("region.", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.reduceDomain", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("defect.", StringComparison.OrdinalIgnoreCase) ||
+            type is "image.flatFieldCorrect" or "image.dynamicThreshold" or "image.difference" ||
             type.Equals("image.threshold", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.grayscale", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.channel", StringComparison.OrdinalIgnoreCase) ||

@@ -25,7 +25,7 @@ public static class VisionAlgorithmRuntime
     internal static string? BackendFor(string type)
     {
         if (type.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return "ONNX Runtime";
-        if (type.StartsWith("contour.", StringComparison.OrdinalIgnoreCase) || type.StartsWith("match.", StringComparison.OrdinalIgnoreCase) ||
+        if (type == "measure.regionIntensity" || type.StartsWith("defect.", StringComparison.OrdinalIgnoreCase) || type.StartsWith("region.", StringComparison.OrdinalIgnoreCase) || type.StartsWith("contour.", StringComparison.OrdinalIgnoreCase) || type.StartsWith("match.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("feature.", StringComparison.OrdinalIgnoreCase) || type is "measure.blob" or "measure.blobs" or "measure.caliper" or "measure.caliperLine" or "measure.caliperCircle" or "measure.fitLine" or "measure.fitCircle" or "measure.fitEllipse" or "measure.rotatedRect" or "calibration.cameraIntrinsics") return "JLVision";
         if (type.StartsWith("image.", StringComparison.OrdinalIgnoreCase) && type is not ("image.acquire" or "image.synthetic")) return "JLVision";
         return null;

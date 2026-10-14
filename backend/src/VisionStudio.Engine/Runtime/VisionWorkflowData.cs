@@ -376,7 +376,7 @@ public sealed class VisionWorkflowData : IDisposable
         if (!CaptureNodeImages) return;
         foreach (var (portName, value) in outputs)
         {
-            if (value.Type != VisionDataType.Image || value.Value is not IVisionImage image || image.NativeImage is not Mat mat) continue;
+            if (value.Type is not (VisionDataType.Image or VisionDataType.DomainImage) || value.Value is not IVisionImage image || image.NativeImage is not Mat mat) continue;
             try
             {
                 Cv2.ImEncode(".jpg", mat, out var jpeg);

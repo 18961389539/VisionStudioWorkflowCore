@@ -1,0 +1,289 @@
+{
+  "id": "region-processing",
+  "name": "Region Processing + Explicit Domain",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "threshold",
+      "type": "region.fromThreshold",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "minGray": 200,
+        "maxGray": 255
+      }
+    },
+    {
+      "id": "connected",
+      "type": "region.connectedComponents",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "filter",
+      "type": "region.filter",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {
+        "feature": "area",
+        "min": 1000,
+        "max": 50000
+      }
+    },
+    {
+      "id": "fill",
+      "type": "region.fillHoles",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "domain",
+      "type": "image.reduceDomain",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "selected",
+      "type": "region.fromThreshold",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 180
+      },
+      "parameters": {
+        "minGray": 200,
+        "maxGray": 255
+      }
+    },
+    {
+      "id": "boolean",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 180
+      },
+      "parameters": {
+        "operation": "intersection"
+      }
+    },
+    {
+      "id": "range",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": 180
+      },
+      "parameters": {
+        "min": 1,
+        "max": 1
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "threshold",
+      "sourcePort": "next",
+      "targetNodeId": "connected",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "connected",
+      "sourcePort": "next",
+      "targetNodeId": "filter",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "filter",
+      "sourcePort": "next",
+      "targetNodeId": "fill",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "fill",
+      "sourcePort": "next",
+      "targetNodeId": "domain",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "domain",
+      "sourcePort": "next",
+      "targetNodeId": "selected",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "selected",
+      "sourcePort": "next",
+      "targetNodeId": "boolean",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "boolean",
+      "sourcePort": "next",
+      "targetNodeId": "range",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "range",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "threshold",
+      "sourcePort": "region",
+      "targetNodeId": "connected",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "connected",
+      "sourcePort": "region",
+      "targetNodeId": "filter",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "filter",
+      "sourcePort": "region",
+      "targetNodeId": "fill",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "domain",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "fill",
+      "sourcePort": "region",
+      "targetNodeId": "domain",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "domain",
+      "sourcePort": "domainImage",
+      "targetNodeId": "selected",
+      "targetPort": "domainImage",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "fill",
+      "sourcePort": "region",
+      "targetNodeId": "boolean",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "selected",
+      "sourcePort": "region",
+      "targetNodeId": "boolean",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "boolean",
+      "sourcePort": "count",
+      "targetNodeId": "range",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "range",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

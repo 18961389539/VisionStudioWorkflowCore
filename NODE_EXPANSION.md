@@ -72,3 +72,11 @@
 最终结果：内置目录 41 → 85（批次一～四，+44）→ 94（第五批，+9）；Release 后端测试 574/574（Engine 236、API 338，排除 Soak）→ 624/624（Engine 286、API 338），前端 39/39，生产构建通过。目录一致性、静态审查和警告基线通过，无新增编译警告。真实英文 OCR、二维码／CODE_128 和四类 ONNX 推理均通过；新增 JSON 示例实际运行通过。
 
 算法后端已迁移为 JLVision／ONNX Runtime；版本、兼容边界和速度／精度对照见 [算法后端迁移说明](ALGORITHM_BACKEND_MIGRATION.md)。
+
+## 第六批：区域处理
+
+新增 `region.fromThreshold`、`region.connectedComponents`、`region.filter`、`region.boolean`、`region.fillHoles`、`image.reduceDomain`，目录 **94 → 100**。区域使用独立、不可变的像素游程数据，保留孔洞并支持结构化快照；限定域图像使用专用端口，防止域外黑色像素被当作检测目标。前端模板“区域处理与限定域”和完整 API 工作流已配套。使用与兼容边界见 [区域处理说明](REGION_NODES.md)。
+
+## 第七批：缺陷检测
+
+新增 `image.flatFieldCorrect`、`image.dynamicThreshold`、`image.difference`、`defect.referenceCompare`、`measure.regionIntensity`，目录 **100 → 105**。五个节点使用 JLVision；动态阈值、标准图比对和区域统计支持限定域图像。前端模板“缺陷检测与良品比对”配套 OK／NG 两条路径。使用与参考图要求见 [缺陷检测说明](DEFECT_NODES.md)。

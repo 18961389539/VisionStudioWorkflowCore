@@ -1,3 +1,6 @@
+export type VisionRegionRun = { row: number; startColumn: number; endColumn: number };
+export type VisionRegion = { width: number; height: number; components: { runs: VisionRegionRun[] }[] };
+
 export type PortDescriptor = {
   name: string;
   dataType: string;
