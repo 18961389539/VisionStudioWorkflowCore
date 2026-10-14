@@ -904,6 +904,7 @@ public static class BuiltInNodeCatalog
         .. Batch3GeometryCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. Batch3RecognitionCatalog.Items,
         .. Batch4IterationCatalog.Items.Select(item => item with { PluginId = "builtin" }),
+        .. Batch5PrecisionCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         new(
             "flow.join",
             "Join",

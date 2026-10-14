@@ -1,0 +1,254 @@
+{
+  "id": "shape-locate-measure",
+  "name": "Shape Locate + Dynamic ROI + Caliper Measurement",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 240
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "template",
+      "type": "image.crop",
+      "name": null,
+      "position": {
+        "x": 260,
+        "y": 420
+      },
+      "parameters": {
+        "x": 220,
+        "y": 140,
+        "width": 200,
+        "height": 200
+      }
+    },
+    {
+      "id": "locate",
+      "type": "match.shape",
+      "name": null,
+      "position": {
+        "x": 520,
+        "y": 180
+      },
+      "parameters": {
+        "minScore": 0.5,
+        "angleRangeDeg": 180,
+        "angleStepDeg": 3,
+        "minArea": 400,
+        "signatureSamples": 360
+      }
+    },
+    {
+      "id": "roi",
+      "type": "roi.transform",
+      "name": null,
+      "position": {
+        "x": 800,
+        "y": 180
+      },
+      "parameters": {
+        "roi": {
+          "type": "Circle",
+          "x": 100,
+          "y": 100,
+          "radius": 80
+        },
+        "baseX": 100,
+        "baseY": 100,
+        "baseThetaDeg": 0
+      }
+    },
+    {
+      "id": "measure",
+      "type": "measure.caliperCircle",
+      "name": null,
+      "position": {
+        "x": 1080,
+        "y": 180
+      },
+      "parameters": {
+        "radialBand": 20,
+        "angleStepDeg": 5,
+        "minContrast": 8
+      }
+    },
+    {
+      "id": "tol",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 1350,
+        "y": 180
+      },
+      "parameters": {
+        "min": 78,
+        "max": 82
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 1620,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "export",
+      "type": "output.exportResult",
+      "name": null,
+      "position": {
+        "x": 1620,
+        "y": 400
+      },
+      "parameters": {
+        "path": "artifacts/shape-locate-measure-result.json",
+        "format": "json",
+        "overwrite": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "template",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "template",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "template",
+      "sourcePort": "next",
+      "targetNodeId": "locate",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "locate",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "template",
+      "sourcePort": "image",
+      "targetNodeId": "locate",
+      "targetPort": "template",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "locate",
+      "sourcePort": "next",
+      "targetNodeId": "roi",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "locate",
+      "sourcePort": "pose",
+      "targetNodeId": "roi",
+      "targetPort": "currentPose",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "roi",
+      "sourcePort": "next",
+      "targetNodeId": "measure",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "locate",
+      "sourcePort": "image",
+      "targetNodeId": "measure",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "roi",
+      "sourcePort": "circle",
+      "targetNodeId": "measure",
+      "targetPort": "circle",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "measure",
+      "sourcePort": "next",
+      "targetNodeId": "tol",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "measure",
+      "sourcePort": "radius",
+      "targetNodeId": "tol",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "tol",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "tol",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "export",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "result",
+      "sourcePort": "pass",
+      "targetNodeId": "export",
+      "targetPort": "value",
+      "kind": "data"
+    }
+  ]
+}

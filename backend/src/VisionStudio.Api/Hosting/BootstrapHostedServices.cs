@@ -217,7 +217,17 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<IfConditionNode>(),
             services.GetRequiredService<ParallelMarkerNode>(),
             services.GetRequiredService<JoinNode>(),
-            services.GetRequiredService<ResultDispositionNode>()
+            services.GetRequiredService<ResultDispositionNode>(),
+            // 第五批（2026-10-14 精密定位与测量）
+            services.GetRequiredService<ContourExtractNode>(),
+            services.GetRequiredService<ContourFilterNode>(),
+            services.GetRequiredService<ContourPropertiesNode>(),
+            services.GetRequiredService<EdgeSubpixelNode>(),
+            services.GetRequiredService<CaliperLineNode>(),
+            services.GetRequiredService<CaliperCircleNode>(),
+            services.GetRequiredService<FitEllipseNode>(),
+            services.GetRequiredService<ShapeMatchNode>(),
+            services.GetRequiredService<RoiTransformNode>()
         ];
 
         foreach (var executor in builtIns)

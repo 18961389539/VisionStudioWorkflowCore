@@ -487,7 +487,31 @@ export const forEachDemo = (): DemoGraph => ({
   ]
 });
 
+export const precisionDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 20, 240, { width: 640, height: 480, centerX: 320, centerY: 240, radius: 80 }),
+    node('template', 'image.crop', 260, 420, { x: 220, y: 140, width: 200, height: 200 }),
+    node('locate', 'match.shape', 520, 180, { minScore: 0.5, angleRangeDeg: 180, angleStepDeg: 3, minArea: 400, signatureSamples: 360 }),
+    node('roi', 'roi.transform', 800, 180, { roi: { type: 'Circle', x: 100, y: 100, radius: 80 }, baseX: 100, baseY: 100, baseThetaDeg: 0 }),
+    node('measure', 'measure.caliperCircle', 1080, 180, { radialBand: 20, angleStepDeg: 5, minContrast: 8 }),
+    node('tol', 'value.range', 1350, 180, { min: 78, max: 82 }),
+    node('result', 'flow.result', 1620, 180),
+    node('export', 'output.exportResult', 1620, 400, { path: 'artifacts/shape-locate-measure-result.json', format: 'json', overwrite: true })
+  ],
+  edges: [
+    control('c0', 'source', 'next', 'template', 'exec'), data('d0', 'source', 'image', 'template', 'image'),
+    control('c1', 'template', 'next', 'locate', 'exec'), data('d1', 'source', 'image', 'locate', 'image'),
+    data('d2', 'template', 'image', 'locate', 'template'), control('c2', 'locate', 'next', 'roi', 'exec'),
+    data('d3', 'locate', 'pose', 'roi', 'currentPose'), control('c3', 'roi', 'next', 'measure', 'exec'),
+    data('d4', 'locate', 'image', 'measure', 'image'), data('d5', 'roi', 'circle', 'measure', 'circle'),
+    control('c4', 'measure', 'next', 'tol', 'exec'), data('d6', 'measure', 'radius', 'tol', 'value'),
+    control('c5', 'tol', 'next', 'result', 'exec'), data('d7', 'tol', 'pass', 'result', 'pass'),
+    control('c6', 'result', 'next', 'export', 'exec'), data('d8', 'result', 'pass', 'export', 'value')
+  ]
+});
+
 export const demos = {
+  precision: precisionDemo,
   forEach: forEachDemo,
   inspection: inspectionDemo,
   camera: cameraDemo,
@@ -512,6 +536,7 @@ export type DemoKey = keyof typeof demos;
 
 /** 每个示例的一句话用途说明：让用户在打开前就知道“这个示例是干什么的、适合谁” */
 export const demoDescriptions: Record<DemoKey, string> = {
+  precision: '形状定位 → 动态 ROI → 卡尺找圆 → 公差判定 → JSON 导出，无需硬件即可运行。',
   forEach: '检测多个目标后逐个读取中心 X 坐标，循环结束继续计数，演示有界顺序迭代。',
   inspection: '灰度 → 滤波 → 自动阈值 → 形态学 → 多目标计数 → 范围判定，演示新增节点的完整检测流程。',
   camera: '从虚拟相机取图 → 阈值分割 → 斑点计数，演示最基本的采集-处理链路。',

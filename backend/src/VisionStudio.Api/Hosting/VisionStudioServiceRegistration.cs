@@ -446,6 +446,16 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ParallelMarkerNode>();
         services.AddSingleton<JoinNode>();
         services.AddSingleton<ResultDispositionNode>();
+        // 第五批（2026-10-14 精密定位与测量）：轮廓 / 亚像素 / 形状定位与动态 ROI
+        services.AddSingleton<ContourExtractNode>();
+        services.AddSingleton<ContourFilterNode>();
+        services.AddSingleton<ContourPropertiesNode>();
+        services.AddSingleton<EdgeSubpixelNode>();
+        services.AddSingleton<CaliperLineNode>();
+        services.AddSingleton<CaliperCircleNode>();
+        services.AddSingleton<FitEllipseNode>();
+        services.AddSingleton<ShapeMatchNode>();
+        services.AddSingleton<RoiTransformNode>();
     }
 }
 

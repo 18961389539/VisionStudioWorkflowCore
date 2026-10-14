@@ -14,6 +14,10 @@ import type { NodeCatalogItem } from '../types';
 import type { Lang } from './lang';
 
 const nodeNames: Record<string, string> = {
+  'contour.extract': '轮廓提取', 'contour.filter': '轮廓筛选', 'contour.properties': '轮廓属性',
+  'feature.edgeSubpixel': '亚像素边缘', 'measure.caliperLine': '卡尺找线',
+  'measure.caliperCircle': '卡尺找圆', 'measure.fitEllipse': '椭圆拟合',
+  'match.shape': '形状匹配', 'roi.transform': '定位修正 ROI',
   'recognition.barcode': '条码 / 二维码识别', 'recognition.ocr': '文字识别 / OCR',
   'inference.classification': 'ONNX 图像分类', 'inference.detection': 'ONNX 目标检测',
   'inference.segmentation': 'ONNX 图像分割', 'inference.anomaly': 'ONNX 异常检测',
@@ -48,12 +52,25 @@ const nodeNames: Record<string, string> = {
 };
 
 const categories: Record<string, string> = {
+  Contour: '轮廓处理',
   Acquisition: '图像采集', Calibration: '标定', Coordinate: '坐标变换', Device: '设备通信', Feature: '特征检测',
   Flow: '流程控制', Geometry: '几何计算', Measurement: '测量', Preprocess: '图像处理', Robot: '机器人',
   Output: '结果输出', Matching: '定位匹配', Value: '数值运算', Logic: '逻辑判定', Collection: '集合处理', Recognition: '识别', AI: 'AI 检测', Inference: '模型推理'
 };
 
 const parameterNames: Record<string, string> = {
+  'Retrieval': '轮廓范围', 'Binarize': '二值化方式', 'Dark Objects': '暗色目标',
+  'Max Contours': '最大轮廓数', 'Point Budget': '轮廓点上限', 'Hierarchy': '层级',
+  'Window X (-1=off)': '筛选窗口 X（-1 为关闭）', 'Window Y (-1=off)': '筛选窗口 Y（-1 为关闭）',
+  'Window Width': '筛选窗口宽度', 'Window Height': '筛选窗口高度', 'Select': '选择目标', 'Index': '索引',
+  'Min Contrast': '最小边缘对比度', 'Direction': '边缘选择方向',
+  'Caliper Count': '卡尺采样数', 'Caliper Span (0=auto)': '卡尺分布跨度（0 为自动）',
+  'Refine': '亚像素细化', 'Edge Line Length (0=auto)': '输出线长度（0 为自动）',
+  'Signature Samples': '形状签名采样数', 'Max Targets': '最大匹配目标数',
+  'Base X': '基准 X', 'Base Y': '基准 Y', 'Base Theta': '基准角度',
+  'Current X': '当前 X', 'Current Y': '当前 Y', 'Current Theta': '当前角度',
+  'Angle Start': '起始角度', 'Angle End': '结束角度', 'Radial Band': '径向搜索半宽',
+  'Max Radius Deviation (0=off)': '最大半径偏差（0 为关闭）',
   'Minimum Confidence (-1=unlimited)': '最低置信度（-1 为不限）', 'Class ID (-1=unlimited)': '类别 ID（-1 为不限）',
   'Class Labels': '类别标签', 'Source Unit': '源单位', 'Transform Source Frame': '变换源坐标系',
   'Transform Target Frame': '变换目标坐标系', 'URL': '请求地址',
@@ -104,6 +121,11 @@ const parameterNames: Record<string, string> = {
 };
 
 const optionNames: Record<string, string> = {
+  'External only': '仅外轮廓', 'External + holes': '外轮廓及孔洞', 'Holes only': '仅孔洞',
+  'Otsu (auto)': 'Otsu 自动阈值', 'Fixed threshold': '固定阈值', 'Non-zero pixels': '非零像素',
+  'Largest area': '最大面积', 'Smallest area': '最小面积', 'First': '第一个', 'Last': '最后一个', 'By index': '按索引',
+  'Strongest': '最强边缘', 'First from start': '从起点首个边缘', 'First from end': '从终点首个边缘',
+  'Parabolic (subpixel)': '抛物线亚像素细化', 'None (integer)': '无细化',
   Latest: '最新帧', Next: '下一帧', Boolean: '布尔值', Integer: '整数', Number: '数值', String: '文本',
   'Industrial Handshake': '工业握手', Move: '移动', 'Eye-to-Hand': '眼在手外', 'Eye-in-Hand': '眼在手上', Manual: '手动',
   True: '是', False: '否', Any: '任意', Rising: '上升沿', Falling: '下降沿', Positive: '正向', Negative: '负向',
@@ -113,6 +135,8 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  contours: '轮廓列表', properties: '轮廓属性', roi: '感兴趣区域',
+  fitError: '拟合误差', sampleCount: '有效采样数', radiusMin: '最小半径', radiusMax: '最大半径',
   classId: '类别 ID',
   classIndex: '类别索引', label: '类别名称', confidence: '置信度', mask: '类别掩膜', isAnomaly: '异常',
   results: '识别结果', text: '识别文字', format: '码格式', repeat: '下一轮', done: '完成',
@@ -138,6 +162,15 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
+  'contour.extract': '提取外轮廓及孔洞，支持动态 ROI；无目标时返回空列表。',
+  'contour.filter': '按面积、圆度、层级及位置筛选已有轮廓。',
+  'contour.properties': '计算轮廓几何属性，并输出供筛选和循环使用的目标列表。',
+  'feature.edgeSubpixel': '沿搜索线查找指定极性的边缘，并细化到亚像素位置。',
+  'measure.caliperLine': '沿多条平行搜索线采集边缘点，拟合真实边缘直线并报告误差。',
+  'measure.caliperCircle': '围绕标称圆进行径向边缘采样，拟合圆心和半径。',
+  'measure.fitEllipse': '对至少含五个有效点的轮廓拟合椭圆，输出长短轴和方向。',
+  'match.shape': '根据外轮廓进行固定尺度的平移及旋转匹配，适用于关于质心呈星形的目标。',
+  'roi.transform': '根据基准与当前位姿移动、旋转 ROI，供后续测量跟随工件。',
   'flow.ifBoolean': '根据布尔条件选择真或假分支，再在汇合节点继续执行。',
   'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；未匹配走默认路径，各路径在多路汇合节点汇合。',
   'flow.forEach': '按输入目标列表逐个执行循环体，提供当前目标位置、索引及可选的类别和置信度；完成后走 done 路径。',
@@ -187,6 +220,9 @@ const descriptions: Record<string, string> = {
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'measure.caliperLine.edgeLength': '沿边缘方向分布搜索剖面的跨度；0 时使用搜索线长度。跨度过小会降低角度测量的稳定性。',
+  'measure.caliperLine.caliperCount': '平行搜索剖面的数量；至少找到三个有效边缘点才能拟合直线。',
+  'match.shape.signatureSamples': '按角度采样外轮廓的数量。目标应关于质心呈星形，匹配按固定尺度进行。',
   'image.threshold.threshold': '二值化阈值（0–255）：越高，保留的亮区域越少；目标偏暗时调低，偏亮时调高。',
   'image.acquire.cameraId': '要取图的相机 ID（如 virtual-1），可在“设备 → 相机”面板查看可用相机。',
   'image.acquire.frameMode': '取图模式：最新帧直接复用最近一帧；下一帧会等待新图像，适合触发采集。',

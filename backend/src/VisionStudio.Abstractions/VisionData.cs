@@ -27,7 +27,10 @@ public enum VisionDataType
     CoordinatePose2D,
     RobotTarget2D,
     DeviceTagValue,
-    Measurement
+    Measurement,
+    // Append new types to preserve numeric values used by existing compiled plugins.
+    ContourProperties,
+    Roi
 }
 
 /// <summary>
@@ -182,6 +185,15 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
 
     /// <summary>批次一：多目标检测列表（DetectionList）。</summary>
     public static VisionValue Detections(IReadOnlyList<VisionDetection> value) => new(VisionDataType.DetectionList, value);
+
+    /// <summary>第五批：轮廓列表（contour.extract / contour.filter 输出）。</summary>
+    public static VisionValue Contours(IReadOnlyList<VisionContour> value) => new(VisionDataType.Contour, value);
+
+    /// <summary>第五批：轮廓派生属性列表（contour.properties 输出）。</summary>
+    public static VisionValue ContourProperties(IReadOnlyList<VisionContourProperties> value) => new(VisionDataType.ContourProperties, value);
+
+    /// <summary>第五批：感兴趣区域作为图形数据（roi.transform 输出，可经 roi 端口驱动下游测量节点）。</summary>
+    public static VisionValue Roi(VisionRoi value) => new(VisionDataType.Roi, value);
 
     public T Require<T>(string port)
     {

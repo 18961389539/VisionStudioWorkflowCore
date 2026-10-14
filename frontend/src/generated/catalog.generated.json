@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "6653313e158efefce11334273eac11f5ab8eeabc048c4ce5d1ab7341f548b677",
+  "hash": "0231cd4d2aff7b5008678a88ccd02df2286af776294a0f4086bab433808128c6",
   "items": [
     {
       "type": "image.acquire",
@@ -591,6 +591,453 @@
       },
       "actions": [],
       "declaresActions": true
+    },
+    {
+      "type": "contour.extract",
+      "displayName": "Contour Extract",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Retrieval",
+          "type": "select",
+          "defaultValue": "external",
+          "options": [
+            {
+              "label": "External only",
+              "value": "external"
+            },
+            {
+              "label": "External + holes",
+              "value": "all"
+            },
+            {
+              "label": "Holes only",
+              "value": "holes"
+            }
+          ],
+          "group": "Retrieval"
+        },
+        {
+          "name": "binarize",
+          "label": "Binarize",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Otsu (auto)",
+              "value": "auto"
+            },
+            {
+              "label": "Fixed threshold",
+              "value": "fixed"
+            },
+            {
+              "label": "Non-zero pixels",
+              "value": "direct"
+            }
+          ],
+          "group": "Binarize",
+          "description": "auto=Otsu; fixed uses Threshold; direct treats every non-zero pixel as foreground."
+        },
+        {
+          "name": "threshold",
+          "label": "Threshold",
+          "type": "number",
+          "defaultValue": 128,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Binarize",
+          "description": "Used when Binarize = fixed threshold."
+        },
+        {
+          "name": "invert",
+          "label": "Dark Objects",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Binarize",
+          "description": "Treat dark-on-light as foreground."
+        },
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²",
+          "group": "Filter"
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Contours",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 1,
+          "max": 2000,
+          "step": 1,
+          "group": "Filter"
+        },
+        {
+          "name": "maxPoints",
+          "label": "Point Budget",
+          "type": "number",
+          "defaultValue": 2000,
+          "min": 16,
+          "max": 20000,
+          "step": 1,
+          "group": "Filter",
+          "description": "Contours are evenly subsampled to this budget so graph data stays bounded."
+        }
+      ],
+      "description": "Extract contours with hierarchy (external/holes). Returns a Contour list; an empty result is found=false, not a failure. Binarize before extraction or rely on Otsu.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "contour.filter",
+      "displayName": "Contour Filter",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²",
+          "group": "Geometry"
+        },
+        {
+          "name": "maxArea",
+          "label": "Max Area (0=unlimited)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²",
+          "group": "Geometry"
+        },
+        {
+          "name": "minCircularity",
+          "label": "Min Circularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Geometry"
+        },
+        {
+          "name": "maxCircularity",
+          "label": "Max Circularity",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Geometry"
+        },
+        {
+          "name": "hierarchy",
+          "label": "Hierarchy",
+          "type": "select",
+          "defaultValue": "any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "any"
+            },
+            {
+              "label": "External only",
+              "value": "external"
+            },
+            {
+              "label": "Holes only",
+              "value": "holes"
+            }
+          ],
+          "group": "Hierarchy"
+        },
+        {
+          "name": "windowX",
+          "label": "Window X (-1=off)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 100000,
+          "step": 1,
+          "unit": "px",
+          "group": "Position"
+        },
+        {
+          "name": "windowY",
+          "label": "Window Y (-1=off)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 100000,
+          "step": 1,
+          "unit": "px",
+          "group": "Position"
+        },
+        {
+          "name": "windowWidth",
+          "label": "Window Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "unit": "px",
+          "group": "Position"
+        },
+        {
+          "name": "windowHeight",
+          "label": "Window Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "unit": "px",
+          "group": "Position"
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Contours",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 1,
+          "max": 2000,
+          "step": 1,
+          "group": "Limit"
+        }
+      ],
+      "description": "Filter an existing Contour list by area, circularity, hierarchy and a position window (bounding-box center inside the window). Composable with contour.extract; no re-extraction.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "contour.properties",
+      "displayName": "Contour Properties",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "properties",
+          "dataType": "ContourProperties",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "selected",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "circularity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "selectBy",
+          "label": "Select",
+          "type": "select",
+          "defaultValue": "largest",
+          "options": [
+            {
+              "label": "Largest area",
+              "value": "largest"
+            },
+            {
+              "label": "Smallest area",
+              "value": "smallest"
+            },
+            {
+              "label": "First",
+              "value": "first"
+            },
+            {
+              "label": "Last",
+              "value": "last"
+            },
+            {
+              "label": "By index",
+              "value": "index"
+            }
+          ],
+          "group": "Selection"
+        },
+        {
+          "name": "index",
+          "label": "Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "group": "Selection",
+          "description": "Used when Select = by index (clamped)."
+        }
+      ],
+      "description": "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) and emit a DetectionList for the collection/loop nodes. Empty input is an error.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
     },
     {
       "type": "coordinate.transformCompose",
@@ -2120,6 +2567,214 @@
         }
       ],
       "description": "Find the longest Hough line and return a strongly typed Line2D.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "feature.edgeSubpixel",
+      "displayName": "Subpixel Edge",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "strength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "fitError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "startX",
+          "label": "Start X",
+          "type": "number",
+          "defaultValue": 120,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "startY",
+          "label": "Start Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endX",
+          "label": "End X",
+          "type": "number",
+          "defaultValue": 520,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endY",
+          "label": "End Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "sampleWidth",
+          "label": "Sample Width",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 99,
+          "step": 2,
+          "unit": "px",
+          "group": "Sampling"
+        },
+        {
+          "name": "minContrast",
+          "label": "Min Contrast",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Sampling"
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "Any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "Any"
+            },
+            {
+              "label": "Rising",
+              "value": "Rising"
+            },
+            {
+              "label": "Falling",
+              "value": "Falling"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "direction",
+          "label": "Direction",
+          "type": "select",
+          "defaultValue": "strongest",
+          "options": [
+            {
+              "label": "Strongest",
+              "value": "strongest"
+            },
+            {
+              "label": "First from start",
+              "value": "firstfromstart"
+            },
+            {
+              "label": "First from end",
+              "value": "firstfromend"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "refine",
+          "label": "Refine",
+          "type": "select",
+          "defaultValue": "parabolic",
+          "options": [
+            {
+              "label": "Parabolic (subpixel)",
+              "value": "parabolic"
+            },
+            {
+              "label": "None (integer)",
+              "value": "none"
+            }
+          ],
+          "group": "Sampling"
+        }
+      ],
+      "description": "Subpixel edge location along a search line: parabolic refinement on the gradient peak with fit error and valid sample count. No edge above the contrast threshold returns found=false, not a failure.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3673,6 +4328,225 @@
       "declaresActions": true
     },
     {
+      "type": "match.shape",
+      "displayName": "Shape Match",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "template",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "score",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": false
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "templatePath",
+          "label": "Template Path",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Used only when the template port is not connected."
+        },
+        {
+          "name": "binarize",
+          "label": "Binarize",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Otsu (auto)",
+              "value": "auto"
+            },
+            {
+              "label": "Fixed threshold",
+              "value": "fixed"
+            },
+            {
+              "label": "Non-zero pixels",
+              "value": "direct"
+            }
+          ],
+          "group": "Binarize"
+        },
+        {
+          "name": "threshold",
+          "label": "Threshold",
+          "type": "number",
+          "defaultValue": 128,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Binarize",
+          "description": "Used when Binarize = fixed threshold."
+        },
+        {
+          "name": "invert",
+          "label": "Dark Objects",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Binarize"
+        },
+        {
+          "name": "minArea",
+          "label": "Min Area",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²",
+          "group": "Candidates"
+        },
+        {
+          "name": "angleRangeDeg",
+          "label": "Angle Range",
+          "type": "number",
+          "defaultValue": 180,
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "unit": "deg",
+          "group": "Matching"
+        },
+        {
+          "name": "angleStepDeg",
+          "label": "Angle Step",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.1,
+          "max": 30,
+          "step": 0.1,
+          "unit": "deg",
+          "group": "Matching"
+        },
+        {
+          "name": "minScore",
+          "label": "Min Score",
+          "type": "number",
+          "defaultValue": 0.6,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Matching"
+        },
+        {
+          "name": "signatureSamples",
+          "label": "Signature Samples",
+          "type": "number",
+          "defaultValue": 180,
+          "min": 16,
+          "max": 720,
+          "step": 4,
+          "group": "Matching",
+          "description": "Angular bins of the polar radius signature; more bins = finer shape detail."
+        },
+        {
+          "name": "maxTargets",
+          "label": "Max Targets",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "Multi-target"
+        },
+        {
+          "name": "minCenterDistance",
+          "label": "Min Center Distance",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Multi-target"
+        }
+      ],
+      "description": "Rotation-and-translation shape matching over external contours using a polar radius signature (centroid-relative, rotation from a cyclic shift search). First version assumes a star-shaped target around its centroid and a fixed scale; a low score means the shape/scale does not match. angle = rotate the template by this amount (CCW) to align with the scene.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
       "type": "match.template",
       "displayName": "Template Match",
       "category": "Matching",
@@ -3799,6 +4673,231 @@
         "executionMode": "Auto"
       },
       "declaresActions": false
+    },
+    {
+      "type": "measure.caliperCircle",
+      "displayName": "Caliper Circle",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "radiusMin",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "radiusMax",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "fitError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "centerX",
+          "label": "Center X",
+          "type": "number",
+          "defaultValue": 320,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Nominal Circle"
+        },
+        {
+          "name": "centerY",
+          "label": "Center Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Nominal Circle"
+        },
+        {
+          "name": "radius",
+          "label": "Nominal Radius",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 5000,
+          "step": 1,
+          "unit": "px",
+          "group": "Nominal Circle"
+        },
+        {
+          "name": "angleStartDeg",
+          "label": "Angle Start",
+          "type": "number",
+          "defaultValue": -180,
+          "min": -360,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Arc"
+        },
+        {
+          "name": "angleEndDeg",
+          "label": "Angle End",
+          "type": "number",
+          "defaultValue": 180,
+          "min": -360,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Arc"
+        },
+        {
+          "name": "angleStepDeg",
+          "label": "Angle Step",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 45,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Arc"
+        },
+        {
+          "name": "radialBand",
+          "label": "Radial Band",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "unit": "px",
+          "group": "Sampling"
+        },
+        {
+          "name": "minContrast",
+          "label": "Min Contrast",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Sampling"
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "Any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "Any"
+            },
+            {
+              "label": "Rising",
+              "value": "Rising"
+            },
+            {
+              "label": "Falling",
+              "value": "Falling"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "sampleWidth",
+          "label": "Sample Width",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 99,
+          "step": 2,
+          "unit": "px",
+          "group": "Sampling"
+        },
+        {
+          "name": "maxRadiusDeviation",
+          "label": "Max Radius Deviation (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 5000,
+          "step": 1,
+          "unit": "px",
+          "group": "Sampling",
+          "description": "Reject spokes whose found edge deviates more than this from the nominal radius."
+        }
+      ],
+      "description": "Caliper circle measurement: radial caliper spokes around a nominal circle, least-squares circle fit over the valid edge points, with roundness (radius spread) and fit error. The optional circle input overrides the nominal parameters (use it with roi.transform for workpiece-following measurement).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "measure.caliper",
@@ -3936,6 +5035,242 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.caliperLine",
+      "displayName": "Caliper Line",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "strength",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "fitError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "startX",
+          "label": "Start X",
+          "type": "number",
+          "defaultValue": 120,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "startY",
+          "label": "Start Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endX",
+          "label": "End X",
+          "type": "number",
+          "defaultValue": 520,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "endY",
+          "label": "End Y",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search Line"
+        },
+        {
+          "name": "sampleWidth",
+          "label": "Sample Width",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 99,
+          "step": 2,
+          "unit": "px",
+          "group": "Sampling"
+        },
+        {
+          "name": "minContrast",
+          "label": "Min Contrast",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Sampling"
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "Any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "Any"
+            },
+            {
+              "label": "Rising",
+              "value": "Rising"
+            },
+            {
+              "label": "Falling",
+              "value": "Falling"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "direction",
+          "label": "Direction",
+          "type": "select",
+          "defaultValue": "strongest",
+          "options": [
+            {
+              "label": "Strongest",
+              "value": "strongest"
+            },
+            {
+              "label": "First from start",
+              "value": "firstfromstart"
+            },
+            {
+              "label": "First from end",
+              "value": "firstfromend"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "refine",
+          "label": "Refine",
+          "type": "select",
+          "defaultValue": "parabolic",
+          "options": [
+            {
+              "label": "Parabolic (subpixel)",
+              "value": "parabolic"
+            },
+            {
+              "label": "None (integer)",
+              "value": "none"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "edgeLength",
+          "label": "Caliper Span (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Sampling",
+          "description": "Spread of parallel profiles perpendicular to the search line; zero uses the search line length."
+        },
+        {
+          "name": "caliperCount",
+          "label": "Caliper Count",
+          "type": "number",
+          "defaultValue": 9,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "group": "Sampling",
+          "description": "Number of parallel search profiles along the edge span; at least 3 valid edge points are required for a line fit."
+        }
+      ],
+      "description": "Caliper line measurement: detects edges on multiple parallel profiles across the configured edge span, then fits the measured edge points to a line with orthogonal RMS fit error. At least three valid points are required.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
         "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
@@ -4134,6 +5469,124 @@
       ],
       "description": "Extract one DetectionList item as typed scalar and geometry outputs, including optional confidence and classId; an out-of-range index returns found=false.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.fitEllipse",
+      "displayName": "Ellipse Fit",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "selectBy",
+          "label": "Select",
+          "type": "select",
+          "defaultValue": "largest",
+          "options": [
+            {
+              "label": "Largest area",
+              "value": "largest"
+            },
+            {
+              "label": "Smallest area",
+              "value": "smallest"
+            },
+            {
+              "label": "First",
+              "value": "first"
+            },
+            {
+              "label": "Last",
+              "value": "last"
+            },
+            {
+              "label": "By index",
+              "value": "index"
+            }
+          ],
+          "group": "Selection"
+        },
+        {
+          "name": "index",
+          "label": "Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "group": "Selection",
+          "description": "Used when Select = by index (clamped)."
+        }
+      ],
+      "description": "Fit an ellipse to a contour (needs >= 5 non-collinear points). Output is the rotated rectangle of the ellipse: width = major axis, height = minor axis, angle = major-axis direction (degrees, CCW).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true
     },
@@ -4695,6 +6148,146 @@
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
+    },
+    {
+      "type": "roi.transform",
+      "displayName": "ROI Transform",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        },
+        {
+          "name": "currentPose",
+          "dataType": "Pose2D",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": true
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "baseX",
+          "label": "Base X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100000,
+          "max": 100000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Base Pose",
+          "description": "The pose at which the ROI parameter was authored."
+        },
+        {
+          "name": "baseY",
+          "label": "Base Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100000,
+          "max": 100000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Base Pose"
+        },
+        {
+          "name": "baseThetaDeg",
+          "label": "Base Theta",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.01,
+          "unit": "deg",
+          "group": "Base Pose"
+        },
+        {
+          "name": "currentX",
+          "label": "Current X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100000,
+          "max": 100000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Current Pose",
+          "description": "Used only when the currentPose port is not connected."
+        },
+        {
+          "name": "currentY",
+          "label": "Current Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100000,
+          "max": 100000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Current Pose"
+        },
+        {
+          "name": "currentThetaDeg",
+          "label": "Current Theta",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.01,
+          "unit": "deg",
+          "group": "Current Pose"
+        }
+      ],
+      "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Rectangle ROIs stay rectangles for pure translation and become polygons when rotated; circle ROIs translate. Outputs a Roi value (feed it into the roi port of downstream measurement nodes), the bounding rectangle/circle and the base->current Transform2D.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
     },
     {
       "type": "measure.rotatedRect",

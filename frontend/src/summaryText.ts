@@ -13,6 +13,11 @@ export function formatScalar(value: string | number | boolean | null) {
 /** 各节点类型的“关键结果”字段顺序：先展示用户真正关心的测量量，而不是摘要里的前 N 个键。
  *  键取自后端各节点 Summary（backend/src/VisionStudio.Engine/Nodes/*.cs）；未列出的类型走通用排序。 */
 const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
+  'contour.extract': ['found', 'count', 'holes'], 'contour.filter': ['count', 'dropped'],
+  'contour.properties': ['area', 'circularity', 'selectedIndex'],
+  'feature.edgeSubpixel': ['found', 'edgeX', 'edgeY'], 'measure.caliperLine': ['found', 'fitError', 'sampleCount'],
+  'measure.caliperCircle': ['found', 'fittedRadius', 'fitError'], 'measure.fitEllipse': ['width', 'height', 'angleDeg'],
+  'match.shape': ['found', 'bestScore', 'matchedAngle'], 'roi.transform': ['roiType', 'thetaDeg'],
   'measure.blobs': ['count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
   'value.arithmetic': ['result'], 'value.range': ['pass', 'value'], 'logic.boolean': ['result'],
   'flow.ifBoolean': ['condition'], 'flow.switch': ['selected'],

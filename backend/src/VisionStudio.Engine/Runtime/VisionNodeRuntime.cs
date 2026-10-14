@@ -243,7 +243,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             VisionDataType.Circle or VisionDataType.Transform2D or VisionDataType.CoordinatePoint2D or
             VisionDataType.CoordinateLine2D or VisionDataType.CoordinatePose2D or VisionDataType.RobotTarget2D or
             VisionDataType.DeviceTagValue or VisionDataType.Measurement or VisionDataType.DetectionList or
-            VisionDataType.Contour => value.Value,
+            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Roi => value.Value,
             _ => value.Value.ToString()
         };
         return new VisionValueSnapshot(value.Type.ToString(), value.Value.ToString() ?? value.Type.ToString(), payload);

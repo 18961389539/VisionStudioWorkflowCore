@@ -50,10 +50,23 @@
 
 模板库新增“逐目标顺序执行”，无需连接设备即可查看每个目标的执行报告。
 
+## 第五批：精密定位与测量（审查修复）
+
+- `contour.extract`、`contour.filter`、`contour.properties`：轮廓提取、层级与几何筛选、派生属性及 DetectionList 转换。`ParentIndex` 指向当前输出列表中的父轮廓；父轮廓被过滤、截断或 holes-only 模式省略时设为 -1，`IsHole` 保留孔洞身份。
+- `feature.edgeSubpixel`：搜索剖面的亚像素边缘定位。五点二次最小二乘窗口提供梯度峰形的 RMS 残差（灰度单位），不是定位精度承诺；窗口不足或峰形不适合拟合时输出 -1。
+- `measure.caliperLine`：沿搜索线的垂直方向分布多条平行剖面，至少找到三个边缘点后进行正交直线拟合。`caliperCount` 默认 9；`edgeLength` 表示卡尺分布跨度，0 时取搜索线长度。`fitError` 为点到拟合线的 RMS 距离（像素），`sampleCount` 为有效边缘点数；短于 2 px 的搜索线明确报错。
+- `measure.caliperCircle`：径向搜索边缘并拟合圆；`measure.fitEllipse`：对至少五个有效轮廓点拟合椭圆。无可用边缘返回 found=false；空轮廓等输入错误报错。
+- `match.shape`：以质心为原点，按固定角度取射线与完整外轮廓的交点构造半径签名，支持固定尺度的平移、旋转和多目标匹配。适用于关于质心呈星形的完整目标，孔洞不参与匹配；遮挡与尺度适配不在首版范围。角度为图像坐标中的逆时针旋转，旋转对称目标的方向存在固有歧义，并列分数优先报告绝对值较小的角度。
+- `roi.transform`：根据基准及当前位姿刚性修正 ROI，旋转矩形转换为多边形；Roi 和 ContourProperties 在运行报告中保留结构化值。
+
+轮廓提取、亚像素边缘、卡尺找线／找圆、形状匹配的 image 输出均为独立图像副本，成功与未命中路径都可连接下游处理；检测标注通过 overlays 展示，不修改图像像素。
+
+前端离线目录和中文名称、参数、工具分类已同步为 94 个节点。模板库新增“定位与精密测量”，对应 `samples/shape-locate-measure-workflow.json`，包含形状定位、动态圆 ROI、卡尺找圆、公差判定和 JSON 导出。模板中的导出节点会写入 `artifacts/shape-locate-measure-result.json`，启用了 overwrite。
+
 ## 验证入口
 
-新增测试位于 `Batch1NodeTests`、`Batch2ImageNodeTests`、`Batch2UtilityNodeTests`、`Batch2ControlRuntimeTests`、`Batch2TryRuntimeTests`、`Batch3GeometryNodeTests`、`Batch3RecognitionNodeTests`、`Batch4IterationTests`，以及 Engine／API 的 `NodeExpansion*Tests`。
+新增测试位于 `Batch1NodeTests`、`Batch2ImageNodeTests`、`Batch2UtilityNodeTests`、`Batch2ControlRuntimeTests`、`Batch2TryRuntimeTests`、`Batch3GeometryNodeTests`、`Batch3RecognitionNodeTests`、`Batch4IterationTests`、`Batch5PrecisionNodeTests`、`Batch5ShapeMatchTests`、`Batch5PrecisionIntegrationTests`、`Batch5CaliperRegressionTests`、`Batch5ContourRegressionTests`、`Batch5ImagePortTests`，以及 Engine／API 的 `NodeExpansion*Tests`。
 
 最终验收同时检查实际节点算法、完整运行链路、宿主注册、类型化结果快照、目录生成一致性、静态审查和前端测试／构建。
 
-最终结果：内置目录 41 → 85，共补齐 44 个节点；Release 后端测试 574/574（Engine 236、API 338，排除 Soak），前端 37/37，生产构建通过。目录一致性、静态审查和警告基线通过，无新增编译警告。真实英文 OCR、二维码／CODE_128 和四类 ONNX 推理均通过；两个新增 JSON 示例实际运行通过。
+最终结果：内置目录 41 → 85（批次一～四，+44）→ 94（第五批，+9）；Release 后端测试 574/574（Engine 236、API 338，排除 Soak）→ 624/624（Engine 286、API 338），前端 39/39，生产构建通过。目录一致性、静态审查和警告基线通过，无新增编译警告。真实英文 OCR、二维码／CODE_128 和四类 ONNX 推理均通过；新增 JSON 示例实际运行通过。
