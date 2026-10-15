@@ -490,15 +490,7 @@
       "method": "post"
     },
     {
-      "path": "/api/products",
-      "method": "get"
-    },
-    {
-      "path": "/api/products",
-      "method": "post"
-    },
-    {
-      "path": "/api/products/{productId}/recipes",
+      "path": "/api/recipes",
       "method": "post"
     },
     {
@@ -516,14 +508,6 @@
     {
       "path": "/api/jobs/{id}/versions/{version}/validation",
       "method": "post"
-    },
-    {
-      "path": "/api/products/{productId}/parameters",
-      "method": "get"
-    },
-    {
-      "path": "/api/products/{productId}/parameters",
-      "method": "put"
     },
     {
       "path": "/api/jobs/{id}/parameters",

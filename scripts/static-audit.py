@@ -582,7 +582,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 236  # 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
+expected_routes = 232  # fcaea6b independent recipes: 236 - 5 product routes (/api/products GET+POST, /api/products/{productId}/recipes POST, /api/products/{productId}/parameters GET+PUT) + POST /api/recipes; prior base: 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -946,7 +946,7 @@ product_recipe_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/Produ
 product_recipe_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductRecipeLifecycleTests.cs')
 for token in ['ProductDescriptor','ValidationAcceptancePolicy','LinkValidationAsync','CloneRecipeAsync','DiffAsync','False OK']:
     if token not in product_recipe_source: fail(f'V0.50 product recipe token missing: {token}')
-for token in ['/api/products','/api/products/{productId}/recipes','/api/jobs/{id}/clone','/validation-candidates','/validation']:
+for token in ['/api/recipes','/api/jobs/{id}/clone','/validation-candidates','/validation']:
     if token not in product_recipe_endpoints: fail(f'V0.50 product recipe endpoint missing: {token}')
 for token in ['V050ProductRecipe_PublishRequiresAcceptedValidationForExactWorkflowHash','V050ValidationPolicy_RejectsFalseOkEvenWhenAccuracyLooksHigh','V050CloneAndDiff_KeepRecipeTopologyTraceable']:
     if token not in product_recipe_tests: fail(f'V0.50 product recipe regression test missing: {token}')
@@ -963,7 +963,7 @@ parameter_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/RecipePara
 parameter_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RecipeParameterBindingTests.cs')
 for token in ['RecipeParameterStore','ResolvedRecipeParameterization','ResolveForJobAsync','product_parameter_values','recipe_parameter_values','IsCompatible']:
     if token not in parameter_source: fail(f'V0.51 parameter binding token missing: {token}')
-for token in ['/api/products/{productId}/parameters','/api/jobs/{id}/parameters','/api/jobs/{id}/parameterization/resolve','/api/jobs/{id}/versions/{version:int}/parameterization']:
+for token in ['/api/jobs/{id}/parameters','/api/jobs/{id}/parameterization/resolve','/api/jobs/{id}/versions/{version:int}/parameterization']:
     if token not in parameter_endpoints: fail(f'V0.51 parameter endpoint missing: {token}')
 for token in ['base_workflow_hash','base_workflow_json','parameter_bindings_json','parameter_snapshot_json','V0.51 recipe parameter binding',CURRENT_SCHEMA_TOKEN]:
     if token not in schema_migration_source: fail(f'V0.51 parameter schema token missing: {token}')
