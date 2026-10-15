@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Handle, Position, useConnection, useNodeConnections, useReactFlow } from '@xyflow/react';
+import { useEffect, useMemo, useState } from 'react';
+import { Handle, Position, useConnection, useNodeConnections, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import { connectionVerdict } from '../validation';
 import { nodePresentation } from '../toolboxModel';
@@ -7,7 +7,7 @@ import NodeCategoryIcon from './NodeCategoryIcon';
 import { summarizeScalars } from '../summaryText';
 import { portNames } from '../i18n/catalog';
 import { getInitialLang } from '../i18n';
-import { showNodeDetails } from '../uiBridge';
+import { configureNode, showNodeDetails } from '../uiBridge';
 import type { CSSProperties } from 'react';
 
 type PortLike = { name: string; dataType: string; label?: string; required?: boolean };
@@ -27,7 +27,7 @@ function statusText(status?: string) {
 const hasResultState = (status: string) => status === 'ok' || status === 'error' || status === 'warmup' || status === 'breakpoint';
 
 /** 控制端口（执行/分支）聚为一组放在上方，数据端口排在下方——执行顺序与数据传递各自成区。
- *  只重排显示顺序，Handle 的 id 与纵向位置都不变（Handle 由 CSS 相对端口行居中），既有连线不受影响。 */
+ *  保留 Handle 的 id；显示列表变化后刷新连线落点，Handle 由 CSS 相对端口行居中。 */
 function partitionPorts(ports: PortLike[]) {
   const control = ports.filter((port) => port.dataType === 'Control');
   const data = ports.filter((port) => port.dataType !== 'Control');
@@ -53,6 +53,8 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
   const connection = useConnection();
   const inputConnections = useNodeConnections({ handleType: 'target' });
   const outputConnections = useNodeConnections({ handleType: 'source' });
+  const [portsExpanded, setPortsExpanded] = useState(false);
+  const updateNodeInternals = useUpdateNodeInternals();
   const { updateNodeData, getNode } = useReactFlow();
   // 语言在启动时由 localStorage 确定性决定（项目无运行时切换入口），直接读模块级值即可
   const lang = getInitialLang();
@@ -61,6 +63,18 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
     input: new Set(inputConnections.map((c) => c.targetHandle).filter(Boolean) as string[]),
     output: new Set(outputConnections.map((c) => c.sourceHandle).filter(Boolean) as string[]),
   }), [inputConnections, outputConnections]);
+
+  const selectPorts = (ports: PortLike[], connected: Set<string>) => {
+    if (portsExpanded || connection.inProgress || ports.length <= 5) return ports;
+    const primary = new Set(ports.filter((port) => port.dataType !== 'Control').slice(0, 3).map((port) => port.name));
+    return ports.filter((port) => port.dataType === 'Control' || port.required || connected.has(port.name) || primary.has(port.name));
+  };
+  const visibleInputs = selectPorts(inputs, connectedHandles.input);
+  const visibleOutputs = selectPorts(outputs, connectedHandles.output);
+  const hiddenCount = inputs.length + outputs.length - visibleInputs.length - visibleOutputs.length;
+  const portSignature = JSON.stringify([visibleInputs.map((p) => p.name), visibleOutputs.map((p) => p.name)]);
+  // 展开/折叠后刷新 Handle 坐标，既有连线仍绑定原端口 ID。
+  useEffect(() => { updateNodeInternals(id); }, [id, portSignature, updateNodeInternals]);
 
   // 每个输入口上的入边按种类计数：控制口可多入边（join），数据口只允许 1 条
   const incoming = useMemo(() => {
@@ -112,7 +126,7 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
       : connectionVerdict({ sourceType: port.dataType, targetType: connectingPort.dataType });
   };
 
-  const labelOf = (port: PortLike) => port.label ?? port.name;
+  const labelOf = (port: PortLike) => port.label ?? (lang === 'zh' ? portNames[port.name] : undefined) ?? port.name;
   const isConnected = (port: PortLike, side: 'input' | 'output') =>
     side === 'input' ? connectedHandles.input.has(port.name) : connectedHandles.output.has(port.name);
   const portTitle = (port: PortLike, side: 'input' | 'output', verdict?: { allowed: boolean; reason?: string }) => {
@@ -150,7 +164,7 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
           {side === 'input' && port.required && !connected && (
             <em className="port-required" title="必需输入未连接">!</em>
           )}
-          <span className="port-label">{labelOf(port)}<small> {port.dataType}</small></span>
+          <span className="port-label">{labelOf(port)}</span>
         </span>
         {side === 'output' && handle}
       </div>
@@ -173,17 +187,21 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
   const hasDetail = Boolean(errorText || summaryLine);
 
   return (
-    <div className={`vision-node ${selected ? 'selected' : ''} status-${status} ${typeKey.startsWith('flow.') ? 'flow-node' : ''} ${typeKey === 'module.call' ? 'module-node' : ''}${stale ? ' result-stale' : ''}`} style={{ '--node-accent': nodePresentation(typeKey).color } as CSSProperties}>
+    <div className={`vision-node ${selected ? 'selected' : ''} status-${stale ? 'stale' : status} ${typeKey.startsWith('flow.') ? 'flow-node' : ''} ${typeKey === 'module.call' ? 'module-node' : ''}${stale ? ' result-stale' : ''}`} style={{ '--node-accent': nodePresentation(typeKey).color } as CSSProperties}>
       {breakpoint && <span className="breakpoint-dot" title="断点" />}
       <div className="vision-node-title">
         <span className="vision-node-name" title={String(d.label ?? typeKey)}>
           <NodeCategoryIcon type={typeKey} /><span>{String(d.label ?? typeKey)}</span>
         </span>
         <span className="node-title-right">
-          {stale && (
-            <span className="node-stale" title="参数或 ROI 已修改，节点上显示的是上一次运行的结果">过期</span>
-          )}
-          {disposition && (
+          <button type="button" className="node-configure nodrag nopan" title="配置节点（也可双击节点）" aria-label={`配置节点：${String(d.label ?? typeKey)}`}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => { event.stopPropagation(); configureNode(id); }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+              <path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="var(--vs-bg-node-title)" /><circle cx="15" cy="17" r="3" fill="var(--vs-bg-node-title)" />
+            </svg>
+          </button>
+          {disposition && !stale && (
             <span className={`node-disposition ${disposition === 'NG' ? 'ng' : 'ok'}`} title="检测判定（与执行状态分开：算法执行成功也可能判定不合格）">
               {disposition}
             </span>
@@ -199,28 +217,34 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
               updateNodeData(id, { breakpoint: !breakpoint });
             }}
           />
-          <span className="node-status">{statusText(status)}</span>
+          <span className="node-status" title={stale ? `上次执行状态：${statusText(status)}${disposition ? ` · ${disposition}` : ''}` : undefined}>{stale ? '待运行' : statusText(status)}</span>
         </span>
       </div>
+      {stale && <div className="node-stale-message">参数已修改，待运行</div>}
       <div className="vision-node-body">
         <div className="port-column input-column">
-          {partitionPorts(inputs).map(({ port, firstData }) => renderPortRow(port, 'input', firstData))}
+          {partitionPorts(visibleInputs).map(({ port, firstData }) => renderPortRow(port, 'input', firstData))}
         </div>
         <div className="port-column output-column">
-          {partitionPorts(outputs).map(({ port, firstData }) => renderPortRow(port, 'output', firstData))}
+          {partitionPorts(visibleOutputs).map(({ port, firstData }) => renderPortRow(port, 'output', firstData))}
         </div>
       </div>
+      {(hiddenCount > 0 || portsExpanded) && <button type="button" className="node-ports-toggle nodrag nopan" aria-expanded={portsExpanded || connection.inProgress}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); setPortsExpanded((value) => !value); }}>
+        {portsExpanded ? '收起未连接端口' : `展开其余端口（${hiddenCount}）`}
+      </button>}
       <div
         className={`vision-node-footer${!errorText && missingRequired > 0 ? ' footer-warning' : ''}${stale ? ' footer-stale' : ''}`}
         title={[errorText, missingRequired > 0 ? `缺 ${missingRequired} 个必需输入（未连接）` : undefined, summaryLine].filter(Boolean).join(' · ') || undefined}
       >
         {/* 关键警告（缺必需输入 / 错误 / 判定）在最前，远缩放时仍保留；类型与版本常驻右侧 */}
         <span className="footer-main">
-          {stale && (alertText || resultText) && <span className="footer-stale-mark" title="上一次运行的结果">上次 · </span>}
+          {stale && (alertText || resultText) && <span className="footer-stale-mark" title="上一次运行的结果，不代表当前参数">旧结果 · </span>}
           {alertText && <span className="footer-alert">{alertText}</span>}
           {resultText && <span className="footer-summary">{resultText}</span>}
           {hasDetail && (
-            <button type="button" className="footer-detail nodrag" title="在运行结果面板查看该节点的完整结果"
+            <button type="button" className="footer-detail nodrag" title="在弹窗中查看该节点的完整运行结果"
               onClick={(event) => { event.stopPropagation(); showNodeDetails(id); }}>详情</button>
           )}
         </span>

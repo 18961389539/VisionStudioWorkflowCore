@@ -3,7 +3,6 @@ import {
   addEdge,
   Background,
   Controls,
-  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
@@ -18,10 +17,9 @@ import {
 } from '@xyflow/react';
 import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
-import PropertyPanel from './components/PropertyPanel';
+import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
 import RunPanel from './components/RunPanel';
 import RunObservabilityPanel from './components/RunObservabilityPanel';
-import ImageViewer from './components/ImageViewer';
 import CameraPanel from './components/CameraPanel';
 import RobotPanel from './components/RobotPanel';
 import DevicePanel from './components/DevicePanel';
@@ -30,21 +28,24 @@ import DiagnosticsPanel from './components/DiagnosticsPanel';
 import SplitHandle from './components/SplitHandle';
 import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
 import VisionNode from './components/VisionNode';
+import CanvasMiniMap from './components/CanvasMiniMap';
+import { automaticResultHeight } from './layout';
 import { fallbackCatalog, fallbackCatalogHash, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
 import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
 import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
+import { SecurityAccountBadge } from './security';
 import { demos, demoDescriptions, linearDemo, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, writeDraft, type WorkflowDraft } from './draft';
 import { connectionVerdict, serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
 import { responseErrorMessage } from './apiErrors';
 import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, renameDecision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
-import { onShowNodeDetails } from './uiBridge';
+import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
-import { useRunImages } from './useRunImages';
+import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
-import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, VisionRoi, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
+import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 
 // R12（2026-10-12 复审）：低频重面板按需加载（dynamic import + Suspense）——首屏不下载其代码，
 // 首次打开时拉取并进入浏览器缓存。配对的渲染侧见 LazyPanel（条件挂载：关闭即卸载）。
@@ -115,6 +116,26 @@ const persistNodeCompact = (value: boolean) => {
 type FitPaddingUnit = number | `${number}px` | `${number}%`;
 const CANVAS_FIT_PADDING: { top: FitPaddingUnit; right: FitPaddingUnit; bottom: FitPaddingUnit; left: FitPaddingUnit } =
   { top: '56px', right: 0.16, bottom: 0.16, left: 0.16 };
+
+// 结果区折叠态保留的标签条高度（P1）：折叠不再等于“入口消失”，标签条即展开入口。
+// 与 .bottom-panel.collapsed .bottom-tabs-bar 的 padding + Segmented 高度对齐（4+24+4）。
+const COLLAPSED_RESULT_BAR_HEIGHT = 34;
+
+// 键盘快捷键一览（工具菜单 → 键盘快捷键…）：与下方 keydown 处理器保持同步，改快捷键时两处一起改。
+const SHORTCUT_ROWS: { combos: string[][]; desc: string }[] = [
+  { combos: [['Ctrl/Cmd', 'S']], desc: '保存工作流（节点配置弹窗内为“应用暂存参数”）' },
+  { combos: [['Ctrl/Cmd', 'Enter']], desc: '节点配置弹窗内：运行此节点（使用暂存参数测试，不写回流程）' },
+  { combos: [['Ctrl/Cmd', 'F']], desc: '在画布中查找节点（聚焦左上搜索框）' },
+  { combos: [['Ctrl/Cmd', 'Z']], desc: '撤销' },
+  { combos: [['Ctrl/Cmd', 'Shift', 'Z'], ['Ctrl', 'Y']], desc: '重做' },
+  { combos: [['Ctrl/Cmd', 'C']], desc: '复制选中节点（含集合内部连线）' },
+  { combos: [['Ctrl/Cmd', 'V']], desc: '粘贴节点（整体偏移，连续粘贴逐次错位）' },
+  { combos: [['Delete'], ['Backspace']], desc: '删除选中节点（连线一并删除，可撤销）' },
+  { combos: [['Shift', '拖拽']], desc: '框选多个节点（Ctrl/Cmd/Shift + 点击为追加选择）' },
+  { combos: [['双击节点']], desc: '打开节点配置弹窗（参数 / 图像 / 说明）' },
+  { combos: [['双击分隔条']], desc: '复位该面板尺寸（工具箱 / 结果区）' },
+  { combos: [['Esc']], desc: '清空画布查找框；连线选择菜单中取消' }
+];
 
 function hydrateNodesFromCatalog(nodes: Node[], catalog: NodeCatalogItem[]): Node[] {
   const byType = new Map(catalog.map((item) => [item.type.toLowerCase(), item]));
@@ -211,8 +232,13 @@ function Editor() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [selectedId, setSelectedId] = useState<string>('threshold-1');
-  // 定位选区信号：属性面板点击“定位选区”时递增，图像查看器据此把视图适配到 ROI 区域
-  const [roiFocusTick, setRoiFocusTick] = useState(0);
+  const [nodeConfigurationId, setNodeConfigurationId] = useState<string>();
+  const [configurationTab, setConfigurationTab] = useState<NodeConfigurationTab>('parameters');
+  const openNodeConfiguration = useCallback((nodeId: string, tab: NodeConfigurationTab = 'parameters') => {
+    setSelectedId(nodeId);
+    setConfigurationTab(tab);
+    setNodeConfigurationId(nodeId);
+  }, []);
   const [recentNodeTypes, setRecentNodeTypes] = useState<string[]>(readRecentNodeTypes);
   const flowAreaRef = useRef<HTMLDivElement>(null);
   const [compactNodes, setCompactNodes] = useState(readNodeCompact);
@@ -237,6 +263,8 @@ function Editor() {
   const focusSnapshotRef = useRef<LayoutState | null>(null);
   // R06：保存请求在途标志——保存中禁止重复提交（Ctrl+S 连按 / 双击保存按钮）。
   const saveInFlightRef = useRef(false);
+  // P1：保存按钮的在途视觉（ref 只防重复提交；按钮需要自证“正在保存”）
+  const [saving, setSaving] = useState(false);
   // R07（2026-10-12 复审）/F05（2026-10-12 复核）：并发基线修订**必须绑定它所属的文档**——
   // 单一字符串在切换文档（模板/Job/模块/草稿）后会携带错误修订产生误报 409。
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
@@ -248,7 +276,7 @@ function Editor() {
   // A03（2026-10-12 第三轮）：文档代次——每次整块替换文档（模板/加载/草稿/模块注入）递增；
   // 在途的加载/保存响应据此作废（A→B→A 仅比较文档 ID 无法区分不同加载代次）。
   const documentEpochRef = useRef(0);
-  const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio V0.51 linear demo');
+  const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio · 线性流程示例');
   const [compiledDsl, setCompiledDsl] = useState<string>();
 
   useEffect(() => {
@@ -271,6 +299,7 @@ function Editor() {
   const [hardwareProvenanceOpen, setHardwareProvenanceOpen] = useState(false);
   const [runtimeOnly, setRuntimeOnly] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
   const { screenToFlowPosition, getZoom, getViewport, setCenter, fitView } = useReactFlow();
   const [messageApi, contextHolder] = message.useMessage();
@@ -347,16 +376,13 @@ function Editor() {
   // 运行 / 调试控制 + 图像资源管理（独立模块）：anyBusy 是全局唯一执行闸门；
   // 结果与图像以 result.runId 为代际统一管理（详见 useRunController.ts / useRunImages.ts）
   const {
-    running, result, clearResult, applyResult, resultStale,
-    run, runNode, runFromHere,
+    running, result, resultReceivedAt, clearResult, applyResult, resultStale,
+    run, abortRun, runNode, runFromHere, previewNode,
     debugSession, debugBusy, allowSideEffects, setAllowSideEffects, anyBusy,
     hasSideEffectNodes, hasModuleCalls,
     startDebugSession, continueDebugSession, runSelectedNodeInSession, endDebugSession, debugStatus,
     endDebugSessionSilently
   } = useRunController({ workflowPayload, nodes, catalog, selectedId, nodeLabels, breakpoints, setNodes, setEdges, setBottomTab, messageApi });
-
-  const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable } =
-    useRunImages({ result, selectedId, nodes, edges, nodeLabels });
 
   // 校验问题列表 + 问题连线高亮（点击问题项定位节点或连线）
   const [validationIssues, setValidationIssues] = useState<WorkflowIssue[]>([]);
@@ -436,29 +462,25 @@ function Editor() {
     if (restoreSnapshot && snapshot) updateLayout({ ...snapshot });
   };
 
-  // 应用布局预设（P2）：预设 = 全部面板展开的完整布局；若正处专注画布先退出（布局由预设接管），
-  // 并显式展开图像区——否则专注切入的 imageCollapsed:true 会让“图像调试”预设下图像区继续隐藏
+  // 布局预设只调整面板；查看图像统一使用画布上的“查看图像”入口。
   const applyLayoutPreset = (preset: LayoutPreset) => {
     if (focusMode) exitFocusMode(false);
     setLayout((current) => ({
-      ...current, preset, ...LAYOUT_PRESETS[preset],
-      leftCollapsed: false, rightCollapsed: false, bottomCollapsed: false, bottomMaximized: false,
-      imageCollapsed: false
+      ...current, preset, ...LAYOUT_PRESETS[preset], bottomSizing: 'auto',
+      leftCollapsed: false, bottomCollapsed: false, bottomMaximized: false
     }));
   };
   const previewVar = (name: string, value: string) => shellRef.current?.style.setProperty(name, value);
 
-  // 渲染时按当前窗口尺寸收窄尺寸，避免小窗口下三栏把画布挤没（存的值保持不变，窗口变回来即恢复）
-  const rightMax = Math.max(LAYOUT_LIMITS.right.min, shellSize.width - layout.left - MIN_CENTER_WIDTH);
-  const shownRightBase = clampNumber(layout.right, LAYOUT_LIMITS.right.min, rightMax);
-  const leftMax = Math.max(LAYOUT_LIMITS.left.min, shellSize.width - shownRightBase - MIN_CENTER_WIDTH);
+  // 参数移入弹窗后，工具箱以外的宽度全部留给画布。
+  const leftMax = Math.max(LAYOUT_LIMITS.left.min, shellSize.width - MIN_CENTER_WIDTH);
   const shownLeftBase = clampNumber(layout.left, LAYOUT_LIMITS.left.min, leftMax);
   const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - 48 - MIN_WORKSPACE_HEIGHT);
-  const shownBottomBase = layout.bottomMaximized ? bottomMax : clampNumber(layout.bottom, LAYOUT_LIMITS.bottom.min, bottomMax);
+  const normalBottom = layout.bottomSizing === 'manual' ? layout.bottom : automaticResultHeight(shellSize.height);
+  const shownBottomBase = layout.bottomMaximized ? bottomMax : clampNumber(normalBottom, LAYOUT_LIMITS.bottom.min, bottomMax);
   const shownLeft = layout.leftCollapsed ? 0 : shownLeftBase;
-  const shownRight = layout.rightCollapsed ? 0 : shownRightBase;
-  const shownBottom = layout.bottomCollapsed ? 0 : shownBottomBase;
-  const centerHeight = Math.max(MIN_WORKSPACE_HEIGHT, shellSize.height - 48 - shownBottom - 20);
+  // 折叠态：保留细标签条（而非 0 高度）——运行/校验入口始终可见，点击标签即展开
+  const shownBottom = layout.bottomCollapsed ? COLLAPSED_RESULT_BAR_HEIGHT : shownBottomBase;
   const presetSizes = LAYOUT_PRESETS[layout.preset === 'custom' ? 'edit' : layout.preset];
 
   const refreshCatalog = useCallback(async () => {
@@ -508,9 +530,11 @@ function Editor() {
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
   const selectedCatalog = catalog.find((c) => c.type === selectedNode?.data.typeKey) ?? moduleCatalogFromNode(selectedNode);
-  const selectedParameters = (selectedNode?.data.parameters ?? {}) as Record<string, unknown>;
-  const selectedRoi = selectedParameters.roi as VisionRoi | undefined;
-  const roiEnabled = selectedNode?.data.typeKey !== 'module.call' && Boolean(selectedCatalog?.inputs.some((p) => p.dataType === 'Image'));
+  const configurationNode = nodes.find((node) => node.id === nodeConfigurationId);
+  const configurationCatalog = catalog.find((item) => item.type === configurationNode?.data.typeKey) ?? moduleCatalogFromNode(configurationNode);
+  const configurationPreviewBlockedReason = debugSession ? '请先结束当前调试会话，再测试暂存参数。'
+    : configurationNode?.data.typeKey === 'module.call' ? '复用模块暂不支持单节点测试。'
+    : configurationCatalog?.capabilities?.supportsRunNode === false ? '此节点不支持单节点测试，请应用后通过流程运行入口执行。' : undefined;
 
   // 目标数据输入上已有的数据线数量（控制口可多入边；kind 缺失时按源端口类型回推）
   const dataEdgeCount = useCallback((targetNodeId: string, targetHandle?: string | null) =>
@@ -805,27 +829,13 @@ function Editor() {
     }));
   }, [pushHistory, selectedNodeIds, setNodes]);
 
-  const updateParameter = (key: string, value: unknown) => {
-    if (!selectedId) return;
-    pushHistory('修改参数', `param:${selectedId}`);
-    // 参数改了：节点上残留的成功/失败与判定属于上一次运行 → 标过期，不再冒充当前结论
-    setNodes((current) => current.map((node) =>
-      node.id === selectedId
-        ? { ...node, data: { ...node.data, stale: true, parameters: { ...(node.data.parameters as object), [key]: value } } }
-        : node
-    ));
-  };
-
-  const updateRoi = (roi?: VisionRoi) => {
-    if (!selectedId || !roiEnabled) return;
-    pushHistory('修改 ROI', `roi:${selectedId}`);
-    setNodes((current) => current.map((node) => {
-      if (node.id !== selectedId) return node;
-      const parameters = { ...((node.data.parameters ?? {}) as Record<string, unknown>) };
-      if (roi) parameters.roi = roi;
-      else delete parameters.roi;
-      return { ...node, data: { ...node.data, stale: true, parameters } };
-    }));
+  const applyNodeParameters = (parameters: NodeParameters) => {
+    if (!nodeConfigurationId || anyBusy || !nodesRef.current.some((node) => node.id === nodeConfigurationId)) return false;
+    pushHistory('应用节点参数');
+    const committed = cloneParameters(parameters);
+    setNodes((current) => current.map((node) => node.id === nodeConfigurationId
+      ? { ...node, data: { ...node.data, stale: true, parameters: committed } } : node));
+    return true;
   };
 
   // 已保存 / 未保存：用「当前负载快照 vs 上次保存/加载快照」比对，避免在每个改动入口手动打脏标记
@@ -834,12 +844,14 @@ function Editor() {
   // 最近一次保存到后端的时间（仅保存成功时记录；批量加载/恢复草稿会清空）
   const [lastSavedAt, setLastSavedAt] = useState<Date>();
   const [pendingGuard, setPendingGuard] = useState<{ label: string; run: () => void }>();
-  // 节点 footer 的“详情”：选中该节点并把底部面板切到运行结果（节点内部无法直接碰到外壳状态）
-  useEffect(() => onShowNodeDetails((nodeId) => {
-    setSelectedId(nodeId);
-    setBottomTab('result');
-    updateLayout({ bottomCollapsed: false });
-  }), [updateLayout]);
+  // 节点详情打开配置弹窗并定位到统一结果区。
+  useEffect(() => onShowNodeDetails((nodeId) => openNodeConfiguration(nodeId, 'result')), [openNodeConfiguration]);
+  useEffect(() => onConfigureNode((nodeId) => openNodeConfiguration(nodeId)), [openNodeConfiguration]);
+  useEffect(() => {
+    if (nodeConfigurationId && (selectedId !== nodeConfigurationId || !nodes.some((node) => node.id === nodeConfigurationId))) {
+      setNodeConfigurationId(undefined);
+    }
+  }, [nodeConfigurationId, selectedId, nodes]);
   const markCleanOnNextChange = useRef(false);
   const dirty = savedSnapshot !== undefined && workflowSnapshot !== savedSnapshot;
   // 校验快照漂移：流程在校验后被修改（参数/节点/连线）⇒ 顶部按钮转“需要重新校验”
@@ -883,7 +895,7 @@ function Editor() {
     if (focusMode) { exitFocusMode(true); return; }
     focusSnapshotRef.current = layout;
     setFocusMode(true);
-    updateLayout({ leftCollapsed: true, rightCollapsed: true, bottomCollapsed: true, bottomMaximized: false, imageCollapsed: true });
+    updateLayout({ leftCollapsed: true, bottomCollapsed: true, bottomMaximized: false });
   };
 
   // 切换示例 / 加载会整块替换流程图，存在未保存修改时先让用户选择
@@ -901,7 +913,8 @@ function Editor() {
     const graph = { ...rawGraph, nodes: hydrateNodesFromCatalog(rawGraph.nodes, catalog) };
     setDemoKey(key);
     setDesignerWorkflowId(`demo-${key}`);
-    setDesignerWorkflowName(`VisionStudio V0.51 ${key} demo`);
+    // 文档名不携带版本号（避免与品牌 V{APP_VERSION} 同屏互相矛盾），并复用分组里的中文用途名
+    setDesignerWorkflowName(`VisionStudio · ${DEMO_LABELS[key] ?? key}`);
     setNodes(graph.nodes.map((node) => ({ ...node, data: { ...node.data, breakpoint: false } })));
     setEdges(graph.edges);
     setSelectedId(key === 'roi' ? 'threshold-1' : (graph.nodes[0]?.id ?? ''));
@@ -1081,6 +1094,7 @@ function Editor() {
       return false;
     }
     saveInFlightRef.current = true;
+    setSaving(true);
     const savedId = designerWorkflowId;
     const saveEpoch = documentEpochRef.current;
     try {
@@ -1165,6 +1179,7 @@ function Editor() {
       return false;
     } finally {
       saveInFlightRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -1259,6 +1274,11 @@ function Editor() {
     const onKeyDown = (event: KeyboardEvent) => {
       const comboKey = event.key.toLowerCase();
       const mod = event.ctrlKey || event.metaKey;
+      // 弹窗内的参数尚未应用，保存/查找/删除等画布快捷键不能穿透。
+      if (nodeConfigurationId) {
+        if (mod && (comboKey === 's' || comboKey === 'f')) event.preventDefault();
+        return;
+      }
       if (mod && comboKey === 's') {
         event.preventDefault();
         void save();
@@ -1322,7 +1342,7 @@ function Editor() {
     // 捕获阶段监听：避免画布内部对按键的 stopPropagation 把删除快捷键吃掉
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [copySelection, deleteNodes, messageApi, pushHistory, redo, save, selectedNodeIds, setEdges, setNodes, undo]);
+  }, [copySelection, deleteNodes, messageApi, nodeConfigurationId, pushHistory, redo, save, selectedNodeIds, setEdges, setNodes, undo]);
 
   // 有未保存修改时拦截刷新 / 关闭页面
   useEffect(() => {
@@ -1400,11 +1420,19 @@ function Editor() {
   const selectedLabel = selectedId ? (nodeLabels[selectedId] ?? selectedId) : '';
   const targetSuffix = selectedLabel ? `：${selectedLabel}` : '';
   const debugMenuItems: MenuProps['items'] = [
+    ...(debugSession ? [
+      { key: 'debug-state', label: `当前会话：${debugStatus.text}`, disabled: true },
+      { key: 'debug-continue', label: '继续调试', disabled: anyBusy || debugSession.status !== 'halted', onClick: () => void continueDebugSession() },
+      { key: 'debug-cached-node', label: `用缓存输入运行节点${targetSuffix}`, disabled: anyBusy || debugSession.status === 'faulted' || !selectedId, onClick: () => void runSelectedNodeInSession() },
+      { key: 'debug-end', label: '结束调试会话', danger: true, disabled: anyBusy, onClick: () => void endDebugSession() },
+      { type: 'divider' as const }
+    ] : []),
     { key: 'breakpoint', label: `切换断点${targetSuffix}`, disabled: !selectedId, onClick: toggleBreakpoint },
     { key: 'run-node', label: `运行节点${targetSuffix}`, disabled: anyBusy || !selectedId || selectedNode?.data.typeKey === 'module.call', onClick: runNode },
     { key: 'run-from-here', label: `从此处运行${targetSuffix}`, disabled: anyBusy || !selectedId || selectedNode?.data.typeKey === 'module.call', onClick: runFromHere },
     { type: 'divider' },
-    { key: 'debug-breakpoints', label: `调试到断点${breakpoints.length ? `（${breakpoints.length}）` : ''}`, disabled: anyBusy || breakpoints.length === 0, onClick: () => void startDebugSession() },
+    ...(hasSideEffectNodes ? [{ key: 'debug-side-effects', label: <Checkbox checked={allowSideEffects} disabled={anyBusy || Boolean(debugSession)} onChange={(event) => setAllowSideEffects(event.target.checked)}>允许真实设备写入</Checkbox> }] : []),
+    { key: 'debug-breakpoints', label: `开始断点调试${breakpoints.length ? `（${breakpoints.length}）` : ''}`, disabled: anyBusy || hasModuleCalls || Boolean(debugSession) || breakpoints.length === 0, onClick: () => void startDebugSession() },
     { key: 'core-dsl', label: '查看核心 DSL', onClick: inspectDsl }
   ];
 
@@ -1413,6 +1441,8 @@ function Editor() {
   const contextNodeLabel = contextNode ? (nodeLabels[contextNode.id] ?? contextNode.id) : '';
   const contextTargetSuffix = contextNodeLabel ? `：${contextNodeLabel}` : '';
   const nodeContextMenuItems: MenuProps['items'] = [
+    { key: 'configure', label: `配置节点${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) openNodeConfiguration(contextNode.id); } },
+    { key: 'view-image', label: `查看图像${contextTargetSuffix}`, disabled: !contextNode, onClick: () => { if (contextNode) openNodeConfiguration(contextNode.id, 'image'); } },
     { key: 'run-node', label: `运行此节点${contextTargetSuffix}`, disabled: anyBusy || !contextNode || contextNode.data.typeKey === 'module.call', onClick: runNode },
     { key: 'run-from-here', label: `从此处运行${contextTargetSuffix}`, disabled: anyBusy || !contextNode || contextNode.data.typeKey === 'module.call', onClick: runFromHere },
     { key: 'breakpoint', label: `切换断点${contextTargetSuffix}`, disabled: !contextNode, onClick: toggleBreakpoint },
@@ -1446,14 +1476,15 @@ function Editor() {
     { type: 'divider' },
     { key: 'undo', label: `撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !history.canUndo, onClick: undo },
     { key: 'redo', label: `重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !history.canRedo, onClick: redo },
+    { key: 'shortcuts', label: '键盘快捷键…', onClick: () => setShortcutsOpen(true) },
     { type: 'divider' },
     { key: 'plugins', label: '插件', onClick: () => setPluginsOpen(true) },
     { key: 'modules', label: '可复用模块', onClick: () => setModulesOpen(true) },
     { key: 'tuning', label: '参数调优', onClick: () => setTuningOpen(true) },
     { key: 'validation', label: '数据集验证', onClick: () => setValidationOpen(true) },
     { type: 'divider' },
-    { key: 'layout-edit', label: '布局：流程编辑' },
-    { key: 'layout-image', label: '布局：图像调试' },
+    { key: 'layout-edit', label: '布局：标准布局' },
+    { key: 'layout-image', label: '布局：宽画布' },
     { key: 'layout-reset', label: '布局：复位为预设尺寸' },
     { type: 'divider' },
     { key: 'load', label: '加载已保存工作流', onClick: () => guardUnsaved('加载已保存的工作流', () => void load()) },
@@ -1484,6 +1515,8 @@ function Editor() {
   if (runtimeOnly) return <>
     <ProductionPanel open={true} onClose={() => undefined} embedded />
     <Button className="runtime-diagnostics-button" type="primary" ghost onClick={() => setDiagnosticsOpen(true)}>诊断</Button>
+    {/* 操作员页无顶栏：账号入口固定在「诊断」按钮下方 */}
+    <div className="runtime-account-slot"><SecurityAccountBadge /></div>
     <DiagnosticsPanel open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
   </>;
 
@@ -1493,9 +1526,7 @@ function Editor() {
       ref={shellRef}
       style={{
         '--vs-left-width': `${shownLeft}px`,
-        '--vs-right-width': `${shownRight}px`,
-        '--vs-bottom-height': `${shownBottom}px`,
-        '--vs-image-height': imageViewerSource.url ? `${layout.image}%` : '44px'
+        '--vs-bottom-height': `${shownBottom}px`
       } as CSSProperties}
     >
       {contextHolder}{modalContextHolder}
@@ -1541,7 +1572,7 @@ function Editor() {
           <Button onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开流程</Button>
           <span className="topbar-divider" />
           <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
-            <Button>调试 <span className="menu-caret">▾</span></Button>
+            <Button type={debugSession ? 'primary' : 'default'} title={debugSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debugSession ? `调试 · ${debugStatus.text}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
           </Dropdown>
           <Dropdown menu={{ items: deviceMenuItems }} trigger={['click']}>
             <Button>设备 <span className="menu-caret">▾</span></Button>
@@ -1565,9 +1596,16 @@ function Editor() {
             <Button>工具 <span className="menu-caret">▾</span></Button>
           </Dropdown>
         </div>
-        {/* 右侧固定：高频动作常驻，账号入口（security-badge）经 CSS 融入本段最右；“更多”仅在窄窗口出现。
+        {/* 右侧固定：高频动作常驻（账号徽标已内联在本段 flex 流中，见 SecurityAccountBadge）；“更多”仅在窄窗口出现。
             校验按钮三分态（P1）：未校验 / 校验通过 ✓ / 校验 · N 项问题；流程修改后（快照漂移）标记“需要重新校验” */}
         <div className="topbar-right">
+          {/* 目录回退常驻标签（P0）：后端目录不可用时只有一个转瞬即逝的提示——参数可能与运行时不一致，
+              用户需要随时可见的状态；恢复成功后自动消失 */}
+          {catalogError && (
+            <Tooltip title={`后端节点目录不可用，正在使用本地回退目录（节点参数可能与运行时不一致）：${catalogError}`}>
+              <Tag color="orange" className="catalog-fallback-tag">目录回退</Tag>
+            </Tooltip>
+          )}
           <Dropdown trigger={['click']} menu={moreMenu}>
             <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
           </Dropdown>
@@ -1590,8 +1628,12 @@ function Editor() {
               </Button>
             </Badge>
           </Tooltip>
-          <Button onClick={save}>保存</Button>
-          <Button type="primary" onClick={run} loading={running} disabled={debugBusy}>运行</Button>
+          <Button onClick={save} loading={saving}>保存</Button>
+          {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
+          {running
+            ? <Button danger onClick={abortRun} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
+            : <Button type="primary" onClick={run} disabled={debugBusy}>运行</Button>}
+          <SecurityAccountBadge />
         </div>
       </header>
 
@@ -1638,7 +1680,7 @@ function Editor() {
                   size="small"
                   allowClear
                   className="canvas-search-input"
-                  placeholder="查找节点（Ctrl+F）"
+                  placeholder="画布中查找（Ctrl+F）"
                   value={searchQuery}
                   onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }}
                   onFocus={() => setSearchOpen(true)}
@@ -1677,10 +1719,19 @@ function Editor() {
                 )}
               </div>
               <span className="canvas-toolbar-divider" />
+              {/* 撤销/重做可见入口（P0）：高频编辑动作不再只藏在「工具」菜单与快捷键里；
+                  tooltip 带历史标签（如“撤销 · 连线”），运行中也随 anyBusy 一起禁用 */}
+              <Button size="small" className="canvas-history-button" disabled={!history.canUndo || anyBusy}
+                title={`撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`} aria-label="撤销" onClick={undo}>↶</Button>
+              <Button size="small" className="canvas-history-button" disabled={!history.canRedo || anyBusy}
+                title={`重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`} aria-label="重做" onClick={redo}>↷</Button>
+              <span className="canvas-toolbar-divider" />
               <label className="canvas-compact-toggle" title="紧凑模式：压缩节点标题与端口间距，适合多端口的大型流程">
                 <Switch size="small" checked={compactNodes} onChange={setCompactNodes} />
                 <span>紧凑</span>
               </label>
+              <Button size="small" disabled={!selectedNode} title="打开所选节点的参数、图像和详细说明（也可双击节点）" onClick={() => openNodeConfiguration(selectedId)}>节点配置</Button>
+              <Button size="small" disabled={nodes.length === 0} title="在弹窗中查看最终预览及节点输入、输出图像" onClick={() => { const target = selectedNode ?? nodes[0]; if (target) openNodeConfiguration(target.id, 'image'); }}>查看图像</Button>
             </div>
 
             {selectedNodeIds.length >= 2 && (
@@ -1703,8 +1754,8 @@ function Editor() {
                 // 切预设即退出专注：由 applyLayoutPreset 统一处理（丢弃专注快照，布局完全由预设接管，P2）
                 onChange={(value) => { if (value !== 'custom') applyLayoutPreset(value as LayoutPreset); }}
                 options={[
-                  { label: '流程编辑', value: 'edit' },
-                  { label: '图像调试', value: 'image' },
+                  { label: '标准布局', value: 'edit' },
+                  { label: '宽画布', value: 'image' },
                   ...(layout.preset === 'custom' ? [{ label: '自定义', value: 'custom' }] : [])
                 ]}
               />
@@ -1712,7 +1763,7 @@ function Editor() {
                 size="small"
                 type={focusMode ? 'primary' : 'default'}
                 onClick={toggleFocusMode}
-                title={focusMode ? '退出专注：还原进入前的面板布局' : '专注画布：收起左右栏与图像/结果区'}
+                title={focusMode ? '退出专注：还原进入前的面板布局' : '专注画布：收起工具箱与结果区'}
               >
                 {focusMode ? '退出专注' : '专注'}
               </Button>
@@ -1736,6 +1787,7 @@ function Editor() {
               deleteKeyCode={null}
               selectionKeyCode="Shift"
               multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
+              zoomOnDoubleClick={false}
               isValidConnection={isValidConnection}
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
@@ -1752,6 +1804,7 @@ function Editor() {
               onMoveStart={() => setConnectionPicker(undefined)}
               onNodeDragStart={() => pushHistory('移动节点')}
               onNodeClick={(_, node) => setSelectedId(node.id)}
+              onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
               onMove={(_, viewport) => syncZoomLevel(viewport)}
               // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
               onNodeContextMenu={(event, node) => {
@@ -1766,43 +1819,14 @@ function Editor() {
               }}
               fitView
               fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
+              // P2：右下角是画布唯一“空白处”——隐藏 React Flow 水印，避免与小地图按钮叠压
+              //（@xyflow/react v12 免费支持 proOptions.hideAttribution）
+              proOptions={{ hideAttribution: true }}
             >
               <Background gap={18} size={1} />
               <Controls />
-              <MiniMap pannable zoomable />
+              <CanvasMiniMap nodeCount={nodes.length} />
             </ReactFlow>
-
-            <div className="debug-toolbar" style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 10, background: 'var(--vs-bg-card)', border: '1px solid var(--vs-border-frame)', boxShadow: '0 6px 18px rgba(0, 0, 0, 0.18)' }}>
-              {/* 普通状态只保留调试入口；进入会话后展示完整操作条，减少画布常驻浮层 */}
-              {!debugSession ? (
-                <>
-                  <Button
-                    size="small"
-                    disabled={anyBusy || hasModuleCalls}
-                    title={hasModuleCalls
-                      ? '含复用模块的流程暂不支持会话调试'
-                      : breakpoints.length === 0
-                        ? '先为节点设置断点（右键节点 → 切换断点），再从起点运行到第一个断点并保留现场'
-                        : '从起点运行到第一个断点并保留现场'}
-                    onClick={() => void startDebugSession()}
-                  >
-                    调试
-                  </Button>
-                  {hasSideEffectNodes && (
-                    <span title="流程含 PLC 写入 / 机器人命令节点：勾选后调试会话才会真的写设备，否则这类节点将被跳过">
-                      <Checkbox style={{ fontSize: 12 }} checked={allowSideEffects} onChange={(event) => setAllowSideEffects(event.target.checked)}>允许真实设备写入</Checkbox>
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Tag color={debugStatus.color} style={{ marginInlineEnd: 0 }} title="会话基于启动时的流程快照">调试 · {debugStatus.text}</Tag>
-                  <Button size="small" type="primary" disabled={anyBusy || debugSession.status !== 'halted'} onClick={() => void continueDebugSession()}>继续</Button>
-                  <Button size="small" disabled={anyBusy || debugSession.status === 'faulted' || !selectedId} title={!selectedId ? '先在画布上选择一个节点' : '用会话缓存的输入执行选中节点，不重跑上游'} onClick={() => void runSelectedNodeInSession()}>运行选中节点</Button>
-                  <Button size="small" danger disabled={anyBusy} onClick={() => void endDebugSession()}>结束会话</Button>
-                </>
-              )}
-            </div>
 
             {/* 节点右键菜单：锚点为不可见占位，Dropdown 受控打开；点击菜单项或菜单外自动关闭 */}
             {connectionPicker && (
@@ -1824,104 +1848,20 @@ function Editor() {
             )}
           </div>
 
-          <SplitHandle
-            axis="y"
-            label="调整图像区高度"
-            value={layout.image}
-            min={LAYOUT_LIMITS.image.min}
-            max={LAYOUT_LIMITS.image.max}
-            scale={100 / centerHeight}
-            invert
-            collapsed={layout.imageCollapsed}
-            collapsible
-            collapseGlyph="▴"
-            expandGlyph="▾"
-            preview={(value) => previewVar('--vs-image-height', `${value}%`)}
-            commit={(value) => updateLayout({ image: value, preset: 'custom' })}
-            reset={() => updateLayout({ image: presetSizes.image })}
-            onToggleCollapse={() => updateLayout({ imageCollapsed: !layout.imageCollapsed })}
-          />
-
-          {/* 折叠时画布独占中央区域；分隔条上的 ▾ 按钮可重新展开。
-              无图像时整区压缩为提示条（44px），运行出图后自动恢复为完整查看器（P0-1） */}
-          <div className={`preview-area${imageViewerSource.url ? '' : ' preview-empty'}`} style={layout.imageCollapsed ? { display: 'none' } : undefined}>
-            {imageViewerSource.url ? (
-              <>
-                <div className="panel-title preview-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>图像查看器 · 感兴趣区域 / 覆盖层</span>
-                  <Segmented
-                    size="small"
-                    value={imageSource}
-                    onChange={(value) => setImageSource(value as 'preview' | 'output' | 'input')}
-                    options={[
-                      { label: '最终预览', value: 'preview' },
-                      { label: '输出', value: 'output', disabled: !selectedOutputAvailable },
-                      { label: '输入', value: 'input', disabled: !selectedInputAvailable }
-                    ]}
-                  />
-                  <Tag style={{ marginInlineEnd: 0 }} color={imageSource === 'preview' ? 'default' : 'blue'} title="当前图像来源（输出=所选节点结果，输入=其上游图像）">{imageViewerSource.label}</Tag>
-                </div>
-                <ImageViewer
-                  previewUrl={imageViewerSource.url}
-                  imageWidth={imageViewerSource.width}
-                  imageHeight={imageViewerSource.height}
-                  overlays={viewerOverlays}
-                  roi={selectedRoi}
-                  roiEnabled={roiEnabled}
-                  roiTargetLabel={roiEnabled ? String(selectedNode?.data.label ?? selectedNode?.id ?? '') : undefined}
-                  loading={anyBusy}
-                  onRoiChange={updateRoi}
-                  nodeLabels={nodeLabels}
-                  focusTick={roiFocusTick}
-                />
-              </>
-            ) : (
-              <div className="preview-empty-bar">
-                <span>运行流程后，最终预览与逐节点图像会显示在这里</span>
-                <Button size="small" type="primary" ghost onClick={run} loading={running} disabled={debugBusy}>运行当前流程</Button>
-                <Button size="small" onClick={() => setCamerasOpen(true)}>添加图像源</Button>
-                <Button size="small" onClick={() => updateLayout({ imageCollapsed: true })}>收起图像区</Button>
-              </div>
-            )}
-          </div>
         </section>
 
-        <SplitHandle
-          axis="x"
-          label="调整属性面板宽度"
-          value={layout.right}
-          min={LAYOUT_LIMITS.right.min}
-          max={rightMax}
-          invert
-          collapsed={layout.rightCollapsed}
-          collapseGlyph="›"
-          expandGlyph="‹"
-          preview={(value) => previewVar('--vs-right-width', `${value}px`)}
-          commit={(value) => updateLayout({ right: value, rightCollapsed: false, preset: 'custom' })}
-          reset={() => updateLayout({ right: presetSizes.right, rightCollapsed: false })}
-          onToggleCollapse={() => updateLayout({ rightCollapsed: !layout.rightCollapsed })}
-        />
-        <aside className="right-panel">
-          {selectedNode ? (
-            <PropertyPanel node={selectedNode} catalogItem={selectedCatalog} onChange={updateParameter} disabled={anyBusy} onLocateRoi={() => setRoiFocusTick((tick) => tick + 1)} />
-          ) : (
-            // 空状态给下一步动作（P1）：不只是“选择一个节点”
-            <div className="panel-empty-state">
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个节点查看与编辑参数" />
-              <div className="panel-empty-actions">
-                <Button size="small" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
-                <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
-                <Button size="small" type="primary" ghost onClick={run} loading={running} disabled={debugBusy}>运行当前流程</Button>
-              </div>
-            </div>
-          )}
-        </aside>
       </main>
+
+      {nodeConfigurationId && configurationNode && configurationCatalog && <NodeConfigurationDialog key={nodeConfigurationId} initialTab={configurationTab} open
+        node={configurationNode} catalogItem={configurationCatalog} nodes={nodes} edges={edges} disabled={anyBusy}
+        result={result} resultReceivedAt={resultReceivedAt} resultStale={resultStale}
+        onClose={() => setNodeConfigurationId(undefined)} onApply={applyNodeParameters}
+        onPreview={(parameters) => previewNode(nodeConfigurationId, parameters)} previewBlockedReason={configurationPreviewBlockedReason} />}
 
       <SplitHandle
         axis="y"
         label="调整结果区高度"
-        value={layout.bottom}
+        value={shownBottomBase}
         min={LAYOUT_LIMITS.bottom.min}
         max={bottomMax}
         invert
@@ -1934,29 +1874,44 @@ function Editor() {
           onToggle: () => updateLayout({ bottomMaximized: !layout.bottomMaximized, bottomCollapsed: false })
         }}
         preview={(value) => previewVar('--vs-bottom-height', `${value}px`)}
-        commit={(value) => updateLayout({ bottom: value, bottomMaximized: false, bottomCollapsed: false, preset: 'custom' })}
-        reset={() => updateLayout({ bottom: presetSizes.bottom, bottomMaximized: false, bottomCollapsed: false })}
+        commit={(value) => updateLayout({ bottom: value, bottomSizing: 'manual', bottomMaximized: false, bottomCollapsed: false, preset: 'custom' })}
+        reset={() => updateLayout({ bottom: presetSizes.bottom, bottomSizing: 'auto', bottomMaximized: false, bottomCollapsed: false })}
         onToggleCollapse={() => updateLayout({ bottomCollapsed: !layout.bottomCollapsed })}
       />
 
-      <footer className="bottom-panel">
-        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；布局切换已移至画布右上角（P1） */}
+      <footer className={`bottom-panel${layout.bottomCollapsed ? ' collapsed' : ''}`}>
+        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；布局切换已移至画布右上角（P1）。
+            折叠态（P1）：标签条保留为展开入口——点击任一标签即展开对应页签 */}
         <div className="bottom-tabs-bar">
-          <Segmented
-            size="small"
-            value={bottomTab}
-            onChange={(value) => setBottomTab(value as typeof bottomTab)}
-            options={[
-              { label: '运行结果', value: 'result' },
-              { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
-              { label: '运行观测', value: 'observability' }
-            ]}
-          />
+          {/* 折叠态点击即展开：Segmented 点击“已选中项”不触发 onChange，必须由外层点击区域兜底 */}
+          <span className="bottom-tabs-expand" title={layout.bottomCollapsed ? '展开结果区' : undefined}
+            onClick={() => { if (layout.bottomCollapsed) updateLayout({ bottomCollapsed: false }); }}>
+            <Segmented
+              size="small"
+              value={bottomTab}
+              onChange={(value) => {
+                setBottomTab(value as typeof bottomTab);
+                if (layout.bottomCollapsed) updateLayout({ bottomCollapsed: false });
+              }}
+              options={[
+                { label: '运行结果', value: 'result' },
+                { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
+                { label: '运行观测', value: 'observability' }
+              ]}
+            />
+          </span>
+          {result && !result.success && <Button size="small" danger onClick={() => {
+            setBottomTab('result');
+            updateLayout({ bottomCollapsed: false, bottomMaximized: false });
+            const failed = result.nodeReports.find((report) => !report.success);
+            if (failed) focusNode(failed.nodeId);
+          }}>{resultStale ? '查看上次错误' : '查看运行错误'}{result.nodeReports.some((report) => !report.success) ? ` · ${result.nodeReports.filter((report) => !report.success).length}` : ''}</Button>}
+          {layout.bottomCollapsed && <span className="bottom-collapsed-hint">点击标签展开结果区</span>}
         </div>
-        {bottomTab === 'result' && (
+        {!layout.bottomCollapsed && bottomTab === 'result' && (
           <RunPanel result={result} nodeLabels={nodeLabels} onSelectNode={focusNode} stale={resultStale} embedded />
         )}
-        {bottomTab === 'issues' && (
+        {!layout.bottomCollapsed && bottomTab === 'issues' && (
           validationIssues.length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击顶部“校验”检查流程；发现的问题将显示在这里，点击可定位到画布" />
           ) : (
@@ -1983,7 +1938,7 @@ function Editor() {
             </div>
           )
         )}
-        {bottomTab === 'observability' && <RunObservabilityPanel runId={result?.runId} />}
+        {!layout.bottomCollapsed && bottomTab === 'observability' && <RunObservabilityPanel runId={result?.runId} nodeLabels={nodeLabels} nodeTypeLabels={Object.fromEntries(catalog.map((item) => [item.type, item.displayName]))} />}
       </footer>
 
       <Modal
@@ -2064,6 +2019,31 @@ function Editor() {
             </div>
           </div>
         ))}
+      </Modal>
+
+      {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}
+      <Modal
+        open={shortcutsOpen}
+        title="键盘快捷键"
+        width={560}
+        footer={<Button onClick={() => setShortcutsOpen(false)}>关闭</Button>}
+        onCancel={() => setShortcutsOpen(false)}
+      >
+        <div className="shortcut-list">
+          {SHORTCUT_ROWS.map((row) => (
+            <div className="shortcut-row" key={row.desc}>
+              <span className="shortcut-keys">
+                {row.combos.map((combo, comboIndex) => (
+                  <span key={combo.join('+')}>
+                    {comboIndex > 0 && <span className="shortcut-alt">或</span>}
+                    {combo.map((key) => <kbd key={key}>{key}</kbd>)}
+                  </span>
+                ))}
+              </span>
+              <span className="shortcut-desc">{row.desc}</span>
+            </div>
+          ))}
+        </div>
       </Modal>
 
       <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Empty, Input, InputNumber, Select, Switch, Tag, Typography } from 'antd';
+import { useMemo } from 'react';
+import { Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
 import { isParameterVisible, validateParameterValues } from '../validation';
@@ -13,22 +13,6 @@ type Props = {
   /** 在图像查看器中居中显示当前节点的 ROI */
   onLocateRoi?: () => void;
 };
-
-const META_KEY = 'visionstudio.property-meta-expanded';
-
-/** 返回 undefined 表示用户尚未表态，由“有参数则折叠”的默认策略决定 */
-function readMetaExpanded(): boolean | undefined {
-  try {
-    const raw = window.localStorage.getItem(META_KEY);
-    return raw === '1' ? true : raw === '0' ? false : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function persistMetaExpanded(expanded: boolean) {
-  try { window.localStorage.setItem(META_KEY, expanded ? '1' : '0'); } catch { /* 忽略存储失败 */ }
-}
 
 function sameValue(a: unknown, b: unknown) {
   if (typeof a === 'number' && typeof b === 'number') return a === b;
@@ -46,7 +30,7 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
   const field = (label: string, value: number, apply: (next: number) => void) => (
     <label className="roi-field" key={label}>
       <span>{label}</span>
-      <InputNumber size="small" disabled={disabled} value={Number(value.toFixed(2))} onChange={(next) => apply(Number(next ?? 0))} />
+      <InputNumber size="small" aria-label={label} disabled={disabled} value={Number(value.toFixed(2))} onChange={(next) => apply(Number(next ?? 0))} />
     </label>
   );
   if (roi.type === 'Rectangle') {
@@ -92,7 +76,6 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
 }
 
 export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi }: Props) {
-  const [metaOverride, setMetaOverride] = useState<boolean | undefined>(readMetaExpanded);
   const sections = useMemo(() => buildSections(catalogItem), [catalogItem]);
 
   if (!node || !catalogItem) {
@@ -105,21 +88,12 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   }
 
   const parameters = (node.data.parameters ?? {}) as Record<string, unknown>;
-  const hasParameters = catalogItem.parameters.length > 0;
-  // 默认折叠技术信息；但没有任何参数的节点只剩元数据可看，这种情况保持展开
-  const metaExpanded = metaOverride ?? !hasParameters;
   const modified = catalogItem.parameters.filter((parameter) => parameters[parameter.name] !== undefined
     && parameter.defaultValue !== undefined
     && !sameValue(parameters[parameter.name], parameter.defaultValue));
 
   // 参数值预检（与“校验”问题列表共用同一套判定）：数字缺失/非法/越界、选择项越界
   const paramIssues = new Map(validateParameterValues(catalogItem.parameters, parameters).map((issue) => [issue.name, issue.message]));
-
-  const toggleMeta = () => {
-    const next = !metaExpanded;
-    setMetaOverride(next);
-    persistMetaExpanded(next);
-  };
 
   const resetAll = () => modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
 
@@ -130,9 +104,10 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       return (
         <InputNumber
           size="small"
+          aria-label={parameter.label}
           status={status}
           disabled={disabled}
-          value={Number(parameters[parameter.name] ?? parameter.defaultValue ?? 0)}
+          value={parameters[parameter.name] === null ? null : Number(parameters[parameter.name] ?? parameter.defaultValue ?? 0)}
           min={parameter.min}
           max={parameter.max}
           step={parameter.step}
@@ -144,6 +119,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       return (
         <Input
           size="small"
+          aria-label={parameter.label}
           status={status}
           disabled={disabled}
           value={String(parameters[parameter.name] ?? '')}
@@ -155,6 +131,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       return (
         <Input.TextArea
           size="small"
+          aria-label={parameter.label}
           status={status}
           disabled={disabled}
           autoSize={{ minRows: 3, maxRows: 12 }}
@@ -167,6 +144,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       return (
         <Switch
           size="small"
+          aria-label={parameter.label}
           disabled={disabled}
           checked={Boolean(parameters[parameter.name])}
           onChange={(value) => onChange(parameter.name, value)}
@@ -176,6 +154,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
     return (
       <Select
         size="small"
+        aria-label={parameter.label}
         status={status}
         disabled={disabled}
         value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
@@ -198,6 +177,9 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
             <span className="property-label-name">
               {parameter.label}{parameter.unit ? ` (${parameter.unit})` : ''}
             </span>
+            {parameter.description && <Tooltip title={parameter.description} trigger={['hover', 'focus']}>
+              <button type="button" className="property-help" aria-label={`${parameter.label}说明`}>?</button>
+            </Tooltip>}
             {isModified && (
               <span className="property-label-actions">
                 <em className="property-modified">已改</em>
@@ -212,7 +194,6 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
               </span>
             )}
           </span>
-          {parameter.description && <span className="property-description">{parameter.description}</span>}
         </label>
         <div className="property-control">
           {renderControl(parameter)}
@@ -224,39 +205,16 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
 
   return (
     <div className="property-panel">
-      <div className="panel-title">属性{disabled ? ' · 运行中已冻结' : ''}</div>
       {disabled && (
         <div className="property-frozen-note">运行/调试进行中：参数编辑已冻结，结果对应提交时的流程；结束后可继续编辑。</div>
       )}
-      <div className="property-heading">{catalogItem.displayName}</div>
-      <div className="property-subtitle">
-        {catalogItem.type}
-        {modified.length > 0 && (
-          <> · <button type="button" className="text-button" disabled={disabled} onClick={resetAll}>恢复全部默认值（{modified.length}）</button></>
-        )}
-      </div>
-
-      <div className="property-tech">
-        <button type="button" className={`property-tech-toggle${metaExpanded ? ' open' : ''}`} aria-expanded={metaExpanded} onClick={toggleMeta}>
-          <span className="panel-caret">{metaExpanded ? '▾' : '▸'}</span>
-          <span>技术信息</span>
-        </button>
-        {metaExpanded && (
-          <>
-            <div className="property-meta">
-              <Tag>{catalogItem.pluginId ?? 'builtin'}</Tag>
-              {catalogItem.capabilities?.supportsRoi && <Tag color="blue">ROI</Tag>}
-              {catalogItem.capabilities?.emitsOverlay && <Tag color="green">覆盖层</Tag>}
-              {catalogItem.capabilities?.deterministic !== false && <Tag color="default">确定性执行</Tag>}
-              {catalogItem.description && <Typography.Text type="secondary">{catalogItem.description}</Typography.Text>}
-            </div>
-            <div className="port-schema">
-              <div><strong>IN</strong> {catalogItem.inputs.map((p) => `${p.name}:${p.dataType}`).join(' · ') || '—'}</div>
-              <div><strong>OUT</strong> {catalogItem.outputs.map((p) => `${p.name}:${p.dataType}`).join(' · ') || '—'}</div>
-            </div>
-          </>
-        )}
-      </div>
+      {catalogItem.parameters.length > 0 && <div className="property-subtitle property-actions">
+        {/* 单条操作不再藏在“更多参数操作 ···”菜单里：直接可见、一次点击（与“还原为打开时”互补：
+            本按钮回到节点出厂默认值，弹窗标题栏的“还原为打开时”回到打开弹窗那一刻的值） */}
+        <Button size="small" type="text" disabled={disabled || modified.length === 0}
+          title="把已改参数恢复为节点出厂默认值；如需恢复为打开弹窗时的值，用标题栏的“还原为打开时”"
+          onClick={resetAll}>恢复出厂默认（{modified.length}）</Button>
+      </div>}
 
       <div className="property-list">
         {isVisionRoi(parameters.roi) && (

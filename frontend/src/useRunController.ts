@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'r
 import { message } from 'antd';
 import type { Edge, Node } from '@xyflow/react';
 import type { NodeCatalogItem, RunResult, WorkflowPayload } from './types';
+import { workflowWithNodeParameters, type NodeParameters } from './nodeConfigurationState';
 
 export type BottomTab = 'result' | 'issues' | 'observability';
 
@@ -63,6 +64,8 @@ export function useRunController({
 }: Params) {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult>();
+  const [resultReceivedAt, setResultReceivedAt] = useState<string>();
+  const previewInFlightRef = useRef(false);
   // 调试会话（后端有状态会话）：启动到断点 / 继续 / 用缓存输入运行单节点 / 结束会话。
   // debugBusy 与 running 合成统一忙碌闸门 anyBusy：任何执行在飞时禁用全部运行/调试入口，防止重复提交。
   const [debugSession, setDebugSession] = useState<DebugSessionView>();
@@ -71,6 +74,10 @@ export function useRunController({
   const debugSessionRef = useRef<DebugSessionView | undefined>(undefined);
   debugSessionRef.current = debugSession;
   const anyBusy = running || debugBusy;
+  // 运行中止（P1）：flow 运行/一次性调试运行共用 execute 的请求控制器。
+  // 前端 abort 会断开连接 → 后端 /api/run 的 CancellationToken 随之取消（端点已把 ct 透传给 runner/租约），
+  // 因此这是真取消而非“仅断前端显示”。设备动作的收尾由后端意图（actionIntent）与租约释放统一处理。
+  const runAbortRef = useRef<AbortController | null>(null);
 
   // 含 PLC 写入 / 机器人命令（supportsRunNode=false）的流程：仅勾选“允许副作用”后才可启动会话
   const hasSideEffectNodes = useMemo(() => nodes.some((node) => {
@@ -108,6 +115,7 @@ export function useRunController({
     // 共享的 submittedWorkflowRef 会被后续请求改写，继续旧会话时必须显式传会话创建时的指纹。
     resultWorkflowRef.current = workflowFingerprint ?? submittedWorkflowRef.current;
     setResult(data);
+    setResultReceivedAt(new Date().toISOString());
     const byId = new Map((data.nodeReports ?? []).map((x) => [x.nodeId, x]));
     setNodes((current) => current.map((node) => {
       const report = byId.get(node.id);
@@ -153,7 +161,7 @@ export function useRunController({
   };
 
   const execute = async (url: string, body: unknown) => {
-    if (anyBusy) return;
+    if (anyBusy || previewInFlightRef.current) return;
     let resultApplied = false;
     setRunning(true);
     // 记录提交时的流程指纹与调试选项（分开存）：结果返回后若画布已改动，RunPanel 提示“结果对应提交时的版本”
@@ -179,11 +187,14 @@ export function useRunController({
       const { className: _className, ...rest } = edge;
       return edge.data?.kind === 'control' ? { ...rest, animated: true } : rest;
     }));
+    const controller = new AbortController();
+    runAbortRef.current = controller;
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
       const data: RunResult & { detail?: string } = await response.json();
       // “执行完成但失败”与“请求被拒绝”必须区分：
@@ -196,16 +207,60 @@ export function useRunController({
       applyResult(data, workflowFingerprint);
       if (!response.ok) messageApi.error(data.error ?? `运行失败 (${response.status})`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '运行失败');
-      if (!resultApplied) {
-        setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'idle' } })));
+      // 中止是用户的显式动作：不当作错误播报，节点回空闲、结果标记保持原样（旧结果不会被误当本次结论，
+      // 因为 applyResult 未执行 → RunPanel 的“提交版本”提示与 stale 语义不受影响）。
+      if (controller.signal.aborted) {
+        messageApi.info('已中止本次运行（后端已收到取消，设备动作按意图登记收尾）。');
+        if (!resultApplied) {
+          setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'idle' } })));
+        }
+      } else {
+        messageApi.error(error instanceof Error ? error.message : '运行失败');
+        if (!resultApplied) {
+          setNodes((current) => current.map((node) => ({ ...node, data: { ...node.data, status: 'idle' } })));
+        }
       }
     } finally {
+      if (runAbortRef.current === controller) runAbortRef.current = null;
       setRunning(false);
     }
   };
 
   const run = () => execute('/api/run', workflowPayload);
+
+  /** 中止当前运行/一次性调试运行（无请求在飞时为无操作）。 */
+  const abortRun = () => { runAbortRef.current?.abort(); };
+
+  // 节点弹窗的草稿测试与普通运行共用执行闸门，结果只交给弹窗；不修改画布参数、节点状态或全局结果。
+  const previewNode = async (nodeId: string, parameters: NodeParameters): Promise<RunResult> => {
+    if (anyBusy || previewInFlightRef.current) throw new Error('已有运行正在进行，请稍后再试。');
+    if (debugSessionRef.current) throw new Error('请先结束当前调试会话，再测试暂存参数。');
+    const target = nodes.find((node) => node.id === nodeId);
+    const metadata = catalog.find((item) => item.type === target?.data.typeKey);
+    if (!target || !metadata) throw new Error('待测试节点不可用。');
+    if (target.data.typeKey === 'module.call' || metadata.capabilities?.supportsRunNode === false) throw new Error('此节点不支持单节点测试，请应用参数后使用流程运行入口。');
+    const workflow = workflowWithNodeParameters(workflowPayload, nodeId, parameters);
+    previewInFlightRef.current = true;
+    setRunning(true);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch('/api/debug/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+        body: JSON.stringify({ workflow, options: { mode: 'RunNode', targetNodeId: nodeId, breakpoints: [] } })
+      });
+      const data = await response.json();
+      if (!isRunResult(data)) throw new Error(data?.detail ?? data?.error ?? `节点测试失败 (${response.status})`);
+      return data as RunResult; // 算法失败的有效报告同样展示在弹窗中。
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error('节点测试请求超时，请检查运行状态后重试。');
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      previewInFlightRef.current = false;
+      setRunning(false);
+    }
+  };
 
   const runNode = () => {
     if (!selectedId) return messageApi.warning('先选择一个节点');
@@ -226,7 +281,7 @@ export function useRunController({
   // 调试会话：启动（跑到首个断点并保留现场）→ 继续 / 用缓存输入运行单节点 → 结束会话。
   // 所有入口共用 anyBusy 闸门；会话在后端持有流程快照，界面编辑不影响进行中的会话。
   const startDebugSession = async () => {
-    if (anyBusy) return;
+    if (anyBusy || previewInFlightRef.current) return;
     if (hasModuleCalls) { messageApi.warning('含复用模块的流程暂不支持会话调试，请先在“可复用模块”中调试模块内部节点'); return; }
     if (breakpoints.length === 0) { messageApi.warning('请先为至少一个节点设置断点'); return; }
     endDebugSessionSilently(); // 重新开始：先释放旧会话，避免孤儿会话占资源
@@ -418,16 +473,20 @@ export function useRunController({
   const clearResult = () => {
     resultWorkflowRef.current = '';
     setResult(undefined);
+    setResultReceivedAt(undefined);
   };
 
   return {
     running,
     result,
+    resultReceivedAt,
     clearResult,
     applyResult,
     resultStale,
     run,
+    abortRun,
     runNode,
+    previewNode,
     runFromHere,
     debugSession,
     debugBusy,

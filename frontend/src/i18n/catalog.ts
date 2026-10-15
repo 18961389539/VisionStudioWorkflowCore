@@ -199,6 +199,7 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  threshold: '阈值',
   pixelCount: '像素数', binsJson: '256 级频数 JSON', cdfJson: '累计分布 JSON', median: '中位灰度',
   entropy: '灰度熵（bit）', percentileLow: '下百分位灰度', percentileHigh: '上百分位灰度',
   pointsJson: '点列 JSON', inner: '内圆', outer: '外圆', contained: '内圆完全包含', minThickness: '最小壁厚', maxThickness: '最大壁厚',
@@ -405,7 +406,7 @@ const statusNames: Record<string, string> = {
   Starting: '启动中', Stopping: '停止中', StopUnconfirmed: '停止未确认', Recovering: '恢复中',
   Administrator: '管理员', Engineer: '工程师', Operator: '操作员',
   OK: '合格', NG: '不合格', Unknown: '未知', Native: '原生', Fallback: '备用',
-  Insufficient: '数据不足', Slow: '较慢', VerySlow: '很慢', Same: '无变化', Added: '新增', Missing: '缺失',
+  Insufficient: '样本不足', Normal: '正常', Slow: '偏慢', VerySlow: '明显偏慢', Same: '无变化', Added: '新增', Missing: '缺失',
   TypeChanged: '类型已更改', StatusChanged: '状态已更改', OutputChanged: '输出已更改',
   PerformanceRegression: '性能下降', Within: '符合范围', Out: '超出范围'
 };
@@ -444,3 +445,5 @@ export const localizeStatus = (value: string | null | undefined, lang: Lang = 'z
   if (lang === 'en') return value;
   return statusNames[value] ?? value;
 };
+
+export const localizeNodeType = (type: string, lang: Lang = 'zh') => lang === 'zh' ? nodeNames[type] ?? type : type;

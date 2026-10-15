@@ -76,7 +76,10 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
   }, [results]);
   const recentItems = recentTypes.map((type) => results.find((item) => item.type === type))
     .filter((item): item is NodeCatalogItem => Boolean(item));
+  const favoriteItems = results.filter((item) => favorites.includes(item.type));
+  const allGroupsCollapsed = groups.length > 0 && groups.every((group) => collapsed.includes(group.key) || collapsed.includes(group.label));
   const visibleItems = keyword || tab === 'favorites' || connection ? results : [
+    ...favoriteItems.slice(0, 3),
     ...recentItems.slice(0, showAllRecent ? undefined : 3),
     ...groups.filter((group) => !collapsed.includes(group.key) && !collapsed.includes(group.label)).flatMap((group) => group.items)
   ];
@@ -89,6 +92,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[data-tool-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [selectedType, query, tab]);
+  useEffect(() => { if (listRef.current) listRef.current.scrollTop = 0; }, [query, tab]);
   const select = (type: string) => {
     if (selectedType !== type) setSelectedPort(undefined);
     setSelectedType(type);
@@ -136,6 +140,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
   const renderItem = (item: NodeCatalogItem) => {
     const favorite = favorites.includes(item.type);
     const active = item.type === activeType;
+    const purpose = (item.description || text('添加后配置参数并连接到流程。', 'Add, configure and connect to the workflow.')).trim().split(/[。！？]|\.(?:\s|$)/)[0];
     return <div key={item.type} className={`toolbox-item${active ? ' active' : ''}`} data-tool-active={active}
       style={{ '--node-accent': nodePresentation(item.type).color } as CSSProperties}
       draggable={!connection} onDragStart={(event) => {
@@ -143,9 +148,11 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         event.dataTransfer.effectAllowed = 'copy';
       }}>
       <button type="button" className="toolbox-item-main" aria-pressed={selectedType === item.type}
-        title={item.displayName} onClick={() => select(item.type)} onDoubleClick={() => add(item)}
+        aria-label={item.displayName} title={item.description || item.displayName} onClick={() => select(item.type)} onDoubleClick={() => add(item)}
         onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); add(item); } }}>
-        <NodeCategoryIcon type={item.type} /><span className="toolbox-item-name"><Highlight text={item.displayName} query={query} /></span>
+        <NodeCategoryIcon type={item.type} /><span className="toolbox-item-copy"><span className="toolbox-item-name"><Highlight text={item.displayName} query={query} /></span>
+          {(keyword || connection) && <small className="toolbox-item-purpose">{purpose}</small>}
+        </span>
       </button>
       <button type="button" className={`toolbox-action${favorite ? ' favorited' : ''}`} aria-label={text(`${favorite ? '取消收藏' : '收藏'} ${item.displayName}`, `${favorite ? 'Unfavorite' : 'Favorite'} ${item.displayName}`)}
         aria-pressed={favorite} title={text(favorite ? '取消收藏' : '收藏', favorite ? 'Unfavorite' : 'Favorite')}
@@ -168,6 +175,11 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         <button type="button" aria-pressed={tab === 'all'} onClick={() => setTab('all')}>{text('全部', 'All')}</button>
         <button type="button" aria-pressed={tab === 'favorites'} onClick={() => setTab('favorites')}>{text('收藏', 'Favorites')} <small>{searchTools(catalog, '').filter((item) => favorites.includes(item.type)).length}</small></button>
       </div>}
+      {!connection && !keyword && tab === 'all' && <div className="toolbox-category-actions">
+        <button type="button" className="toolbox-link" onClick={() => setCollapsed(allGroupsCollapsed ? [] : groups.map((group) => group.key))}>
+          {text(allGroupsCollapsed ? '展开全部分类' : '折叠全部分类', allGroupsCollapsed ? 'Expand all groups' : 'Collapse all groups')}
+        </button>
+      </div>}
       <div className="toolbox-hint">{connection ? `${connection.dataType} ${connection.direction === 'source' ? '→' : '←'} ${text('兼容端口', 'compatible ports')}` : text('拖拽 / 双击 / ＋ 添加', 'Drag / double-click / ＋ to add')}</div>
     </div>
     <div className="toolbox-list" ref={listRef}>
@@ -179,6 +191,11 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         <div className="toolbox-hint">{text(`${results.length} 个结果 · ↑↓ 选择 · 回车添加`, `${results.length} results · ↑↓ select · Enter to add`)}</div>
         {results.map(renderItem)}
       </> : <>
+        {favoriteItems.length > 0 && <section aria-label={text('常用收藏', 'Favorite shortcuts')}>
+          <div className="toolbox-category static"><span>{text('常用收藏', 'Favorites')}</span><span className="toolbox-category-count">{favoriteItems.length}</span>
+            {favoriteItems.length > 3 && <button type="button" className="toolbox-link" onClick={() => setTab('favorites')}>{text('查看全部', 'View all')}</button>}
+          </div>{favoriteItems.slice(0, 3).map(renderItem)}
+        </section>}
         {recentItems.length > 0 && <section aria-label={text('最近使用', 'Recently used')}>
           <div className="toolbox-category static"><span>{text('最近使用', 'Recent')}</span><span className="toolbox-category-count">{recentItems.length}</span>
             {recentItems.length > 3 && <button type="button" className="toolbox-link" aria-expanded={showAllRecent} onClick={() => setShowAllRecent(!showAllRecent)}>{text(showAllRecent ? '收起' : '更多', showAllRecent ? 'Less' : 'More')}</button>}
@@ -198,7 +215,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
     {selected && selectedVisible && <section className="toolbox-detail" aria-label={text('节点详情', 'Node details')}>
       <div className="toolbox-detail-heading"><NodeCategoryIcon type={selected.type} /><strong>{selected.displayName}</strong><button type="button" className="toolbox-close" aria-label={text('关闭节点详情', 'Close node details')} onClick={() => setSelectedType(undefined)}>×</button></div>
       <code>{selected.type}</code>
-      <p>{selected.description || text('选择后添加到画布，在属性面板配置参数。', 'Add to canvas and configure in the properties panel.')}</p>
+      <p>{selected.description || text('添加到画布后，双击节点打开配置弹窗。', 'Add to canvas, then double-click the node to configure it.')}</p>
       <div className="toolbox-badges">
         {selected.pluginId && selected.pluginId !== 'builtin' && <span>{text('来源', 'Source')} · {selected.pluginId}</span>}
         {['image.acquire', 'camera.syncCapture'].includes(selected.type) && <span>{text('需要相机', 'Camera required')}</span>}
@@ -214,6 +231,6 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         placeholder={text('选择要连接的端口', 'Choose a port to connect')} onChange={setSelectedPort} options={ports.map((port) => ({ value: port.name, label: `${port.name} · ${port.dataType}` }))} />}
       <button type="button" className="toolbox-detail-add" disabled={Boolean(connection && ports.length > 1 && !selectedPort)} onClick={() => add(selected)}>{text(connection ? '添加并连接' : '＋ 添加到画布', connection ? 'Add and connect' : '＋ Add to canvas')}</button>
     </section>}
-    <div className="toolbox-feedback" role="status" aria-live="polite">{feedback || text('单击节点查看用途和端口', 'Click a node to view its purpose and ports')}</div>
+    <div className="toolbox-feedback" role="status" aria-live="polite">{feedback || text('单击节点查看详情', 'Click a node for details')}</div>
   </div>;
 }

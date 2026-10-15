@@ -128,7 +128,6 @@ export const messages = {
 
   // ── 属性面板 / property panel ────────────────────────────────────────────
   'property.overlay': { zh: '覆盖层', en: 'Overlay' },
-  'property.deterministic': { zh: '确定性执行', en: 'Deterministic' },
   'property.roiHint': { zh: '感兴趣区域 · 在图像查看器中编辑', en: 'ROI · edit in the image viewer' },
   'property.noParameters': { zh: '无可配置参数', en: 'No configurable parameters' },
 

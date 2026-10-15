@@ -4,6 +4,17 @@
 type NodeDetailsListener = (nodeId: string) => void;
 
 const listeners = new Set<NodeDetailsListener>();
+const configurationListeners = new Set<NodeDetailsListener>();
+
+/** 配置和结果详情使用同一弹窗的不同页签。 */
+export function onConfigureNode(listener: NodeDetailsListener): () => void {
+  configurationListeners.add(listener);
+  return () => { configurationListeners.delete(listener); };
+}
+
+export function configureNode(nodeId: string): void {
+  for (const listener of [...configurationListeners]) listener(nodeId);
+}
 
 /** 订阅“查看该节点的完整运行结果”；返回取消订阅函数。 */
 export function onShowNodeDetails(listener: NodeDetailsListener): () => void {
@@ -11,7 +22,7 @@ export function onShowNodeDetails(listener: NodeDetailsListener): () => void {
   return () => { listeners.delete(listener); };
 }
 
-/** 节点 footer 的“查看完整详情”入口调用：把节点交给外壳（选中 + 展开运行结果）。 */
+/** 节点 footer 的“详情”入口调用：把节点交给外壳并打开结果弹窗。 */
 export function showNodeDetails(nodeId: string): void {
   for (const listener of [...listeners]) listener(nodeId);
 }

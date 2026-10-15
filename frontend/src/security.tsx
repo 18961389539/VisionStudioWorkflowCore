@@ -1,9 +1,42 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Alert, Button, Card, Dropdown, Input, Space, Spin, Tag, Typography } from 'antd';
 import { localizeStatus } from './i18n';
 
 type SecurityStatus = { enabled: boolean; bootstrapRequired: boolean; autoLogin: boolean };
 export type SecurityUser = { id: string; username: string; displayName: string; role: 'Operator' | 'Engineer' | 'Administrator' };
+
+/**
+ * 账号上下文：SecurityGate 持有登录态，账号徽标由顶栏（或运行时页）在**普通 flex 流**中渲染。
+ * 之前徽标是 gate 内固定定位（fixed + 顶栏预留 108px）的浮层——长显示名会挤占「运行」按钮，
+ * 且与运行时页的「诊断」按钮叠压。改为上下文 + 组件后，布局完全由所在容器的 flex 决定。
+ */
+type SecurityAccount = { enabled: boolean; user?: SecurityUser; busy: boolean; logout: () => Promise<void> };
+const SecurityAccountContext = createContext<SecurityAccount>({ enabled: false, busy: false, logout: async () => undefined });
+
+/** 账号徽标：角色色点 + 显示名，点击展开角色/用户信息与退出登录。 */
+export function SecurityAccountBadge() {
+  const { enabled, user, busy, logout } = useContext(SecurityAccountContext);
+  const name = user?.displayName ?? user?.username;
+  if (!enabled) return <Tag className="security-badge-disabled" color="orange">安全功能已关闭</Tag>;
+  return (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [
+          { key: 'role', label: `角色：${localizeStatus(user?.role) ?? '未知'}`, disabled: true },
+          { key: 'name', label: `用户：${name ?? '未知'}`, disabled: true },
+          { type: 'divider' },
+          { key: 'logout', label: '退出登录', danger: true, disabled: busy, onClick: () => void logout() }
+        ]
+      }}
+    >
+      <button type="button" className="security-badge-trigger" title="账号：查看角色与退出登录">
+        <span className={`security-role-dot role-${String(user?.role ?? 'operator').toLowerCase()}`} />
+        <span className="security-badge-name">{name ?? '未登录'}</span>
+      </button>
+    </Dropdown>
+  );
+}
 
 const AUTO_LOGIN_SKIPPED_KEY = 'visionstudio.auto-login-skipped';
 
@@ -125,28 +158,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
     );
   }
 
-  return <>
+  return <SecurityAccountContext.Provider value={{ enabled: Boolean(status?.enabled), user, busy, logout }}>
     {children}
-    {/* 账号入口：收起为顶栏右上角的一个轻量按钮（角色色点+显示名），点击展开退出登录 */}
-    <div className="security-badge">
-      {status?.enabled ? (
-        <Dropdown
-          trigger={['click']}
-          menu={{
-            items: [
-              { key: 'role', label: `角色：${localizeStatus(user?.role) ?? '未知'}`, disabled: true },
-              { key: 'name', label: `用户：${user?.displayName ?? user?.username ?? '未知'}`, disabled: true },
-              { type: 'divider' },
-              { key: 'logout', label: '退出登录', danger: true, onClick: () => void logout() }
-            ]
-          }}
-        >
-          <button type="button" className="security-badge-trigger" title="账号">
-            <span className={`security-role-dot role-${String(user?.role ?? 'operator').toLowerCase()}`} />
-            {user?.displayName ?? user?.username ?? '未登录'}
-          </button>
-        </Dropdown>
-      ) : <Tag color="orange">安全功能已关闭</Tag>}
-    </div>
-  </>;
+  </SecurityAccountContext.Provider>;
 }

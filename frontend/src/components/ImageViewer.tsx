@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Segmented, Select, Space, Switch, Tag, Tooltip } from 'antd';
+import { Button, Segmented, Select, Space, Switch, Tooltip } from 'antd';
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi } from '../types';
+import { createPixelBuffer, readPixel } from '../imagePixels';
 
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's';
+
+/** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
+ *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
+const PIXELATED_KEY = 'visionstudio.viewer-pixelated';
+const readPixelated = () => {
+  try { return window.localStorage.getItem(PIXELATED_KEY) !== '0'; } catch { return true; }
+};
+const persistPixelated = (value: boolean) => {
+  try { window.localStorage.setItem(PIXELATED_KEY, value ? '1' : '0'); } catch { /* 忽略存储失败 */ }
+};
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
@@ -14,18 +25,18 @@ const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) =
 const HANDLE_HIT = 10;
 
 function useHtmlImage(url?: string) {
-  const [image, setImage] = useState<HTMLImageElement>();
-  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState<{ url: string; image: HTMLImageElement }>();
+  const [failedUrl, setFailedUrl] = useState<string>();
   useEffect(() => {
-    if (!url) { setImage(undefined); setFailed(false); return; }
-    setFailed(false);
+    if (!url) { setLoaded(undefined); setFailedUrl(undefined); return; }
+    setFailedUrl(undefined);
     const img = new window.Image();
-    img.onload = () => setImage(img);
-    img.onerror = () => { setImage(undefined); setFailed(true); };
+    img.onload = () => setLoaded({ url, image: img });
+    img.onerror = () => { setLoaded(undefined); setFailedUrl(url); };
     img.src = url;
     return () => { img.onload = null; img.onerror = null; };
   }, [url]);
-  return { image, failed };
+  return { image: loaded?.url === url ? loaded?.image : undefined, failed: Boolean(url && failedUrl === url) };
 }
 
 function normalizeRect(start: Point, end: Point): VisionRoi {
@@ -151,11 +162,14 @@ export default function ImageViewer({
   overlays,
   roi,
   roiEnabled,
+  showRoiTools = true,
   roiTargetLabel,
   loading,
   onRoiChange,
   nodeLabels,
-  focusTick
+  focusTick,
+  emptyHint = '运行工作流以显示图像和矢量覆盖层',
+  emptyAction
 }: {
   previewUrl?: string;
   imageWidth?: number;
@@ -163,6 +177,8 @@ export default function ImageViewer({
   overlays: VisionOverlay[];
   roi?: VisionRoi;
   roiEnabled: boolean;
+  /** 纯图像预览时隐藏无关的绘图操作。 */
+  showRoiTools?: boolean;
   roiTargetLabel?: string;
   loading?: boolean;
   onRoiChange: (roi?: VisionRoi) => void;
@@ -170,15 +186,22 @@ export default function ImageViewer({
   nodeLabels?: Record<string, string>;
   /** 递增信号：来自属性面板“定位选区”，把视图适配到当前 ROI 区域 */
   focusTick?: number;
+  /** 无图像时的提示文案（默认面向主画布流程运行；弹窗内可改为“运行此节点”） */
+  emptyHint?: string;
+  /** 无图像时的操作入口（如“运行此节点”）：空态不再只有一行灰字 */
+  emptyAction?: { label: string; onClick: () => void; disabled?: boolean; title?: string };
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<any>(null);
   const [size, setSize] = useState({ width: 400, height: 260 });
   const [view, setView] = useState<ViewState>({ scale: 1, x: 0, y: 0 });
   const [tool, setTool] = useState<ToolMode>('pan');
-  const [cursor, setCursor] = useState<Point>();
+  const [cursorScreen, setCursor] = useState<Point>();
   const [showOverlay, setShowOverlay] = useState(true);
   const [overlayFilter, setOverlayFilter] = useState<string[]>([]);
+  // 像素化（最近邻）默认开：放大即真实像素方块；开关可切回平滑插值
+  const [pixelated, setPixelated] = useState(readPixelated);
+  useEffect(() => { persistPixelated(pixelated); }, [pixelated]);
   const [draft, setDraft] = useState<VisionRoi>();
   const gestureStart = useRef<Point | undefined>(undefined);
   const panStart = useRef<{ pointer: Point; view: ViewState } | undefined>(undefined);
@@ -188,6 +211,37 @@ export default function ImageViewer({
   const { image, failed } = useHtmlImage(previewUrl);
   const actualWidth = imageWidth || image?.naturalWidth || 0;
   const actualHeight = imageHeight || image?.naturalHeight || 0;
+  const cursorPoint = cursorScreen ? { x: (cursorScreen.x - view.x) / view.scale, y: (cursorScreen.y - view.y) / view.scale } : undefined;
+  const cursor = cursorPoint && cursorPoint.x >= 0 && cursorPoint.y >= 0 && cursorPoint.x < actualWidth && cursorPoint.y < actualHeight ? cursorPoint : undefined;
+  const pixelBuffer = useMemo(() => {
+    if (!image) return undefined;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return createPixelBuffer(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
+    } catch { return null; }
+  }, [image]);
+  const pixel = cursor && pixelBuffer ? readPixel(pixelBuffer, cursor.x, cursor.y, actualWidth, actualHeight) : undefined;
+
+  useEffect(() => {
+    if (!roiEnabled) {
+      setTool('pan');
+      setDraft(undefined);
+      polygonPoints.current = [];
+      gestureStart.current = undefined;
+      roiDrag.current = undefined;
+    }
+  }, [roiEnabled]);
+  useEffect(() => {
+    setOverlayFilter([]);
+    setCursor(undefined);
+    setDraft(undefined);
+    polygonPoints.current = [];
+  }, [previewUrl]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -294,6 +348,7 @@ export default function ImageViewer({
   const onPointerDown = () => {
     const p = pointer();
     if (!p) return;
+    setCursor(p);
     // 已有选区时优先响应拖动：控制点缩放 > 选区内部平移 > 平移画布 / 新建选区
     if (roi && roiEnabled && tool !== 'polygon') {
       const handle = hitRoiHandle(roi, p);
@@ -322,7 +377,7 @@ export default function ImageViewer({
     const p = pointer();
     if (!p) return;
     const ip = imagePoint(p);
-    setCursor(inside(ip) ? ip : undefined);
+    setCursor(p);
     if (roiDrag.current) {
       const next = applyRoiDrag(roiDrag.current.origin, roiDrag.current.mode, roiDrag.current.start, ip, actualWidth, actualHeight);
       if (next) setDraft(next);
@@ -419,7 +474,7 @@ export default function ImageViewer({
     <div className="vision-viewer">
       <div className="viewer-toolbar">
         <Space size={5} wrap>
-          <Segmented
+          {showRoiTools && <Segmented
             size="small"
             value={tool}
             onChange={(value) => { polygonPoints.current = []; setDraft(undefined); setTool(value as ToolMode); }}
@@ -429,12 +484,13 @@ export default function ImageViewer({
               { value: 'circle', disabled: !roiEnabled, label: <Tooltip title="圆形选区">圆形</Tooltip> },
               { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title="多边形选区 · 双击完成">多边形</Tooltip> }
             ]}
-          />
-          <span className="viewer-toolbar-divider" />
+          />}
+          {showRoiTools && <span className="viewer-toolbar-divider" />}
           <Button size="small" onClick={fit}>适应窗口</Button>
           <Button size="small" onClick={oneToOne}>原始比例</Button>
-          <Button size="small" danger disabled={!roi} onClick={clearRoi}>清除选区</Button>
+          {showRoiTools && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}
           <span className="viewer-toolbar-divider" />
+          <span className="viewer-toggle" title="像素化（默认）：放大时按真实像素方块显示，便于逐像素核对；关闭则使用平滑插值（缩小总览更顺眼）">像素化 <Switch size="small" checked={pixelated} onChange={setPixelated} /></span>
           <span className="viewer-toggle">显示覆盖层 <Switch size="small" checked={showOverlay} onChange={setShowOverlay} /></span>
           {/* 覆盖层按节点筛选：仅当存在多个节点来源时才有意义（单节点输出视图 App 已按节点过滤） */}
           {overlayNodeIds.length > 1 && (
@@ -451,17 +507,14 @@ export default function ImageViewer({
               options={overlayNodeIds.map((id) => ({ value: id, label: nodeLabels?.[id] ?? id }))}
             />
           )}
-          <Tag>{Math.round(view.scale * 100)}%</Tag>
         </Space>
-        <div className="viewer-readout">
-          {actualWidth > 0 && <span>{actualWidth} × {actualHeight}</span>}
-          {cursor && <span>X {cursor.x.toFixed(1)} · Y {cursor.y.toFixed(1)}</span>}
-          <span>选区 → {roiTargetLabel || '请选择图像节点'}</span>
-        </div>
       </div>
 
       <div ref={hostRef} className={`viewer-stage ${loading ? 'is-loading' : ''}`} style={{ cursor: cursorStyle }}>
-        {!previewUrl && !failed && <div className="image-placeholder">运行工作流以显示图像和矢量覆盖层</div>}
+        {!previewUrl && !failed && <div className="image-placeholder">
+          <span>{emptyHint}</span>
+          {emptyAction && <Button size="small" type="primary" disabled={emptyAction.disabled} title={emptyAction.title} onClick={emptyAction.onClick}>{emptyAction.label}</Button>}
+        </div>}
         {failed && <div className="image-placeholder error">图像加载失败：预览不可用或已被清理</div>}
         {previewUrl && !failed && (
           <Stage
@@ -479,7 +532,7 @@ export default function ImageViewer({
             onDblClick={commitPolygon}
             onMouseLeave={() => { setCursor(undefined); panStart.current = undefined; }}
           >
-            <Layer>
+            <Layer imageSmoothingEnabled={!pixelated}>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
                 {image && <KonvaImage image={image} width={actualWidth} height={actualHeight} listening={false} />}
               </Group>
@@ -499,6 +552,15 @@ export default function ImageViewer({
           </Stage>
         )}
         {loading && <div className="viewer-loading">运行中…</div>}
+      </div>
+      <div className="viewer-readout" role="group" aria-label="图像状态栏">
+        <span className="viewer-image-size">{actualWidth > 0 ? `${actualWidth} × ${actualHeight}` : '无图像'}</span>
+        <span className="viewer-zoom">{Math.round(view.scale * 100)}%</span>
+        <span className="viewer-pixel-readout">{cursor && image ? <>
+          <span>X {Math.floor(cursor.x)} · Y {Math.floor(cursor.y)}</span>
+          <span>{pixel ? `${pixel.grayscale ? `灰度 ${pixel.r}` : `RGB (${pixel.r}, ${pixel.g}, ${pixel.b})`}${pixel.a < 255 ? ` · A ${pixel.a}` : ''}` : pixelBuffer === null ? '像素值不可用' : ''}</span>
+        </> : <span className="viewer-pixel-placeholder">移动鼠标查看像素</span>}</span>
+        <span className="viewer-roi-target" title={roiEnabled ? `选区编辑作用于：${roiTargetLabel || '当前图像'}` : '只读：该节点/该图像不支持编辑选区（未开启 ROI 能力、正在查看预览图像或图像尚未产出）'}>{roiEnabled ? `选区 → ${roiTargetLabel || '当前图像'}` : '只读 · 不可编辑选区'}</span>
       </div>
     </div>
   );
