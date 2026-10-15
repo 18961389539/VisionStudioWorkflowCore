@@ -1276,7 +1276,9 @@ SELECT replay_relative_path FROM run_traces WHERE has_replay_input=1 AND replay_
         {
             await connection.OpenAsync();
             await using var downgrade = connection.CreateCommand();
-            downgrade.CommandText = "ALTER TABLE run_traces DROP COLUMN error_code; UPDATE schema_info SET version=19 WHERE id=1; DELETE FROM schema_migration_history WHERE version=20;";
+            // 降级到 v19 需撤销 v19 之后每个迁移的架构效果与历史行（v20 error_code、v21 requires_validation）：
+            // 重放按 version>current 全量执行，残留历史行会撞 UNIQUE，残留列会让非幂等 ALTER 撞 duplicate。
+            downgrade.CommandText = "ALTER TABLE run_traces DROP COLUMN error_code; ALTER TABLE jobs DROP COLUMN requires_validation; UPDATE schema_info SET version=19 WHERE id=1; DELETE FROM schema_migration_history WHERE version>19;";
             await downgrade.ExecuteNonQueryAsync();
         }
 

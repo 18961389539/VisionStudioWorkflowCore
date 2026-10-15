@@ -56,10 +56,8 @@ public sealed class SqliteSchemaMigrationRunner
         new(19, "V0.63 case verification gate and dataset regression evidence", InvestigationVerificationSchemaSql),
         new(20, "V0.64 run trace lifecycle and structured error codes", "", ApplyRunTraceLifecycleColumnsAsync,
             "run_traces.error_code"),
-        new(21, "Independent recipe validation policy", """
-ALTER TABLE jobs ADD COLUMN requires_validation INTEGER NOT NULL DEFAULT 0;
-UPDATE jobs SET requires_validation=1 WHERE product_id IS NOT NULL OR recipe_code IS NOT NULL;
-""")
+        new(21, "Independent recipe validation policy", "", ApplyIndependentRecipeValidationAsync,
+            "jobs.requires_validation")
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -282,6 +280,17 @@ SET base_workflow_hash = COALESCE(base_workflow_hash, workflow_hash),
     parameter_bindings_json = COALESCE(parameter_bindings_json, '{}'),
     parameter_snapshot_json = COALESCE(parameter_snapshot_json, '{}');
 """;
+        await backfill.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task ApplyIndependentRecipeValidationAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    {
+        // Replay-safe：恢复旧备份时会重放迁移，裸 ALTER 会在已有该列的库上抛 duplicate column
+        // （其余列扩展迁移同样走 EnsureColumnAsync）。UPDATE 自身幂等，可重复执行。
+        await EnsureColumnAsync(connection, tx, "jobs", "requires_validation", "INTEGER NOT NULL DEFAULT 0", ct);
+        await using var backfill = connection.CreateCommand();
+        backfill.Transaction = tx;
+        backfill.CommandText = "UPDATE jobs SET requires_validation=1 WHERE product_id IS NOT NULL OR recipe_code IS NOT NULL;";
         await backfill.ExecuteNonQueryAsync(ct);
     }
 
