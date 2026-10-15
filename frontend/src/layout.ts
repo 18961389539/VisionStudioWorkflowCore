@@ -72,7 +72,7 @@ export function readLayout(): LayoutState {
 }
 
 export function automaticResultHeight(shellHeight: number): number {
-  return clampNumber(Math.round(Math.max(0, shellHeight - 48) * 0.27), 120, LAYOUT_LIMITS.bottom.max);
+  return clampNumber(Math.round(Math.max(0, shellHeight - 96) * 0.27), 120, LAYOUT_LIMITS.bottom.max);
 }
 
 export function persistLayout(state: LayoutState) {

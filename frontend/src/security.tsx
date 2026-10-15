@@ -147,8 +147,8 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
             {error && <Alert type="error" showIcon message={error} />}
             <Input value={username} onChange={e => setUsername(e.target.value)} placeholder="用户名" autoComplete="username" />
             {firstRun && <Input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="显示名称" />}
-            <Input.Password value={password} onChange={e => setPassword(e.target.value)} placeholder="密码（至少 10 个字符）" autoComplete={firstRun ? 'new-password' : 'current-password'} onPressEnter={() => void (firstRun ? bootstrap() : login())} />
-            <Button type="primary" block loading={busy} disabled={username.trim().length < 3 || password.length < 10} onClick={() => void (firstRun ? bootstrap() : login())}>
+            <Input.Password value={password} onChange={e => setPassword(e.target.value)} placeholder={firstRun ? '密码（至少 10 个字符）' : '密码'} autoComplete={firstRun ? 'new-password' : 'current-password'} onPressEnter={() => void (firstRun ? bootstrap() : login())} />
+            <Button type="primary" block loading={busy} disabled={username.trim().length < 3 || password.length < (firstRun ? 10 : 1)} onClick={() => void (firstRun ? bootstrap() : login())}>
               {firstRun ? '创建管理员并登录' : '登录'}
             </Button>
             <Typography.Text type="secondary">本地凭据以 PBKDF2 哈希形式保存。浏览器会话使用 HttpOnly Cookie。</Typography.Text>

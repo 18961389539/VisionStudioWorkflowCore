@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Collapse, Divider, Dropdown, Empty, Input, InputNumber, Menu, Modal, Segmented, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Divider, Dropdown, Empty, Form, Input, InputNumber, Menu, Modal, Segmented, Select, Space, Spin, Steps, Switch, Table, Tabs, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
-import type { JobDescriptor, JobVersionDiff, JobVersionSnapshot, ParameterValueSet, ProductDescriptor, ResolvedRecipeParameterization, RunResult, RuntimeDependencyValidation, ValidationCandidateInfo, WorkflowPayload } from '../types';
+import type { JobDescriptor, JobVersionDiff, JobVersionSnapshot, ResolvedRecipeParameterization, RunResult, RuntimeDependencyValidation, ValidationCandidateInfo, WorkflowPayload } from '../types';
 
 type Props = { open: boolean; onClose: () => void; workflow: WorkflowPayload; onLoadWorkflow: (workflow: WorkflowPayload) => void; onRunResult: (result: RunResult) => void; };
 
@@ -84,74 +84,85 @@ function ParameterDraft({ title, text, onChange, disabled }: { title: string; te
 
 export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRunResult }: Props) {
   const [jobs, setJobs] = useState<JobDescriptor[]>([]);
-  const [products, setProducts] = useState<ProductDescriptor[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [selectedProductId, setSelectedProductId] = useState<string>();
-  const [productId, setProductId] = useState('product-a');
-  const [productName, setProductName] = useState('产品 A');
-  const [jobId, setJobId] = useState('product-a-main');
-  const [recipeCode, setRecipeCode] = useState('MAIN');
-  const [name, setName] = useState('产品 A 检测');
+  const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [note, setNote] = useState('已验证的参数更新');
+  const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const [productParams, setProductParams] = useState('{\n  "NominalWidth": 10.0\n}');
-  const [recipeParams, setRecipeParams] = useState('{\n  "MatchThreshold": 0.8\n}');
+  const [recipeParams, setRecipeParams] = useState('{}');
   const [bindings, setBindings] = useState<Record<string,string>>({});
   const [bindingTarget, setBindingTarget] = useState<string>();
-  const [bindingScope, setBindingScope] = useState<'product'|'recipe'>('recipe');
   const [bindingKey, setBindingKey] = useState('MatchThreshold');
   const [resolved, setResolved] = useState<ResolvedRecipeParameterization>();
   const [candidates, setCandidates] = useState<ValidationCandidateInfo[]>([]);
   const [candidatesVersion, setCandidatesVersion] = useState<number>();
   const [dependency, setDependency] = useState<RuntimeDependencyValidation>();
-  const [tab, setTab] = useState('parameters');
+  const [tab, setTab] = useState('versions');
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published'>('all');
+  const [recipeCreateOpen, setRecipeCreateOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
+  const [parameterLoading, setParameterLoading] = useState(false);
+  const [parameterError, setParameterError] = useState<string>();
+  const [parameterAttempt, setParameterAttempt] = useState(0);
   const [messageApi, contextHolder] = message.useMessage();
 
   const selected = useMemo(() => jobs.find((x) => x.id === selectedId), [jobs, selectedId]);
-  const productJobs = useMemo(() => jobs.filter((x) => x.productId), [jobs]);
-  const legacyJobs = useMemo(() => jobs.filter((x) => !x.productId), [jobs]);
   const bindingTargets = useMemo(() => workflow.nodes.flatMap(n => Object.keys(n.parameters ?? {}).filter(key => !key.startsWith('__') && !['moduleId','moduleVersion','moduleHash'].includes(key)).map(key => ({ value:`${n.id}.${key}`, label:`${n.name ?? n.id} · ${key}` }))), [workflow]);
 
   const refresh = async () => {
-    const [jobsRes, productsRes] = await Promise.all([fetch('/api/jobs'), fetch('/api/products')]);
-    if (jobsRes.ok) {
-      const data: JobDescriptor[] = await jobsRes.json(); setJobs(data);
-      if (!selectedId && data.length) setSelectedId(data[0].id);
-    }
-    if (productsRes.ok) {
-      const data: ProductDescriptor[] = await productsRes.json(); setProducts(data);
-      if (!selectedProductId && data.length) setSelectedProductId(data[0].id);
-    }
+    setLoading(true);
+    setLoadError(undefined);
+    try {
+      const jobsRes = await fetch('/api/jobs');
+      if (!jobsRes.ok) throw new Error('配方列表加载失败，请重试。');
+      const nextJobs: JobDescriptor[] = await jobsRes.json();
+      setJobs(nextJobs);
+      setSelectedId((current) => nextJobs.some((job) => job.id === current) ? current : nextJobs[0]?.id);
+    } catch (error) { setLoadError(error instanceof Error ? error.message : '列表加载失败'); }
+    finally { setLoading(false); }
   };
   useEffect(() => { if (open) void refresh(); }, [open]);
   const invoke = async (action: () => Promise<void>) => { setBusy(true); try { await action(); await refresh(); } catch (error) { messageApi.error(error instanceof Error ? error.message : '操作失败'); } finally { setBusy(false); } };
 
 
   const parseValues = (text:string) => { const value=JSON.parse(text); if(!value || Array.isArray(value) || typeof value!=='object') throw new Error('参数必须是 JSON 对象。'); return value as Record<string,unknown>; };
-  const loadParameterDrafts = async () => {
-    if (selectedProductId) { const response=await fetch(`/api/products/${encodeURIComponent(selectedProductId)}/parameters`); if(response.ok){const data:ParameterValueSet=await response.json(); setProductParams(JSON.stringify(data.values,null,2));} }
-    if (selected) {
-      const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`); if(response.ok){const data:ParameterValueSet=await response.json(); setRecipeParams(JSON.stringify(data.values,null,2));}
-      const version=selected.latestVersion; const param=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${version}/parameterization`);
-      if(param.ok){const data=await param.json(); setBindings(data.parameterBindings ?? {});}
-    }
-  };
-  useEffect(()=>{ if(open) void loadParameterDrafts(); },[open,selectedId,selectedProductId]);
-  const saveProductParameters = () => invoke(async()=>{ if(!selectedProductId) throw new Error('请先选择产品。'); const response=await fetch(`/api/products/${encodeURIComponent(selectedProductId)}/parameters`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(productParams)})}); const data=await response.json(); if(!response.ok) throw new Error(data.detail??'保存产品参数失败'); setProductParams(JSON.stringify(data.values,null,2)); messageApi.success('产品参数草稿已保存'); });
+  useEffect(() => {
+    if (!open || !selected) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    setParameterLoading(true); setParameterError(undefined);
+    setRecipeParams('{}'); setBindings({}); setResolved(undefined);
+    void (async () => {
+      try {
+        const requests = [
+          fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`, { signal: controller.signal }),
+          fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${selected.latestVersion}/parameterization`, { signal: controller.signal })
+        ];
+        const responses = await Promise.all(requests);
+        if (responses.some((response) => !response.ok)) throw new Error('参数草稿加载失败，请重试。');
+        const [recipe, parameterization] = await Promise.all(responses.map((response) => response.json()));
+        if (cancelled) return;
+        setRecipeParams(JSON.stringify(recipe.values ?? {}, null, 2));
+        setBindings(parameterization.parameterBindings ?? {});
+      } catch (error) {
+        if (!cancelled) setParameterError(error instanceof Error ? error.message : '参数加载失败');
+      } finally { if (!cancelled) setParameterLoading(false); }
+    })();
+    return () => { cancelled = true; controller.abort(); };
+  }, [open, selected?.id, selected?.latestVersion, parameterAttempt]);
+  useEffect(() => {
+    if (!selected) return;
+    setCandidates([]); setCandidatesVersion(undefined); setDependency(undefined);
+  }, [selected?.id]);
   const saveRecipeParameters = () => selected && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(recipeParams)})}); const data=await response.json(); if(!response.ok) throw new Error(data.detail??'保存配方参数失败'); setRecipeParams(JSON.stringify(data.values,null,2)); messageApi.success('配方参数草稿已保存'); });
   const resolveBindings = () => selected && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameterization/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow,bindings})}); const data:ResolvedRecipeParameterization & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'解析参数绑定失败'); setResolved(data); messageApi.success(`已解析 ${data.bindingCount} 个绑定`); });
-  const addBinding = () => { if(!bindingTarget || !bindingKey.trim()) return; setBindings(x=>({...x,[bindingTarget]:`${bindingScope}.${bindingKey.trim()}`})); };
+  const addBinding = () => { if(!bindingTarget || !bindingKey.trim()) return; setBindings(x=>({...x,[bindingTarget]:`recipe.${bindingKey.trim()}`})); };
 
-  const createProduct = () => invoke(async () => {
-    const response = await fetch('/api/products', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:productId.trim(), name:productName.trim(), description:'' }) });
-    const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建产品失败');
-    setSelectedProductId(data.id); messageApi.success('产品已创建');
-  });
   const createRecipe = () => invoke(async () => {
-    if (!selectedProductId) throw new Error('请先选择或创建产品。');
-    const response = await fetch(`/api/products/${encodeURIComponent(selectedProductId)}/recipes`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:jobId.trim(), recipeCode:recipeCode.trim(), name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
-    const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建配方失败'); setSelectedId(data.id); messageApi.success('配方已创建为不可变的 V1 版本');
+    const response = await fetch('/api/recipes', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
+    const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建配方失败'); setSelectedId(data.id); setRecipeCreateOpen(false); setQuery(''); setStatusFilter('all'); setTab('versions'); messageApi.success('配方 V1 草稿已创建，验证通过后即可发布');
   });
   const saveVersion = () => selected && invoke(async () => {
     const response = await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ workflow, note, parameterBindings:bindings }) });
@@ -215,10 +226,8 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
   const validateDependencies = () => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/dependencies/validate`); const data:RuntimeDependencyValidation & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'依赖校验失败'); setDependency(data); if(!data.compatible) throw new Error(data.drifts[0]?.message??'运行时依赖发生变化'); messageApi.success('运行时依赖一致'); });
   const runPublished = () => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/run`,{method:'POST'}); const data:RunResult=await response.json(); onRunResult(data); if(!response.ok) throw new Error(data.error??'已发布版本运行失败'); messageApi.success('当前生效配方已运行'); });
   const cloneRecipe = () => selected && invoke(async () => {
-    if (!selected.productId) throw new Error('旧版作业需要先在产品下重新创建。');
-    const newId = window.prompt('新配方 ID', `${selected.id}-copy`); if (!newId) return;
-    const newCode = window.prompt('新配方编码', `${selected.recipeCode ?? 'RECIPE'}-COPY`); if (!newCode) return;
-    const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/clone`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({newId,productId:selected.productId,recipeCode:newCode,name:`${selected.name} Copy`})});
+    const copyName = window.prompt('新配方名称', `${selected.name} 副本`); if (!copyName?.trim()) return;
+    const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/clone`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:copyName.trim()})});
     const data=await response.json(); if(!response.ok) throw new Error(data.detail??data.error??'复制配方失败'); setSelectedId(data.id); messageApi.success('配方已复制');
   });
   const showDiff = (from:number,to:number) => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${from}/diff/${to}`); const data:JobVersionDiff & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'版本差异比较失败'); Modal.info({title:`${selected.id} V${from} → V${to}`,width:900,content:<pre className="job-diff-pre">{data.changes.length?data.changes.map(x=>`${x.kind}  ${x.path}\n  ${x.before??'∅'} → ${x.after??'∅'}`).join('\n\n'):'没有影响执行语义的变更。'}</pre>}); });
@@ -230,24 +239,24 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
     return <Tag>草稿</Tag>;
   };
 
-  // 左列导航：产品 → 配方（旧版作业单独一组）
-  const navItems: MenuProps['items'] = [
-    ...products.map((product) => ({
-      key: `p:${product.id}`,
-      label: <span className="job-nav-product">{product.name}<span className="job-nav-count">{product.recipes.length}</span></span>,
-      children: product.recipes.length
-        ? product.recipes.map((recipe) => {
-          const job = jobs.find((x) => x.id === recipe.id);
-          return { key: recipe.id, label: <span className="job-nav-recipe">{recipe.name}{job ? lifecycleTag(job) : null}</span> };
-        })
-        : [{ key: `p:${product.id}:empty`, label: <span className="job-nav-empty">该产品暂无配方</span>, disabled: true }]
-    })),
-    ...(legacyJobs.length ? [{ type: 'divider' as const }, {
-      key: 'legacy',
-      label: <span className="job-nav-product">旧版作业<span className="job-nav-count">{legacyJobs.length}</span></span>,
-      children: legacyJobs.map((job) => ({ key: job.id, label: <span className="job-nav-recipe">{job.name}</span> }))
-    }] : [])
-  ];
+  const keyword = query.trim().toLowerCase();
+  const visibleJobs = jobs.filter((job) => {
+    const matches = `${job.name} ${job.id}`.toLowerCase().includes(keyword);
+    return matches && (statusFilter === 'all' || (statusFilter === 'published' ? job.publishedVersion != null : job.publishedVersion !== job.latestVersion));
+  });
+  const filtered = Boolean(keyword || statusFilter !== 'all');
+  const navItems: MenuProps['items'] = visibleJobs.map((job) => ({
+    key: job.id,
+    label: <span className="job-nav-recipe"><span className="job-nav-recipe-copy" title={job.name}><span>{job.name}</span></span>{lifecycleTag(job)}</span>
+  }));
+  const latestVersion = selected?.versions.find((version) => version.version === selected.latestVersion);
+  const latestPublished = Boolean(selected && selected.publishedVersion === selected.latestVersion);
+  const validated = Boolean(latestVersion?.validation?.accepted);
+  const needsValidation = Boolean(selected && !validated);
+  const canCreateRecipe = Boolean(name.trim() && workflow.nodes.length);
+  const openRecipeCreate = () => {
+    setName(workflow.name ?? ''); setDescription(''); setRecipeCreateOpen(true);
+  };
 
   const bindingsRows = Object.entries(bindings).map(([target, source]) => ({
     target,
@@ -261,7 +270,7 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
     { key: 'base', label: '载入基础版本到设计器', onClick: () => loadBaseVersion(version) },
     { key: 'effective', label: '载入有效版本到设计器', onClick: () => loadVersion(version) },
     { type: 'divider' },
-    { key: 'rollback', label: '回滚到此版本', danger: true, disabled: published || (!!selected?.productId && !validationAccepted), onClick: () => void requestPublish(version, true) },
+    { key: 'rollback', label: '回滚到此版本', danger: true, disabled: published || !validationAccepted, onClick: () => void requestPublish(version, true) },
     { key: 'diff', label: '与上一版本对比', disabled: version <= 1, onClick: () => showDiff(version - 1, version) }
   ];
 
@@ -271,83 +280,68 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
     { key: 'diff-latest', label: '对比最近两个版本', disabled: !selected || selected.versions.length < 2, onClick: () => selected && showDiff(Math.max(1, selected.latestVersion - 1), selected.latestVersion) }
   ];
 
-  return <Modal open={open} width={1380} title="产品 / 配方参数 · V0.51" footer={null} onCancel={onClose} destroyOnHidden>
+  return <Modal open={open} width={1380} title="配方管理" className="job-manager-modal" style={{ top: 24 }}
+    styles={{ body: { maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto' } }} footer={null} onCancel={onClose}
+    closable={!busy} mask={{ closable: !busy }} keyboard={!busy} destroyOnHidden>
     {contextHolder}
-    <Alert style={{marginBottom:12}} type="info" showIcon message="一套标准工作流 + 产品 / 配方参数集" description="参数草稿可随时编辑。保存草稿版本时会将绑定映射和参数快照固化到不可变的有效工作流中。验证和生产运行只使用该固化版本。" />
+    <div className="job-manager-toolbar">
+      <div><strong>配方工作台</strong><p>{jobs.length} 个配方 · {jobs.filter((job) => job.publishedVersion != null).length} 个已发布配方</p></div>
+      <Space wrap><Button onClick={() => void refresh()} loading={loading} disabled={busy}>刷新列表</Button>
+        <Button type="primary" onClick={openRecipeCreate} disabled={busy}>新建配方</Button></Space>
+    </div>
+    <div className="job-workflow-source"><span>当前设计器工作流</span><strong>{workflow.name || workflow.id}</strong><span>{workflow.nodes.length} 个节点 · {workflow.edges.length} 条连线</span>
+      <small>新建配方、保存新版本均使用当前工作流快照。</small></div>
+    {loadError && <Alert type="error" showIcon title={loadError} action={<Button size="small" onClick={() => void refresh()}>重试</Button>} />}
     <div className="job-grid">
-      {/* 左列：产品 → 配方 导航 + 新建入口 */}
-      <section className="job-nav-column">
-        <Typography.Title level={5} style={{ marginTop: 0 }}>产品 / 配方</Typography.Title>
-        <Menu
-          mode="inline"
-          className="job-nav"
-          selectedKeys={selectedId ? [selectedId] : []}
-          defaultOpenKeys={selectedProductId ? [`p:${selectedProductId}`] : []}
-          items={navItems}
-          onSelect={({ key }) => {
-            if (key.startsWith('p:') || key === 'legacy') return;
-            const job = jobs.find((x) => x.id === key);
+      <section className="job-nav-column" aria-label="配方导航">
+        <Input.Search allowClear value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索配方名称" aria-label="搜索配方" />
+        <Segmented block size="small" value={statusFilter} onChange={(value) => setStatusFilter(value as typeof statusFilter)} options={[
+          { value: 'all', label: '全部' }, { value: 'draft', label: '待发布' }, { value: 'published', label: '已发布' }
+        ]} />
+        <div className="job-nav-summary">{filtered ? `找到 ${visibleJobs.length} 条记录` : `${jobs.length} 条配方记录`}{loading && <Spin size="small" />}</div>
+        {filtered && selected && !visibleJobs.some((job) => job.id === selected.id) && <small className="job-nav-empty">当前查看的配方不在筛选结果中。</small>}
+        <Menu mode="inline" className="job-nav" aria-label="配方列表" disabled={busy}
+          selectedKeys={selectedId ? [selectedId] : []} items={navItems}
+          onClick={({ key }) => {
+            const job = jobs.find((item) => item.id === key);
             if (!job) return;
-            setSelectedId(job.id);
-            if (job.productId) setSelectedProductId(job.productId);
-          }}
-          onOpenChange={(keys) => {
-            const last = keys[keys.length - 1];
-            if (last?.startsWith('p:')) setSelectedProductId(last.slice(2));
-          }}
-        />
-        <Collapse
-          ghost
-          className="job-create-collapse"
-          items={[
-            {
-              key: 'product',
-              label: '新建产品',
-              children: (
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                  <Input value={productId} onChange={e=>setProductId(e.target.value)} addonBefore="产品 ID" />
-                  <Input value={productName} onChange={e=>setProductName(e.target.value)} addonBefore="名称" />
-                  <Button block onClick={createProduct} loading={busy}>创建产品</Button>
-                </Space>
-              )
-            },
-            {
-              key: 'recipe',
-              label: '从设计器创建配方',
-              children: (
-                <div className="job-create-grid">
-                  <Input value={jobId} onChange={e=>setJobId(e.target.value)} addonBefore="配方 ID" />
-                  <Input value={recipeCode} onChange={e=>setRecipeCode(e.target.value)} addonBefore="编码" />
-                  <Input value={name} onChange={e=>setName(e.target.value)} addonBefore="名称" />
-                  <Input value={description} onChange={e=>setDescription(e.target.value)} addonBefore="说明" />
-                  <Button type="primary" disabled={!selectedProductId} onClick={createRecipe} loading={busy}>创建配方</Button>
-                </div>
-              )
-            }
-          ]}
-        />
+            setSelectedId(job.id); setTab('versions');
+          }} />
+        {!loading && navItems.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={filtered ? '没有匹配的配方' : '还没有配方'}>
+          <Button onClick={filtered ? () => { setQuery(''); setStatusFilter('all'); } : openRecipeCreate}>{filtered ? '清空筛选' : '创建第一个配方'}</Button>
+        </Empty>}
+        <div className="job-nav-guide"><strong>创建到生产</strong><span>从当前工作流创建配方 → 数据集验证 → 发布 → 生产配置中选用</span></div>
       </section>
 
       {/* 右列：草稿/生效状态 + 参数 / 版本 / 验证 / 发布记录 */}
       <section className="job-detail">
-        {!selected?<div className="job-empty">请在左侧选择配方</div>:<>
+        {!selected?<div className="job-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择左侧配方查看版本，或从当前工作流创建新配方"><Button type="primary" onClick={openRecipeCreate}>从当前工作流创建配方</Button></Empty></div>:<>
           <div className="job-heading">
             <div>
               <strong>{selected.name}</strong>
-              <div>{selected.productId?`${selected.productId} / ${selected.recipeCode}`:'旧版作业'}</div>
               <Space wrap size={6} style={{ marginTop: 6 }}>
                 <Tag color={selected.publishedVersion ? 'green' : 'default'}>当前生效 {selected.publishedVersion ? `V${selected.publishedVersion}` : '无'}</Tag>
-                <Tag color="gold">当前草稿 V{selected.latestVersion}</Tag>
+                <Tag color={latestPublished ? 'green' : 'gold'}>{latestPublished ? '最新版本' : '待发布草稿'} V{selected.latestVersion}</Tag>
                 {selected.publishedVersion !== selected.latestVersion && <Tag color="orange">草稿尚未生效</Tag>}
               </Space>
             </div>
             <Space wrap>
-              <Button type="primary" onClick={saveVersion} loading={busy}>保存草稿版本</Button>
+              <Button onClick={saveVersion} loading={busy} disabled={parameterLoading || Boolean(parameterError) || !workflow.nodes.length} title="使用当前设计器中的工作流和参数绑定创建新的不可变版本">保存草稿版本</Button>
               <Button onClick={runPublished} disabled={!selected.publishedVersion||!selected.publishedDependencyManifestHash}>运行当前版本</Button>
               <Dropdown menu={{ items: headingMenu }} trigger={['click']}><Button>更多 ▾</Button></Dropdown>
             </Space>
           </div>
-          <Input value={note} onChange={e=>setNote(e.target.value)} addonBefore="变更说明" style={{ marginBottom: 10 }} />
+          <div className="job-lifecycle">
+            <Steps size="small" items={[
+              { title: `V${selected.latestVersion} 已保存`, status: 'finish' },
+              { title: validated ? '验证通过' : '数据集验证', status: validated ? 'finish' : latestPublished ? 'wait' : 'process' },
+              { title: latestPublished ? '已发布，可用于生产' : '发布生产', status: latestPublished ? 'finish' : validated ? 'process' : 'wait' }
+            ]} />
+            <div className="job-next-action"><span>{latestPublished ? `生产使用已发布的 V${selected.publishedVersion}。修改后请保存为新草稿版本。` : needsValidation ? `下一步：为 V${selected.latestVersion} 关联通过的数据集验证记录。` : `下一步：检查 V${selected.latestVersion} 的变更并确认发布。`}</span>
+              {!latestPublished && <Button type="primary" disabled={busy} onClick={() => { if (needsValidation) { setTab('validation'); void loadCandidates(selected.latestVersion); } else void requestPublish(selected.latestVersion); }}>{needsValidation ? '去验证' : `发布 V${selected.latestVersion}`}</Button>}
+            </div>
+          </div>
+          <Input value={note} onChange={e=>setNote(e.target.value)} addonBefore="变更说明" placeholder="记录本次参数或流程修改（可选）" style={{ marginBottom: 10 }} />
 
           <Tabs
             activeKey={tab}
@@ -358,26 +352,25 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
                 label: '参数',
                 children: (
                   <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                    <Alert type="warning" showIcon message="草稿参数不会直接修改已发布版本" description="先保存参数草稿，再将节点参数映射到 product.* / recipe.*，解析预览后保存草稿版本。不可变版本会固化具体参数值和有效工作流哈希。" />
-                    <div className="job-draft-grid">
+                    <Alert type="warning" showIcon message="草稿参数不会直接修改已发布版本" description="先保存参数草稿，再将节点参数映射到 recipe.*，解析预览后保存草稿版本。不可变版本会固化具体参数值和有效工作流哈希。" />
+                    {parameterError && <Alert type="error" showIcon title={parameterError}
+                      action={<Button size="small" disabled={busy} onClick={() => setParameterAttempt((attempt) => attempt + 1)}>重试加载参数</Button>} />}
+                    {parameterLoading && <span><Spin size="small" /> 正在加载参数…</span>}
+                    <div className="job-draft-grid job-draft-grid-single">
                       <div>
-                        <ParameterDraft title="产品参数草稿" text={productParams} onChange={setProductParams} disabled={busy || !selectedProductId} />
-                        <Button style={{marginTop:6}} disabled={!selectedProductId} onClick={saveProductParameters}>保存产品参数</Button>
-                      </div>
-                      <div>
-                        <ParameterDraft title="配方参数草稿" text={recipeParams} onChange={setRecipeParams} disabled={busy} />
-                        <Button style={{marginTop:6}} onClick={saveRecipeParameters}>保存配方参数</Button>
+                        <ParameterDraft title="配方参数草稿" text={recipeParams} onChange={setRecipeParams} disabled={busy || parameterLoading || Boolean(parameterError)} />
+                        <Button style={{marginTop:6}} disabled={busy || parameterLoading || Boolean(parameterError)} onClick={saveRecipeParameters}>保存配方参数</Button>
                       </div>
                     </div>
                     <Divider titlePlacement="left" style={{ margin: 0 }}>配方参数绑定</Divider>
                     <Space wrap>
-                      <Select showSearch placeholder="节点参数" style={{width:280}} value={bindingTarget} onChange={setBindingTarget} options={bindingTargets}/><Select style={{width:110}} value={bindingScope} onChange={setBindingScope} options={[{value:'product',label:'产品'},{value:'recipe',label:'配方'}]}/><Input style={{width:190}} value={bindingKey} onChange={e=>setBindingKey(e.target.value)} placeholder="参数键"/><Button onClick={addBinding}>添加绑定</Button><Button type="primary" onClick={resolveBindings}>解析预览</Button>{resolved&&<Button onClick={()=>onLoadWorkflow(resolved.effectiveWorkflow)}>加载有效版本到设计器</Button>}
+                      <Select disabled={busy || parameterLoading || Boolean(parameterError)} showSearch placeholder="节点参数" style={{width:280}} value={bindingTarget} onChange={setBindingTarget} options={bindingTargets}/><Input disabled={busy || parameterLoading || Boolean(parameterError)} style={{width:190}} value={bindingKey} onChange={e=>setBindingKey(e.target.value)} placeholder="参数键"/><Button disabled={busy || parameterLoading || Boolean(parameterError) || !bindingTarget || !bindingKey.trim()} onClick={addBinding}>添加绑定</Button><Button type="primary" disabled={busy || parameterLoading || Boolean(parameterError)} onClick={resolveBindings}>解析预览</Button>{resolved&&<Button onClick={()=>onLoadWorkflow(resolved.effectiveWorkflow)}>加载有效版本到设计器</Button>}
                     </Space>
                     <Table size="small" pagination={false} rowKey="target" dataSource={bindingsRows} locale={{ emptyText: '尚未配置绑定' }} columns={[
                       {title:'工作流参数',dataIndex:'target'},
-                      {title:'参数来源',dataIndex:'source',render:(v:string)=><Tag color={v.startsWith('product.')?'geekblue':'purple'}>{v}</Tag>},
+                      {title:'参数来源',dataIndex:'source',render:(v:string)=><Tag color="purple">{v}</Tag>},
                       {title:'解析后的有效值',render:(_,r)=><code className="job-draft-nested">{r.resolved === undefined ? '—' : JSON.stringify(r.resolved)}</code>},
-                      {title:'',width:80,render:(_,r)=><Button size="small" danger onClick={()=>setBindings(x=>{const n={...x};delete n[r.target];return n})}>移除</Button>}
+                      {title:'',width:80,render:(_,r)=><Button size="small" danger disabled={busy || parameterLoading || Boolean(parameterError)} onClick={()=>setBindings(x=>{const n={...x};delete n[r.target];return n})}>移除</Button>}
                     ]} />
                     {resolved&&<Alert type="success" showIcon message={`Resolved effective hash ${resolved.effectiveWorkflowHash.slice(0,16)}…`} description={<span>Base {resolved.baseWorkflowHash.slice(0,12)}… · {resolved.bindingCount} bindings · Frozen snapshot: <code>{JSON.stringify(resolved.snapshot)}</code></span>}/>}
                   </Space>
@@ -387,16 +380,16 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
                 key: 'versions',
                 label: '版本',
                 children: (
-                  <Table size="small" pagination={false} rowKey="version" dataSource={versions} locale={{ emptyText: '暂无版本' }} columns={[
+                  <Table size="small" scroll={{ x: 980 }} pagination={false} rowKey="version" dataSource={versions} locale={{ emptyText: '暂无版本' }} columns={[
                     {title:'版本',width:110,render:(_,r)=>r.published?<Tag color="green">V{r.version} 生效</Tag>:r.version===selected.latestVersion?<Tag color="gold">V{r.version} 草稿</Tag>:<Tag>V{r.version}</Tag>},
                     {title:'生命周期',width:110,render:(_,r)=>r.published?<Tag color="green">已发布</Tag>:r.validation?.accepted?<Tag color="blue">已验证</Tag>:r.validation?<Tag color="red">未通过</Tag>:<Tag>草稿</Tag>},
                     {title:'验证',width:190,render:(_,r)=>r.validation?<span>{r.validation.accepted?'通过':'失败'}{r.validation.summary?` · ${(r.validation.summary.accuracy*100).toFixed(2)}%`:''}</span>:'未关联'},
                     {title:'创建时间',dataIndex:'createdAt',width:165,render:(v:string)=>new Date(v).toLocaleString('zh-CN')},
                     {title:'绑定数',width:80,render:(_,r)=>r.bindingCount?<Tag color="purple">{r.bindingCount}</Tag>:'—'},
                     {title:'变更说明',dataIndex:'note'},
-                    {title:'操作',width:210,render:(_,r)=><Space size={4}>
+                    {title:'操作',width:210,fixed:'right',render:(_,r)=><Space size={4}>
                       <Button size="small" onClick={()=>{setTab('validation'); loadCandidates(r.version);}} disabled={!!r.validation?.accepted}>验证</Button>
-                      <Button size="small" type="primary" onClick={()=>void requestPublish(r.version)} disabled={r.published||!!selected.productId&&!r.validation?.accepted}>发布</Button>
+                      <Button size="small" type="primary" onClick={()=>void requestPublish(r.version)} disabled={r.published||!r.validation?.accepted}>发布</Button>
                       <Dropdown menu={{ items: versionRowMenu(r.version, r.published, !!r.validation?.accepted) }} trigger={['click']}><Button size="small">更多 ▾</Button></Dropdown>
                     </Space>}
                   ]}/>
@@ -472,5 +465,16 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
         </>}
       </section>
     </div>
+    <Modal open={recipeCreateOpen} title="从当前工作流创建配方" okText="创建配方" cancelText="取消" width={620} confirmLoading={busy}
+      okButtonProps={{ disabled: !canCreateRecipe }} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
+      onCancel={() => { if (!busy) setRecipeCreateOpen(false); }} onOk={() => { if (canCreateRecipe && !busy) void createRecipe(); }} destroyOnHidden>
+      <Alert type={workflow.nodes.length ? 'info' : 'warning'} showIcon
+        title={workflow.nodes.length ? `工作流来源：${workflow.name || workflow.id}` : '当前工作流为空'}
+        description={workflow.nodes.length ? `${workflow.nodes.length} 个节点 · ${workflow.edges.length} 条连线。创建后保存为 V1 草稿，验证并发布后才能用于生产。` : '请先在设计器添加节点或选择模板。'} />
+      <Form layout="vertical" className="job-recipe-form">
+        <Form.Item label="配方名称" required><Input aria-label="配方名称" value={name} disabled={busy} placeholder="例如：外观标准检测" onChange={(event) => setName(event.target.value)} /></Form.Item>
+        <Form.Item label="说明"><Input.TextArea aria-label="配方说明" value={description} disabled={busy} rows={2} placeholder="说明适用工况或检测要求（可选）" onChange={(event) => setDescription(event.target.value)} /></Form.Item>
+      </Form>
+    </Modal>
   </Modal>;
 }

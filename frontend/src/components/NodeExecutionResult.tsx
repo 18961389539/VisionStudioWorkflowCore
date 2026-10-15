@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { Alert, Tag } from 'antd';
 import type { NodeCatalogItem, RunResult, VisionValueSnapshot } from '../types';
+import ExecutionStatus from './ExecutionStatus';
 import { portNames } from '../i18n/catalog';
 
 type Props = {
@@ -40,10 +41,10 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
       aria-controls={bodyId} onClick={() => onExpandedChange(!expanded)}>
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><strong>本节点运行结果</strong>
       {requestError && <Tag color="error">本次测试未完成</Tag>}
-      {report && <><Tag color={report.success ? 'success' : 'error'}>{requestError ? '上次' : ''}{report.success ? '执行成功' : '执行失败'}</Tag><span>{report.durationMs.toFixed(2)} 毫秒</span></>}
+      {report && <><Tag color={report.success ? 'success' : 'error'}><ExecutionStatus status={report.success ? (report.phase === 'Warmup' ? 'warmup' : 'ok') : 'error'} label={`${requestError ? '上次' : ''}${report.success ? (report.phase === 'Warmup' ? '预热成功' : '执行成功') : '执行失败'}`} /></Tag><span>{report.durationMs.toFixed(2)} 毫秒</span></>}
       {!result && !requestError && <span>尚无结果</span>}
       {result && !report && <Tag color={result.success ? 'default' : 'error'}>{result.success ? '本节点未执行' : '运行失败'}</Tag>}
-      {stale && result && <Tag color="gold">已过期 · 当前参数待运行</Tag>}
+      {stale && result && <Tag color="gold"><ExecutionStatus status="stale" label="已过期 · 当前参数待运行" /></Tag>}
       <span className="node-result-toggle-label">{expanded ? '收起' : '展开'}</span>
     </button>
     <div id={bodyId} hidden={!expanded} className="node-result-content">

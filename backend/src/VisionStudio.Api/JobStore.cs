@@ -68,7 +68,8 @@ public sealed record CreateJobRequest(
     string? Note = null,
     string? ProductId = null,
     string? RecipeCode = null,
-    Dictionary<string, string>? ParameterBindings = null);
+    Dictionary<string, string>? ParameterBindings = null,
+    bool RequiresValidation = false);
 
 public sealed record SaveJobVersionRequest(
     WorkflowDefinition Workflow,
@@ -104,7 +105,7 @@ public sealed class JobStore
         var rows = new List<JobRow>();
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code FROM jobs ORDER BY updated_at DESC;";
+            command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code,requires_validation FROM jobs ORDER BY updated_at DESC;";
             await using var reader = await command.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) rows.Add(ReadJobRow(reader));
         }
@@ -134,11 +135,11 @@ public sealed class JobStore
             var snapshot = await CreateSnapshotAsync(request.Id, 1, request.Workflow, request.Note ?? "Initial version", request.ProductId, request.ParameterBindings, now, ct);
 
             await ExecuteAsync(connection, transaction,
-                "INSERT INTO jobs(id,name,description,created_at,updated_at,latest_version,published_version,product_id,recipe_code) VALUES($id,$name,$description,$created,$updated,1,NULL,$product,$recipe);",
+                "INSERT INTO jobs(id,name,description,created_at,updated_at,latest_version,published_version,product_id,recipe_code,requires_validation) VALUES($id,$name,$description,$created,$updated,1,NULL,$product,$recipe,$validation);",
                 ct,
                 ("$id", request.Id), ("$name", request.Name.Trim()), ("$description", request.Description?.Trim() ?? string.Empty),
                 ("$created", Iso(now)), ("$updated", Iso(now)),
-                ("$product", NullIfWhiteSpace(request.ProductId)), ("$recipe", NullIfWhiteSpace(request.RecipeCode)));
+                ("$product", NullIfWhiteSpace(request.ProductId)), ("$recipe", NullIfWhiteSpace(request.RecipeCode)), ("$validation", request.RequiresValidation ? 1 : 0));
 
             await InsertVersionAsync(connection, transaction, snapshot, ct);
             await transaction.CommitAsync(ct);
@@ -233,7 +234,7 @@ public sealed class JobStore
                 throw new ApiNotFoundException($"Version {version} does not exist for job '{id}'.");
         }
 
-        if (!string.IsNullOrWhiteSpace(row.ProductId))
+        if (row.RequiresValidation || !string.IsNullOrWhiteSpace(row.ProductId) || !string.IsNullOrWhiteSpace(row.RecipeCode))
         {
             await using var validation = connection.CreateCommand();
             validation.Transaction = transaction;
@@ -345,14 +346,14 @@ VALUES($job,$version,$hash,$created,$note,$workflow,$baseHash,$baseWorkflow,$bin
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code FROM jobs WHERE id=$id;";
+        command.CommandText = "SELECT id,name,description,created_at,updated_at,latest_version,published_version,published_dependency_manifest_hash,product_id,recipe_code,requires_validation FROM jobs WHERE id=$id;";
         command.Parameters.AddWithValue("$id", id);
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadJobRow(reader) : null;
     }
 
     private static JobRow ReadJobRow(SqliteDataReader reader)
-        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), ParseTime(reader.GetString(3)), ParseTime(reader.GetString(4)), reader.GetInt32(5), reader.IsDBNull(6) ? null : reader.GetInt32(6), reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9));
+        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), ParseTime(reader.GetString(3)), ParseTime(reader.GetString(4)), reader.GetInt32(5), reader.IsDBNull(6) ? null : reader.GetInt32(6), reader.IsDBNull(7) ? null : reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetInt32(10) != 0);
 
     private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken ct, params (string Name, object? Value)[] parameters)
     {
@@ -376,5 +377,5 @@ VALUES($job,$version,$hash,$created,$note,$workflow,$baseHash,$baseWorkflow,$bin
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private sealed record JobRow(string Id, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion, int? PublishedVersion, string? PublishedDependencyManifestHash, string? ProductId, string? RecipeCode);
+    private sealed record JobRow(string Id, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion, int? PublishedVersion, string? PublishedDependencyManifestHash, string? ProductId, string? RecipeCode, bool RequiresValidation);
 }

@@ -24,6 +24,22 @@ beforeEach(() => { state.connection = { inProgress: false }; state.outputConnect
 afterEach(cleanup);
 
 describe('canvas node presentation', () => {
+  it.each([
+    ['idle', '空闲'], ['pending', '等待'], ['running', '执行中'], ['ok', '成功'],
+    ['error', '失败'], ['warmup', '预热'], ['breakpoint', '暂停'], ['skipped', '未走到']
+  ])('exposes %s with a text label and a decorative icon', (status, label) => {
+    const { container } = render(component({ ...base, status }));
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(container.querySelector('.node-status svg[aria-hidden="true"]')).toBeTruthy();
+  });
+
+  it('distinguishes selection from execution success and breakpoints', () => {
+    render(<VisionNode {...({ id: 'node', data: { ...base, breakpoint: true }, selected: true } as unknown as NodeProps)} />);
+    expect(screen.getByRole('img', { name: '已选中节点' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移除断点' })).toBeTruthy();
+    expect(screen.getByText('成功')).toBeTruthy();
+  });
+
   it('starts with common ports, expands on request, and refreshes connection positions', () => {
     render(component());
     expect(screen.queryByTestId('source-radius')).toBeNull();

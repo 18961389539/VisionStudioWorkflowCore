@@ -7,12 +7,6 @@ public static class RecipeParameterEndpoints
 {
     public static IEndpointRouteBuilder MapRecipeParameterEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/products/{productId}/parameters", async (string productId, RecipeParameterStore store, CancellationToken ct) =>
-            Results.Ok(await store.GetProductAsync(productId, ct))).RequireAuthorization(SecurityPolicies.Engineer);
-
-        app.MapPut("/api/products/{productId}/parameters", async (string productId, ReplaceParameterValuesRequest request, RecipeParameterStore store, CancellationToken ct) =>
-            Results.Ok(await store.ReplaceProductAsync(productId, request, ct))).RequireEngineer("product.parameters.update", "product");
-
         app.MapGet("/api/jobs/{id}/parameters", async (string id, RecipeParameterStore store, CancellationToken ct) =>
             Results.Ok(await store.GetRecipeAsync(id, ct))).RequireAuthorization(SecurityPolicies.Engineer);
 

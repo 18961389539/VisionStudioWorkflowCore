@@ -7,7 +7,7 @@ import { responseErrorMessage } from '../apiErrors';
 // R04：轮询节拍、单请求超时与"最后成功时间"语义——HTTP 失败不得让旧状态冒充实时数据。
 const PRODUCTION_POLL_TIMEOUT_MS = 5000;
 
-type JobItem = { id: string; name: string; productId?: string | null; recipeCode?: string | null; publishedVersion?: number | null };
+type JobItem = { id: string; name: string; publishedVersion?: number | null };
 
 /// R05/F03：待核对的设备动作（管理员核对入口的数据契约，与后端 pending 端点对齐）。
 export type DeviceActionPendingState = {
@@ -234,7 +234,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const criticalAlarms = activeAlarms.filter((a) => a.severity === 'Critical');
   const latestAlarm = [...activeAlarms].sort((a, b) => Date.parse(b.raisedAt) - Date.parse(a.raisedAt))[0];
   const jobLabel = activeJob
-    ? `${activeJob.productId ? `${activeJob.productId} / ` : ''}${activeJob.recipeCode ?? activeJob.name ?? activeJob.id}`
+    ? activeJob.name
     : selectedJobId ?? '未选择';
   const jobVersion = status?.lockedJobVersion ?? activeJob?.publishedVersion ?? null;
   const startBlockedReason = locked
@@ -401,7 +401,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           disabled={locked}
           value={config.jobId ?? undefined}
           placeholder="选择已发布的配方"
-          options={jobs.filter(x => x.publishedVersion != null).map(x => ({ value: x.id, label: `${x.productId ? `${x.productId} / ${x.recipeCode ?? x.id} · ` : ''}${x.name} · V${x.publishedVersion}` }))}
+          options={jobs.filter(x => x.publishedVersion != null).map(x => ({ value: x.id, label: `${x.name} · V${x.publishedVersion}` }))}
           onChange={(jobId) => setConfig({ ...config, jobId })}
         />
         <Checkbox disabled={locked} checked={config.autoStart} onChange={e => setConfig({ ...config, autoStart: e.target.checked })}>自动启动</Checkbox>

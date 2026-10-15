@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 20;
+    public const int CurrentVersion = 21;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -55,7 +55,11 @@ public sealed class SqliteSchemaMigrationRunner
         new(18, "V0.62 investigation cases and signature evidence", InvestigationCaseSchemaSql),
         new(19, "V0.63 case verification gate and dataset regression evidence", InvestigationVerificationSchemaSql),
         new(20, "V0.64 run trace lifecycle and structured error codes", "", ApplyRunTraceLifecycleColumnsAsync,
-            "run_traces.error_code")
+            "run_traces.error_code"),
+        new(21, "Independent recipe validation policy", """
+ALTER TABLE jobs ADD COLUMN requires_validation INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET requires_validation=1 WHERE product_id IS NOT NULL OR recipe_code IS NOT NULL;
+""")
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)

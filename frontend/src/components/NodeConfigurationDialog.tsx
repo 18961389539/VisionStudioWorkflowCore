@@ -118,7 +118,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
   const nodeLabels = Object.fromEntries(nodes.map((item) => [item.id, String(item.data.label ?? item.id)]));
-  const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable } =
+  const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
+    imageCatalogLoading, imageCatalogError, retryImageCatalog } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
   const imagePorts = [...catalogItem.inputs, ...catalogItem.outputs].some((p) => p.dataType === 'Image' || p.dataType === 'DomainImage');
   const showImage = imagePorts || initialTab === 'image';
@@ -246,6 +247,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
                   options={[{ label: '最终预览', value: 'preview' }, { label: '输出', value: 'output', disabled: !selectedOutputAvailable }, { label: '输入', value: 'input', disabled: !selectedInputAvailable }]} />
               </div>
               <div className="node-image-provenance"><span>{imageViewerSource.label}</span>
+                {imageCatalogLoading && <span>正在加载节点图像…</span>}
+                {imageCatalogError && <span role="alert" title={imageCatalogError}>节点图像加载失败 <Button size="small" onClick={retryImageCatalog}>重试加载</Button></span>}
                 {receivedAt && <span>更新于 {new Date(receivedAt).toLocaleString()}</span>}
                 {stale && displayedResult && <Tag color="gold">上次运行图像 · 当前参数待验证</Tag>}
               </div>

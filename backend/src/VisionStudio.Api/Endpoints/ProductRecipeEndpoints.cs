@@ -4,17 +4,15 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api.Endpoints;
 
+public sealed record CreateRecipeRequest(string Name, WorkflowDefinition Workflow, string? Description = null, string? Id = null, string? ChangeNote = null, Dictionary<string, string>? ParameterBindings = null);
+public sealed record CopyRecipeRequest(string Name, string? NewId = null, string? Description = null, int? SourceVersion = null);
+
 public static class ProductRecipeEndpoints
 {
     public static IEndpointRouteBuilder MapProductRecipeEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/products", async (ProductRecipeStore store, CancellationToken ct) => Results.Ok(await store.ListProductsAsync(ct)))
-            .RequireAuthorization(SecurityPolicies.Engineer);
-
-        app.MapPost("/api/products", async (CreateProductRequest request, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.CreateProductAsync(request, ct))).RequireEngineer("product.create", "product");
-
-        app.MapPost("/api/products/{productId}/recipes", async (string productId, CreateProductRecipeRequest request, ProductRecipeStore store, VisionWorkflowCompiler compiler, WorkflowModuleExpander modules, CancellationToken ct) =>
+        // Recipes are independent authoring units; no Product needs to exist first.
+        app.MapPost("/api/recipes", async (CreateRecipeRequest request, JobStore jobs, VisionWorkflowCompiler compiler, WorkflowModuleExpander modules, CancellationToken ct) =>
         {
             try
             {
@@ -22,11 +20,13 @@ public static class ProductRecipeEndpoints
                 compiler.Compile(expanded.Workflow);
             }
             catch (InvalidOperationException ex) { throw new ApiValidationException(ex.Message, ex); }
-            return Results.Ok(await store.CreateRecipeAsync(productId, request, ct));
+            return Results.Ok(await jobs.CreateAsync(new CreateJobRequest(
+                request.Id ?? $"recipe-{Guid.NewGuid():N}", request.Name, request.Description, request.Workflow,
+                request.ChangeNote ?? "Initial recipe version", ParameterBindings: request.ParameterBindings, RequiresValidation: true), ct));
         }).RequireEngineer("recipe.create", "recipe");
 
-        app.MapPost("/api/jobs/{id}/clone", async (string id, CloneRecipeRequest request, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.CloneRecipeAsync(id, request, ct))).RequireEngineer("recipe.clone", "recipe");
+        app.MapPost("/api/jobs/{id}/clone", async (string id, CopyRecipeRequest request, ProductRecipeStore store, CancellationToken ct) =>
+            Results.Ok(await store.CloneRecipeAsync(id, new CloneRecipeRequest(request.NewId ?? $"recipe-{Guid.NewGuid():N}", null, null, request.Name, request.Description, request.SourceVersion), ct))).RequireEngineer("recipe.clone", "recipe");
 
         app.MapGet("/api/jobs/{id}/versions/{fromVersion:int}/diff/{toVersion:int}", async (string id, int fromVersion, int toVersion, ProductRecipeStore store, CancellationToken ct) =>
             Results.Ok(await store.DiffAsync(id, fromVersion, toVersion, ct))).RequireAuthorization(SecurityPolicies.Engineer);

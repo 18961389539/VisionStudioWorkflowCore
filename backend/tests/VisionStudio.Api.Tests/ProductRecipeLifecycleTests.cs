@@ -67,6 +67,30 @@ public sealed class ProductRecipeLifecycleTests
         Assert.Equal((await jobs.GetVersionAsync(recipe.Id, 2, default))!.WorkflowHash, clone.Versions[0].WorkflowHash);
     }
 
+    [Fact]
+    public async Task IndependentRecipe_RequiresValidation_ThenPublishesAndClonesWithoutProduct()
+    {
+        using var env = new TempWebHostEnvironment();
+        var db = new SqliteMetadataDatabase(env);
+        var jobs = new JobStore(db);
+        var recipes = new ProductRecipeStore(db, jobs);
+        var recipe = await jobs.CreateAsync(new("independent", "Independent inspection", null, Workflow(120), RecipeCode: "MAIN"), default);
+        Assert.Null(recipe.ProductId);
+        Assert.Empty(await recipes.ListProductsAsync(default));
+        await Assert.ThrowsAsync<ApiConflictException>(() => jobs.PublishAsync(recipe.Id, 1, "Publish", Manifest("unvalidated"), default));
+
+        var validationRun = await InsertValidationRunAsync(db, recipe.Versions[0].WorkflowHash, 1, 0, 0, 0);
+        await recipes.LinkValidationAsync(recipe.Id, 1, new(validationRun), default);
+        var published = await jobs.PublishAsync(recipe.Id, 1, "Publish", Manifest("accepted"), default);
+        Assert.Equal(1, published.PublishedVersion);
+        var clone = await recipes.CloneRecipeAsync(recipe.Id, new("independent-copy", null, "COPY", "Copy"), default);
+        Assert.Null(clone.ProductId);
+        Assert.Null(clone.PublishedVersion);
+        Assert.Null(clone.Versions.Single().Validation);
+        Assert.Equal(recipe.Versions.Single().WorkflowHash, clone.Versions.Single().WorkflowHash);
+        await Assert.ThrowsAsync<ApiConflictException>(() => jobs.PublishAsync(clone.Id, 1, "Publish", Manifest("clone-unvalidated"), default));
+    }
+
     private static async Task<string> InsertValidationRunAsync(SqliteMetadataDatabase db, string workflowHash, double accuracy, double falseOkRate, double falseNgRate, int errors)
     {
         var runId = $"validation-{Guid.NewGuid():N}";

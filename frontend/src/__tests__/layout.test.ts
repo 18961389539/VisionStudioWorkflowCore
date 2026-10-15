@@ -20,8 +20,8 @@ describe('layout without the properties sidebar', () => {
   it('moves legacy large panels to automatic sizing and adapts to the viewport', () => {
     localStorage.setItem('visionstudio.layout', JSON.stringify({ bottom: 516, preset: 'custom' }));
     expect(readLayout().bottomSizing).toBe('auto');
-    expect(automaticResultHeight(1040)).toBe(268);
-    expect(automaticResultHeight(800)).toBe(203);
+    expect(automaticResultHeight(1040)).toBe(255);
+    expect(automaticResultHeight(800)).toBe(190);
   });
 
   it('preserves a manual size after subsequent loads', () => {

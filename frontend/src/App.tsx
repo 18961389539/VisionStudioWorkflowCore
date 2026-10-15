@@ -7,6 +7,7 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useNodesInitialized,
   useReactFlow,
   type Connection,
   type Edge,
@@ -29,6 +30,8 @@ import SplitHandle from './components/SplitHandle';
 import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
 import VisionNode from './components/VisionNode';
 import CanvasMiniMap from './components/CanvasMiniMap';
+import WorkflowImagePreview from './components/WorkflowImagePreview';
+import TemplateFlowPreview from './components/TemplateFlowPreview';
 import { automaticResultHeight } from './layout';
 import { fallbackCatalog, fallbackCatalogHash, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
 import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
@@ -110,12 +113,11 @@ const persistNodeCompact = (value: boolean) => {
   try { window.localStorage.setItem(NODE_COMPACT_KEY, value ? '1' : '0'); } catch { /* 忽略存储失败 */ }
 };
 
-// 自动适配视图的内缩：顶部用固定像素为画布左上角的浮动工具条（查找/紧凑）留出空间。
-// 分数制的实际内缩是 viewport*(1-1/(1+p))/2（250px 高的画布仅约 17px），会被固定高度的工具条压住节点标题。
+// 工具栏已移出画布，自动适配在四周使用相同内缩。
 // 类型对齐 @xyflow/react 的 PaddingWithUnit（number | `${number}px` | `${number}%`），避免任意 string 撞类型。
 type FitPaddingUnit = number | `${number}px` | `${number}%`;
 const CANVAS_FIT_PADDING: { top: FitPaddingUnit; right: FitPaddingUnit; bottom: FitPaddingUnit; left: FitPaddingUnit } =
-  { top: '56px', right: 0.16, bottom: 0.16, left: 0.16 };
+  { top: 0.16, right: 0.16, bottom: 0.16, left: 0.16 };
 
 // 结果区折叠态保留的标签条高度（P1）：折叠不再等于“入口消失”，标签条即展开入口。
 // 与 .bottom-panel.collapsed .bottom-tabs-bar 的 padding + Segmented 高度对齐（4+24+4）。
@@ -254,7 +256,22 @@ function Editor() {
   const [demoKey, setDemoKey] = useState<DemoKey>('linear');
   // 模板入口 P0：顶栏下拉改为“从模板新建”弹窗——替换当前流程属于破坏性动作，必须显式确认
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [templateQuery, setTemplateQuery] = useState('');
+  const [templateGroup, setTemplateGroup] = useState('all');
+  const visibleTemplateGroups = useMemo(() => {
+    const keyword = templateQuery.trim().toLowerCase();
+    return DEMO_GROUPS.filter((group) => templateGroup === 'all' || templateGroup === group.group)
+      .map((group) => ({ ...group, keys: group.keys.filter((key) => `${DEMO_LABELS[key]} ${demoDescriptions[key]}`.toLowerCase().includes(keyword)) }))
+      .filter((group) => group.keys.length > 0);
+  }, [templateQuery, templateGroup]);
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const [templateSelected, setTemplateSelected] = useState<DemoKey | null>(null);
+  const showTemplates = () => {
+    setTemplateQuery('');
+    setTemplateGroup('all');
+    setTemplateSelected(demoKey);
+    setTemplateOpen(true);
+  };
   // 校验状态三分态（P1）：未校验 / 校验通过 / 有 N 项问题；流程修改后按快照比对标记“需要重新校验”
   const [validationState, setValidationState] = useState<{ status: 'unvalidated' | 'ok' | 'issues'; summary?: string }>({ status: 'unvalidated' });
   const validatedSnapshotRef = useRef<string | undefined>(undefined);
@@ -302,6 +319,23 @@ function Editor() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const { mode: themeMode, toggle: toggleTheme } = useThemeMode();
   const { screenToFlowPosition, getZoom, getViewport, setCenter, fitView } = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
+  const initialFitDone = useRef(false);
+  useEffect(() => {
+    if (!nodesInitialized || initialFitDone.current) return;
+    // 节点测量完成后再适配首屏，避免初次布局尚未稳定时放大到 200%。
+    const frame = requestAnimationFrame(() => {
+      initialFitDone.current = true;
+      void fitView({ padding: CANVAS_FIT_PADDING });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [nodesInitialized, fitView]);
+  useEffect(() => {
+    if (!imagePreviewOpen || focusMode) return;
+    // 打开预览会压缩画布；仅在此显式布局操作时重新适配，日常选节点不改变视角。
+    const frame = requestAnimationFrame(() => { void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }); });
+    return () => cancelAnimationFrame(frame);
+  }, [imagePreviewOpen, focusMode, fitView]);
   const [messageApi, contextHolder] = message.useMessage();
   // A04：远端已存在同名文档时，覆盖必须由用户显式确认（绝不静默覆盖他人修改）。
   const [modalApi, modalContextHolder] = Modal.useModal();
@@ -472,10 +506,10 @@ function Editor() {
   };
   const previewVar = (name: string, value: string) => shellRef.current?.style.setProperty(name, value);
 
-  // 参数移入弹窗后，工具箱以外的宽度全部留给画布。
+  // 工具箱与结果区遵循主工作区最小尺寸；图像预览在中心区域内响应式分栏。
   const leftMax = Math.max(LAYOUT_LIMITS.left.min, shellSize.width - MIN_CENTER_WIDTH);
   const shownLeftBase = clampNumber(layout.left, LAYOUT_LIMITS.left.min, leftMax);
-  const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - 48 - MIN_WORKSPACE_HEIGHT);
+  const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - 96 - MIN_WORKSPACE_HEIGHT);
   const normalBottom = layout.bottomSizing === 'manual' ? layout.bottom : automaticResultHeight(shellSize.height);
   const shownBottomBase = layout.bottomMaximized ? bottomMax : clampNumber(normalBottom, LAYOUT_LIMITS.bottom.min, bottomMax);
   const shownLeft = layout.leftCollapsed ? 0 : shownLeftBase;
@@ -857,19 +891,21 @@ function Editor() {
   // 校验快照漂移：流程在校验后被修改（参数/节点/连线）⇒ 顶部按钮转“需要重新校验”
   const needsRevalidate = validationState.status !== 'unvalidated' && validatedSnapshotRef.current !== workflowSnapshot;
 
-  // 模板弹窗的预览数据：节点数 + 前几个节点的目录中文名（构建 demo 图是纯内存操作，代价可忽略）
+  // 模板真实图数据只构建一次；目录变化时同步更新预览中的显示名。
   const templatePreviews = useMemo(() => {
-    const previews = new Map<DemoKey, { nodeCount: number; nodeChips: string[] }>();
+    const previews = new Map<DemoKey, { nodeCount: number; nodeChips: string[]; nodes: Node[]; edges: Edge[] }>();
     for (const [key, build] of Object.entries(demos)) {
-      const graph = (build as () => { nodes: Node[] })();
+      const graph = (build as () => { nodes: Node[]; edges: Edge[] })();
       const labelOf = (type: string) => catalog.find((item) => item.type === type)?.displayName ?? type;
       previews.set(key as DemoKey, {
-        nodeCount: graph.nodes.length,
+        nodeCount: graph.nodes.length, nodes: graph.nodes, edges: graph.edges,
         nodeChips: graph.nodes.slice(0, 5).map((item) => labelOf(String(item.data.typeKey)))
       });
     }
     return previews;
   }, [catalog]);
+  const templateLabels = useMemo(() => Object.fromEntries(catalog.map((item) => [item.type, item.displayName])), [catalog]);
+  const selectedTemplatePreview = templateSelected ? templatePreviews.get(templateSelected) : undefined;
 
   // P0-1：每次新的运行/调试结果落地时自动展开底部结果区（首次使用默认收起，结果出现即回位）
   const lastExpandedRunRef = useRef<string | undefined>(undefined);
@@ -1464,7 +1500,7 @@ function Editor() {
   ];
 
   const productionMenuItems: MenuProps['items'] = [
-    { key: 'jobs', label: '作业与配方版本', onClick: () => setJobsOpen(true) },
+    { key: 'jobs', label: '配方管理', onClick: () => setJobsOpen(true) },
     { key: 'traces', label: '运行追溯', onClick: () => setTracesOpen(true) },
     { key: 'production', label: '生产运行', onClick: () => setProductionOpen(true) }
   ];
@@ -1492,10 +1528,10 @@ function Editor() {
     { key: 'about', label: '关于 VisionStudio', onClick: () => setAboutOpen(true) }
   ];
 
-  // P0-3：窄窗口时顶栏中段（模板/打开/调试/设备/生产/工具）整体收进“更多”，保存/校验/运行与流程名恒可见
+  // 领域菜单先收进“更多”，更窄时再收起文件操作；流程名和执行动作独占第二行。
   const moreMenu: MenuProps = {
     items: [
-      { key: 'more-template', label: '从模板新建', onClick: () => { setTemplateSelected(demoKey); setTemplateOpen(true); } },
+      { key: 'more-template', label: '从模板新建', onClick: showTemplates },
       { key: 'more-open', label: '打开已有流程', onClick: () => guardUnsaved('加载已保存的工作流', () => void load()) },
       { type: 'divider' },
       ...debugMenuItems,
@@ -1531,109 +1567,111 @@ function Editor() {
     >
       {contextHolder}{modalContextHolder}
       <header className="topbar">
-        <div className="topbar-left">
+        <div className="topbar-menu-row">
           <div className="brand">VisionStudio <span>V{APP_VERSION}</span></div>
-          <span className="topbar-divider" />
-          <div className="workflow-identity" title={`${designerWorkflowName} · ${designerWorkflowId}`}>
-            {/* 名称可点击重命名；技术 ID 收进悬停详情，不再常驻占位 */}
-            <Typography.Text
-              className="workflow-name"
-              editable={{
-                onChange: (value) => {
-                  // Q07（2026-10-13 审查）：重命名是完整文档编辑——递增文档代次，
-                  // 使在途的加载响应被丢弃（旧实现只比较 epoch/nodes/edges 引用，
-                  // 漏掉名称编辑，加载期间的重命名会被迟到响应覆盖）。
-                  const decision = renameDecision(value, designerWorkflowName);
-                  if (decision.changed) {
-                    setDesignerWorkflowName(decision.name);
-                    documentEpochRef.current += 1;
-                  }
-                },
-                tooltip: '点击重命名工作流',
-                icon: <span className="workflow-rename-icon">✎</span>
+
+          <div className="topbar-center">
+            <Button className="topbar-file-action" type="text" onClick={showTemplates}>从模板新建</Button>
+            <Button className="topbar-file-action" type="text" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开流程</Button>
+            <span className="topbar-divider" />
+            <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
+              <Button className="topbar-domain-action" type={debugSession ? 'primary' : 'default'} title={debugSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debugSession ? `调试 · ${debugStatus.text}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
+            </Dropdown>
+            <Dropdown menu={{ items: deviceMenuItems }} trigger={['click']}>
+              <Button type="text" className="topbar-domain-action">设备 <span className="menu-caret">▾</span></Button>
+            </Dropdown>
+            <Dropdown menu={{ items: productionMenuItems }} trigger={['click']}>
+              <Button type="text" className="topbar-domain-action">生产 <span className="menu-caret">▾</span></Button>
+            </Dropdown>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: toolMenuItems,
+                selectable: true,
+                selectedKeys: layout.preset === 'custom' ? [] : [layout.preset],
+                onClick: ({ key }) => {
+                  if (key === 'layout-edit') applyLayoutPreset('edit');
+                  else if (key === 'layout-image') applyLayoutPreset('image');
+                  else if (key === 'layout-reset') applyLayoutPreset(layout.preset === 'custom' ? 'edit' : layout.preset);
+                }
               }}
-            >{designerWorkflowName}</Typography.Text>
-            <Tag
-              className="workflow-dirty"
-              color={dirty ? 'gold' : 'default'}
-              title={dirty
-                ? '有未保存的修改（Ctrl+S 保存）'
-                : lastSavedAt
-                  ? `已保存 · ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()))}`
-                  : '自上次保存或加载以来没有修改'}
             >
-              {dirty ? '未保存' : lastSavedAt ? `已保存 ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()), { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
-            </Tag>
+              <Button type="text" className="topbar-domain-action">工具 <span className="menu-caret">▾</span></Button>
+            </Dropdown>
           </div>
-        </div>
-        {/* 中段：模板/打开（低频入口）+ 领域菜单；窄窗口整段收进“更多”（媒体查询） */}
-        <div className="topbar-center">
-          <Button onClick={() => { setTemplateSelected(demoKey); setTemplateOpen(true); }}>从模板新建</Button>
-          <Button onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开流程</Button>
-          <span className="topbar-divider" />
-          <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
-            <Button type={debugSession ? 'primary' : 'default'} title={debugSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debugSession ? `调试 · ${debugStatus.text}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
-          </Dropdown>
-          <Dropdown menu={{ items: deviceMenuItems }} trigger={['click']}>
-            <Button>设备 <span className="menu-caret">▾</span></Button>
-          </Dropdown>
-          <Dropdown menu={{ items: productionMenuItems }} trigger={['click']}>
-            <Button>生产 <span className="menu-caret">▾</span></Button>
-          </Dropdown>
-          <Dropdown
-            trigger={['click']}
-            menu={{
-              items: toolMenuItems,
-              selectable: true,
-              selectedKeys: layout.preset === 'custom' ? [] : [layout.preset],
-              onClick: ({ key }) => {
-                if (key === 'layout-edit') applyLayoutPreset('edit');
-                else if (key === 'layout-image') applyLayoutPreset('image');
-                else if (key === 'layout-reset') applyLayoutPreset(layout.preset === 'custom' ? 'edit' : layout.preset);
-              }
-            }}
-          >
-            <Button>工具 <span className="menu-caret">▾</span></Button>
-          </Dropdown>
-        </div>
-        {/* 右侧固定：高频动作常驻（账号徽标已内联在本段 flex 流中，见 SecurityAccountBadge）；“更多”仅在窄窗口出现。
-            校验按钮三分态（P1）：未校验 / 校验通过 ✓ / 校验 · N 项问题；流程修改后（快照漂移）标记“需要重新校验” */}
-        <div className="topbar-right">
-          {/* 目录回退常驻标签（P0）：后端目录不可用时只有一个转瞬即逝的提示——参数可能与运行时不一致，
-              用户需要随时可见的状态；恢复成功后自动消失 */}
-          {catalogError && (
-            <Tooltip title={`后端节点目录不可用，正在使用本地回退目录（节点参数可能与运行时不一致）：${catalogError}`}>
-              <Tag color="orange" className="catalog-fallback-tag">目录回退</Tag>
-            </Tooltip>
-          )}
           <Dropdown trigger={['click']} menu={moreMenu}>
             <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
           </Dropdown>
-          <Tooltip title={validationState.status === 'ok' && !needsRevalidate ? validationState.summary : undefined}>
-            <Badge
-              count={validationState.status === 'issues' && !needsRevalidate ? validationIssues.length : 0}
-              dot={needsRevalidate}
-              color={needsRevalidate ? 'gold' : undefined}
-              size="small"
-              offset={[10, 0]}
-            >
-              <Button onClick={validate}>
-                {needsRevalidate
-                  ? '需要重新校验'
-                  : validationState.status === 'ok'
-                    ? '校验通过 ✓'
-                    : validationState.status === 'issues'
-                      ? `校验 · ${validationIssues.length} 项问题`
-                      : '校验'}
-              </Button>
-            </Badge>
-          </Tooltip>
-          <Button onClick={save} loading={saving}>保存</Button>
-          {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
-          {running
-            ? <Button danger onClick={abortRun} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
-            : <Button type="primary" onClick={run} disabled={debugBusy}>运行</Button>}
-          <SecurityAccountBadge />
+          <div className="topbar-account"><SecurityAccountBadge /></div>
+        </div>
+        <div className="topbar-workflow-row">
+          <div className="topbar-left">
+            <div className="workflow-identity" title={`${designerWorkflowName} · ${designerWorkflowId}`}>
+              {/* 名称可点击重命名；技术 ID 收进悬停详情，不再常驻占位 */}
+              <Typography.Text
+                className="workflow-name"
+                editable={{
+                  onChange: (value) => {
+                    // Q07（2026-10-13 审查）：重命名是完整文档编辑——递增文档代次，
+                    // 使在途的加载响应被丢弃（旧实现只比较 epoch/nodes/edges 引用，
+                    // 漏掉名称编辑，加载期间的重命名会被迟到响应覆盖）。
+                    const decision = renameDecision(value, designerWorkflowName);
+                    if (decision.changed) {
+                      setDesignerWorkflowName(decision.name);
+                      documentEpochRef.current += 1;
+                    }
+                  },
+                  tooltip: '点击重命名工作流',
+                  icon: <span className="workflow-rename-icon">✎</span>
+                }}
+              >{designerWorkflowName}</Typography.Text>
+              <Tag
+                className="workflow-dirty"
+                color={dirty ? 'gold' : 'default'}
+                title={dirty
+                  ? '有未保存的修改（Ctrl+S 保存）'
+                  : lastSavedAt
+                    ? `已保存 · ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()))}`
+                    : '自上次保存或加载以来没有修改'}
+              >
+                {dirty ? '未保存' : lastSavedAt ? `已保存 ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()), { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
+              </Tag>
+            </div>
+          </div>
+          <div className="topbar-right">
+            {/* 目录回退常驻标签（P0）：后端目录不可用时只有一个转瞬即逝的提示——参数可能与运行时不一致，
+                用户需要随时可见的状态；恢复成功后自动消失 */}
+            {catalogError && (
+              <Tooltip title={`后端节点目录不可用，正在使用本地回退目录（节点参数可能与运行时不一致）：${catalogError}`}>
+                <Tag color="orange" className="catalog-fallback-tag">目录回退</Tag>
+              </Tooltip>
+            )}
+
+            <Tooltip title={validationState.status === 'ok' && !needsRevalidate ? validationState.summary : undefined}>
+              <Badge
+                count={validationState.status === 'issues' && !needsRevalidate ? validationIssues.length : 0}
+                dot={needsRevalidate}
+                color={needsRevalidate ? 'gold' : undefined}
+                size="small"
+                offset={[10, 0]}
+              >
+                <Button onClick={validate}>
+                  {needsRevalidate
+                    ? '需要重新校验'
+                    : validationState.status === 'ok'
+                      ? '校验通过 ✓'
+                      : validationState.status === 'issues'
+                        ? `校验 · ${validationIssues.length} 项问题`
+                        : '校验'}
+                </Button>
+              </Badge>
+            </Tooltip>
+            <Button onClick={save} loading={saving}>保存</Button>
+            {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
+            {running
+              ? <Button danger onClick={abortRun} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
+              : <Button type="primary" onClick={run} disabled={debugBusy}>运行</Button>}
+          </div>
         </div>
       </header>
 
@@ -1655,25 +1693,8 @@ function Editor() {
         />
 
         <section className="center-panel">
-          <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef} onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
-            {draftNotice && (
-              <div className="draft-recovery" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, width: 'min(640px, calc(100% - 24px))' }}>
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="检测到未保存的本地草稿"
-                  description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(dateLocale(getInitialLang()))}`}
-                  action={(
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <Button size="small" type="primary" onClick={restoreDraft}>恢复草稿</Button>
-                      <Button size="small" onClick={discardDraft}>丢弃</Button>
-                    </div>
-                  )}
-                />
-              </div>
-            )}
-            {/* 校验问题列表已迁至底部“校验问题”标签页：不再用浮层遮挡画布 */}
-            <div className="canvas-toolbar" style={{ position: 'absolute', top: 10, left: 10, zIndex: 44 }}>
+          <div className="workspace-toolbar">
+            <div className="canvas-toolbar" role="toolbar" aria-label="画布编辑工具">
               <div className="canvas-search">
                 <Input
                   ref={searchInputRef}
@@ -1731,11 +1752,11 @@ function Editor() {
                 <span>紧凑</span>
               </label>
               <Button size="small" disabled={!selectedNode} title="打开所选节点的参数、图像和详细说明（也可双击节点）" onClick={() => openNodeConfiguration(selectedId)}>节点配置</Button>
-              <Button size="small" disabled={nodes.length === 0} title="在弹窗中查看最终预览及节点输入、输出图像" onClick={() => { const target = selectedNode ?? nodes[0]; if (target) openNodeConfiguration(target.id, 'image'); }}>查看图像</Button>
+              <Button size="small" type={imagePreviewOpen && !focusMode ? 'primary' : 'default'} aria-pressed={imagePreviewOpen && !focusMode} onClick={() => { if (focusMode) exitFocusMode(true); setImagePreviewOpen((open) => focusMode || !open); }}>图像预览</Button>
             </div>
 
             {selectedNodeIds.length >= 2 && (
-              <div className="canvas-align-toolbar" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 44 }}>
+              <div className="canvas-align-toolbar" role="toolbar" aria-label="多选对齐工具">
                 <Tag style={{ marginInlineEnd: 0 }}>已选 {selectedNodeIds.length}</Tag>
                 <Button size="small" onClick={() => alignSelection('left')}>左对齐</Button>
                 <Button size="small" onClick={() => alignSelection('centerX')}>水平居中</Button>
@@ -1746,8 +1767,10 @@ function Editor() {
               </div>
             )}
 
-            {/* 布局切换移至画布右上角（P1）：结果区折叠后依然可达；附“专注画布”一键收纳 */}
-            <div className="canvas-layout-toolbar" style={{ position: 'absolute', top: 10, right: 10, zIndex: 44 }}>
+            {/* 布局切换与编辑工具同处独立工具栏，结果区折叠后仍然可达。 */}
+            <div className="canvas-layout-toolbar">
+              <Button size="small" onClick={() => void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 })}
+                title="缩放并居中显示整个流程">适应画布</Button>
               <Segmented
                 size="small"
                 value={layout.preset}
@@ -1768,86 +1791,110 @@ function Editor() {
                 {focusMode ? '退出专注' : '专注'}
               </Button>
             </div>
-            {/* 空画布引导（P1）：首屏/新流程时给出下一步动作 */}
-            {nodes.length === 0 && (
-              <div className="canvas-empty-state">
-                <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
-                <div className="canvas-empty-actions">
-                  <Button size="small" type="primary" onClick={() => setTemplateOpen(true)}>从模板新建</Button>
-                  <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
-                </div>
-              </div>
-            )}
-
-            <ReactFlow
-              nodes={nodes}
-              edges={displayEdges}
-              nodeTypes={nodeTypes}
-              colorMode={themeMode}
-              deleteKeyCode={null}
-              selectionKeyCode="Shift"
-              multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
-              zoomOnDoubleClick={false}
-              isValidConnection={isValidConnection}
-              onNodesChange={handleNodesChange}
-              onEdgesChange={handleEdgesChange}
-              onConnect={onConnect}
-              // 连线进行中：临时恢复端口名（远缩放下也能确认落点）。写 dataset 而不是 className，避免与 React 的 className 互相覆盖
-              onConnectStart={() => {
-                setConnectionPicker(undefined);
-                if (flowAreaRef.current) flowAreaRef.current.dataset.connecting = 'true';
-              }}
-              onConnectEnd={(event, state) => {
-                if (flowAreaRef.current) delete flowAreaRef.current.dataset.connecting;
-                onConnectEnd(event, state);
-              }}
-              onMoveStart={() => setConnectionPicker(undefined)}
-              onNodeDragStart={() => pushHistory('移动节点')}
-              onNodeClick={(_, node) => setSelectedId(node.id)}
-              onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
-              onMove={(_, viewport) => syncZoomLevel(viewport)}
-              // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
-              onNodeContextMenu={(event, node) => {
-                event.preventDefault();
-                setSelectedId(node.id);
-                const bounds = flowAreaRef.current?.getBoundingClientRect();
-                setNodeContextMenu({
-                  x: event.clientX - (bounds?.left ?? 0),
-                  y: event.clientY - (bounds?.top ?? 0),
-                  nodeId: node.id
-                });
-              }}
-              fitView
-              fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
-              // P2：右下角是画布唯一“空白处”——隐藏 React Flow 水印，避免与小地图按钮叠压
-              //（@xyflow/react v12 免费支持 proOptions.hideAttribution）
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background gap={18} size={1} />
-              <Controls />
-              <CanvasMiniMap nodeCount={nodes.length} />
-            </ReactFlow>
-
-            {/* 节点右键菜单：锚点为不可见占位，Dropdown 受控打开；点击菜单项或菜单外自动关闭 */}
-            {connectionPicker && (
-              <div className="connection-node-picker" ref={connectionPickerRef} style={{ left: connectionPicker.x, top: connectionPicker.y }} role="dialog" aria-label="添加兼容节点">
-                <Toolbox catalog={catalog} recentTypes={recentNodeTypes} connection={connectionPicker}
-                  onClose={() => setConnectionPicker(undefined)}
-                  onAddNode={(type, port) => { if (port) addNode(type, connectionPicker.position, { ...connectionPicker, newPort: port }); }} />
-              </div>
-            )}
-            {nodeContextMenu && (
-              <Dropdown
-                open
-                trigger={['contextMenu']}
-                menu={{ items: nodeContextMenuItems, onClick: () => setNodeContextMenu(undefined) }}
-                onOpenChange={(open) => { if (!open) setNodeContextMenu(undefined); }}
-              >
-                <div style={{ position: 'absolute', top: nodeContextMenu.y, left: nodeContextMenu.x, width: 1, height: 1 }} />
-              </Dropdown>
-            )}
           </div>
+          <div className={`editor-content${imagePreviewOpen && !focusMode ? ' has-preview' : ''}`}>
+            <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef} onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
+              {draftNotice && (
+                <div className="draft-recovery" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, width: 'min(640px, calc(100% - 24px))' }}>
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="检测到未保存的本地草稿"
+                    description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(dateLocale(getInitialLang()))}`}
+                    action={(
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Button size="small" type="primary" onClick={restoreDraft}>恢复草稿</Button>
+                        <Button size="small" onClick={discardDraft}>丢弃</Button>
+                      </div>
+                    )}
+                  />
+                </div>
+              )}
 
+              {/* 空画布引导（P1）：首屏/新流程时给出下一步动作 */}
+              {nodes.length === 0 && (
+                <div className="canvas-empty-state">
+                  <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
+                  <div className="canvas-empty-actions">
+                    <Button size="small" type="primary" onClick={showTemplates}>从模板新建</Button>
+                    <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
+                  </div>
+                </div>
+              )}
+
+              <ReactFlow
+                nodes={nodes}
+                edges={displayEdges}
+                nodeTypes={nodeTypes}
+                colorMode={themeMode}
+                deleteKeyCode={null}
+                selectionKeyCode="Shift"
+                multiSelectionKeyCode={['Control', 'Meta', 'Shift']}
+                zoomOnDoubleClick={false}
+                isValidConnection={isValidConnection}
+                onNodesChange={handleNodesChange}
+                onEdgesChange={handleEdgesChange}
+                onConnect={onConnect}
+                // 连线进行中：临时恢复端口名（远缩放下也能确认落点）。写 dataset 而不是 className，避免与 React 的 className 互相覆盖
+                onConnectStart={() => {
+                  setConnectionPicker(undefined);
+                  if (flowAreaRef.current) flowAreaRef.current.dataset.connecting = 'true';
+                }}
+                onConnectEnd={(event, state) => {
+                  if (flowAreaRef.current) delete flowAreaRef.current.dataset.connecting;
+                  onConnectEnd(event, state);
+                }}
+                onMoveStart={() => setConnectionPicker(undefined)}
+                onNodeDragStart={() => pushHistory('移动节点')}
+                onNodeClick={(_, node) => setSelectedId(node.id)}
+                onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
+                onMove={(_, viewport) => syncZoomLevel(viewport)}
+                // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
+                onNodeContextMenu={(event, node) => {
+                  event.preventDefault();
+                  setSelectedId(node.id);
+                  const bounds = flowAreaRef.current?.getBoundingClientRect();
+                  setNodeContextMenu({
+                    x: event.clientX - (bounds?.left ?? 0),
+                    y: event.clientY - (bounds?.top ?? 0),
+                    nodeId: node.id
+                  });
+                }}
+                fitView
+                fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
+                // P2：右下角是画布唯一“空白处”——隐藏 React Flow 水印，避免与小地图按钮叠压
+                //（@xyflow/react v12 免费支持 proOptions.hideAttribution）
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background gap={18} size={1} />
+                <Controls />
+                <CanvasMiniMap nodeCount={nodes.length} />
+              </ReactFlow>
+
+              {/* 节点右键菜单：锚点为不可见占位，Dropdown 受控打开；点击菜单项或菜单外自动关闭 */}
+              {connectionPicker && (
+                <div className="connection-node-picker" ref={connectionPickerRef} style={{ left: connectionPicker.x, top: connectionPicker.y }} role="dialog" aria-label="添加兼容节点">
+                  <Toolbox catalog={catalog} recentTypes={recentNodeTypes} connection={connectionPicker}
+                    onClose={() => setConnectionPicker(undefined)}
+                    onAddNode={(type, port) => { if (port) addNode(type, connectionPicker.position, { ...connectionPicker, newPort: port }); }} />
+                </div>
+              )}
+              {nodeContextMenu && (
+                <Dropdown
+                  open
+                  trigger={['contextMenu']}
+                  menu={{ items: nodeContextMenuItems, onClick: () => setNodeContextMenu(undefined) }}
+                  onOpenChange={(open) => { if (!open) setNodeContextMenu(undefined); }}
+                >
+                  <div style={{ position: 'absolute', top: nodeContextMenu.y, left: nodeContextMenu.x, width: 1, height: 1 }} />
+                </Dropdown>
+              )}
+            </div>
+
+            {imagePreviewOpen && !focusMode && <WorkflowImagePreview key={designerWorkflowId} nodes={nodes} edges={edges} selectedId={selectedId}
+              nodeLabels={nodeLabels} result={result} stale={resultStale} running={running || debugBusy}
+              onClose={() => setImagePreviewOpen(false)} />}
+          </div>
         </section>
 
       </main>
@@ -1986,39 +2033,59 @@ function Editor() {
             disabled={!templateSelected}
             onClick={() => { if (!templateSelected) return; setTemplateOpen(false); guardUnsaved('从模板新建', () => applyDemo(templateSelected)); }}
           >
-            使用此模板
+            {templateSelected ? `使用「${DEMO_LABELS[templateSelected]}」` : '使用此模板'}
           </Button>
         ]}
       >
-        {DEMO_GROUPS.map((group) => (
-          <div key={group.group} className="template-group">
-            <div className="template-group-title">{group.group}</div>
-            <div className="template-cards">
-              {group.keys.map((key) => {
-                const preview = templatePreviews.get(key);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={`template-card${templateSelected === key ? ' active' : ''}`}
-                    onClick={() => setTemplateSelected(key)}
-                    title={demoDescriptions[key]}
-                  >
-                    <div className="template-card-name">
-                      {DEMO_LABELS[key]}
-                      {demoKey === key && <span className="template-card-current">当前</span>}
-                    </div>
-                    <div className="template-card-desc">{demoDescriptions[key]}</div>
-                    <div className="template-card-meta">
-                      {preview?.nodeCount ?? '—'} 节点
-                      {(preview?.nodeChips.length ?? 0) > 0 && <span className="template-card-chips">{preview?.nodeChips.join(' · ')}</span>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+        <div className="template-filters">
+          <Input allowClear value={templateQuery} onChange={(event) => { setTemplateQuery(event.target.value); setTemplateSelected(null); }}
+            aria-label="搜索流程模板" placeholder="搜索模板名称或用途" />
+          <Select value={templateGroup} onChange={(value) => { setTemplateGroup(value); setTemplateSelected(null); }} aria-label="模板分类" options={[
+            { value: 'all', label: '全部分类' }, ...DEMO_GROUPS.map((group) => ({ value: group.group, label: group.group }))
+          ]} />
+        </div>
+        {templateSelected && selectedTemplatePreview && <section className="template-selected-preview" aria-label="所选模板流程预览">
+          <div className="template-preview-heading"><strong>{DEMO_LABELS[templateSelected]}</strong><span>{selectedTemplatePreview.nodeCount} 个节点 · {selectedTemplatePreview.edges.length} 条连线</span></div>
+          <div className="template-preview-legend"><span>虚线：执行顺序</span><span>实线：数据传递</span><span>滚动查看完整流程</span></div>
+          <div className="template-preview-scroll" tabIndex={0} aria-label="完整流程图，可滚动查看">
+            <TemplateFlowPreview nodes={selectedTemplatePreview.nodes} edges={selectedTemplatePreview.edges}
+              labels={templateLabels} name={DEMO_LABELS[templateSelected]} detailed />
           </div>
-        ))}
+        </section>}
+        <div className="template-results">
+          {visibleTemplateGroups.map((group) => (
+            <div key={group.group} className="template-group">
+              <div className="template-group-title">{group.group}</div>
+              <div className="template-cards">
+                {group.keys.map((key) => {
+                  const preview = templatePreviews.get(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`template-card${templateSelected === key ? ' active' : ''}`}
+                      aria-pressed={templateSelected === key}
+                      onClick={() => setTemplateSelected(key)}
+                      title={demoDescriptions[key]}
+                    >
+                      <div className="template-card-name">
+                        {DEMO_LABELS[key]}
+                        {demoKey === key && <span className="template-card-current">当前</span>}
+                      </div>
+                      <div className="template-card-desc">{demoDescriptions[key]}</div>
+                      {preview && <TemplateFlowPreview nodes={preview.nodes} edges={preview.edges} labels={templateLabels} name={DEMO_LABELS[key]} />}
+                      <div className="template-card-meta">
+                        {preview?.nodeCount ?? '—'} 节点
+                        {(preview?.nodeChips.length ?? 0) > 0 && <span className="template-card-chips">{preview?.nodeChips.join(' · ')}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {visibleTemplateGroups.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模板，请调整搜索或分类" />}
+        </div>
       </Modal>
 
       {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}

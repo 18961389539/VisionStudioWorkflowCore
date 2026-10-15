@@ -25,7 +25,7 @@ public sealed record ProductDescriptor(
 
 public sealed record CreateProductRequest(string Id, string Name, string? Description = null);
 public sealed record CreateProductRecipeRequest(string Id, string RecipeCode, string Name, string? Description, WorkflowDefinition Workflow, string? ChangeNote = null, Dictionary<string,string>? ParameterBindings = null);
-public sealed record CloneRecipeRequest(string NewId, string ProductId, string RecipeCode, string Name, string? Description = null, int? SourceVersion = null);
+public sealed record CloneRecipeRequest(string NewId, string? ProductId, string? RecipeCode, string Name, string? Description = null, int? SourceVersion = null);
 
 public sealed record ValidationAcceptancePolicy(
     double MinimumAccuracy = 0.99,
@@ -114,15 +114,15 @@ public sealed class ProductRecipeStore(SqliteMetadataDatabase db, JobStore jobs)
 
     public async Task<JobDescriptor> CloneRecipeAsync(string sourceJobId, CloneRecipeRequest request, CancellationToken ct)
     {
-        await EnsureProductAsync(request.ProductId, ct);
-        ValidateRecipeCode(request.RecipeCode);
+        if (!string.IsNullOrWhiteSpace(request.ProductId)) await EnsureProductAsync(request.ProductId, ct);
+        if (request.RecipeCode?.Trim().Length > 64) throw new ApiValidationException("Recipe code must be at most 64 characters.");
         var source = await jobs.GetAsync(sourceJobId, ct) ?? throw new ApiNotFoundException($"Recipe '{sourceJobId}' does not exist.");
         var version = request.SourceVersion ?? source.PublishedVersion ?? source.LatestVersion;
         var snapshot = await jobs.GetVersionAsync(sourceJobId, version, ct) ?? throw new ApiNotFoundException($"Recipe '{sourceJobId}' V{version} does not exist.");
         var result = await jobs.CreateAsync(new CreateJobRequest(
             request.NewId, request.Name, request.Description ?? source.Description, snapshot.Workflow,
-            $"Cloned from {sourceJobId} V{version}", request.ProductId, request.RecipeCode.Trim()), ct);
-        await TouchProductAsync(request.ProductId, ct);
+            $"Cloned from {sourceJobId} V{version}", request.ProductId, request.RecipeCode?.Trim(), RequiresValidation: true), ct);
+        if (!string.IsNullOrWhiteSpace(request.ProductId)) await TouchProductAsync(request.ProductId, ct);
         return result;
     }
 

@@ -538,13 +538,10 @@ export type JobDescriptor = {
   publishedDependencyManifestHash?: string | null;
   versions: JobVersionInfo[];
   publicationHistory: PublicationEvent[];
-  productId?: string | null;
   recipeCode?: string | null;
 };
 
 
-export type ProductRecipeSummary = { id: string; recipeCode: string; name: string; description: string; latestVersion: number; activeVersion?: number | null; lifecycleState: 'Draft' | 'Validated' | 'Published'; updatedAt: string; };
-export type ProductDescriptor = { id: string; name: string; description: string; createdAt: string; updatedAt: string; recipes: ProductRecipeSummary[]; };
 export type ValidationCandidateInfo = { validationRunId: string; datasetId: string; startedAt: string; completedAt?: string | null; summary: ValidationRunSummary; };
 export type JobVersionDiff = { jobId: string; fromVersion: number; toVersion: number; fromHash: string; toHash: string; changed: boolean; changes: Array<{kind:string;path:string;before?:string|null;after?:string|null}>; };
 export type JobVersionSnapshot = {
@@ -560,7 +557,7 @@ export type JobVersionSnapshot = {
   parameterSnapshot?: Record<string,unknown> | null;
 };
 
-export type ParameterValueSet = { scope: 'product'|'recipe'; ownerId: string; values: Record<string,unknown>; updatedAt?: string|null; };
+export type ParameterValueSet = { scope: 'recipe'; ownerId: string; values: Record<string,unknown>; updatedAt?: string|null; };
 export type ResolvedRecipeParameterization = {
   baseWorkflow: WorkflowPayload; effectiveWorkflow: WorkflowPayload; baseWorkflowHash: string; effectiveWorkflowHash: string;
   bindings: Record<string,string>; snapshot: Record<string,unknown>; bindingCount: number;

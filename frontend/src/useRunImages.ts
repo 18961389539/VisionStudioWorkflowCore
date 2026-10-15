@@ -23,6 +23,8 @@ type Params = {
 export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: Params) {
   const [runImageCatalog, setRunImageCatalog] = useState<RunImageCatalog>();
   const [imageSource, setImageSource] = useState<'preview' | 'output' | 'input'>('preview');
+  const [catalogRequest, setCatalogRequest] = useState<{ runId: string; loading: boolean; error?: string }>();
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
 
   const runId = result?.runId;
 
@@ -31,27 +33,39 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     if (!runId) {
       setRunImageCatalog(undefined);
       setImageSource('preview');
+      setCatalogRequest(undefined);
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    setCatalogRequest({ runId, loading: true });
     void (async () => {
       let catalog: RunImageCatalog = { runId, images: {} };
+      let error: string | undefined;
       try {
-        const response = await fetch(`/api/runs/${runId}/images`);
-        if (response.ok) {
-          const data = await response.json();
-          const images: Record<string, RunImageEntry> = {};
-          for (const item of data.images ?? []) {
-            if (typeof item?.nodeId === 'string')
-              images[item.nodeId] = { portName: String(item.portName ?? 'image'), width: Number(item.width ?? 0), height: Number(item.height ?? 0) };
-          }
-          catalog = { runId, images };
+        const response = await fetch(`/api/runs/${runId}/images`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const images: Record<string, RunImageEntry> = {};
+        for (const item of data.images ?? []) {
+          if (typeof item?.nodeId === 'string')
+            images[item.nodeId] = { portName: String(item.portName ?? 'image'), width: Number(item.width ?? 0), height: Number(item.height ?? 0) };
         }
-      } catch { /* 网络失败保持空表：查看器回退最终预览 */ }
-      if (!cancelled) setRunImageCatalog(catalog);
+        catalog = { runId, images };
+      } catch (reason) {
+        error = controller.signal.aborted ? '请求超时' : reason instanceof Error ? reason.message : '网络请求失败';
+      } finally { window.clearTimeout(timeout); }
+      if (!cancelled) {
+        setRunImageCatalog(catalog);
+        setCatalogRequest({ runId, loading: false, error });
+      }
     })();
-    return () => { cancelled = true; };
-  }, [runId]);
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timeout); };
+  }, [runId, catalogAttempt]);
+
+  const imageCatalogLoading = Boolean(runId && (catalogRequest?.runId !== runId || catalogRequest.loading));
+  const imageCatalogError = catalogRequest?.runId === runId ? catalogRequest?.error : undefined;
 
   // 目录与结果必须属于同一次运行：runId 不一致一律不采用（请求竞态的双重保险）
   const catalog = useMemo(
@@ -89,15 +103,15 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     if (imageSource === 'output' && selectedId) {
       const resolved = nodeImage(selectedId);
       if (resolved) return { ...resolved, label: `输出 · ${label(selectedId)}`, nodeId: selectedId as string | undefined };
-      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: `最终预览（${label(selectedId)} 无输出图像）`, nodeId: undefined as string | undefined };
+      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输出图像`}）`, nodeId: undefined as string | undefined };
     }
     if (imageSource === 'input') {
       const resolved = imageInputSourceId ? nodeImage(imageInputSourceId) : undefined;
       if (resolved && imageInputSourceId) return { ...resolved, label: `输入 ← ${label(imageInputSourceId)}`, nodeId: imageInputSourceId as string | undefined };
-      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: selectedId ? `最终预览（${label(selectedId)} 无输入图像）` : '最终预览', nodeId: undefined as string | undefined };
+      if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: selectedId ? `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输入图像`}）` : '最终预览', nodeId: undefined as string | undefined };
     }
     return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: '最终预览', nodeId: undefined as string | undefined };
-  }, [catalog, imageInputSourceId, imageSource, nodeLabels, previewUrl, result, selectedId]);
+  }, [catalog, imageInputSourceId, imageSource, nodeLabels, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError]);
 
   // 查看节点图像时只显示该节点自己的覆盖层，避免与上游/下游标注混淆
   const viewerOverlays = useMemo(
@@ -112,6 +126,9 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
 
   return {
     runImageCatalog: catalog,
+    imageCatalogLoading,
+    imageCatalogError,
+    retryImageCatalog: () => setCatalogAttempt((attempt) => attempt + 1),
     imageSource,
     setImageSource,
     imageViewerSource,

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Alert, Button, Empty, Segmented, Table, Tag, Typography } from 'antd';
 import type { NodeRunReport, RunResult } from '../types';
+import ExecutionStatus from './ExecutionStatus';
 import { localizeStatus } from '../i18n';
 import { summarizeScalars } from '../summaryText';
 
@@ -109,7 +110,8 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
           <span>
             {result.success
               ? `${localizeStatus(result.debugState ?? 'Complete')} · ${result.qualityDisposition ? localizeStatus(result.qualityDisposition) : '执行成功'} · ${result.totalDurationMs.toFixed(2)} 毫秒`
-              : '执行失败'}
+              : `执行失败 · ${result.totalDurationMs.toFixed(2)} 毫秒`}
+            <span className="run-outcome-count"> · {result.nodeReports.length} 次节点执行 · {failedCount} 次失败</span>
             {stale && (
               <Tag color="gold" style={{ marginInlineStart: 8 }} title="画布在本次运行提交后已被修改：下方状态与摘要对应提交时的流程版本，不代表当前参数的运行结果">
                 流程已修改 · 结果对应提交时的版本
@@ -227,10 +229,10 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
             {
               title: '状态',
               dataIndex: 'success',
-              width: 78,
+              width: 100,
               render: (success: boolean, record) => (
                 <Tag color={success ? (record.phase === 'Warmup' ? 'blue' : 'green') : 'red'} title={record.error ?? undefined}>
-                  {success ? '成功' : '失败'}
+                  <ExecutionStatus status={success ? (record.phase === 'Warmup' ? 'warmup' : 'ok') : 'error'} />
                 </Tag>
               )
             },

@@ -4,6 +4,7 @@ import type { NodeProps } from '@xyflow/react';
 import { connectionVerdict } from '../validation';
 import { nodePresentation } from '../toolboxModel';
 import NodeCategoryIcon from './NodeCategoryIcon';
+import ExecutionStatus, { executionStatusLabel } from './ExecutionStatus';
 import { summarizeScalars } from '../summaryText';
 import { portNames } from '../i18n/catalog';
 import { getInitialLang } from '../i18n';
@@ -11,17 +12,6 @@ import { configureNode, showNodeDetails } from '../uiBridge';
 import type { CSSProperties } from 'react';
 
 type PortLike = { name: string; dataType: string; label?: string; required?: boolean };
-
-function statusText(status?: string) {
-  if (status === 'pending') return '等待';
-  if (status === 'running') return '执行';
-  if (status === 'ok') return '成功';
-  if (status === 'error') return '失败';
-  if (status === 'warmup') return '预热';
-  if (status === 'breakpoint') return '暂停';
-  if (status === 'skipped') return '未走到';
-  return '空闲';
-}
 
 /** 有“上一次结果”遗留的状态（改了参数/ROI 后旧结果尚未刷新） */
 const hasResultState = (status: string) => status === 'ok' || status === 'error' || status === 'warmup' || status === 'breakpoint';
@@ -188,6 +178,9 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
 
   return (
     <div className={`vision-node ${selected ? 'selected' : ''} status-${stale ? 'stale' : status} ${typeKey.startsWith('flow.') ? 'flow-node' : ''} ${typeKey === 'module.call' ? 'module-node' : ''}${stale ? ' result-stale' : ''}`} style={{ '--node-accent': nodePresentation(typeKey).color } as CSSProperties}>
+      {selected && <span className="node-selection-marker" role="img" aria-label="已选中节点" title="已选中节点">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" /><circle cx="12" cy="12" r="2" /></svg>
+      </span>}
       {breakpoint && <span className="breakpoint-dot" title="断点" />}
       <div className="vision-node-title">
         <span className="vision-node-name" title={String(d.label ?? typeKey)}>
@@ -217,7 +210,8 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
               updateNodeData(id, { breakpoint: !breakpoint });
             }}
           />
-          <span className="node-status" title={stale ? `上次执行状态：${statusText(status)}${disposition ? ` · ${disposition}` : ''}` : undefined}>{stale ? '待运行' : statusText(status)}</span>
+          <span className="node-status"><ExecutionStatus status={stale ? 'stale' : status}
+            title={stale ? `上次执行状态：${executionStatusLabel(status)}${disposition ? ` · ${disposition}` : ''}` : undefined} /></span>
         </span>
       </div>
       {stale && <div className="node-stale-message">参数已修改，待运行</div>}
