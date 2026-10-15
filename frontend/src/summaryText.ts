@@ -13,6 +13,22 @@ export function formatScalar(value: string | number | boolean | null) {
 /** 各节点类型的“关键结果”字段顺序：先展示用户真正关心的测量量，而不是摘要里的前 N 个键。
  *  键取自后端各节点 Summary（backend/src/VisionStudio.Engine/Nodes/*.cs）；未列出的类型走通用排序。 */
 const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
+  'image.topHat': ['kernelWidth', 'kernelHeight'], 'image.bottomHat': ['kernelWidth', 'kernelHeight'],
+  'image.morphGradient': ['kernelWidth', 'kernelHeight'], 'measure.grayHistogram': ['found', 'pixelCount', 'entropy'],
+  'region.fromRoi': ['found', 'area', 'count'], 'region.convexHull': ['area', 'count'],
+  'region.boundary': ['area', 'count'], 'region.skeleton': ['area', 'count'],
+  'contour.fromPoints': ['found', 'sampleCount', 'closed'], 'measure.wallThickness': ['found', 'minThickness', 'maxThickness'],
+  'measure.concentricity': ['centerDistance', 'diametralOffset'], 'measure.roundness': ['found', 'deviation', 'rms'],
+  'measure.straightness': ['found', 'deviation', 'rms'], 'measure.contourDeviation': ['found', 'deviation', 'mean'],
+  'measure.parallelism': ['angleError', 'deviation', 'measuredLength'], 'measure.perpendicularity': ['angleError', 'deviation', 'measuredLength'],
+  'image.colorConvert': ['space', 'channelNames'], 'region.fromColorRange': ['found', 'area', 'count'],
+  'measure.colorDifference': ['found', 'deltaE', 'maxDeltaE'], 'image.contrastNormalize': ['inputMin', 'inputMax', 'rangeCollapsed'],
+  'image.illuminationNormalize': ['windowSize', 'targetMean'], 'image.sharpen': ['amount', 'windowSize'],
+  'text.match': ['pass', 'mode', 'textLength'], 'text.regex': ['pass', 'groupCount', 'textLength'],
+  'image.register': ['found', 'score'], 'image.warpAffine': ['width', 'height', 'interpolation'],
+  'region.morphology': ['count', 'area'], 'region.transform': ['count', 'area'],
+  'region.properties': ['found', 'area', 'orientation'], 'region.toDetections': ['count'],
+  'measure.lineSpacing': ['found', 'distance', 'sampleCount'], 'calibration.detectBoard': ['found', 'count', 'views'],
   'image.flatFieldCorrect': ['targetMean', 'minGain', 'outputType'],
   'image.dynamicThreshold': ['found', 'area', 'offset'], 'image.difference': ['meanDifference', 'minDifference', 'maxDifference'],
   'defect.referenceCompare': ['found', 'count', 'area'], 'measure.regionIntensity': ['found', 'mean', 'stdDev'],

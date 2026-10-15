@@ -80,3 +80,19 @@
 ## 第七批：缺陷检测
 
 新增 `image.flatFieldCorrect`、`image.dynamicThreshold`、`image.difference`、`defect.referenceCompare`、`measure.regionIntensity`，目录 **100 → 105**。五个节点使用 JLVision；动态阈值、标准图比对和区域统计支持限定域图像。前端模板“缺陷检测与良品比对”配套 OK／NG 两条路径。使用与参考图要求见 [缺陷检测说明](DEFECT_NODES.md)。
+
+## 第八批：图像对齐、逐区域测量与标定板提取
+
+新增 `image.register`、`image.warpAffine`、`region.morphology`、`region.properties`、`region.toDetections`、`region.transform`、`measure.lineSpacing`、`calibration.detectBoard`，目录 **105 → 113**。图像与区域共享像素中心仿射约定；逐区域属性可接现有目标集合与循环；标定板对应点可累计并直接连接内参标定。前端模板“图像对齐与逐区域测量”包含定位成功和未找到两条路径。端口、限制与验证入口见 [图像对齐与逐区域测量说明](ALIGNMENT_REGION_NODES.md)。
+
+## 第九批：色彩检测、图像增强与文本校验
+
+新增 `image.colorConvert`、`region.fromColorRange`、`measure.colorDifference`、`image.contrastNormalize`、`image.illuminationNormalize`、`image.sharpen`、`text.match`、`text.regex`，目录 **113 → 121**。颜色转换明确 sRGB、HSV 与 D65 Lab 浮点通道，颜色区域与色差支持限定域，增强节点输出灰度，文本节点可直接校验 OCR/条码结果。新增“色彩检测与图像增强”“文本与批号校验”模板。数值约定、限制和验证入口见 [色彩与文本节点说明](COLOR_TEXT_NODES.md)。
+
+## 第十批：圆环壁厚与采样形状测量
+
+新增 `contour.fromPoints`、`measure.wallThickness`、`measure.concentricity`、`measure.roundness`、`measure.straightness`、`measure.contourDeviation`、`measure.parallelism`、`measure.perpendicularity`，目录 **121 → 129**。点列保留亚像素坐标，圆环壁厚使用解析极值，形状误差明确最小二乘基准与有限采样含义。新增“圆环壁厚与同心偏差”“直线形状与轮廓偏差”模板，包含缺失几何和未包含时的 NG 路径。使用与验证入口见 [几何测量说明](GEOMETRY_TOLERANCE_NODES.md)。
+
+## 第十一批：细小特征增强与区域形状处理
+
+新增 `image.topHat`、`image.bottomHat`、`image.morphGradient`、`measure.grayHistogram`、`region.fromRoi`、`region.convexHull`、`region.boundary`、`region.skeleton`，目录 **129 → 137**。灰度形态学突出亮暗细小结构，直方图支持限定域和百分位，ROI 转区域采用明确的像素裁剪语义，区域形状处理支持逐对象或先合并。新增“细小亮暗特征检测”“区域形状与凸包差”模板。端口、数值约定与验证入口见 [细小特征与区域形状说明](FEATURE_REGION_NODES.md)。

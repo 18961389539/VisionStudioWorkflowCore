@@ -18,6 +18,7 @@ public static class VisionExecutionPolicy
 
         var type = catalog.Type;
         if (type.Equals("image.synthetic", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("contour.fromPoints", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("region.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.reduceDomain", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("defect.", StringComparison.OrdinalIgnoreCase) ||
@@ -28,10 +29,14 @@ public static class VisionExecutionPolicy
             type.StartsWith("image.blur.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("image.threshold.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.morphology", StringComparison.OrdinalIgnoreCase) ||
+            type is "image.topHat" or "image.bottomHat" or "image.morphGradient" ||
             type.Equals("image.crop", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.resize", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase) ||
+            type is "image.register" or "image.warpAffine" ||
+            type is "image.colorConvert" or "image.contrastNormalize" or "image.illuminationNormalize" or "image.sharpen" ||
+            type.StartsWith("text.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.undistort", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("match.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("value.", StringComparison.OrdinalIgnoreCase) ||

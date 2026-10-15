@@ -1,0 +1,530 @@
+{
+  "id": "edge-tolerance",
+  "name": "Line Form and Contour Deviation",
+  "nodes": [
+    {
+      "id": "datumPoints",
+      "type": "contour.fromPoints",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {
+        "pointsJson": "[[100,200],[150,200],[200,200],[250,200],[300,200]]",
+        "closed": false
+      }
+    },
+    {
+      "id": "edgePoints",
+      "type": "contour.fromPoints",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "pointsJson": "[[100,210],[150,210.5],[200,211],[250,211.5],[300,212]]",
+        "closed": false
+      }
+    },
+    {
+      "id": "verticalPoints",
+      "type": "contour.fromPoints",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {
+        "pointsJson": "[[320,80],[320,120],[320,180],[320,250]]",
+        "closed": false
+      }
+    },
+    {
+      "id": "datumFit",
+      "type": "measure.straightness",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "edgeFit",
+      "type": "measure.straightness",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "verticalFit",
+      "type": "measure.straightness",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "fitsAB",
+      "type": "logic.boolean",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 180
+      },
+      "parameters": {
+        "op": "and"
+      }
+    },
+    {
+      "id": "fits",
+      "type": "logic.boolean",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 180
+      },
+      "parameters": {
+        "op": "and"
+      }
+    },
+    {
+      "id": "gateFit",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "parallel",
+      "type": "measure.parallelism",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "perpendicular",
+      "type": "measure.perpendicularity",
+      "name": null,
+      "position": {
+        "x": 2820,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "deviation",
+      "type": "measure.contourDeviation",
+      "name": null,
+      "position": {
+        "x": 3100,
+        "y": 20
+      },
+      "parameters": {
+        "closed": false,
+        "sampleStep": 2,
+        "symmetric": true
+      }
+    },
+    {
+      "id": "gateDeviation",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 3380,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "tolerance",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 3660,
+        "y": -140
+      },
+      "parameters": {
+        "min": 0,
+        "max": 13
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 3940,
+        "y": -140
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missingDeviation",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 3660,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "joinDeviation",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 4220,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missingFit",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 500
+      },
+      "parameters": {}
+    },
+    {
+      "id": "joinFit",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 4500,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "datumPoints",
+      "sourcePort": "next",
+      "targetNodeId": "edgePoints",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "edgePoints",
+      "sourcePort": "next",
+      "targetNodeId": "verticalPoints",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "verticalPoints",
+      "sourcePort": "next",
+      "targetNodeId": "datumFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "datumFit",
+      "sourcePort": "next",
+      "targetNodeId": "edgeFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "edgeFit",
+      "sourcePort": "next",
+      "targetNodeId": "verticalFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "verticalFit",
+      "sourcePort": "next",
+      "targetNodeId": "fitsAB",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "fitsAB",
+      "sourcePort": "next",
+      "targetNodeId": "fits",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "fits",
+      "sourcePort": "next",
+      "targetNodeId": "gateFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "true",
+      "targetNodeId": "parallel",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "parallel",
+      "sourcePort": "next",
+      "targetNodeId": "perpendicular",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "perpendicular",
+      "sourcePort": "next",
+      "targetNodeId": "deviation",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c11",
+      "sourceNodeId": "deviation",
+      "sourcePort": "next",
+      "targetNodeId": "gateDeviation",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c12",
+      "sourceNodeId": "gateDeviation",
+      "sourcePort": "true",
+      "targetNodeId": "tolerance",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c13",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c14",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "joinDeviation",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c15",
+      "sourceNodeId": "gateDeviation",
+      "sourcePort": "false",
+      "targetNodeId": "missingDeviation",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c16",
+      "sourceNodeId": "missingDeviation",
+      "sourcePort": "next",
+      "targetNodeId": "joinDeviation",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c17",
+      "sourceNodeId": "joinDeviation",
+      "sourcePort": "next",
+      "targetNodeId": "joinFit",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c18",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "false",
+      "targetNodeId": "missingFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c19",
+      "sourceNodeId": "missingFit",
+      "sourcePort": "next",
+      "targetNodeId": "joinFit",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "datumPoints",
+      "sourcePort": "contours",
+      "targetNodeId": "datumFit",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "edgePoints",
+      "sourcePort": "contours",
+      "targetNodeId": "edgeFit",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "verticalPoints",
+      "sourcePort": "contours",
+      "targetNodeId": "verticalFit",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "datumFit",
+      "sourcePort": "found",
+      "targetNodeId": "fitsAB",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "edgeFit",
+      "sourcePort": "found",
+      "targetNodeId": "fitsAB",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "fitsAB",
+      "sourcePort": "result",
+      "targetNodeId": "fits",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "verticalFit",
+      "sourcePort": "found",
+      "targetNodeId": "fits",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "fits",
+      "sourcePort": "result",
+      "targetNodeId": "gateFit",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "datumFit",
+      "sourcePort": "line",
+      "targetNodeId": "parallel",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "edgeFit",
+      "sourcePort": "line",
+      "targetNodeId": "parallel",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "datumFit",
+      "sourcePort": "line",
+      "targetNodeId": "perpendicular",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d11",
+      "sourceNodeId": "verticalFit",
+      "sourcePort": "line",
+      "targetNodeId": "perpendicular",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "edgePoints",
+      "sourcePort": "contours",
+      "targetNodeId": "deviation",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d13",
+      "sourceNodeId": "datumPoints",
+      "sourcePort": "contours",
+      "targetNodeId": "deviation",
+      "targetPort": "referenceContours",
+      "kind": "data"
+    },
+    {
+      "id": "d14",
+      "sourceNodeId": "deviation",
+      "sourcePort": "found",
+      "targetNodeId": "gateDeviation",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d15",
+      "sourceNodeId": "deviation",
+      "sourcePort": "deviation",
+      "targetNodeId": "tolerance",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d16",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d17",
+      "sourceNodeId": "gateDeviation",
+      "sourcePort": "condition",
+      "targetNodeId": "missingDeviation",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d18",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "condition",
+      "targetNodeId": "missingFit",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

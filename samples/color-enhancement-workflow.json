@@ -1,0 +1,356 @@
+{
+  "id": "color-enhancement",
+  "name": "Color Inspection and Image Enhancement",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "contrast",
+      "type": "image.contrastNormalize",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "illumination",
+      "type": "image.illuminationNormalize",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {
+        "windowSize": 51,
+        "targetMean": 128
+      }
+    },
+    {
+      "id": "sharpen",
+      "type": "image.sharpen",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {
+        "amount": 0.5
+      }
+    },
+    {
+      "id": "channels",
+      "type": "image.colorConvert",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 180
+      },
+      "parameters": {
+        "space": "hsv"
+      }
+    },
+    {
+      "id": "range",
+      "type": "region.fromColorRange",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 180
+      },
+      "parameters": {
+        "space": "hsv",
+        "min1": 0,
+        "max1": 360,
+        "min2": 0,
+        "max2": 1,
+        "min3": 0.6,
+        "max3": 1
+      }
+    },
+    {
+      "id": "objects",
+      "type": "region.connectedComponents",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "difference",
+      "type": "measure.colorDifference",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "tolerance",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 180
+      },
+      "parameters": {
+        "min": 0,
+        "max": 100
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2820,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "gate",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missing",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 500
+      },
+      "parameters": {}
+    },
+    {
+      "id": "join",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 3100,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "contrast",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "contrast",
+      "sourcePort": "next",
+      "targetNodeId": "illumination",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "illumination",
+      "sourcePort": "next",
+      "targetNodeId": "sharpen",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "sharpen",
+      "sourcePort": "next",
+      "targetNodeId": "channels",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "channels",
+      "sourcePort": "next",
+      "targetNodeId": "range",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "range",
+      "sourcePort": "next",
+      "targetNodeId": "objects",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "objects",
+      "sourcePort": "next",
+      "targetNodeId": "difference",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "contrast",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "contrast",
+      "sourcePort": "image",
+      "targetNodeId": "illumination",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "illumination",
+      "sourcePort": "image",
+      "targetNodeId": "sharpen",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "channels",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "range",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "range",
+      "sourcePort": "region",
+      "targetNodeId": "objects",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "difference",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "range",
+      "sourcePort": "region",
+      "targetNodeId": "difference",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "difference",
+      "sourcePort": "deltaE",
+      "targetNodeId": "tolerance",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c-gate",
+      "sourceNodeId": "difference",
+      "sourcePort": "next",
+      "targetNodeId": "gate",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c-found",
+      "sourceNodeId": "gate",
+      "sourcePort": "true",
+      "targetNodeId": "tolerance",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c-empty",
+      "sourceNodeId": "gate",
+      "sourcePort": "false",
+      "targetNodeId": "missing",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c-pass-join",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c-empty-join",
+      "sourceNodeId": "missing",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d-found",
+      "sourceNodeId": "difference",
+      "sourcePort": "found",
+      "targetNodeId": "gate",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d-empty-pass",
+      "sourceNodeId": "gate",
+      "sourcePort": "condition",
+      "targetNodeId": "missing",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

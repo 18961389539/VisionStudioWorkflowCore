@@ -1,0 +1,413 @@
+{
+  "id": "small-feature-inspection",
+  "name": "Small Bright and Dark Features",
+  "nodes": [
+    {
+      "id": "board",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 40
+      },
+      "parameters": {
+        "canvasWidth": 128,
+        "canvasHeight": 128,
+        "roi": {
+          "type": "rectangle",
+          "x": 16,
+          "y": 16,
+          "width": 96,
+          "height": 96
+        }
+      }
+    },
+    {
+      "id": "slit",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 40
+      },
+      "parameters": {
+        "canvasWidth": 128,
+        "canvasHeight": 128,
+        "roi": {
+          "type": "rectangle",
+          "x": 60,
+          "y": 40,
+          "width": 5,
+          "height": 48
+        }
+      }
+    },
+    {
+      "id": "bright",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 40
+      },
+      "parameters": {
+        "canvasWidth": 128,
+        "canvasHeight": 128,
+        "roi": {
+          "type": "rectangle",
+          "x": 4,
+          "y": 40,
+          "width": 5,
+          "height": 48
+        }
+      }
+    },
+    {
+      "id": "cut",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "parameters": {
+        "operation": "difference"
+      }
+    },
+    {
+      "id": "pattern",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 40
+      },
+      "parameters": {
+        "operation": "union"
+      }
+    },
+    {
+      "id": "top",
+      "type": "image.topHat",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 300
+      },
+      "parameters": {
+        "kernelWidth": 11,
+        "kernelHeight": 11
+      }
+    },
+    {
+      "id": "bottom",
+      "type": "image.bottomHat",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 300
+      },
+      "parameters": {
+        "kernelWidth": 11,
+        "kernelHeight": 11
+      }
+    },
+    {
+      "id": "gradient",
+      "type": "image.morphGradient",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 300
+      },
+      "parameters": {
+        "kernelWidth": 3,
+        "kernelHeight": 3
+      }
+    },
+    {
+      "id": "histogram",
+      "type": "measure.grayHistogram",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 300
+      },
+      "parameters": {
+        "lowPercent": 5,
+        "highPercent": 95
+      }
+    },
+    {
+      "id": "gate",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 300
+      },
+      "parameters": {}
+    },
+    {
+      "id": "tolerance",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 560
+      },
+      "parameters": {
+        "min": 240,
+        "max": 255
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 560
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missing",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 560
+      },
+      "parameters": {}
+    },
+    {
+      "id": "join",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 560
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "sourceNodeId": "board",
+      "sourcePort": "next",
+      "targetNodeId": "slit",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c0"
+    },
+    {
+      "sourceNodeId": "slit",
+      "sourcePort": "next",
+      "targetNodeId": "bright",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c1"
+    },
+    {
+      "sourceNodeId": "bright",
+      "sourcePort": "next",
+      "targetNodeId": "cut",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c2"
+    },
+    {
+      "sourceNodeId": "cut",
+      "sourcePort": "next",
+      "targetNodeId": "pattern",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c3"
+    },
+    {
+      "sourceNodeId": "pattern",
+      "sourcePort": "next",
+      "targetNodeId": "top",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c4"
+    },
+    {
+      "sourceNodeId": "top",
+      "sourcePort": "next",
+      "targetNodeId": "bottom",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c5"
+    },
+    {
+      "sourceNodeId": "bottom",
+      "sourcePort": "next",
+      "targetNodeId": "gradient",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c6"
+    },
+    {
+      "sourceNodeId": "gradient",
+      "sourcePort": "next",
+      "targetNodeId": "histogram",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c7"
+    },
+    {
+      "sourceNodeId": "histogram",
+      "sourcePort": "next",
+      "targetNodeId": "gate",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c8"
+    },
+    {
+      "sourceNodeId": "gate",
+      "sourcePort": "true",
+      "targetNodeId": "tolerance",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c9"
+    },
+    {
+      "sourceNodeId": "tolerance",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c10"
+    },
+    {
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch1",
+      "kind": "control",
+      "id": "c11"
+    },
+    {
+      "sourceNodeId": "gate",
+      "sourcePort": "false",
+      "targetNodeId": "missing",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c12"
+    },
+    {
+      "sourceNodeId": "missing",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch2",
+      "kind": "control",
+      "id": "c13"
+    },
+    {
+      "sourceNodeId": "board",
+      "sourcePort": "region",
+      "targetNodeId": "cut",
+      "targetPort": "a",
+      "kind": "data",
+      "id": "d14"
+    },
+    {
+      "sourceNodeId": "slit",
+      "sourcePort": "region",
+      "targetNodeId": "cut",
+      "targetPort": "b",
+      "kind": "data",
+      "id": "d15"
+    },
+    {
+      "sourceNodeId": "cut",
+      "sourcePort": "region",
+      "targetNodeId": "pattern",
+      "targetPort": "a",
+      "kind": "data",
+      "id": "d16"
+    },
+    {
+      "sourceNodeId": "bright",
+      "sourcePort": "region",
+      "targetNodeId": "pattern",
+      "targetPort": "b",
+      "kind": "data",
+      "id": "d17"
+    },
+    {
+      "sourceNodeId": "pattern",
+      "sourcePort": "image",
+      "targetNodeId": "top",
+      "targetPort": "image",
+      "kind": "data",
+      "id": "d18"
+    },
+    {
+      "sourceNodeId": "pattern",
+      "sourcePort": "image",
+      "targetNodeId": "bottom",
+      "targetPort": "image",
+      "kind": "data",
+      "id": "d19"
+    },
+    {
+      "sourceNodeId": "pattern",
+      "sourcePort": "image",
+      "targetNodeId": "gradient",
+      "targetPort": "image",
+      "kind": "data",
+      "id": "d20"
+    },
+    {
+      "sourceNodeId": "bottom",
+      "sourcePort": "image",
+      "targetNodeId": "histogram",
+      "targetPort": "image",
+      "kind": "data",
+      "id": "d21"
+    },
+    {
+      "sourceNodeId": "slit",
+      "sourcePort": "region",
+      "targetNodeId": "histogram",
+      "targetPort": "region",
+      "kind": "data",
+      "id": "d22"
+    },
+    {
+      "sourceNodeId": "histogram",
+      "sourcePort": "found",
+      "targetNodeId": "gate",
+      "targetPort": "condition",
+      "kind": "data",
+      "id": "d23"
+    },
+    {
+      "sourceNodeId": "histogram",
+      "sourcePort": "mean",
+      "targetNodeId": "tolerance",
+      "targetPort": "value",
+      "kind": "data",
+      "id": "d24"
+    },
+    {
+      "sourceNodeId": "tolerance",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data",
+      "id": "d25"
+    },
+    {
+      "sourceNodeId": "gate",
+      "sourcePort": "condition",
+      "targetNodeId": "missing",
+      "targetPort": "pass",
+      "kind": "data",
+      "id": "d26"
+    }
+  ]
+}

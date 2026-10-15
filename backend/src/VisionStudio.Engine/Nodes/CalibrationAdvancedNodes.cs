@@ -18,7 +18,9 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var json = node.GetString("calibrationDataJson", "{}");
+        var json = context.TryGetValue("calibrationDataJson", out var connectedViews)
+            ? connectedViews.Require<string>("calibrationDataJson")
+            : node.GetString("calibrationDataJson", "{}");
         CameraCalibrationRequest request;
         try { request = JsonSerializer.Deserialize<CameraCalibrationRequest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new JsonException("empty payload"); }
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid calibrationDataJson: {ex.Message}", ex); }

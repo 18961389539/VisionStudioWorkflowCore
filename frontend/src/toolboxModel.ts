@@ -17,7 +17,7 @@ export function nodeCategory(type: string): NodeCategory {
   return ({ image: 'preprocess', feature: 'feature', measure: 'measurement', geometry: 'geometry',
     calibration: 'calibration', coordinate: 'coordinate', flow: 'flow', device: 'device', robot: 'robot',
     match: 'feature', value: 'flow', logic: 'flow', output: 'device', http: 'device',
-    recognition: 'feature', ai: 'feature', inference: 'feature', contour: 'feature', roi: 'measurement', collection: 'flow' } as Record<string, NodeCategory>)[prefix] ?? 'plugin';
+    recognition: 'feature', text: 'feature', ai: 'feature', inference: 'feature', contour: 'feature', region: 'feature', roi: 'measurement', collection: 'flow' } as Record<string, NodeCategory>)[prefix] ?? 'plugin';
 }
 export function nodePresentation(type: string) {
   const category = nodeCategory(type);

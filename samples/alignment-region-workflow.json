@@ -1,0 +1,426 @@
+{
+  "id": "alignment-region",
+  "name": "Image Alignment and Per-object Regions",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "current",
+      "type": "image.rotate",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "angleDeg": 5,
+        "expand": false
+      }
+    },
+    {
+      "id": "threshold",
+      "type": "region.fromThreshold",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {
+        "minGray": 200,
+        "maxGray": 255
+      }
+    },
+    {
+      "id": "connected",
+      "type": "region.connectedComponents",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "clean",
+      "type": "region.morphology",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 180
+      },
+      "parameters": {
+        "operation": "open",
+        "kernelWidth": 3,
+        "kernelHeight": 3
+      }
+    },
+    {
+      "id": "register",
+      "type": "image.register",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 180
+      },
+      "parameters": {
+        "x": 50,
+        "y": 40,
+        "width": 400,
+        "height": 350,
+        "angleRangeDeg": 10,
+        "minScore": 0.7
+      }
+    },
+    {
+      "id": "gate",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "warp",
+      "type": "image.warpAffine",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "transform",
+      "type": "region.transform",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "properties",
+      "type": "region.properties",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "detections",
+      "type": "region.toDetections",
+      "name": null,
+      "position": {
+        "x": 2820,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "range",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 3100,
+        "y": 20
+      },
+      "parameters": {
+        "min": 1,
+        "max": 1
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 3380,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missing",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 420
+      },
+      "parameters": {}
+    },
+    {
+      "id": "join",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 3660,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "current",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "current",
+      "sourcePort": "next",
+      "targetNodeId": "threshold",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold",
+      "sourcePort": "next",
+      "targetNodeId": "connected",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "connected",
+      "sourcePort": "next",
+      "targetNodeId": "clean",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "clean",
+      "sourcePort": "next",
+      "targetNodeId": "register",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "register",
+      "sourcePort": "next",
+      "targetNodeId": "gate",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "gate",
+      "sourcePort": "true",
+      "targetNodeId": "warp",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "warp",
+      "sourcePort": "next",
+      "targetNodeId": "transform",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "transform",
+      "sourcePort": "next",
+      "targetNodeId": "properties",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "properties",
+      "sourcePort": "next",
+      "targetNodeId": "detections",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "detections",
+      "sourcePort": "next",
+      "targetNodeId": "range",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c11",
+      "sourceNodeId": "range",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c12",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c13",
+      "sourceNodeId": "gate",
+      "sourcePort": "false",
+      "targetNodeId": "missing",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c14",
+      "sourceNodeId": "missing",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "current",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "current",
+      "sourcePort": "image",
+      "targetNodeId": "threshold",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold",
+      "sourcePort": "region",
+      "targetNodeId": "connected",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "connected",
+      "sourcePort": "region",
+      "targetNodeId": "clean",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "current",
+      "sourcePort": "image",
+      "targetNodeId": "register",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "register",
+      "targetPort": "reference",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "register",
+      "sourcePort": "found",
+      "targetNodeId": "gate",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "current",
+      "sourcePort": "image",
+      "targetNodeId": "warp",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "register",
+      "sourcePort": "transform",
+      "targetNodeId": "warp",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "clean",
+      "sourcePort": "region",
+      "targetNodeId": "transform",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "register",
+      "sourcePort": "transform",
+      "targetNodeId": "transform",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "d11",
+      "sourceNodeId": "transform",
+      "sourcePort": "region",
+      "targetNodeId": "properties",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "transform",
+      "sourcePort": "region",
+      "targetNodeId": "detections",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d13",
+      "sourceNodeId": "detections",
+      "sourcePort": "count",
+      "targetNodeId": "range",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d14",
+      "sourceNodeId": "range",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d15",
+      "sourceNodeId": "gate",
+      "sourcePort": "condition",
+      "targetNodeId": "missing",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

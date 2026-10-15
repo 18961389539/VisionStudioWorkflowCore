@@ -908,6 +908,10 @@ public static class BuiltInNodeCatalog
         .. Batch5PrecisionCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. RegionCatalog.Items,
         .. DefectCatalog.Items,
+        .. AlignmentRegionCatalog.Items,
+        .. ColorTextCatalog.Items,
+        .. GeometryToleranceCatalog.Items,
+        .. FeatureRegionCatalog.Items,
         new(
             "flow.join",
             "Join",
