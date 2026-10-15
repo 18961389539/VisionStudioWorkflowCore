@@ -180,6 +180,7 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<ChannelExtractNode>(),
             services.GetRequiredService<GaussianBlurNode>(),
             services.GetRequiredService<MedianBlurNode>(),
+            services.GetRequiredService<ImageFilterNode>(),
             services.GetRequiredService<MorphologyNode>(),
             services.GetRequiredService<AdaptiveThresholdNode>(),
             services.GetRequiredService<OtsuThresholdNode>(),
@@ -228,6 +229,7 @@ public sealed class RuntimeBootstrapHostedService(
             // 第五批（2026-10-14 精密定位与测量）
             services.GetRequiredService<ContourExtractNode>(),
             services.GetRequiredService<RegionFromThresholdNode>(),
+            services.GetRequiredService<RegionFromRangeNode>(),
             services.GetRequiredService<RegionConnectedComponentsNode>(),
             services.GetRequiredService<RegionFilterNode>(),
             services.GetRequiredService<RegionBooleanNode>(),
@@ -248,6 +250,7 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<ImageSharpenNode>(),
             services.GetRequiredService<TextMatchNode>(),
             services.GetRequiredService<TextRegexNode>(),
+            services.GetRequiredService<TextValidationNode>(),
             services.GetRequiredService<ContourFromPointsNode>(),
             services.GetRequiredService<WallThicknessNode>(),
             services.GetRequiredService<ConcentricityNode>(),

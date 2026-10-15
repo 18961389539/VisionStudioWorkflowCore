@@ -6,6 +6,7 @@ import type {
   ValidationDatasetSummary, ValidationRunRecord, VisionRoi, WorkflowPayload
 } from '../types';
 import { localizeStatus } from '../i18n';
+import { isParameterVisible } from '../validation';
 
 type Props = {
   open: boolean;
@@ -181,7 +182,7 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
         </Card>
         <Card size="small" title="参数" style={{ marginTop: 10, maxHeight: 520, overflow: 'auto' }}>
           {!selectedCatalog?.parameters.length && !roiEnabled && <Typography.Text type="secondary">此节点没有可调参数。</Typography.Text>}
-          {selectedCatalog?.parameters.map((descriptor) => <div key={descriptor.name} style={{ marginBottom: 10 }}>
+          {selectedCatalog?.parameters.filter((descriptor) => isParameterVisible(descriptor, selectedCatalog.parameters, parameters)).map((descriptor) => <div key={descriptor.name} style={{ marginBottom: 10 }}>
             <Typography.Text strong>{descriptor.label}{descriptor.unit ? ` (${descriptor.unit})` : ''}</Typography.Text>
             {descriptor.description && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{descriptor.description}</Typography.Text></div>}
             <div style={{ marginTop: 4 }}><ParameterEditor descriptor={descriptor} value={parameters[descriptor.name]} onChange={(value) => updateParameter(descriptor.name, value)} /></div>

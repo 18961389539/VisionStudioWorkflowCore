@@ -55,6 +55,29 @@ public sealed class ParameterValidationTests
         Assert.Contains("n1", compiled.OrderedNodeIds);
     }
 
+    [Theory]
+    [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
+    [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
+    [InlineData("image.morphology", """{"operation":"open","kernelWidth":"inactive"}""")]
+    [InlineData("text.validate", """{"mode":"contains","pattern":7,"timeoutMs":"inactive"}""")]
+    public void InactiveModeParameters_AreNotValidated(string nodeType, string parametersJson)
+    {
+        var compiler = CreateCompiler();
+        var nodeCatalog = BuiltInNodeCatalog.Require(nodeType);
+        var nodes = new List<NodeDefinition>();
+        var edges = new List<EdgeDefinition>();
+        if (nodeCatalog.Inputs.Any(port => port.Name == "image" && port.DataType != VisionDataType.Control))
+        {
+            nodes.Add(new NodeDefinition("source", "image.synthetic", null, null, null));
+            edges.Add(new EdgeDefinition("image", "source", "image", "n1", "image", "data"));
+        }
+        nodes.Add(new NodeDefinition("n1", nodeType, null, null, JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(parametersJson)));
+
+        var compiled = compiler.Compile(new WorkflowDefinition("wf-conditional", "conditional parameters", nodes, edges));
+
+        Assert.NotEmpty(compiled.DslJson);
+    }
+
     private static WorkflowDefinition CreateWorkflow(string nodeType, string parametersJson)
         => new(
             "wf-params",

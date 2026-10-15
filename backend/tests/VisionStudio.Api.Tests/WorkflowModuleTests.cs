@@ -67,9 +67,13 @@ public sealed class WorkflowModuleTests
         var v1 = extracted.Version;
         var updatedWorkflow = v1.Workflow with
         {
-            Nodes = v1.Workflow.Nodes.Select(node => node.Id == "threshold"
-                ? node with { Parameters = new Dictionary<string, JsonElement> { ["threshold"] = JsonSerializer.SerializeToElement(155d) } }
-                : node).ToArray()
+            Nodes = v1.Workflow.Nodes.Select(node =>
+            {
+                if (node.Id != "threshold") return node;
+                var parameters = node.Parameters?.ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+                parameters["threshold"] = JsonSerializer.SerializeToElement(155d);
+                return node with { Parameters = parameters };
+            }).ToArray()
         };
         var v2 = await runtime.Authoring.AddVersionAsync("threshold-stage", new(updatedWorkflow, "tune threshold"), default);
         Assert.Equal(2, v2.Version);

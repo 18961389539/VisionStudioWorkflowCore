@@ -26,6 +26,7 @@ public static class VisionExecutionPolicy
             type.Equals("image.threshold", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.grayscale", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.channel", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("image.filter", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("image.blur.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("image.threshold.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.morphology", StringComparison.OrdinalIgnoreCase) ||

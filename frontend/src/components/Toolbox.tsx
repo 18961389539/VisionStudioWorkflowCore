@@ -166,7 +166,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         onChange={(event) => { setQuery(event.target.value); setSelectedType(undefined); setSelectedPort(undefined); setFeedback(''); }} onKeyDown={onSearchKeyDown} /></div>
       {!connection && <div className="toolbox-tabs" role="group" aria-label={text('节点筛选', 'Filter nodes')}>
         <button type="button" aria-pressed={tab === 'all'} onClick={() => setTab('all')}>{text('全部', 'All')}</button>
-        <button type="button" aria-pressed={tab === 'favorites'} onClick={() => setTab('favorites')}>{text('收藏', 'Favorites')} <small>{catalog.filter((item) => favorites.includes(item.type)).length}</small></button>
+        <button type="button" aria-pressed={tab === 'favorites'} onClick={() => setTab('favorites')}>{text('收藏', 'Favorites')} <small>{searchTools(catalog, '').filter((item) => favorites.includes(item.type)).length}</small></button>
       </div>}
       <div className="toolbox-hint">{connection ? `${connection.dataType} ${connection.direction === 'source' ? '→' : '←'} ${text('兼容端口', 'compatible ports')}` : text('拖拽 / 双击 / ＋ 添加', 'Drag / double-click / ＋ to add')}</div>
     </div>
@@ -196,9 +196,9 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
       </>}
     </div>
     {selected && selectedVisible && <section className="toolbox-detail" aria-label={text('节点详情', 'Node details')}>
-      <div className="toolbox-detail-heading"><strong>{selected.displayName}</strong><button type="button" className="toolbox-close" aria-label={text('关闭节点详情', 'Close node details')} onClick={() => setSelectedType(undefined)}>×</button></div>
+      <div className="toolbox-detail-heading"><NodeCategoryIcon type={selected.type} /><strong>{selected.displayName}</strong><button type="button" className="toolbox-close" aria-label={text('关闭节点详情', 'Close node details')} onClick={() => setSelectedType(undefined)}>×</button></div>
       <code>{selected.type}</code>
-      <p>{selected.type === 'image.threshold' ? text('将图像转换为二值图像，便于分离目标与背景。', 'Convert an image to binary to separate objects from the background.') : selected.description || text('选择后添加到画布，在属性面板配置参数。', 'Add to canvas and configure in the properties panel.')}</p>
+      <p>{selected.description || text('选择后添加到画布，在属性面板配置参数。', 'Add to canvas and configure in the properties panel.')}</p>
       <div className="toolbox-badges">
         {selected.pluginId && selected.pluginId !== 'builtin' && <span>{text('来源', 'Source')} · {selected.pluginId}</span>}
         {['image.acquire', 'camera.syncCapture'].includes(selected.type) && <span>{text('需要相机', 'Camera required')}</span>}

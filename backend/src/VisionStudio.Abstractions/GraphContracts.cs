@@ -32,6 +32,8 @@ public sealed record PortDescriptor(string Name, VisionDataType DataType, bool R
 
 public sealed record ParameterOption(string Label, string Value);
 
+public sealed record ParameterVisibility(string Parameter, IReadOnlyList<string> Values);
+
 public sealed record ParameterDescriptor(
     string Name,
     string Label,
@@ -43,7 +45,8 @@ public sealed record ParameterDescriptor(
     IReadOnlyList<ParameterOption>? Options = null,
     string? Unit = null,
     string? Group = null,
-    string? Description = null);
+    string? Description = null,
+    ParameterVisibility? VisibleWhen = null);
 
 public enum VisionExecutionMode
 {

@@ -26,6 +26,7 @@ export type ParameterDescriptor = {
   unit?: string | null;
   group?: string | null;
   description?: string | null;
+  visibleWhen?: { parameter: string; values: string[] } | null;
 };
 
 export type VisionToolCapabilities = {

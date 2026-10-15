@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Empty, Input, InputNumber, Select, Switch, Tag, Typography } from 'antd';
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
-import { validateParameterValues } from '../validation';
+import { isParameterVisible, validateParameterValues } from '../validation';
 
 type Props = {
   node?: Node;
@@ -275,12 +275,15 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
           </div>
         )}
         {catalogItem.parameters.length === 0 && !parameters.roi && <div className="property-empty">无可配置参数</div>}
-        {sections.map((section, index) => (
-          <div key={section.title ?? `section-${index}`}>
+        {sections.map((section, index) => {
+          const visibleParameters = section.parameters.filter((parameter) =>
+            isParameterVisible(parameter, catalogItem.parameters, parameters));
+          if (visibleParameters.length === 0) return null;
+          return <div key={section.title ?? `section-${index}`}>
             {section.title && <div className="property-group">{section.title}</div>}
-            {section.parameters.map(renderRow)}
-          </div>
-        ))}
+            {visibleParameters.map(renderRow)}
+          </div>;
+        })}
       </div>
     </div>
   );

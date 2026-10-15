@@ -40,15 +40,24 @@ public sealed class ThresholdNode : IVisionNodeExecutor
 {
     public string Type => "image.threshold";
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var mode = node.GetString("mode", "manual").Trim().ToLowerInvariant();
+        if (mode == "adaptive")
+            return await new AdaptiveThresholdNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
+        if (mode == "otsu")
+            return await new OtsuThresholdNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
+        if (mode != "manual") throw new InvalidOperationException($"Unsupported threshold mode '{mode}'.");
+
         var sourceImage = context.RequireImage("image");
         var source = sourceImage.Mat;
         var threshold = node.GetDouble("threshold", 128);
+        var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
 
         var thresholded = new Mat();
-        JLVisionOperators.Threshold(source, thresholded, threshold, 255, ThresholdTypes.Binary);
+        JLVisionOperators.Threshold(source, thresholded, threshold, 255, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary);
 
         Mat outputMat;
         if (roi is null)
@@ -63,13 +72,17 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             thresholded.Dispose();
         }
 
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(outputMat)) },
+        return new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(VisionImage.Own(outputMat)),
+                ["threshold"] = VisionValue.Double(threshold)
+            },
             new Dictionary<string, object?>
             {
                 ["threshold"] = threshold,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
-            }));
+            });
     }
 }
 

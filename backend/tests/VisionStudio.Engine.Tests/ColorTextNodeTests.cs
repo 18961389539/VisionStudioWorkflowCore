@@ -218,6 +218,25 @@ public sealed class ColorTextNodeTests : IDisposable
     }
 
     [Fact]
+    public async Task UnifiedTextValidationSupportsLiteralAndRegexModes()
+    {
+        var literal = await Run(new TextValidationNode(), Text("  LOT-42  "), new { mode = "contains", expected = "OT-4" });
+        Assert.True(literal.Outputs["pass"].Require<bool>("pass"));
+        Assert.Equal("LOT-42", literal.Outputs["text"].Require<string>("text"));
+        Assert.Equal("{}", literal.Outputs["groupsJson"].Require<string>("groupsJson"));
+
+        var regex = await Run(new TextValidationNode(), Text(" LOT-20261015-A42 "), new
+        {
+            mode = "regex", pattern = @"LOT-(?<date>[0-9]{8})-(?<batch>[A-Z][0-9]{2})"
+        });
+        Assert.True(regex.Outputs["pass"].Require<bool>("pass"));
+        Assert.Equal("LOT-20261015-A42", regex.Outputs["matchedText"].Require<string>("matchedText"));
+        var groups = JsonSerializer.Deserialize<Dictionary<string, string>>(regex.Outputs["groupsJson"].Require<string>("groupsJson"))!;
+        Assert.Equal("20261015", groups["date"]);
+        Assert.Equal("A42", groups["batch"]);
+    }
+
+    [Fact]
     public async Task RegexFullMatchPreservesAlternationAndExtendedModeTrailingComments()
     {
         var result = await Run(new TextRegexNode(), Text("AB"), new { pattern = "A|AB" });
@@ -238,10 +257,10 @@ public sealed class ColorTextNodeTests : IDisposable
     }
 
     [Fact]
-    public async Task AllEightNodesHonorPreCancellation()
+    public async Task AllTextValidationNodesHonorPreCancellation()
     {
         using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
-        IVisionNodeExecutor[] nodes = [new ImageColorConvertNode(), new RegionFromColorRangeNode(), new ColorDifferenceNode(), new ContrastNormalizeNode(), new IlluminationNormalizeNode(), new ImageSharpenNode(), new TextMatchNode(), new TextRegexNode()];
+        IVisionNodeExecutor[] nodes = [new ImageColorConvertNode(), new RegionFromColorRangeNode(), new ColorDifferenceNode(), new ContrastNormalizeNode(), new IlluminationNormalizeNode(), new ImageSharpenNode(), new TextMatchNode(), new TextRegexNode(), new TextValidationNode()];
         foreach (var node in nodes) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Run(node, new(), token: cancellation.Token));
     }
 }

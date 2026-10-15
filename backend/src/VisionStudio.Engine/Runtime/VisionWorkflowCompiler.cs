@@ -164,6 +164,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 
         foreach (var descriptor in catalog.Parameters)
         {
+            if (!IsParameterVisible(node, catalog, descriptor)) continue;
             if (!node.Parameters.TryGetValue(descriptor.Name, out var value)) continue;
 
             var prefix = $"Node '{node.Id}' parameter '{descriptor.Name}'";
@@ -207,6 +208,20 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     break;
             }
         }
+    }
+
+    private static bool IsParameterVisible(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)
+    {
+        if (descriptor.VisibleWhen is not { } condition) return true;
+        if (condition.Values.Count == 0) return false;
+        var controller = catalog.Parameters.FirstOrDefault(parameter =>
+            parameter.Name.Equals(condition.Parameter, StringComparison.OrdinalIgnoreCase));
+        if (controller is null) return false;
+
+        var actual = node.Parameters is not null && node.Parameters.TryGetValue(controller.Name, out var value)
+            ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString()
+            : controller.DefaultValue?.ToString();
+        return condition.Values.Any(expected => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string Describe(JsonElement value) => value.ValueKind switch

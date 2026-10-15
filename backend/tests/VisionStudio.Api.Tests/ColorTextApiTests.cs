@@ -13,11 +13,11 @@ public sealed class ColorTextApiTests(VisionStudioApiFactory factory) : IClassFi
     private readonly HttpClient _client = factory.CreateClient();
 
     [Fact]
-    public async Task HostPublishesAllEightColorEnhancementAndTextTools()
+    public async Task HostPublishesAllColorEnhancementAndTextTools()
     {
         var catalog = await _client.GetFromJsonAsync<JsonElement>("/api/catalog");
         var registry = factory.Services.GetRequiredService<VisionNodeRegistry>();
-        Assert.Equal(8, ColorTextCatalog.Items.Count);
+        Assert.Equal(9, ColorTextCatalog.Items.Count);
         foreach (var item in ColorTextCatalog.Items)
         {
             var actual = Assert.Single(catalog.EnumerateArray(), entry => entry.GetProperty("type").GetString() == item.Type);

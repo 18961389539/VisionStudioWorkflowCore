@@ -401,6 +401,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ChannelExtractNode>();
         services.AddSingleton<GaussianBlurNode>();
         services.AddSingleton<MedianBlurNode>();
+        services.AddSingleton<ImageFilterNode>();
         services.AddSingleton<MorphologyNode>();
         services.AddSingleton<AdaptiveThresholdNode>();
         services.AddSingleton<OtsuThresholdNode>();
@@ -449,6 +450,7 @@ public static class VisionStudioServiceRegistration
         // 第五批（2026-10-14 精密定位与测量）：轮廓 / 亚像素 / 形状定位与动态 ROI
         services.AddSingleton<ContourExtractNode>();
         services.AddSingleton<RegionFromThresholdNode>();
+        services.AddSingleton<RegionFromRangeNode>();
         services.AddSingleton<RegionConnectedComponentsNode>();
         services.AddSingleton<RegionFilterNode>();
         services.AddSingleton<RegionBooleanNode>();
@@ -469,6 +471,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ImageSharpenNode>();
         services.AddSingleton<TextMatchNode>();
         services.AddSingleton<TextRegexNode>();
+        services.AddSingleton<TextValidationNode>();
         services.AddSingleton<ContourFromPointsNode>();
         services.AddSingleton<WallThicknessNode>();
         services.AddSingleton<ConcentricityNode>();

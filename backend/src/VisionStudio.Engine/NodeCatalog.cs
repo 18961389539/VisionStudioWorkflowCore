@@ -98,10 +98,23 @@ public static class BuiltInNodeCatalog
             "Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
-            [new("threshold", "Threshold", "number", 128, 0, 255, 1)],
-            "Binary threshold using JLVision native regions.",
-            "builtin"),
+            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double, Required: false), Next],
+            [
+                new("mode", "Threshold Mode", "select", "manual", Options:
+                [new("Manual", "manual"), new("Adaptive", "adaptive"), new("Otsu", "otsu")]),
+                new("threshold", "Threshold", "number", 128, 0, 255, 1,
+                    VisibleWhen: new("mode", ["manual"])),
+                new("blockSize", "Block Size", "number", 31, 3, 99, 2,
+                    Description: "Local window size (coerced to odd).", VisibleWhen: new("mode", ["adaptive"])),
+                new("c", "C Constant", "number", 5, 0, 50, 1,
+                    VisibleWhen: new("mode", ["adaptive"])),
+                new("method", "Adaptive Method", "select", "mean", Options:
+                [new("Mean", "mean"), new("Gaussian", "gaussian")], VisibleWhen: new("mode", ["adaptive"])),
+                new("invert", "Invert", "boolean", false,
+                    VisibleWhen: new("mode", ["manual", "adaptive", "otsu"]))
+            ],
+            "Create a binary image with a manual, local adaptive, or Otsu threshold. Adaptive and Otsu modes convert color input to gray; the threshold output is present for manual and Otsu modes.",
+            "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
         new(
             "image.grayscale",
@@ -130,6 +143,8 @@ public static class BuiltInNodeCatalog
                 new("channel", "Channel", "select", "gray", Options:
                 [
                     new("Gray", "gray"),
+                    new("Average Gray", "average"),
+                    new("Maximum Gray", "max"),
                     new("Blue", "blue"),
                     new("Green", "green"),
                     new("Red", "red"),
@@ -141,6 +156,27 @@ public static class BuiltInNodeCatalog
             "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
+        new(
+            "image.filter",
+            "Image Filter",
+            "Preprocess",
+            [ExecIn, new("image", VisionDataType.Image)],
+            [new("image", VisionDataType.Image), Next],
+            [
+                new("method", "Filter Method", "select", "gaussian", Options:
+                [
+                    new("Gaussian", "gaussian"),
+                    new("Median", "median")
+                ]),
+                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2),
+                new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5,
+                    Description: "0 derives sigma from the kernel size.", VisibleWhen: new("method", ["gaussian"])),
+                new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5,
+                    Description: "0 mirrors sigmaX.", VisibleWhen: new("method", ["gaussian"]))
+            ],
+            "Gaussian filtering suppresses general noise; median filtering removes salt-and-pepper noise while preserving edges. Kernel size must be odd.",
+            "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
             "image.blur.gaussian",
             "Gaussian Blur",
@@ -177,18 +213,27 @@ public static class BuiltInNodeCatalog
                     new("Erode", "erode"),
                     new("Dilate", "dilate"),
                     new("Open (erode then dilate)", "open"),
-                    new("Close (dilate then erode)", "close")
+                    new("Close (dilate then erode)", "close"),
+                    new("White Top Hat (bright details)", "whiteTopHat"),
+                    new("Black Bottom Hat (dark details)", "blackBottomHat"),
+                    new("Gradient (local gray range)", "gradient")
                 ]),
-                new("kernelSize", "Kernel Size", "number", 3, 1, 31, 2),
-                new("iterations", "Iterations", "number", 1, 1, 10, 1),
+                new("kernelSize", "Kernel Size", "number", 3, 1, 31, 2,
+                    VisibleWhen: new("operation", ["erode", "dilate", "open", "close"])),
+                new("iterations", "Iterations", "number", 1, 1, 10, 1,
+                    VisibleWhen: new("operation", ["erode", "dilate", "open", "close"])),
                 new("shape", "Kernel Shape", "select", "rect", Options:
                 [
                     new("Rectangle", "rect"),
                     new("Ellipse", "ellipse"),
                     new("Cross", "cross")
-                ])
+                ], VisibleWhen: new("operation", ["erode", "dilate", "open", "close"])),
+                new("kernelWidth", "Kernel Width", "number", 15, 1, 255, 2,
+                    VisibleWhen: new("operation", ["whiteTopHat", "blackBottomHat", "gradient"])),
+                new("kernelHeight", "Kernel Height", "number", 15, 1, 255, 2,
+                    VisibleWhen: new("operation", ["whiteTopHat", "blackBottomHat", "gradient"]))
             ],
-            "Morphological erode/dilate/open/close: remove burrs, fill pinholes and stabilize blobs.",
+            "Choose erode/dilate/open/close for binary-shape cleanup, or white top hat, black bottom hat and gradient for grayscale feature extraction. Grayscale modes convert color input to gray and use a rectangular odd-sized kernel.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -226,6 +271,7 @@ public static class BuiltInNodeCatalog
             "Measurement",
             [ExecIn, new("image", VisionDataType.Image)],
             [
+                new("image", VisionDataType.Image),
                 new("count", VisionDataType.Integer),
                 new("detections", VisionDataType.DetectionList),
                 new("x", VisionDataType.Double, Required: false),
@@ -237,19 +283,21 @@ public static class BuiltInNodeCatalog
                 Next
             ],
             [
+                new("mode", "Blob Mode", "select", "all", Options:
+                [new("All Blobs", "all"), new("Largest Blob", "largest")]),
                 new("minArea", "Min Area", "number", 100, 0, 99999999, 10),
-                new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Description: "0 disables the upper bound."),
-                new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Description: "4*pi*A/P^2, 1 = perfect circle."),
-                new("maxCount", "Max Count", "number", 20, 1, 200, 1),
+                new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
+                new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Description: "4*pi*A/P^2, 1 = perfect circle.", VisibleWhen: new("mode", ["all"])),
+                new("maxCount", "Max Count", "number", 20, 1, 200, 1, VisibleWhen: new("mode", ["all"])),
                 new("sortBy", "Sort By", "select", "area", Options:
                 [
                     new("Area", "area"),
                     new("X (left to right)", "x"),
                     new("Y (top to bottom)", "y")
-                ]),
-                new("descending", "Descending", "boolean", true)
+                ], VisibleWhen: new("mode", ["all"])),
+                new("descending", "Descending", "boolean", true, VisibleWhen: new("mode", ["all"]))
             ],
-            "Detect/filter/sort/count multiple blobs; outputs a DetectionList plus the first (sorted) target's geometry. Zero blobs is a normal result (count=0).",
+            "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(

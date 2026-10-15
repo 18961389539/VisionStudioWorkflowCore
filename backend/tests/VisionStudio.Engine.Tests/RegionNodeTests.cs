@@ -38,6 +38,35 @@ public sealed class RegionNodeTests : IDisposable
     }
 
     [Fact]
+    public async Task UnifiedRangeSegmentationSupportsGrayColorAndRegionClipping()
+    {
+        using var gray = VisionImage.Own(new Mat(16, 16, MatType.CV_8UC1, Scalar.All(0)));
+        using (var inner = new Mat(gray.Mat, new Rect(2, 2, 4, 4))) inner.SetTo(Scalar.All(200));
+        using (var outside = new Mat(gray.Mat, new Rect(10, 10, 4, 4))) outside.SetTo(Scalar.All(200));
+        var grayInputs = new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(gray),
+            ["region"] = VisionValue.Region(new VisionRegion(16, 16, [new VisionRegionComponent(Enumerable.Range(3, 2).Select(y => new VisionRegionRun(y, 3, 4)).ToArray())]))
+        };
+        var grayResult = await Run(new RegionFromRangeNode(), grayInputs, """{"mode":"gray","minGray":200,"maxGray":200}""");
+        Assert.Equal(4d, grayResult.Outputs["area"].Require<double>("area"));
+
+        using var color = VisionImage.Own(new Mat(16, 16, MatType.CV_8UC3, new Scalar(0, 0, 0)));
+        using (var red = new Mat(color.Mat, new Rect(4, 4, 6, 6))) red.SetTo(new Scalar(0, 0, 255));
+        var colorInputs = new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(color),
+            ["region"] = VisionValue.Region(new VisionRegion(16, 16, [new VisionRegionComponent(Enumerable.Range(6, 3).Select(y => new VisionRegionRun(y, 6, 8)).ToArray())]))
+        };
+        var colorResult = await Run(new RegionFromRangeNode(), colorInputs,
+            """{"mode":"color","space":"hsv","min1":350,"max1":10,"min2":0.8,"max2":1,"min3":0.9,"max3":1}""");
+        Assert.Equal(9d, colorResult.Outputs["area"].Require<double>("area"));
+        Assert.Equal("hsv", colorResult.Summary["space"]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RegionFromRangeNode(), grayInputs, """{"mode":"binary"}"""));
+    }
+
+    [Fact]
     public async Task ConnectivitySplitsBeforePerObjectFiltering()
     {
         var merged = new VisionRegion(32, 32, [new VisionRegionComponent([new(2, 2, 4), new(3, 2, 4), new(20, 20, 20)])]);

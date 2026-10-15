@@ -25,7 +25,13 @@ export function nodePresentation(type: string) {
 }
 const aliases: Record<string, string[]> = {
   'image.acquire': ['相机', '拍照', '取图', 'camera', 'capture'], 'image.synthetic': ['测试图', '模拟图', 'synthetic'],
-  'image.threshold': ['二值化', '阈值', '分割', 'binarize', 'binary', 'threshold'],
+  'image.filter': ['图像滤波', '高斯滤波', '中值滤波', 'gaussian', 'median', 'blur'],
+  'image.morphology': ['形态学', '开运算', '闭运算', '顶帽', '底帽', '形态学梯度'],
+  'text.validate': ['文本校验', '字符串校验', '正则', 'OCR 校验', 'barcode validation'],
+  'image.threshold': ['二值化', '阈值', '分割', '固定阈值', '自适应阈值', 'otsu', 'binarize', 'binary', 'threshold'],
+  'image.channel': ['灰度', '灰度转换', '通道提取', 'channel', 'grayscale'],
+  'region.fromRange': ['灰度范围', '颜色范围', '区域范围分割', '阈值区域', '颜色分割', 'range segmentation'],
+  'measure.blobs': ['斑点', '连通域', '最大斑点', 'blob', 'largest blob'],
   'feature.edge': ['边缘', '找边', 'canny'], 'feature.circle': ['找圆', '圆检测', 'circle'],
   'feature.line': ['找线', '直线', 'line'], 'measure.blob': ['斑点', '连通域', 'blob'],
   'measure.caliper': ['卡尺', '测宽', 'caliper'], 'geometry.distance': ['测距', '距离', 'distance'],
@@ -34,6 +40,12 @@ const aliases: Record<string, string[]> = {
   'device.readTag': ['plc', '读取', 'read'], 'device.writeTag': ['plc', '写入', 'write'],
   'camera.syncCapture': ['多相机', '同步', 'sync'], 'calibration.planar': ['标定', 'calibrate']
 };
+const mergedLegacyTypes = new Set([
+  'image.blur.gaussian', 'image.blur.median', 'image.topHat', 'image.bottomHat', 'image.morphGradient',
+  'text.match', 'text.regex',
+  'image.threshold.adaptive', 'image.threshold.otsu', 'image.grayscale',
+  'region.fromThreshold', 'region.fromColorRange', 'measure.blob'
+]);
 function score(item: NodeCatalogItem, keyword: string): number {
   const name = item.displayName.toLowerCase();
   const type = item.type.toLowerCase();
@@ -50,7 +62,7 @@ function score(item: NodeCatalogItem, keyword: string): number {
 export function searchTools(catalog: NodeCatalogItem[], query: string): NodeCatalogItem[] {
   const keyword = query.trim().toLowerCase();
   return catalog.map((item, index) => ({ item, index, score: keyword ? score(item, keyword) : 1 }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => entry.score > 0 && !mergedLegacyTypes.has(entry.item.type))
     .sort((a, b) => b.score - a.score || nodePresentation(a.item.type).order - nodePresentation(b.item.type).order || a.index - b.index)
     .map((entry) => entry.item);
 }

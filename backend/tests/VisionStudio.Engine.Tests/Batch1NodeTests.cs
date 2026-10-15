@@ -66,6 +66,21 @@ public sealed class Batch1NodeTests
         Assert.Contains("requires a color image", error.Message);
     }
 
+    [Fact]
+    public async Task Channel_UnifiesLuminanceAverageAndMaximumGrayModes()
+    {
+        using var color = new Mat(10, 10, MatType.CV_8UC3, new Scalar(10, 20, 30));
+        var gray = await Run(new ChannelExtractNode(), Image(color), """{"channel":"gray"}""");
+        var average = await Run(new ChannelExtractNode(), Image(color), """{"channel":"average"}""");
+        var max = await Run(new ChannelExtractNode(), Image(color), """{"channel":"max"}""");
+        using var grayMat = TakeImage(gray);
+        using var averageMat = TakeImage(average);
+        using var maxMat = TakeImage(max);
+        Assert.InRange(grayMat.At<byte>(5, 5), 21, 23);
+        Assert.InRange(averageMat.At<byte>(5, 5), 19, 21);
+        Assert.Equal(30, maxMat.At<byte>(5, 5));
+    }
+
     // ---------- 滤波 ----------
 
     [Fact]
@@ -101,6 +116,23 @@ public sealed class Batch1NodeTests
         Assert.Equal(0, white); // 孤立脉冲被完全移除
     }
 
+    [Fact]
+    public async Task UnifiedImageFilter_SelectsGaussianOrMedianBehavior()
+    {
+        using var image = new Mat(21, 21, MatType.CV_8UC1, Scalar.All(0));
+        image.Set(10, 10, (byte)255);
+
+        var gaussian = await Run(new ImageFilterNode(), Image(image), """{"method":"gaussian","kernelSize":5}""");
+        using var gaussianOutput = TakeImage(gaussian);
+        var median = await Run(new ImageFilterNode(), Image(image), """{"method":"median","kernelSize":5,"sigmaX":"inactive"}""");
+        using var medianOutput = TakeImage(median);
+
+        Assert.Equal("gaussian", gaussian.Summary["method"]);
+        Assert.True(gaussianOutput.At<byte>(10, 10) > 0);
+        Assert.Equal("median", median.Summary["method"]);
+        Assert.Equal(0, medianOutput.At<byte>(10, 10));
+    }
+
     // ---------- 形态学 ----------
 
     [Fact]
@@ -124,6 +156,22 @@ public sealed class Batch1NodeTests
         var eroded = await Run(new MorphologyNode(), Image(burred), """{"operation":"erode","kernelSize":5}""");
         using var erodedMat = TakeImage(eroded);
         Assert.Equal(0, erodedMat.At<byte>(30, 16));                    // 腐蚀收缩边界
+    }
+
+    [Theory]
+    [InlineData("whiteTopHat")]
+    [InlineData("blackBottomHat")]
+    [InlineData("gradient")]
+    public async Task UnifiedMorphology_ExposesGrayFeatureOperations(string operation)
+    {
+        using var image = new Mat(31, 31, MatType.CV_8UC1, Scalar.All(128));
+        Cv2.Rectangle(image, new Rect(13, 13, 5, 5), Scalar.All(operation == "blackBottomHat" ? 0 : 255), -1);
+
+        var result = await Run(new MorphologyNode(), Image(image), $$"""{"operation":"{{operation}}","kernelWidth":9,"kernelHeight":9,"kernelSize":"inactive"}""");
+        using var output = TakeImage(result);
+
+        Assert.Equal(operation is "whiteTopHat" ? "topHat" : operation is "blackBottomHat" ? "bottomHat" : "gradient", result.Summary["operation"]);
+        Assert.True(Cv2.CountNonZero(output) > 0);
     }
 
     // ---------- 自动阈值 ----------
@@ -162,6 +210,31 @@ public sealed class Batch1NodeTests
         Assert.Equal(255, binary.At<byte>(50, 80));    // 亮区 → 白
     }
 
+    [Fact]
+    public async Task UnifiedThreshold_DispatchesManualAdaptiveAndOtsuModes()
+    {
+        using var image = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(200));
+        Cv2.Rectangle(image, new Rect(0, 0, 40, 100), Scalar.All(50), -1);
+
+        var manual = await Run(new ThresholdNode(), Image(image), """{"mode":"manual","threshold":100,"invert":true}""");
+        using var manualImage = TakeImage(manual);
+        Assert.Equal(100d, (double)manual.Outputs["threshold"].Value!);
+        Assert.Equal(255, manualImage.At<byte>(50, 20));
+        Assert.Equal(0, manualImage.At<byte>(50, 80));
+
+        var otsu = await Run(new ThresholdNode(), Image(image), """{"mode":"otsu"}""");
+        using var otsuImage = TakeImage(otsu);
+        Assert.True(otsu.Outputs.ContainsKey("threshold"));
+        Assert.Equal(0, otsuImage.At<byte>(50, 20));
+        Assert.Equal(255, otsuImage.At<byte>(50, 80));
+
+        var adaptive = await Run(new ThresholdNode(), Image(image), """{"mode":"adaptive","blockSize":15,"c":5,"method":"mean"}""");
+        using var adaptiveImage = TakeImage(adaptive);
+        Assert.False(adaptive.Outputs.ContainsKey("threshold"));
+        Assert.Equal(100, adaptiveImage.Rows);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new ThresholdNode(), Image(image), """{"mode":"unknown"}"""));
+    }
+
     // ---------- 多 Blob ----------
 
     [Fact]
@@ -186,6 +259,14 @@ public sealed class Batch1NodeTests
 
         var bigOnly = await Run(new MultiBlobNode(), Image(image), """{"minArea":800}""");
         Assert.Equal(1L, (long)bigOnly.Outputs["count"].Value!);
+
+        var largest = await Run(new MultiBlobNode(), Image(image),
+            """{"mode":"largest","minArea":100,"maxArea":100,"minCircularity":1,"maxCount":20,"sortBy":"x","descending":false}""");
+        var largestDetections = largest.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections");
+        Assert.Equal(1L, (long)largest.Outputs["count"].Value!);
+        Assert.Single(largestDetections);
+        Assert.InRange(largestDetections[0].Area, 1150, 1400);
+        Assert.IsType<VisionImage>(largest.Outputs["image"].Value);
 
         var leftFirst = await Run(new MultiBlobNode(), Image(image), """{"minArea":100,"sortBy":"x","descending":false}""");
         Assert.Equal(40d, (double)leftFirst.Outputs["x"].Value!, 1);   // 最左
@@ -408,6 +489,7 @@ public sealed class Batch1NodeTests
 
     [Theory]
     [InlineData("image.blur.median", """{"kernelSize":40}""", "above the maximum 31")]
+    [InlineData("image.filter", """{"method":"gaussian","sigmaX":21}""", "above the maximum 20")]
     [InlineData("image.morphology", """{"operation":"skeletonize"}""", "not an allowed option")]
     [InlineData("measure.blobs", """{"sortBy":"diagonal"}""", "not an allowed option")]
     [InlineData("logic.boolean", """{"op":"nand"}""", "not an allowed option")]
@@ -445,12 +527,13 @@ public sealed class Batch1NodeTests
         string[] expected =
         [
             "image.grayscale", "image.channel", "image.blur.gaussian", "image.blur.median", "image.morphology",
+            "image.filter",
             "image.threshold.adaptive", "image.threshold.otsu", "measure.blobs", "match.template",
             "value.number", "value.arithmetic", "value.range", "logic.boolean"
         ];
         foreach (var type in expected)
             Assert.NotNull(BuiltInNodeCatalog.Items.FirstOrDefault(x => x.Type == type));
-        Assert.Equal(13, expected.Distinct().Count());
+        Assert.Equal(14, expected.Distinct().Count());
     }
 
     // ---------- 测试辅助 ----------

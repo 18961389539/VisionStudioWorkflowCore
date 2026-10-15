@@ -6,10 +6,10 @@ import { nodeCategory, searchTools } from '../toolboxModel';
 import { validateWorkflow } from '../validation';
 
 describe('color, enhancement and text tools', () => {
-  it('provides eight localized and searchable tools with translated parameters and options', () => {
+  it('provides localized merged tools with translated parameters and options', () => {
     const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
-    for (const type of ['image.colorConvert', 'region.fromColorRange', 'measure.colorDifference', 'image.contrastNormalize',
-      'image.illuminationNormalize', 'image.sharpen', 'text.match', 'text.regex']) {
+    for (const type of ['image.filter', 'image.colorConvert', 'region.fromColorRange', 'measure.colorDifference', 'image.contrastNormalize',
+      'image.illuminationNormalize', 'image.sharpen', 'text.validate']) {
       const item = translated.find(entry => entry.type === type)!;
       expect(item).toBeDefined(); expect(item.displayName).toMatch(/[\u4e00-\u9fff]/);
       expect(item.description).toMatch(/[\u4e00-\u9fff]/); expect(nodeCategory(type)).not.toBe('plugin');
@@ -18,7 +18,9 @@ describe('color, enhancement and text tools', () => {
         for (const option of parameter.options ?? []) expect(option.label).toMatch(/[\u4e00-\u9fff]/);
       }
     }
-    expect(searchTools(translated, '正则校验')[0].type).toBe('text.regex');
+    expect(translated.find(entry => entry.type === 'text.match')?.displayName).toBe('文本匹配');
+    expect(translated.find(entry => entry.type === 'text.regex')?.displayName).toBe('正则校验');
+    expect(searchTools(translated, '正则校验')[0].type).toBe('text.validate');
   });
 
   it.each([['colors', colorEnhancementDemo], ['text', textValidationDemo]] as const)('validates the %s template', (_name, demo) => {

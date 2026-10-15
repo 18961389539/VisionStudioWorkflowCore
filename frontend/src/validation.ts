@@ -66,6 +66,7 @@ export function validateParameterValues(
 ): Array<{ name: string; message: string }> {
   const issues: Array<{ name: string; message: string }> = [];
   for (const descriptor of descriptors ?? []) {
+    if (!isParameterVisible(descriptor, descriptors ?? [], parameters ?? {})) continue;
     const raw = parameters?.[descriptor.name];
     if (descriptor.type === 'number') {
       if (raw === undefined || raw === null || raw === '') {
@@ -92,6 +93,19 @@ export function validateParameterValues(
     }
   }
   return issues;
+}
+
+export function isParameterVisible(
+  descriptor: ParameterDescriptor,
+  descriptors: ParameterDescriptor[],
+  values: Record<string, unknown>
+): boolean {
+  const condition = descriptor.visibleWhen;
+  if (!condition) return true;
+  const controller = descriptors.find((item) => item.name === condition.parameter);
+  if (!controller || condition.values.length === 0) return false;
+  const actual = values[controller.name] ?? controller.defaultValue;
+  return condition.values.some((expected) => String(actual ?? '').toLowerCase() === expected.toLowerCase());
 }
 
 /** 全图客户端预检：类型缺失 / 参数值 / 必需输入 / 重复数据源 / 边的端点、端口与类型。 */

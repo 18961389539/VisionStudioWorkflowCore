@@ -51,7 +51,7 @@ export const linearDemo = (): DemoGraph => ({
   nodes: [
     node('source-1', 'image.synthetic', 60, 150),
     node('threshold-1', 'image.threshold', 360, 150),
-    node('blob-1', 'measure.blob', 680, 150)
+    node('blob-1', 'measure.blobs', 680, 150, { mode: 'largest' })
   ],
   edges: [
     control('c1', 'source-1', 'next', 'threshold-1', 'exec'),
@@ -65,7 +65,7 @@ export const ifDemo = (): DemoGraph => ({
   nodes: [
     node('source-1', 'image.synthetic', 30, 210),
     node('threshold-1', 'image.threshold', 300, 210, { threshold: 128 }),
-    node('blob-1', 'measure.blob', 570, 210),
+    node('blob-1', 'measure.blobs', 570, 210, { mode: 'largest' }),
     node('if-1', 'flow.if', 840, 210, { operator: '>', threshold: 15000 }),
     node('true-threshold', 'image.threshold', 1120, 70, { threshold: 180 }),
     node('false-threshold', 'image.threshold', 1120, 350, { threshold: 80 }),
@@ -97,7 +97,7 @@ export const parallelDemo = (): DemoGraph => ({
     node('branch-a-threshold', 'image.threshold', 620, 70, { threshold: 160 }),
     node('branch-b-threshold', 'image.threshold', 620, 350, { threshold: 95 }),
     node('join-1', 'flow.join', 930, 210),
-    node('blob-1', 'measure.blob', 1210, 210)
+    node('blob-1', 'measure.blobs', 1210, 210, { mode: 'largest' })
   ],
   edges: [
     control('c1', 'source-1', 'next', 'parallel-1', 'exec'),
@@ -119,7 +119,7 @@ export const roiDemo = (): DemoGraph => ({
       threshold: 128,
       roi: { type: 'Rectangle', x: 210, y: 120, width: 230, height: 240 }
     }),
-    node('blob-1', 'measure.blob', 680, 150, { minArea: 1000 })
+    node('blob-1', 'measure.blobs', 680, 150, { mode: 'largest', minArea: 1000 })
   ],
   edges: [
     control('c1', 'source-1', 'next', 'threshold-1', 'exec'),
@@ -134,7 +134,7 @@ export const cameraDemo = (): DemoGraph => ({
   nodes: [
     node('acquire-1', 'image.acquire', 60, 150, { cameraId: 'virtual-1', frameMode: 'Latest', timeoutMs: 1500, autoStart: true }),
     node('threshold-1', 'image.threshold', 380, 150, { threshold: 150 }),
-    node('blob-1', 'measure.blob', 700, 150, { minArea: 1000 })
+    node('blob-1', 'measure.blobs', 700, 150, { mode: 'largest', minArea: 1000 })
   ],
   edges: [
     control('c1', 'acquire-1', 'next', 'threshold-1', 'exec'),
@@ -149,7 +149,7 @@ export const triggeredCameraDemo = (): DemoGraph => ({
   nodes: [
     node('acquire-1', 'image.acquire', 60, 150, { cameraId: 'virtual-1', frameMode: 'Next', timeoutMs: 1800, autoStart: true, triggerBeforeGrab: true }),
     node('threshold-1', 'image.threshold', 390, 150, { threshold: 150 }),
-    node('blob-1', 'measure.blob', 710, 150, { minArea: 1000 })
+    node('blob-1', 'measure.blobs', 710, 150, { mode: 'largest', minArea: 1000 })
   ],
   edges: [
     control('c1', 'acquire-1', 'next', 'threshold-1', 'exec'),
@@ -205,7 +205,7 @@ export const calibrationDemo = (): DemoGraph => ({
   nodes: [
     node('source-1', 'image.synthetic', 20, 170, { centerX: 320, centerY: 240, radius: 80 }),
     node('threshold-1', 'image.threshold', 280, 170, { threshold: 128 }),
-    node('blob-1', 'measure.blob', 540, 170),
+    node('blob-1', 'measure.blobs', 540, 170, { mode: 'largest' }),
     node('calibration-1', 'calibration.planar', 810, 170),
     node('transform-point-1', 'coordinate.transformPoint', 1100, 110),
     node('reference-1', 'coordinate.point', 1100, 330, { x: 20, y: 10, frame: 'Workpiece', unit: 'mm' }),
@@ -353,7 +353,7 @@ export const devicePlcDemo = (): DemoGraph => ({
     node('wait-trigger-1', 'device.waitTag', 20, 210, { deviceId: 'virtual-modbus-1', tagId: 'trigger', operator: 'True', compareValue: '1', timeoutMs: 10000, pollMs: 25, autoConnect: true }),
     node('acquire-1', 'image.acquire', 300, 210, { cameraId: 'virtual-1', frameMode: 'Latest', autoStart: true }),
     node('threshold-1', 'image.threshold', 580, 210, { threshold: 128 }),
-    node('blob-1', 'measure.blob', 860, 210, { minArea: 1000 }),
+    node('blob-1', 'measure.blobs', 860, 210, { mode: 'largest', minArea: 1000 }),
     node('if-1', 'flow.if', 1140, 210, { operator: '>', threshold: 15000 }),
     node('pass-text-1', 'device.writeTag', 1420, 80, { deviceId: 'virtual-modbus-1', tagId: 'statusText', valueType: 'String', fallbackValue: 'VISION PASS', autoConnect: true }),
     node('fail-text-1', 'device.writeTag', 1420, 340, { deviceId: 'virtual-modbus-1', tagId: 'statusText', valueType: 'String', fallbackValue: 'VISION FAIL', autoConnect: true }),
@@ -387,7 +387,7 @@ export const nestedDemo = (): DemoGraph => ({
   nodes: [
     node('source-1', 'image.synthetic', 20, 260),
     node('threshold-1', 'image.threshold', 260, 260, { threshold: 128 }),
-    node('blob-1', 'measure.blob', 500, 260, { minArea: 1000 }),
+    node('blob-1', 'measure.blobs', 500, 260, { mode: 'largest', minArea: 1000 }),
     node('outer-if', 'flow.if', 740, 260, { operator: '>', threshold: 15000 }),
     node('inner-if', 'flow.if', 1010, 110, { operator: '>', threshold: 18000 }),
     node('inner-true', 'image.threshold', 1290, 20, { threshold: 190 }),
@@ -445,9 +445,9 @@ export const frameSetDemo = (): DemoGraph => ({
 export const inspectionDemo = (): DemoGraph => ({
   nodes: [
     node('source', 'image.synthetic', 30, 150),
-    node('gray', 'image.grayscale', 300, 150),
-    node('blur', 'image.blur.gaussian', 570, 150, { kernelSize: 5 }),
-    node('binary', 'image.threshold.otsu', 840, 150),
+    node('gray', 'image.channel', 300, 150, { channel: 'gray' }),
+    node('blur', 'image.filter', 570, 150, { method: 'gaussian', kernelSize: 5 }),
+    node('binary', 'image.threshold', 840, 150, { mode: 'otsu' }),
     node('clean', 'image.morphology', 1110, 150, { operation: 'open', kernelSize: 3 }),
     node('objects', 'measure.blobs', 1380, 150, { minArea: 1000 }),
     node('check', 'value.range', 1650, 150, { min: 1, max: 5 }),
@@ -513,12 +513,12 @@ export const precisionDemo = (): DemoGraph => ({
 export const regionDemo = (): DemoGraph => ({
   nodes: [
     node('source', 'image.synthetic', 20, 180, {"width":640,"height":480,"centerX":320,"centerY":240,"radius":80}),
-    node('threshold', 'region.fromThreshold', 300, 180, {"minGray":200,"maxGray":255}),
+    node('threshold', 'region.fromRange', 300, 180, {"mode":"gray","minGray":200,"maxGray":255}),
     node('connected', 'region.connectedComponents', 580, 180, {}),
     node('filter', 'region.filter', 860, 180, {"feature":"area","min":1000,"max":50000}),
     node('fill', 'region.fillHoles', 1140, 180, {}),
     node('domain', 'image.reduceDomain', 1420, 180, {}),
-    node('selected', 'region.fromThreshold', 1700, 180, {"minGray":200,"maxGray":255}),
+    node('selected', 'region.fromRange', 1700, 180, {"mode":"gray","minGray":200,"maxGray":255}),
     node('boolean', 'region.boolean', 1980, 180, {"operation":"intersection"}),
     node('range', 'value.range', 2260, 180, {"min":1,"max":1}),
     node('result', 'flow.result', 2540, 180, {})
@@ -594,7 +594,7 @@ export const alignmentRegionDemo = (): DemoGraph => ({
   nodes: [
     node('source', 'image.synthetic', 20, 180, {}),
     node('current', 'image.rotate', 300, 180, {"angleDeg":5,"expand":false}),
-    node('threshold', 'region.fromThreshold', 580, 180, {"minGray":200,"maxGray":255}),
+    node('threshold', 'region.fromRange', 580, 180, {"mode":"gray","minGray":200,"maxGray":255}),
     node('connected', 'region.connectedComponents', 860, 180, {}),
     node('clean', 'region.morphology', 1140, 180, {"operation":"open","kernelWidth":3,"kernelHeight":3}),
     node('register', 'image.register', 1420, 180, {"x":50,"y":40,"width":400,"height":350,"angleRangeDeg":10,"minScore":0.7}),
@@ -650,7 +650,7 @@ export const colorEnhancementDemo = (): DemoGraph => ({
     node('illumination', 'image.illuminationNormalize', 580, 180, {"windowSize":51,"targetMean":128}),
     node('sharpen', 'image.sharpen', 860, 180, {"amount":0.5}),
     node('channels', 'image.colorConvert', 1140, 180, {"space":"hsv"}),
-    node('range', 'region.fromColorRange', 1420, 180, {"space":"hsv","min1":0,"max1":360,"min2":0,"max2":1,"min3":0.6,"max3":1}),
+    node('range', 'region.fromRange', 1420, 180, {"mode":"color","space":"hsv","min1":0,"max1":360,"min2":0,"max2":1,"min3":0.6,"max3":1}),
     node('objects', 'region.connectedComponents', 1700, 180, {}),
     node('difference', 'measure.colorDifference', 1980, 180, {}),
     node('tolerance', 'value.range', 2540, 180, {"min":0,"max":100}),
@@ -690,8 +690,8 @@ export const colorEnhancementDemo = (): DemoGraph => ({
 
 export const textValidationDemo = (): DemoGraph => ({
   nodes: [
-    node('match', 'text.match', 20, 180, {"text":"LOT-20261015-A42","expected":"LOT-","mode":"startsWith"}),
-    node('regex', 'text.regex', 300, 180, {"pattern":"LOT-(?<date>[0-9]{8})-(?<batch>[A-Z][0-9]{2})"}),
+    node('match', 'text.validate', 20, 180, {"text":"LOT-20261015-A42","expected":"LOT-","mode":"startsWith"}),
+    node('regex', 'text.validate', 300, 180, {"pattern":"LOT-(?<date>[0-9]{8})-(?<batch>[A-Z][0-9]{2})","mode":"regex"}),
     node('combine', 'logic.boolean', 580, 180, {"op":"and"}),
     node('result', 'flow.result', 860, 180, {})
   ],
@@ -830,9 +830,9 @@ export const smallFeatureDemo = (): { nodes: Node[]; edges: Edge[] } => ({
     node('bright', 'region.fromRoi', 580, 40, {"canvasWidth": 128, "canvasHeight": 128, "roi": {"type": "rectangle", "x": 4, "y": 40, "width": 5, "height": 48}}),
     node('cut', 'region.boolean', 860, 40, {"operation": "difference"}),
     node('pattern', 'region.boolean', 1140, 40, {"operation": "union"}),
-    node('top', 'image.topHat', 20, 300, {"kernelWidth": 11, "kernelHeight": 11}),
-    node('bottom', 'image.bottomHat', 300, 300, {"kernelWidth": 11, "kernelHeight": 11}),
-    node('gradient', 'image.morphGradient', 580, 300, {"kernelWidth": 3, "kernelHeight": 3}),
+    node('top', 'image.morphology', 20, 300, {"operation": "whiteTopHat", "kernelWidth": 11, "kernelHeight": 11}),
+    node('bottom', 'image.morphology', 300, 300, {"operation": "blackBottomHat", "kernelWidth": 11, "kernelHeight": 11}),
+    node('gradient', 'image.morphology', 580, 300, {"operation": "gradient", "kernelWidth": 3, "kernelHeight": 3}),
     node('histogram', 'measure.grayHistogram', 860, 300, {"lowPercent": 5, "highPercent": 95}),
     node('gate', 'flow.ifBoolean', 1140, 300, {}),
     node('tolerance', 'value.range', 20, 560, {"min": 240, "max": 255}),

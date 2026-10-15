@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "d1ac211a64e149b20f532f67c294b34cbaecf6a879e3605b21004a64e75281a4",
+  "hash": "c5c8501aae5e17613b9abfee8b32e200a309f169469fbbb363130c0d4668808a",
   "items": [
     {
       "type": "image.acquire",
@@ -7429,6 +7429,11 @@
       ],
       "outputs": [
         {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
           "name": "count",
           "dataType": "Integer",
           "required": true
@@ -7476,6 +7481,22 @@
       ],
       "parameters": [
         {
+          "name": "mode",
+          "label": "Blob Mode",
+          "type": "select",
+          "defaultValue": "all",
+          "options": [
+            {
+              "label": "All Blobs",
+              "value": "all"
+            },
+            {
+              "label": "Largest Blob",
+              "value": "largest"
+            }
+          ]
+        },
+        {
           "name": "minArea",
           "label": "Min Area",
           "type": "number",
@@ -7492,7 +7513,13 @@
           "min": 0,
           "max": 99999999,
           "step": 10,
-          "description": "0 disables the upper bound."
+          "description": "0 disables the upper bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
         },
         {
           "name": "minCircularity",
@@ -7502,7 +7529,13 @@
           "min": 0,
           "max": 1,
           "step": 0.05,
-          "description": "4*pi*A/P^2, 1 = perfect circle."
+          "description": "4*pi*A/P^2, 1 = perfect circle.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
         },
         {
           "name": "maxCount",
@@ -7511,7 +7544,13 @@
           "defaultValue": 20,
           "min": 1,
           "max": 200,
-          "step": 1
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
         },
         {
           "name": "sortBy",
@@ -7531,16 +7570,28 @@
               "label": "Y (top to bottom)",
               "value": "y"
             }
-          ]
+          ],
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
         },
         {
           "name": "descending",
           "label": "Descending",
           "type": "boolean",
-          "defaultValue": true
+          "defaultValue": true,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
         }
       ],
-      "description": "Detect/filter/sort/count multiple blobs; outputs a DetectionList plus the first (sorted) target's geometry. Zero blobs is a normal result (count=0).",
+      "description": "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -8628,6 +8679,14 @@
               "value": "gray"
             },
             {
+              "label": "Average Gray",
+              "value": "average"
+            },
+            {
+              "label": "Maximum Gray",
+              "value": "max"
+            },
+            {
               "label": "Blue",
               "value": "blue"
             },
@@ -8948,6 +9007,106 @@
       "declaresActions": true
     },
     {
+      "type": "image.filter",
+      "displayName": "Image Filter",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "method",
+          "label": "Filter Method",
+          "type": "select",
+          "defaultValue": "gaussian",
+          "options": [
+            {
+              "label": "Gaussian",
+              "value": "gaussian"
+            },
+            {
+              "label": "Median",
+              "value": "median"
+            }
+          ]
+        },
+        {
+          "name": "kernelSize",
+          "label": "Kernel Size",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 3,
+          "max": 31,
+          "step": 2
+        },
+        {
+          "name": "sigmaX",
+          "label": "Sigma X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "0 derives sigma from the kernel size.",
+          "visibleWhen": {
+            "parameter": "method",
+            "values": [
+              "gaussian"
+            ]
+          }
+        },
+        {
+          "name": "sigmaY",
+          "label": "Sigma Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "0 mirrors sigmaX.",
+          "visibleWhen": {
+            "parameter": "method",
+            "values": [
+              "gaussian"
+            ]
+          }
+        }
+      ],
+      "description": "Gaussian filtering suppresses general noise; median filtering removes salt-and-pepper noise while preserving edges. Kernel size must be odd.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
       "type": "image.blur.median",
       "displayName": "Median Blur",
       "category": "Preprocess",
@@ -9102,6 +9261,18 @@
             {
               "label": "Close (dilate then erode)",
               "value": "close"
+            },
+            {
+              "label": "White Top Hat (bright details)",
+              "value": "whiteTopHat"
+            },
+            {
+              "label": "Black Bottom Hat (dark details)",
+              "value": "blackBottomHat"
+            },
+            {
+              "label": "Gradient (local gray range)",
+              "value": "gradient"
             }
           ]
         },
@@ -9112,7 +9283,16 @@
           "defaultValue": 3,
           "min": 1,
           "max": 31,
-          "step": 2
+          "step": 2,
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "erode",
+              "dilate",
+              "open",
+              "close"
+            ]
+          }
         },
         {
           "name": "iterations",
@@ -9121,7 +9301,16 @@
           "defaultValue": 1,
           "min": 1,
           "max": 10,
-          "step": 1
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "erode",
+              "dilate",
+              "open",
+              "close"
+            ]
+          }
         },
         {
           "name": "shape",
@@ -9141,10 +9330,53 @@
               "label": "Cross",
               "value": "cross"
             }
-          ]
+          ],
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "erode",
+              "dilate",
+              "open",
+              "close"
+            ]
+          }
+        },
+        {
+          "name": "kernelWidth",
+          "label": "Kernel Width",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 1,
+          "max": 255,
+          "step": 2,
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "whiteTopHat",
+              "blackBottomHat",
+              "gradient"
+            ]
+          }
+        },
+        {
+          "name": "kernelHeight",
+          "label": "Kernel Height",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 1,
+          "max": 255,
+          "step": 2,
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "whiteTopHat",
+              "blackBottomHat",
+              "gradient"
+            ]
+          }
         }
       ],
-      "description": "Morphological erode/dilate/open/close: remove burrs, fill pinholes and stabilize blobs.",
+      "description": "Choose erode/dilate/open/close for binary-shape cleanup, or white top hat, black bottom hat and gradient for grayscale feature extraction. Grayscale modes convert color input to gray and use a rectangular odd-sized kernel.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9686,6 +9918,11 @@
           "required": true
         },
         {
+          "name": "threshold",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9693,17 +9930,118 @@
       ],
       "parameters": [
         {
+          "name": "mode",
+          "label": "Threshold Mode",
+          "type": "select",
+          "defaultValue": "manual",
+          "options": [
+            {
+              "label": "Manual",
+              "value": "manual"
+            },
+            {
+              "label": "Adaptive",
+              "value": "adaptive"
+            },
+            {
+              "label": "Otsu",
+              "value": "otsu"
+            }
+          ]
+        },
+        {
           "name": "threshold",
           "label": "Threshold",
           "type": "number",
           "defaultValue": 128,
           "min": 0,
           "max": 255,
-          "step": 1
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "manual"
+            ]
+          }
+        },
+        {
+          "name": "blockSize",
+          "label": "Block Size",
+          "type": "number",
+          "defaultValue": 31,
+          "min": 3,
+          "max": 99,
+          "step": 2,
+          "description": "Local window size (coerced to odd).",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "adaptive"
+            ]
+          }
+        },
+        {
+          "name": "c",
+          "label": "C Constant",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0,
+          "max": 50,
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "adaptive"
+            ]
+          }
+        },
+        {
+          "name": "method",
+          "label": "Adaptive Method",
+          "type": "select",
+          "defaultValue": "mean",
+          "options": [
+            {
+              "label": "Mean",
+              "value": "mean"
+            },
+            {
+              "label": "Gaussian",
+              "value": "gaussian"
+            }
+          ],
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "adaptive"
+            ]
+          }
+        },
+        {
+          "name": "invert",
+          "label": "Invert",
+          "type": "boolean",
+          "defaultValue": false,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "manual",
+              "adaptive",
+              "otsu"
+            ]
+          }
         }
       ],
-      "description": "Binary threshold using JLVision native regions.",
+      "description": "Create a binary image with a manual, local adaptive, or Otsu threshold. Adaptive and Otsu modes convert color input to gray; the threshold output is present for manual and Otsu modes.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true
     },
@@ -10149,6 +10487,172 @@
         "executionMode": "Auto"
       },
       "declaresActions": false
+    },
+    {
+      "type": "text.validate",
+      "displayName": "Validate Text",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "expected",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "expected",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "matchedText",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "groupsJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "text",
+          "label": "Text (fallback)",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "expected",
+          "label": "Expected Text",
+          "type": "text",
+          "defaultValue": "",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "equals",
+              "contains",
+              "startsWith",
+              "endsWith"
+            ]
+          }
+        },
+        {
+          "name": "mode",
+          "label": "Validation Mode",
+          "type": "select",
+          "defaultValue": "equals",
+          "options": [
+            {
+              "label": "Equals",
+              "value": "equals"
+            },
+            {
+              "label": "Contains",
+              "value": "contains"
+            },
+            {
+              "label": "Starts With",
+              "value": "startsWith"
+            },
+            {
+              "label": "Ends With",
+              "value": "endsWith"
+            },
+            {
+              "label": "Regular Expression",
+              "value": "regex"
+            }
+          ]
+        },
+        {
+          "name": "pattern",
+          "label": "Regular Expression",
+          "type": "text",
+          "defaultValue": "[A-Z0-9]+",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
+        },
+        {
+          "name": "fullMatch",
+          "label": "Match Entire Text",
+          "type": "boolean",
+          "defaultValue": true,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "trim",
+          "label": "Trim Outer Whitespace",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "allowEmpty",
+          "label": "Allow Empty Text",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Regex Timeout (ms)",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
+        }
+      ],
+      "description": "Compare text literally or validate it with a culture-invariant .NET regular expression. Connected values override their fallback parameters. Regex mode exposes matchedText and groupsJson; a bounded timeout prevents a slow pattern from blocking the workflow.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
     },
     {
       "type": "text.regex",
@@ -10606,6 +11110,241 @@
         }
       ],
       "description": "JLVision attribute selection on existing objects; does not split objects. Chain filters for multiple criteria. Area counts pixels; anisometry is the equivalent-ellipse axis ratio.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "region.fromRange",
+      "displayName": "Range Segmentation",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "domainImage",
+          "dataType": "DomainImage",
+          "required": false
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Range Mode",
+          "type": "select",
+          "defaultValue": "gray",
+          "options": [
+            {
+              "label": "Gray",
+              "value": "gray"
+            },
+            {
+              "label": "Color",
+              "value": "color"
+            }
+          ]
+        },
+        {
+          "name": "minGray",
+          "label": "Minimum Gray",
+          "type": "number",
+          "defaultValue": 128,
+          "min": -65536,
+          "max": 65536,
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "gray"
+            ]
+          }
+        },
+        {
+          "name": "maxGray",
+          "label": "Maximum Gray",
+          "type": "number",
+          "defaultValue": 255,
+          "min": -65536,
+          "max": 65536,
+          "step": 1,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "gray"
+            ]
+          }
+        },
+        {
+          "name": "space",
+          "label": "Color Space",
+          "type": "select",
+          "defaultValue": "hsv",
+          "options": [
+            {
+              "label": "HSV (degrees, 0-1, 0-1)",
+              "value": "hsv"
+            },
+            {
+              "label": "sRGB (0-1)",
+              "value": "rgb"
+            },
+            {
+              "label": "CIELAB (D65)",
+              "value": "lab"
+            }
+          ],
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "min1",
+          "label": "Channel 1 Minimum",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -360,
+          "max": 360,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "max1",
+          "label": "Channel 1 Maximum",
+          "type": "number",
+          "defaultValue": 360,
+          "min": -360,
+          "max": 360,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "min2",
+          "label": "Channel 2 Minimum",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -200,
+          "max": 200,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "max2",
+          "label": "Channel 2 Maximum",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -200,
+          "max": 200,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "min3",
+          "label": "Channel 3 Minimum",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -200,
+          "max": 200,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "max3",
+          "label": "Channel 3 Maximum",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -200,
+          "max": 200,
+          "step": 0.01,
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "color"
+            ]
+          }
+        }
+      ],
+      "description": "Create a Region from an inclusive grayscale or three-channel color range. Connect exactly one image or domainImage; an optional region further restricts the selection.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

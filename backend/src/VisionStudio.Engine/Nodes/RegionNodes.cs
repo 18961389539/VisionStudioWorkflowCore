@@ -39,6 +39,22 @@ internal static class RegionNodeHelpers
     }
 }
 
+public sealed class RegionFromRangeNode : IVisionNodeExecutor
+{
+    public string Type => "region.fromRange";
+
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        var mode = node.GetString("mode", "gray").Trim().ToLowerInvariant();
+        return mode switch
+        {
+            "gray" => new RegionFromThresholdNode().ExecuteAsync(context, node, cancellationToken),
+            "color" => new RegionFromColorRangeNode().ExecuteAsync(context, node, cancellationToken),
+            _ => throw new InvalidOperationException($"Unsupported region range mode '{mode}'.")
+        };
+    }
+}
+
 public sealed class RegionFromThresholdNode : IVisionNodeExecutor
 {
     public string Type => "region.fromThreshold";
@@ -51,9 +67,8 @@ public sealed class RegionFromThresholdNode : IVisionNodeExecutor
         using var native = JLVisionImages.FromMat(source.Mat);
         using var channels = native.CountChannels();
         using var gray = channels.I == 1 ? native.CopyImage() : native.Rgb1ToGray();
-        using var domainRegion = domain is null ? null : JLVisionRegions.ToNative(domain);
-        using var union = domainRegion?.Union1();
-        using var limited = union is null ? gray.CopyImage() : gray.ReduceDomain(union);
+        using var effectiveDomain = DefectNodeHelpers.Domain(gray, source.Width, source.Height, domain, context);
+        using var limited = gray.ReduceDomain(effectiveDomain);
         using var threshold = limited.Threshold(minimum, maximum);
         var region = JLVisionRegions.FromNative(threshold, source.Width, source.Height, cancellationToken);
         return ValueTask.FromResult(RegionNodeHelpers.Result(region, cancellationToken));

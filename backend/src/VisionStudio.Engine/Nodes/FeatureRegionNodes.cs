@@ -8,7 +8,7 @@ namespace VisionStudio.Engine.Nodes;
 
 internal static class GrayMorphology
 {
-    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string operation, CancellationToken token)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string operation, CancellationToken token, bool applyRoi = false)
     {
         token.ThrowIfCancellationRequested();
         var width = node.GetInt("kernelWidth", 15); var height = node.GetInt("kernelHeight", 15);
@@ -24,7 +24,11 @@ internal static class GrayMorphology
         using var second = operation == "gradient" ? gray.GrayErosionRect(width, height) : null;
         using var output = operation == "topHat" ? gray.SubImage(first, 1d, 0d) : first.SubImage(second ?? gray, 1d, 0d);
         token.ThrowIfCancellationRequested();
-        return DefectNodeHelpers.ImageResult(output, new() { ["kernelWidth"] = width, ["kernelHeight"] = height, ["algorithmBackend"] = "JLVision" });
+        var outputMat = JLVisionImages.ToMat(output);
+        outputMat = PreprocessImageHelpers.ApplyRoiMask(outputMat, applyRoi ? node.GetRoi() : null);
+        return new NodeExecutorResult(
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(outputMat)) },
+            new Dictionary<string, object?> { ["operation"] = operation, ["kernelWidth"] = width, ["kernelHeight"] = height, ["algorithmBackend"] = "JLVision" });
     }
 }
 

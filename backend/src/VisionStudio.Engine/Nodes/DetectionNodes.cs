@@ -7,9 +7,9 @@ using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
 
 /// <summary>
-/// 批次一（2026-10-13 节点补齐）· 多目标检测：measure.blobs。
-/// 与 measure.blob（仅最大轮廓）互补：筛选（面积/圆度）→ 排序 → 计数，支撑多目标检测与数量检查；
-/// 输出 DetectionList（含每个目标的几何/面积/圆度）与"首选目标"的几何快捷输出（排序后第一个）。
+/// 斑点分析：measure.blobs。
+/// 支持全部斑点筛选/排序，或只返回最大斑点；保留 DetectionList 与首选目标几何快捷输出。
+/// 旧 measure.blob 节点继续注册，用于兼容已保存工作流。
 /// 找不到任何目标不是错误（数量检查需要 count=0 的正常结果）；首选几何输出在无目标时缺省。
 /// </summary>
 public sealed class MultiBlobNode : IVisionNodeExecutor
@@ -20,12 +20,15 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
     {
         var sourceImage = context.RequireImage("image");
         var source = sourceImage.Mat;
+        var mode = node.GetString("mode", "all").Trim().ToLowerInvariant();
+        if (mode is not ("all" or "largest")) throw new InvalidOperationException($"Unsupported blob mode '{mode}'.");
+        var largestOnly = mode == "largest";
         var minArea = node.GetDouble("minArea", 100);
-        var maxArea = node.GetDouble("maxArea", 0);
-        var minCircularity = node.GetDouble("minCircularity", 0);
-        var maxCount = Math.Clamp(node.GetInt("maxCount", 20), 1, 200);
-        var sortBy = node.GetString("sortBy", "area").Trim().ToLowerInvariant();
-        var descending = node.GetBool("descending", true);
+        var maxArea = largestOnly ? 0 : node.GetDouble("maxArea", 0);
+        var minCircularity = largestOnly ? 0 : node.GetDouble("minCircularity", 0);
+        var maxCount = largestOnly ? 1 : Math.Clamp(node.GetInt("maxCount", 20), 1, 200);
+        var sortBy = largestOnly ? "area" : node.GetString("sortBy", "area").Trim().ToLowerInvariant();
+        var descending = largestOnly || node.GetBool("descending", true);
         var roi = node.GetRoi();
 
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
@@ -88,6 +91,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
 
             var outputs = new Dictionary<string, VisionValue>
             {
+                ["image"] = VisionValue.Image(sourceImage),
                 ["count"] = VisionValue.Integer(detections.Length),
                 ["detections"] = VisionValue.Detections(detections)
             };
@@ -105,10 +109,19 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                     Height: detection.Height,
                     Stroke: "#faad14",
                     StrokeWidth: 1.5));
+                if (largestOnly && i == 0)
+                {
+                    overlays.Add(new VisionOverlay("blob-largest-circle", VisionOverlayType.Circle,
+                        X: detection.Circle.X, Y: detection.Circle.Y, Radius: detection.Circle.Radius,
+                        Stroke: "#52c41a", StrokeWidth: 2));
+                    overlays.Add(new VisionOverlay("blob-largest-center", VisionOverlayType.Point,
+                        X: detection.Circle.X, Y: detection.Circle.Y, Stroke: "#ff4d4f", StrokeWidth: 2));
+                }
             }
 
             var summary = new Dictionary<string, object?>
             {
+                ["mode"] = mode,
                 ["count"] = detections.Length,
                 ["totalArea"] = detections.Sum(x => x.Area),
                 ["minArea"] = minArea,

@@ -13,6 +13,7 @@ export function formatScalar(value: string | number | boolean | null) {
 /** 各节点类型的“关键结果”字段顺序：先展示用户真正关心的测量量，而不是摘要里的前 N 个键。
  *  键取自后端各节点 Summary（backend/src/VisionStudio.Engine/Nodes/*.cs）；未列出的类型走通用排序。 */
 const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
+  'image.filter': ['method', 'kernelSize', 'sigmaX', 'sigmaY'], 'image.morphology': ['operation', 'kernelSize', 'kernelWidth', 'kernelHeight'],
   'image.topHat': ['kernelWidth', 'kernelHeight'], 'image.bottomHat': ['kernelWidth', 'kernelHeight'],
   'image.morphGradient': ['kernelWidth', 'kernelHeight'], 'measure.grayHistogram': ['found', 'pixelCount', 'entropy'],
   'region.fromRoi': ['found', 'area', 'count'], 'region.convexHull': ['area', 'count'],
@@ -21,10 +22,10 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'measure.concentricity': ['centerDistance', 'diametralOffset'], 'measure.roundness': ['found', 'deviation', 'rms'],
   'measure.straightness': ['found', 'deviation', 'rms'], 'measure.contourDeviation': ['found', 'deviation', 'mean'],
   'measure.parallelism': ['angleError', 'deviation', 'measuredLength'], 'measure.perpendicularity': ['angleError', 'deviation', 'measuredLength'],
-  'image.colorConvert': ['space', 'channelNames'], 'region.fromColorRange': ['found', 'area', 'count'],
+  'image.colorConvert': ['space', 'channelNames'], 'region.fromRange': ['found', 'area', 'count'], 'region.fromColorRange': ['found', 'area', 'count'],
   'measure.colorDifference': ['found', 'deltaE', 'maxDeltaE'], 'image.contrastNormalize': ['inputMin', 'inputMax', 'rangeCollapsed'],
   'image.illuminationNormalize': ['windowSize', 'targetMean'], 'image.sharpen': ['amount', 'windowSize'],
-  'text.match': ['pass', 'mode', 'textLength'], 'text.regex': ['pass', 'groupCount', 'textLength'],
+  'text.validate': ['pass', 'mode', 'textLength', 'groupCount'], 'text.match': ['pass', 'mode', 'textLength'], 'text.regex': ['pass', 'groupCount', 'textLength'],
   'image.register': ['found', 'score'], 'image.warpAffine': ['width', 'height', 'interpolation'],
   'region.morphology': ['count', 'area'], 'region.transform': ['count', 'area'],
   'region.properties': ['found', 'area', 'orientation'], 'region.toDetections': ['count'],
@@ -40,7 +41,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'feature.edgeSubpixel': ['found', 'edgeX', 'edgeY'], 'measure.caliperLine': ['found', 'fitError', 'sampleCount'],
   'measure.caliperCircle': ['found', 'fittedRadius', 'fitError'], 'measure.fitEllipse': ['width', 'height', 'angleDeg'],
   'match.shape': ['found', 'bestScore', 'matchedAngle'], 'roi.transform': ['roiType', 'thetaDeg'],
-  'measure.blobs': ['count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
+  'measure.blobs': ['mode', 'count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
   'value.arithmetic': ['result'], 'value.range': ['pass', 'value'], 'logic.boolean': ['result'],
   'flow.ifBoolean': ['condition'], 'flow.switch': ['selected'],
   'output.saveImage': ['path', 'bytesWritten'], 'output.exportResult': ['path', 'bytesWritten'],
@@ -50,6 +51,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'camera.syncCapture': ['withinTolerance', 'triggerSkewUs', 'cameraCount'],
   'image.synthetic': ['size', 'circle'],
   'image.threshold': ['threshold'],
+  'image.channel': ['channel'],
   'measure.blob': ['area', 'radius', 'x', 'y'],
   'measure.caliper': ['x', 'y', 'strength'],
   'measure.rotatedRect': ['width', 'height', 'angleDeg'],

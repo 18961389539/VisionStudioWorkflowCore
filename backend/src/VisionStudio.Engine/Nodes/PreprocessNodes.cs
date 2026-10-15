@@ -139,6 +139,37 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
             JLVisionOperators.CvtColor(color, hsv, ColorConversionCodes.BGR2HSV);
             JLVisionOperators.ExtractChannel(hsv, mat, channel switch { "hue" => 0, "saturation" => 1, _ => 2 });
         }
+        else if (channel is "average" or "mean" or "max")
+        {
+            if (source.Channels() == 1)
+            {
+                source.CopyTo(mat);
+            }
+            else
+            {
+                using var bgr = new Mat();
+                var color = source.Channels() == 4 ? Bgr(source, bgr) : source;
+                JLVisionOperators.Split(color, out var channels);
+                try
+                {
+                    if (channel is "average" or "mean")
+                    {
+                        using var average = new Mat();
+                        JLVisionOperators.AddWeighted(channels[0], 1d / 3, channels[1], 1d / 3, 0, average);
+                        JLVisionOperators.AddWeighted(average, 1, channels[2], 1d / 3, 0, mat);
+                    }
+                    else
+                    {
+                        JLVisionOperators.Max(channels[0], channels[1], mat);
+                        JLVisionOperators.Max(mat, channels[2], mat);
+                    }
+                }
+                finally
+                {
+                    foreach (var component in channels) component.Dispose();
+                }
+            }
+        }
         else if (channel is "blue" or "green" or "red")
         {
             if (source.Channels() == 1)
@@ -149,7 +180,7 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
         }
         else
         {
-            // gray
+            // gray/luminance uses the same BT.601 conversion as image.grayscale's default mode.
             if (source.Channels() == 1) source.CopyTo(mat);
             else JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         }
@@ -215,14 +246,46 @@ public sealed class MedianBlurNode : IVisionNodeExecutor
     }
 }
 
+public sealed class ImageFilterNode : IVisionNodeExecutor
+{
+    public string Type => "image.filter";
+
+    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        var method = node.GetString("method", "gaussian").Trim().ToLowerInvariant();
+        IVisionNodeExecutor executor = method switch
+        {
+            "gaussian" => new GaussianBlurNode(),
+            "median" => new MedianBlurNode(),
+            _ => throw new InvalidOperationException("Filter method must be gaussian or median.")
+        };
+        var result = await executor.ExecuteAsync(context, node with { Type = executor.Type }, cancellationToken).ConfigureAwait(false);
+        var summary = new Dictionary<string, object?>(result.Summary) { ["method"] = method };
+        return result with { Summary = summary };
+    }
+}
+
 public sealed class MorphologyNode : IVisionNodeExecutor
 {
     public string Type => "image.morphology";
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        var operation = node.GetString("operation", "open").Trim();
+        var normalizedOperation = operation.ToLowerInvariant();
+        if (normalizedOperation is "whitetophat" or "blackbottomhat" or "gradient")
+        {
+            var grayOperation = normalizedOperation switch
+            {
+                "whitetophat" => "topHat",
+                "blackbottomhat" => "bottomHat",
+                _ => "gradient"
+            };
+            return ValueTask.FromResult(GrayMorphology.Execute(context, node, grayOperation, cancellationToken, applyRoi: true));
+        }
+
         var source = context.RequireImage("image").Mat;
-        var operation = node.GetString("operation", "open").Trim().ToLowerInvariant();
+        operation = normalizedOperation;
         var kernel = PreprocessImageHelpers.OddKernel(node.GetInt("kernelSize", 3), 1, 31);
         var iterations = Math.Clamp(node.GetInt("iterations", 1), 1, 10);
         var shape = node.GetString("shape", "rect").Trim().ToLowerInvariant();
