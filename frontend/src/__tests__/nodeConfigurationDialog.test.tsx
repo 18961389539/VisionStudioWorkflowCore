@@ -10,16 +10,22 @@ vi.mock('../components/ImageViewer', () => ({
     previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
     roiTargetLabel?: string;
     measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number } }
-      | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number };
+      | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
     measurementGeometryEditable?: boolean;
     onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
   }) =>
     <div><span data-testid="image-url">{previewUrl}</span><span data-testid="roi-enabled">{roiEnabled ? 'ROI 可编辑' : 'ROI 只读'}</span>
       <span data-testid="roi-target">{roiTargetLabel}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
       <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
+      {measurementGeometry?.type === 'circle' && <span data-testid="circle-geometry" data-center-x={measurementGeometry.center.x}
+        data-center-y={measurementGeometry.center.y} data-radius={measurementGeometry.radius} data-band={measurementGeometry.band}
+        data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
       {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
-      {measurementGeometryEditable && measurementGeometry?.type === 'circle' && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
-        center: { x: 42, y: 51 }, radius: 17, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
+      {measurementGeometryEditable && measurementGeometry?.type === 'circle' && measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false
+        && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
+          center: { x: 42, y: 51 }, radius: 17, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
+      {measurementGeometryEditable && measurementGeometry?.type === 'circle' && (measurementGeometry.centerEditable === false || measurementGeometry.radiusEditable === false)
+        && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整圆弧</button>}
       {showRoiTools && roiEnabled && <button onClick={() => onRoiChange(undefined)}>清除测试 ROI</button>}</div>
 }));
 
@@ -383,6 +389,38 @@ describe('caliper geometry input guidance', () => {
       expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'angleEndDeg')!.label }) as HTMLInputElement).value).toBe('90');
       expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radialBand')!.label }) as HTMLInputElement).value).toBe('14');
     });
+  });
+
+  it('keeps an upstream circle fixed while allowing image-based arc and radial-band edits', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 20, centerY: 30, radius: 10, radialBand: 6, angleStartDeg: 0, angleEndDeg: 60 } } };
+    const circleSource: Node = { id: 'circle-source', position: { x: 0, y: 0 }, data: { typeKey: 'geometry.circle', label: '上游拟合圆' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-override', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' }
+    ];
+    const circleResult: RunResult = { ...report, nodeReports: [{ nodeId: circleNode.id, nodeType: circleCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { circle: { type: 'Circle', display: '(68, 42, r=24)', value: { x: 68, y: 42, radius: 24 } } } }] };
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, circleSource, imageNode], edges, result: circleResult, onApply });
+
+    expect(dialog.getByText(/圆心和标称半径锁定为本次运行的上游输入/)).toBeTruthy();
+    expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'centerX')!.label })).toBeNull();
+    expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'centerY')!.label })).toBeNull();
+    expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radius')!.label })).toBeNull();
+    const geometry = await dialog.findByTestId('circle-geometry');
+    expect(geometry.getAttribute('data-center-x')).toBe('68');
+    expect(geometry.getAttribute('data-center-y')).toBe('42');
+    expect(geometry.getAttribute('data-radius')).toBe('24');
+    expect(geometry.getAttribute('data-center-editable')).toBe('false');
+    expect(geometry.getAttribute('data-radius-editable')).toBe('false');
+
+    fireEvent.click(dialog.getByRole('button', { name: '模拟调整圆弧' }));
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0]).toMatchObject({ centerX: 20, centerY: 30, radius: 10, radialBand: 14, angleStartDeg: -10, angleEndDeg: 90 });
   });
 
   it('blocks a zero-span circle arc before running the measurement', () => {

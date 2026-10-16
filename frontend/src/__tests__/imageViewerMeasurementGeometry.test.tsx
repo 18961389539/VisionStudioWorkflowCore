@@ -161,6 +161,49 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.angleEndDeg).toBe(90);
   });
 
+  it('allows editing an upstream circle arc while keeping its center and radius locked', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
+      angleStartDeg: 350, angleEndDeg: 10, centerEditable: false, radiusEditable: false }, onChange);
+    expect(screen.queryByRole('button', { name: '重绘标称圆' })).toBeNull();
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 260.2, clientY: 140.6 });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 191.36 });
+    fireEvent.mouseUp(stage, { clientX: 200, clientY: 191.36 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.center).toEqual({ x: 50, y: 50 });
+    expect(result.radius).toBe(20);
+    expect(result.angleStartDeg).toBe(350);
+    expect(result.angleEndDeg).toBeCloseTo(450, 0);
+  });
+
+  it('keeps upstream center and radius handles locked while allowing search-band edits', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
+      angleStartDeg: 30, angleEndDeg: 120, centerEditable: false, radiusEditable: false }, onChange);
+    const stage = screen.getByTestId('stage');
+    // The nominal-radius handle is visible only for locally editable circles.
+    fireEvent.mouseDown(stage, { clientX: 247.2, clientY: 130 });
+    fireEvent.mouseUp(stage, { clientX: 247.2, clientY: 130 });
+    expect(onChange).not.toHaveBeenCalled();
+
+    // The cyan inner-band handle remains draggable with the source circle locked.
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 97 });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 106.4 });
+    fireEvent.mouseUp(stage, { clientX: 200, clientY: 106.4 });
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.center).toEqual({ x: 50, y: 50 });
+    expect(result.radius).toBe(20);
+    expect(result.band).toBeCloseTo(10, 0);
+  });
+
   it('allows arc edits on a valid one-pixel-radius circle', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 1,

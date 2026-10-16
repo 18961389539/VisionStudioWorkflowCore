@@ -54,6 +54,18 @@ function parameterMeta(parameter: ParameterDescriptor) {
   return bits.join(' · ');
 }
 
+function connectedCircleGeometry(value: unknown): { x: number; y: number; radius: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const circle = value as Record<string, unknown>;
+  const x = circle.x ?? circle.X;
+  const y = circle.y ?? circle.Y;
+  const radius = circle.radius ?? circle.Radius;
+  if (typeof x !== 'number' || !Number.isFinite(x)
+    || typeof y !== 'number' || !Number.isFinite(y)
+    || typeof radius !== 'number' || !Number.isFinite(radius) || radius <= 0) return undefined;
+  return { x, y, radius };
+}
+
 export default function NodeConfigurationDialog({ node, catalogItem, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
@@ -254,7 +266,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const measurementGeometryFrameKind = !transformInputEdge ? 'current'
     : savedMeasurementReference ? 'saved-reference'
       : cropMeasurementReferenceNodeId ? 'transform-input' : undefined;
-  const canEditMeasurementGeometry = Boolean(measurementGeometryType && !searchLineInputEdge && !circleInputEdge && measurementGeometryFrameKind);
+  const circleInputSnapshot = circleInputEdge && (!resultStale || Boolean(preview))
+    ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
+    : undefined;
+  const connectedCircle = circleInputEdge && !transformInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
+  const canEditMeasurementGeometry = Boolean(measurementGeometryType && !searchLineInputEdge
+    && (!circleInputEdge || connectedCircle) && measurementGeometryFrameKind);
   useEffect(() => {
     if (!open || !canEditMeasurementGeometry) return;
     if (measurementGeometryFrameKind === 'saved-reference' || measurementGeometryFrameKind === 'current') {
@@ -279,11 +296,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         end: { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
         ...(catalogItem.type === 'measure.caliperLine' ? { profileSpan: Math.max(0, geometryNumber('edgeLength', 0)),
           profileCount: geometryNumber('caliperCount', 9) } : {}) }
-      : { type: 'circle', center: { x: geometryNumber('centerX', 320), y: geometryNumber('centerY', 240) },
-        radius: Math.max(0, geometryNumber('radius', 100)), band: Math.max(0, geometryNumber('radialBand', 8)),
+      : { type: 'circle', center: connectedCircle ? { x: connectedCircle.x, y: connectedCircle.y }
+          : { x: geometryNumber('centerX', 320), y: geometryNumber('centerY', 240) },
+        radius: connectedCircle?.radius ?? Math.max(0, geometryNumber('radius', 100)), band: Math.max(0, geometryNumber('radialBand', 8)),
         angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
         caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
-        angleStepDeg: geometryNumber('angleStepDeg', 5) }
+        angleStepDeg: geometryNumber('angleStepDeg', 5), centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
   const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
     if (locked) return;
@@ -295,7 +313,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const wholeTurns = Math.round(((startAngle + endAngle) / 2) / 360);
       const normalizedStartAngle = startAngle - wholeTurns * 360;
       const normalizedEndAngle = endAngle - wholeTurns * 360;
-      setDraft(current => ({ ...current, centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius,
+      setDraft(current => ({ ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
         angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle, radialBand: Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
@@ -818,7 +836,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           title={correctedCircleTransformConflict ? '定位修正圆不能再次应用 transform' : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
           description={correctedCircleTransformMessage ?? (transformInputEdge
             ? `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`
-            : '上游 circle 会覆盖本节点的圆心和标称半径参数；请在上游节点中调整圆几何。')} />}
+            : connectedCircle
+              ? '圆心和标称半径锁定为本次运行的上游输入；可在图像上拖动蓝/紫圆弧端点和青/绿搜索带手柄，调整本节点的搜索范围。'
+              : '上游 circle 会覆盖本节点的圆心和标称半径参数；运行此节点以读取本次使用的圆，之后可在图像上调整圆弧和搜索带。')} />}
         {!searchLineInputEdge && !circleInputEdge && transformInputEdge && <Alert showIcon type="info"
           title={`几何将按变换跟随：${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}`}
           description={canEditMeasurementGeometry

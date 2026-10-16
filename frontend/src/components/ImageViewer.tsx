@@ -13,7 +13,7 @@ type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
   | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
-      caliperCount?: number; samplingMode?: string; angleStepDeg?: number };
+      caliperCount?: number; samplingMode?: string; angleStepDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -339,8 +339,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     <Line points={[geometry.center.x - handleRadius * 1.7, geometry.center.y, geometry.center.x + handleRadius * 1.7, geometry.center.y]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     <Line points={[geometry.center.x, geometry.center.y - handleRadius * 1.7, geometry.center.x, geometry.center.y + handleRadius * 1.7]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     {editable && <>
-      <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
-      <Circle x={geometry.center.x + geometry.radius} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+      {geometry.centerEditable !== false && <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
+      {geometry.radiusEditable !== false && <Circle x={geometry.center.x + geometry.radius} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {arcHandles && <>
         <Circle x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -579,9 +579,9 @@ export default function ImageViewer({
     }
     const arcHandles = caliperCircleArcHandles(target, view.scale, actualWidth, actualHeight);
     const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
-    const candidates: [MeasurementDragMode, Point][] = [
-      ['center', target.center], ['radius', { x: target.center.x + target.radius, y: target.center.y }]
-    ];
+    const candidates: [MeasurementDragMode, Point][] = [];
+    if (target.centerEditable !== false) candidates.push(['center', target.center]);
+    if (target.radiusEditable !== false) candidates.push(['radius', { x: target.center.x + target.radius, y: target.center.y }]);
     if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
     const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
@@ -931,7 +931,8 @@ export default function ImageViewer({
             <span>px</span>
           </span>}
           {showRoiTools && roi?.type === 'Brush' && <Button size="small" disabled={!roiEnabled} onClick={undoBrushStroke}>撤销笔迹</Button>}
-          {measurementGeometry && measurementGeometryEditable && <>
+          {measurementGeometry && measurementGeometryEditable && (measurementGeometry.type === 'line'
+            || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false) && <>
             <span className="viewer-toolbar-divider" />
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
