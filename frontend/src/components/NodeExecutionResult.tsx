@@ -162,9 +162,10 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const notFoundMessage = measurementNotFoundMessage(catalog.type, report?.summary);
   const reportErrorMessage = report?.error ? executionErrorMessage(catalog, report.error) : undefined;
   const reportSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
-    ? pickSummaryKeys(report.summary, catalog.type, catalog.type === 'measure.caliperCircle' ? 5 : 4) : [];
+    ? pickSummaryKeys(report.summary, catalog.type,
+      ['measure.caliperLine', 'measure.caliperCircle', 'measure.caliper'].includes(catalog.type) ? 5 : 4) : [];
   const prominentSummaryKeys = catalog.type === 'measure.caliper' && report?.summary.found === false
-    ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength'].includes(key))].slice(0, 4)
+    ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength', 'sampleCount', 'reason'].includes(key))].slice(0, 4)
     : reportSummaryKeys;
   return <section className="node-execution-result" aria-label="本节点运行结果">
     <button type="button" className="node-result-heading" aria-label="本节点运行结果" aria-expanded={expanded}

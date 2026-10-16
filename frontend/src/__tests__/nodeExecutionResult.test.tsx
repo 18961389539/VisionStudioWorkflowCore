@@ -71,6 +71,20 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).not.toContain('fittedRadius');
   });
 
+  it('surfaces valid, rejected, and fit-ignored calipers in the line result summary', () => {
+    const lineResult = result(true, 'ok');
+    lineResult.nodeReports[0].summary = {
+      found: true, sampleCount: 8, rejectedCalipers: 1, ignoredByFit: 1, fitError: 0.2
+    };
+    mount('measure.caliperLine', lineResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('有效采样数 8');
+    expect(summary.textContent).toContain('拒绝卡尺数 1');
+    expect(summary.textContent).toContain('拟合剔除点数 1');
+    expect(summary.textContent).toContain('拟合误差 0.2');
+  });
+
   it('explains when the search geometry is clipped or excluded by the ROI', () => {
     mount(catalog.type, result(false, 'search-region-clipped-too-short'));
     expect(screen.getByText(/平行搜索剖面与图像相交的部分不足 2 px/)).toBeTruthy();
