@@ -291,6 +291,19 @@ public sealed class Batch5PrecisionNodeTests
         Assert.InRange(line.Start.X, trueEdgeX - 0.5, trueEdgeX + 0.5);
         Assert.InRange(Convert.ToDouble(result.Summary["fitError"]), 0, 0.5);
         Assert.Contains(result.Overlays ?? [], overlay => overlay.Id.StartsWith("caliper-line-ignored-point", StringComparison.Ordinal));
+
+        var minimumAfterRejection = Convert.ToInt32(result.Summary["fitPoints"])
+            + Convert.ToInt32(result.Summary["ignoredByFit"]);
+        var strict = await Run(new CaliperLineNode(), Image(image), JsonSerializer.Serialize(new
+        {
+            startX = 60, startY = 128, endX = 140, endY = 128, sampleWidth = 5, edgeLength = 40,
+            caliperCount = 9, direction = "firstfromend", maxFitOutliers = 2, fitOutlierThreshold = 2,
+            minContrast = 15, minValidCalipers = minimumAfterRejection
+        }));
+        Assert.False(Convert.ToBoolean(strict.Summary["found"]));
+        Assert.Equal("insufficient-valid-calipers", strict.Summary["reason"]);
+        Assert.True(Convert.ToInt32(strict.Summary["fitPoints"]) < minimumAfterRejection);
+        Assert.False(strict.Outputs.ContainsKey("line"));
     }
 
     [Fact]
@@ -421,6 +434,19 @@ public sealed class Batch5PrecisionNodeTests
         Assert.True(Convert.ToInt32(robust.Outputs["ignoredCount"].Require<long>("ignoredCount")) >= 1);
         Assert.InRange(robust.Outputs["radius"].Require<double>("radius"), truth.r - 1, truth.r + 1);
         Assert.True(Convert.ToDouble(robust.Outputs["fitError"].Require<double>("fitError")) < 1);
+
+        var minimumAfterRejection = Convert.ToInt32(robust.Summary["edgePoints"]);
+        var strict = await Run(new CaliperCircleNode(), Image(image), JsonSerializer.Serialize(new
+        {
+            centerX = 200, centerY = 200, radius = 100, radialBand = 15, samplingMode = "count",
+            caliperCount = 72, searchDirection = "firstfromend", maxFitOutliers = 2,
+            fitOutlierThreshold = 2, minContrast = 15, minValidCalipers = minimumAfterRejection
+        }));
+        Assert.False(Convert.ToBoolean(strict.Summary["found"]));
+        Assert.Equal("insufficient-valid-calipers", strict.Summary["reason"]);
+        Assert.True(Convert.ToInt32(strict.Summary["fitPoints"]) < minimumAfterRejection);
+        Assert.Equal(Convert.ToInt32(strict.Summary["fitPoints"]), Convert.ToInt32(strict.Summary["sampleCount"]));
+        Assert.False(strict.Outputs.ContainsKey("circle"));
 
         using var oversized = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(30));
         Cv2.Ellipse(oversized, new Point(200, 200), new Size(104, 104), 0, 0, 360, Scalar.All(220), -1, LineTypes.AntiAlias);

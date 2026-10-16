@@ -41,6 +41,31 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.queryByText('执行成功')).toBeNull();
   });
 
+  it('explains the minimum-valid-caliper gate and shows the fitted count', () => {
+    const strictResult = result(false, 'insufficient-valid-calipers');
+    strictResult.nodeReports[0].summary = {
+      found: false, reason: 'insufficient-valid-calipers', sampleCount: 7, minValidCalipers: 8,
+      rejectedCalipers: 2, ignoredByFit: 1
+    };
+    mount('measure.caliperLine', strictResult);
+
+    expect(screen.getByText(/拟合后保留的有效卡尺数低于“最少有效卡尺数”/)).toBeTruthy();
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('有效采样数 7');
+    expect(summary.textContent).toContain('最少有效卡尺数 8');
+
+    cleanup();
+    const circleResult = result(false, 'insufficient-valid-calipers');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = {
+      found: false, reason: 'insufficient-valid-calipers', sampleCount: 5, minValidCalipers: 6,
+      rejectedSpokes: 4, ignoredByFit: 1
+    };
+    mount('measure.caliperCircle', circleResult);
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('有效采样数 5');
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('最少有效卡尺数 6');
+  });
+
   it('keeps the successful status when the measurement found an edge', () => {
     mount(catalog.type, result(true, 'ok'));
 

@@ -38,6 +38,7 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
     'too-few-edge-points': type === 'measure.caliperCircle'
       ? '找到的边缘点不足 3 个，无法拟合圆。请增加卡尺数量、扩大搜索弧角范围，或改善边缘对比度。'
       : '找到的边缘点不足 3 个，无法拟合。请增加卡尺数量、扩大沿边缘跨度，或改善边缘对比度。',
+    'insufficient-valid-calipers': '拟合后保留的有效卡尺数低于“最少有效卡尺数”。请增加卡尺数量、扩大有效边缘覆盖，或降低门槛。',
     'degenerate-line-fit': '边缘点无法形成有效直线。请检查搜索线是否横穿目标边缘，并减少误检或扩大采样跨度。',
     'degenerate-circle-fit': '检出的边缘点分布接近直线，无法稳定拟合圆。请扩大搜索弧角范围或检查标称圆、径向搜索带和误检点。',
     'all-spokes-exceed-max-radius-deviation': '所有候选边缘都超出最大半径偏差。请检查标称圆和搜索带，或放宽最大半径偏差。',
@@ -206,6 +207,9 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
     : undefined;
   const prominentSummaryKeys = insufficientSamplesKey
     ? ['found', insufficientSamplesKey, ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'edgeX', 'edgeY', 'strength', insufficientSamplesKey, 'reason'].includes(key))].slice(0, 5)
+    : report?.summary.reason === 'insufficient-valid-calipers'
+    ? ['found', 'sampleCount', 'minValidCalipers', catalog.type === 'measure.caliperCircle' ? 'rejectedSpokes' : 'rejectedCalipers', 'ignoredByFit']
+      .filter(key => key in report.summary).slice(0, 5)
     : catalog.type === 'measure.caliper' && report?.summary.found === false
     ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength', 'reason'].includes(key))].slice(0, 4)
     : reportSummaryKeys;

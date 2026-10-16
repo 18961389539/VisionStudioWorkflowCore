@@ -323,6 +323,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "parabolic", "parabolic", "none");
         var edgeLength = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0), 0, 10000);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 3, 101);
+        var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 101);
         var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
         var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
         var roi = ContourNodesHelper.ResolveRoi(context, node);
@@ -389,7 +390,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     strengths.Add(edge.Strength);
                 }
                 var fit = FitCaliperLine(points, maxFitOutliers, fitOutlierThreshold);
-                var found = fit is not null;
+                var found = fit is not null && fit.UsedIndices.Length >= minValidCalipers;
                 var reportedSearchLine = baseIntersects ? new VisionLine2D(start, end) : search;
 
                 var outputs = new Dictionary<string, VisionValue>
@@ -431,7 +432,10 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 }
 
                 var reason = found ? "ok"
-                    : points.Count > 0 ? points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit"
+                    : points.Count > 0 && points.Count < 3 ? "too-few-edge-points"
+                    : points.Count >= 3 && (points.Count < minValidCalipers
+                        || fit is not null && fit.UsedIndices.Length < minValidCalipers) ? "insufficient-valid-calipers"
+                    : points.Count > 0 ? "degenerate-line-fit"
                     : outsideImage == caliperCount ? "search-region-outside-image"
                     : outsideImage + shortAfterClip == caliperCount && shortAfterClip > 0 ? "search-region-clipped-too-short"
                     : profilesWithoutFiniteSamples == caliperCount - outsideImage - shortAfterClip && profilesWithoutFiniteSamples > 0
@@ -457,6 +461,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         ["rejectedCalipers"] = failures,
                         ["maxFitOutliers"] = maxFitOutliers,
                         ["fitOutlierThreshold"] = fitOutlierThreshold,
+                        ["minValidCalipers"] = minValidCalipers,
                         ["sampleWidth"] = sampleWidth,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
@@ -596,6 +601,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         };
         var angleStep = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "angleStepDeg", 5), 0.5, 45);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 72, 3, 361);
+        var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 361);
         var band = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "radialBand", 8), 1, 500);
         var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
         var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
@@ -690,7 +696,10 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var fit = hasEnoughPoints ? FitCircleWithOutlierRejection(edgePoints, maxFitOutliers, fitOutlierThreshold) : null;
                 var radiusOutsideTolerance = fit is not null && fitRadiusTolerance > 0
                     && Math.Abs(fit.Circle.Radius - nominalRadius) > fitRadiusTolerance;
-                var found = fit is not null && !radiusOutsideTolerance;
+                var hasMinimumCalipers = fit is not null
+                    ? fit.UsedIndices.Length >= minValidCalipers
+                    : edgePoints.Count >= minValidCalipers;
+                var found = fit is not null && hasMinimumCalipers && !radiusOutsideTolerance;
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
@@ -704,6 +713,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 };
                 overlays.AddRange(spokeOverlays);
                 var reason = found ? "ok"
+                    : edgePoints.Count >= 3 && !hasMinimumCalipers ? "insufficient-valid-calipers"
                     : radiusOutsideTolerance ? "fitted-radius-outside-tolerance"
                     : edgePoints.Count == 0 && rejectedByDeviation > 0 && rejectedByDeviation == spokesWithEdgeCandidate
                         ? "all-spokes-exceed-max-radius-deviation"
@@ -722,6 +732,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["found"] = found,
                     ["reason"] = reason,
                     ["spokes"] = angles.Length,
+                    ["sampleCount"] = fit?.UsedIndices.Length ?? edgePoints.Count,
                     ["edgePoints"] = edgePoints.Count,
                     ["rejectedSpokes"] = rejected,
                     ["rejectedByDeviation"] = rejectedByDeviation,
@@ -739,6 +750,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["radialSearchMinRadius"] = innerRadius,
                     ["radialSearchMaxRadius"] = outerRadius,
                     ["fitRadiusTolerance"] = fitRadiusTolerance,
+                    ["minValidCalipers"] = minValidCalipers,
                     ["polarity"] = polarity,
                     ["searchDirection"] = searchDirection,
                     ["autoGray"] = autoGray,

@@ -26,6 +26,17 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('exposes a configurable minimum valid-caliper gate for line and circle fits', () => {
+    const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
+    for (const type of ['measure.caliperLine', 'measure.caliperCircle']) {
+      const item = translated.find(entry => entry.type === type)!;
+      const parameter = item.parameters.find(entry => entry.name === 'minValidCalipers');
+      expect(parameter).toMatchObject({ label: '最少有效卡尺数', defaultValue: 3, min: 3 });
+      expect(parameter?.description).toContain('剔除后');
+      expect(item.description).toContain('最少有效卡尺数');
+    }
+  });
+
   it('explains the UInt16 to byte-gray scaling used by caliper thresholds', () => {
     const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
     for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine', 'measure.caliperCircle']) {

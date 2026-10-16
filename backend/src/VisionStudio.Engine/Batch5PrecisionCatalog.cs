@@ -211,13 +211,15 @@ public static class Batch5PrecisionCatalog
                     new("No parabolic refinement", "none")
                 ], Group: "Sampling"),
                 new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles along the expected edge; zero uses the search-line length."),
-                new("caliperCount", "Caliper Count", "number", 9, 3, 101, 1, Group: "Sampling", Description: "Number of parallel search profiles along the edge span; at least 3 valid edge points must remain after fitting."),
+                new("caliperCount", "Caliper Count", "number", 9, 3, 101, 1, Group: "Sampling", Description: "Number of parallel search profiles along the edge span."),
+                new("minValidCalipers", "Minimum Valid Calipers", "number", 3, 3, 101, 1, Group: "Fit",
+                    Description: "Require at least this many edge points to remain after outlier rejection; the default preserves the three-point fit minimum."),
                 new("maxFitOutliers", "Max Fit Outliers", "number", 1, 0, 16, 1, Group: "Fit",
                     Description: "Ignore up to this many edge points when their orthogonal residual exceeds the threshold."),
                 new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
                     Description: "A point can be excluded when its distance from the fitted line exceeds this value.")
             ],
-            "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
+            "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -279,6 +281,8 @@ public static class Batch5PrecisionCatalog
                 new("sampleWidth", "Projection Length", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("maxRadiusDeviation", "Max Radius Deviation (0=off)", "number", 0, 0, 5000, 1, Unit: "px", Group: "Sampling",
                     Description: "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."),
+                new("minValidCalipers", "Minimum Valid Calipers", "number", 3, 3, 361, 1, Group: "Fit",
+                    Description: "Require at least this many edge points to remain after outlier rejection; increase it to prevent sparse arcs from producing a measurement."),
                 new("maxFitOutliers", "Max Fit Outliers", "number", 2, 0, 16, 1, Group: "Fit",
                     Description: "After an initial fit, discard up to this many points whose radial residual exceeds the threshold."),
                 new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
@@ -286,7 +290,7 @@ public static class Batch5PrecisionCatalog
                 new("fitRadiusTolerance", "Fit Radius Tolerance (0=off)", "number", 0, 0, 5000, 0.1, Unit: "px", Group: "Fit",
                     Description: "Reject the fitted circle when its radius differs from the nominal radius by more than this amount.")
             ],
-            "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+            "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
