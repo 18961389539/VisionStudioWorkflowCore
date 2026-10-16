@@ -264,6 +264,27 @@ describe('crop workspace with a connected ROI', () => {
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/processed/image'));
     expect(dialog.getByTestId('overlay-ids').textContent).not.toContain('roi-transform-corrected-shape');
   });
+
+  it('shows the crop output after preview and keeps the input one click away for further editing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 30, height: 40 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
+    const cropResult: RunResult = { ...report, runId: 'crop-preview', nodeReports: [
+      { ...report.nodeReports[0], nodeId: 'crop', nodeType: 'image.crop', summary: { width: 30, height: 40 } }
+    ] };
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, imageNode], edges,
+      result: cropResult, onPreview: vi.fn(async () => cropResult) });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    fireEvent.click(dialog.getByRole('button', { name: '预览裁剪结果' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/crop/image'));
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 只读');
+
+    fireEvent.click(dialog.getByRole('radio', { name: '输入图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 可编辑');
+  });
 });
 
 describe('caliper geometry input guidance', () => {

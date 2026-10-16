@@ -374,7 +374,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       if (isShapeMatch) { setSearchPreview(completedPreview); setSearchWorkspacePreview(completedPreview); setPreviewNodeId(node.id); setImageSource('output'); }
       if (isRoiTransform) { setRoiImageView('output'); setImageSource('output'); }
       if (isShapeMatch) setShapeImageKind('search');
-      if (isImageCrop) { setPreviewNodeId(node.id); setImageSource('input'); }
+      if (isImageCrop) { setPreviewNodeId(node.id); setImageSource('output'); }
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : '节点测试失败。');
       setResultExpanded(true);
