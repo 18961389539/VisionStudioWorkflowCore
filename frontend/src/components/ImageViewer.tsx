@@ -30,6 +30,9 @@ const persistPixelated = (value: boolean) => {
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
 const maxCircleRadius = (center: Point, width: number, height: number) => Math.max(0, Math.min(center.x, center.y, width - center.x, height - center.y));
+const clampCircleCenter = (value: number, radius: number, limit: number) => radius * 2 <= limit
+  ? clamp(value, radius, limit - radius)
+  : clamp(value, 0, limit);
 
 function circleArcSpan(start: number, end: number) {
   const rawSpan = end - start;
@@ -259,10 +262,8 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
   }
   if (origin.type === 'Circle') {
     if (mode === 'move') {
-      const moveCenter = (center: number, delta: number, limit: number) => origin.radius * 2 <= limit
-        ? clamp(center + delta, origin.radius, limit - origin.radius)
-        : clamp(center + delta, 0, limit);
-      return { ...origin, x: moveCenter(origin.x, dx, maxW), y: moveCenter(origin.y, dy, maxH) };
+      return { ...origin, x: clampCircleCenter(origin.x + dx, origin.radius, maxW),
+        y: clampCircleCenter(origin.y + dy, origin.radius, maxH) };
     }
     const maxRadius = maxCircleRadius(origin, maxW, maxH);
     return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), Math.min(2, maxRadius), maxRadius) };
@@ -829,8 +830,8 @@ export default function ImageViewer({
         }
       } else if (mode === 'center') {
         setMeasurementDraft({ ...origin, center: {
-          x: clamp(current.x, origin.radius, Math.max(origin.radius, actualWidth - origin.radius)),
-          y: clamp(current.y, origin.radius, Math.max(origin.radius, actualHeight - origin.radius))
+          x: clampCircleCenter(current.x, origin.radius, actualWidth),
+          y: clampCircleCenter(current.y, origin.radius, actualHeight)
         } });
       } else if (mode === 'radius') {
         setMeasurementDraft({ ...origin, radius: clamp(Math.hypot(current.x - origin.center.x, current.y - origin.center.y), Math.min(2, maxCircleRadius(origin.center, actualWidth, actualHeight)), maxCircleRadius(origin.center, actualWidth, actualHeight)) });

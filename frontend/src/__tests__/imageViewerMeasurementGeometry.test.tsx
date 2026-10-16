@@ -180,6 +180,25 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.angleEndDeg).toBe(90);
   });
 
+  it('keeps an oversized caliper circle center inside the image when moving it', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 60, angleStartDeg: 0, angleEndDeg: 90 }, onChange);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 130 }); // center handle
+    fireEvent.mouseMove(stage, { clientX: 223.6, clientY: 141.8 }); // request center (60, 55)
+    fireEvent.mouseUp(document.body, { clientX: 223.6, clientY: 141.8 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') {
+      expect(result.center.x).toBeCloseTo(60);
+      expect(result.center.y).toBeCloseTo(55);
+      expect(result.radius).toBe(60);
+    }
+  });
+
   it('drags a partial-circle endpoint across zero without reversing the sweep', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
