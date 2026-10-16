@@ -273,6 +273,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .node-configuration-footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .node-configuration-workspace { display: grid; grid-template-columns: var(--node-columns); gap: 0; height: max(300px, calc(100dvh - 330px)); margin-bottom: 12px; }
 .node-configuration-workspace.without-image { grid-template-columns: minmax(0, 1fr); }
+.node-configuration-modal .shape-match-workspace-tabs > .ant-tabs-nav { position: static; margin-bottom: 10px; }
+.shape-match-workspace-tabs > .ant-tabs-content-holder { min-width: 0; }
 .node-configuration-modal.is-maximized .node-configuration-workspace { height: max(300px, calc(100dvh - 274px)); }
 .node-configuration-workspace > .split-handle { margin-inline: 2px; border-radius: 4px; }
 .node-configuration-workspace > .split-handle::after { content: '⋮'; position: relative; color: var(--vs-text-5); background: var(--vs-bg-app); font-size: 18px; }
@@ -283,6 +285,12 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .node-configuration-parameters { min-width: 0; min-height: 0; overflow: auto; border: 1px solid var(--vs-border-subtle); border-radius: 6px; }
 .node-parameter-heading { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; padding: 8px 10px; background: var(--vs-bg-card); font-size: 13px; border-bottom: 1px solid var(--vs-border-subtle); }
 .node-parameter-heading .ant-btn { padding-inline: 0; font-size: 11px; }
+.shape-training-panel { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid var(--vs-border-subtle); background: var(--vs-bg-elevated); }
+.shape-training-panel > strong { font-size: 13px; }
+.shape-training-panel > p { margin: 0; color: var(--vs-text-secondary); font-size: 11px; line-height: 1.55; }
+.shape-training-panel .ant-alert { padding: 7px 9px; }
+.shape-training-panel .ant-alert-message { font-size: 12px; }
+.shape-training-panel .ant-alert-description { font-size: 11px; }
 /* 参数区标题右侧：脏状态徽标 + “还原为打开时” */
 .node-parameter-tools { display: flex; align-items: center; gap: 6px; }
 .node-parameter-dirty.ant-tag { margin-inline-end: 0; font-size: 10px; line-height: 16px; }
@@ -947,6 +955,10 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .roi-field { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--vs-text-3); }
 .roi-field .ant-input-number { width: 74px; }
 .roi-polygon-note { font-size: 11px; color: var(--vs-text-4); }
+.roi-polygon-vertices { display: grid; gap: 4px; margin-top: 7px; }
+.roi-vertex-row { display: grid; grid-template-columns: 32px minmax(54px, 1fr) minmax(54px, 1fr) 24px; align-items: center; gap: 5px; color: var(--vs-text-3); font-size: 11px; }
+.roi-vertex-row .ant-input-number { width: 100%; }
+.roi-vertex-row .ant-btn { width: 24px; height: 24px; padding: 0; }
 
 /* 图像查看器：工具栏分组分隔与加载失败态 */
 .viewer-toolbar-divider { width: 1px; height: 16px; align-self: center; background: var(--vs-border-toolbar); }

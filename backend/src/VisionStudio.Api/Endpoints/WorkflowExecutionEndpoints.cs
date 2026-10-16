@@ -94,7 +94,7 @@ public static class WorkflowExecutionEndpoints
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, workflow, context);
             // 交互式运行：捕获逐节点图像以支持检查中间结果（生产/后台运行保持关闭）
             var result = await runner.RunAsync(workflow, new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true), runId, ct);
-            await recorder.FinalizeAsync(result, workflow, context);
+            await recorder.FinalizeAsync(RedactTrainingModelAssets(result), workflow, context);
             // C01/F02：成功 + 追溯证据已提交 + **设备动作确认完成** 三者齐全才解除意图。
             // 仅"流程返回成功"不够——异步机器人命令（SendTarget/未等待到位）只是"已受理"。
             if (actionIntent is not null)
@@ -136,7 +136,7 @@ public static class WorkflowExecutionEndpoints
             else
                 await recorder.BeginAsync(runId, DateTimeOffset.UtcNow, request.Workflow, context);
             var result = await runner.RunAsync(request.Workflow, options, runId, ct);
-            await recorder.FinalizeAsync(result, request.Workflow, context);
+            await recorder.FinalizeAsync(RedactTrainingModelAssets(result), request.Workflow, context);
             if (actionIntent is not null)
             {
                 if (result.Success && !DeviceSideEffectClassifier.RequiresManualReconciliation(effectiveWorkflow, result, nodes))
@@ -179,6 +179,15 @@ public static class WorkflowExecutionEndpoints
 
         return app;
     }
+
+    private static WorkflowRunResult RedactTrainingModelAssets(WorkflowRunResult result) => result with
+    {
+        NodeReports = result.NodeReports.Select(report =>
+            report.Summary.ContainsKey("trainingModelData")
+                ? report with { Summary = report.Summary.Where(pair => pair.Key is not ("trainingModelData" or "trainingPreviewImage")).ToDictionary(pair => pair.Key, pair => pair.Value) }
+                : report).ToArray()
+    };
+
 }
 
 internal static class EndpointResults

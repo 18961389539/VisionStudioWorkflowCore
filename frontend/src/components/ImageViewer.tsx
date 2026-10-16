@@ -7,7 +7,7 @@ import { createPixelBuffer, readPixel } from '../imagePixels';
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
-type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's';
+type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -21,6 +21,7 @@ const persistPixelated = (value: boolean) => {
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
+const maxCircleRadius = (center: Point, width: number, height: number) => Math.max(0, Math.min(center.x, center.y, width - center.x, height - center.y));
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
 
@@ -89,9 +90,17 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
   }
   if (origin.type === 'Circle') {
     if (mode === 'move') {
-      return { ...origin, x: clamp(origin.x + dx, 0, maxW), y: clamp(origin.y + dy, 0, maxH) };
+      return { ...origin, x: clamp(origin.x + dx, origin.radius, maxW - origin.radius), y: clamp(origin.y + dy, origin.radius, maxH - origin.radius) };
     }
-    return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), 2, Math.max(maxW, maxH)) };
+    const maxRadius = maxCircleRadius(origin, maxW, maxH);
+    return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), Math.min(2, maxRadius), maxRadius) };
+  }
+  if (mode.startsWith('vertex:')) {
+    const index = Number(mode.slice('vertex:'.length));
+    if (!Number.isInteger(index) || index < 0 || index >= origin.points.length) return undefined;
+    return { type: 'Polygon', points: origin.points.map((point, pointIndex) => pointIndex === index
+      ? { x: clamp(current.x, 0, maxW), y: clamp(current.y, 0, maxH) }
+      : point) };
   }
   if (mode === 'move') {
     return { type: 'Polygon', points: origin.points.map((p) => ({ x: clamp(p.x + dx, 0, maxW), y: clamp(p.y + dy, 0, maxH) })) };
@@ -139,14 +148,14 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
   return <Line listening={false} points={flatten(roi.points)} closed={roi.points.length >= 3 && !draft} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
 }
 
-/** 选区控制点：矩形四角 / 圆形四向半径点；尺寸按屏幕像素折算，缩放时手感不变 */
+/** 选区控制点：矩形四角 / 圆形四向半径点 / 多边形顶点；缩放时手感不变 */
 function RoiHandles({ roi, scale }: { roi: VisionRoi; scale: number }) {
   const size = 9 / scale;
   const dots: Point[] = roi.type === 'Rectangle'
     ? [{ x: roi.x, y: roi.y }, { x: roi.x + roi.width, y: roi.y }, { x: roi.x, y: roi.y + roi.height }, { x: roi.x + roi.width, y: roi.y + roi.height }]
     : roi.type === 'Circle'
       ? [{ x: roi.x + roi.radius, y: roi.y }, { x: roi.x - roi.radius, y: roi.y }, { x: roi.x, y: roi.y - roi.radius }, { x: roi.x, y: roi.y + roi.radius }]
-      : [];
+      : roi.points;
   if (dots.length === 0) return null;
   return <Group listening={false}>
     {dots.map((dot, index) => (
@@ -332,6 +341,8 @@ export default function ImageViewer({
       if (near(target.x, target.y + target.radius)) return 's';
       return undefined;
     }
+    const vertexIndex = target.points.findIndex((point) => near(point.x, point.y));
+    if (vertexIndex >= 0) return `vertex:${vertexIndex}`;
     return undefined;
   };
 
@@ -350,13 +361,13 @@ export default function ImageViewer({
     if (!p) return;
     setCursor(p);
     // 已有选区时优先响应拖动：控制点缩放 > 选区内部平移 > 平移画布 / 新建选区
-    if (roi && roiEnabled && tool !== 'polygon') {
+    if (roi && roiEnabled) {
       const handle = hitRoiHandle(roi, p);
       if (handle) {
         roiDrag.current = { mode: handle, origin: roi, start: imagePoint(p) };
         return;
       }
-      if (pointInsideRoi(roi, imagePoint(p))) {
+      if (tool !== 'polygon' && pointInsideRoi(roi, imagePoint(p))) {
         roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p) };
         return;
       }
@@ -394,7 +405,8 @@ export default function ImageViewer({
     if (tool === 'circle') {
       const dx = end.x - gestureStart.current.x;
       const dy = end.y - gestureStart.current.y;
-      setDraft({ type: 'Circle', x: gestureStart.current.x, y: gestureStart.current.y, radius: Math.hypot(dx, dy) });
+      const center = gestureStart.current;
+      setDraft({ type: 'Circle', x: center.x, y: center.y, radius: Math.min(Math.hypot(dx, dy), maxCircleRadius(center, actualWidth, actualHeight)) });
     }
   };
 

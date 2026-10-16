@@ -46,7 +46,7 @@ import { responseErrorMessage } from './apiErrors';
 import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, renameDecision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
 import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
-import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
+import { cloneParameters, hydrateNodeParameters, type NodeParameters } from './nodeConfigurationState';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 
@@ -132,7 +132,7 @@ const SHORTCUT_ROWS: { combos: string[][]; desc: string }[] = [
   { combos: [['Ctrl/Cmd', 'Shift', 'Z'], ['Ctrl', 'Y']], desc: '重做' },
   { combos: [['Ctrl/Cmd', 'C']], desc: '复制选中节点（含集合内部连线）' },
   { combos: [['Ctrl/Cmd', 'V']], desc: '粘贴节点（整体偏移，连续粘贴逐次错位）' },
-  { combos: [['Delete'], ['Backspace']], desc: '删除选中节点（连线一并删除，可撤销）' },
+  { combos: [['Delete'], ['Backspace']], desc: '删除选中的节点或连线（可撤销）' },
   { combos: [['Shift', '拖拽']], desc: '框选多个节点（Ctrl/Cmd/Shift + 点击为追加选择）' },
   { combos: [['双击节点']], desc: '打开节点配置弹窗（参数 / 图像 / 说明）' },
   { combos: [['双击分隔条']], desc: '复位该面板尺寸（工具箱 / 结果区）' },
@@ -155,7 +155,7 @@ function hydrateNodesFromCatalog(nodes: Node[], catalog: NodeCatalogItem[]): Nod
         ...node.data,
         label,
         catalogDisplayName: item.displayName,
-        parameters: { ...makeDefaultParameters(item), ...((node.data.parameters ?? {}) as Record<string, unknown>) },
+        parameters: hydrateNodeParameters((node.data.parameters ?? {}) as NodeParameters, item, makeDefaultParameters(item)),
         inputs: item.inputs,
         outputs: item.outputs
       }
@@ -814,6 +814,7 @@ function Editor() {
     if (flagged.length > 0) return flagged;
     return selectedId && nodes.some((node) => node.id === selectedId) ? [selectedId] : [];
   }, [nodes, selectedId]);
+  const selectedEdgeIds = useMemo(() => edges.filter((edge) => edge.selected).map((edge) => edge.id), [edges]);
 
   // 节点查找：按显示名 / 类型 / id 匹配；高亮直接切 DOM 类名，避免大流程里每次输入都重建节点状态
   const searchMatches = useMemo(() => {
@@ -1292,19 +1293,26 @@ function Editor() {
     return true;
   }, [messageApi]);
 
-  // 删除指定节点（快捷键删除选中集合、右键菜单删除单个节点共用）；保留未受影响的选中
-  const deleteNodes = useCallback((ids: string[]) => {
-    if (ids.length === 0) return;
-    const idSet = new Set(ids);
-    pushHistory('删除节点');
-    setNodes((current) => current.filter((node) => !idSet.has(node.id)));
-    setEdges((current) => current.filter((edge) => !idSet.has(edge.source) && !idSet.has(edge.target)));
-    setSelectedId((current) => (current && idSet.has(current) ? '' : current));
-    void messageApi.success(ids.length > 1 ? `已删除 ${ids.length} 个节点` : '已删除选中节点');
+  // 删除选中的节点与连线：连线可独立删除，节点删除时仍会一并清理其关联连线。
+  const deleteElements = useCallback((nodeIds: string[], edgeIds: string[]) => {
+    if (nodeIds.length === 0 && edgeIds.length === 0) return;
+    const nodeIdSet = new Set(nodeIds);
+    const edgeIdSet = new Set(edgeIds);
+    pushHistory(nodeIds.length > 0 && edgeIds.length > 0 ? '删除节点和连线' : nodeIds.length > 0 ? '删除节点' : '删除连线');
+    if (nodeIdSet.size > 0) setNodes((current) => current.filter((node) => !nodeIdSet.has(node.id)));
+    setEdges((current) => current.filter((edge) =>
+      !edgeIdSet.has(edge.id) && !nodeIdSet.has(edge.source) && !nodeIdSet.has(edge.target)
+    ));
+    setSelectedId((current) => (current && nodeIdSet.has(current) ? '' : current));
+    const deleted = [
+      nodeIds.length > 0 ? `${nodeIds.length} 个节点` : '',
+      edgeIds.length > 0 ? `${edgeIds.length} 条连线` : ''
+    ].filter(Boolean).join('和');
+    void messageApi.success(`已删除 ${deleted}`);
   }, [messageApi, pushHistory, setEdges, setNodes]);
 
   // 快捷键：Ctrl/Cmd+S 保存、Ctrl/Cmd+F 查找节点、Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z（或 Ctrl+Y）重做、
-  // Ctrl/Cmd+C / V 复制粘贴选中集合、Delete/Backspace 批量删除选中节点；
+  // Ctrl/Cmd+C / V 复制粘贴选中集合、Delete/Backspace 删除选中的节点或连线；
   // 焦点在输入控件内时只保留原生文本编辑行为（查找与保存除外）。捕获阶段监听，避免画布吞键。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1371,14 +1379,19 @@ function Editor() {
         }
       }
       if (event.key !== 'Delete' && event.key !== 'Backspace' && event.key !== 'Del' && event.code !== 'Delete' && event.code !== 'Backspace') return;
-      if (selectedNodeIds.length === 0) return;
+      const explicitlySelectedNodeIds = nodes.filter((node) => node.selected).map((node) => node.id);
+      // 选中连线时忽略 selectedId 的单节点兼容回退，避免误删上次选中的节点。
+      const nodeIdsToDelete = explicitlySelectedNodeIds.length > 0
+        ? explicitlySelectedNodeIds
+        : selectedEdgeIds.length > 0 ? [] : selectedNodeIds;
+      if (nodeIdsToDelete.length === 0 && selectedEdgeIds.length === 0) return;
       event.preventDefault();
-      deleteNodes(selectedNodeIds);
+      deleteElements(nodeIdsToDelete, selectedEdgeIds);
     };
     // 捕获阶段监听：避免画布内部对按键的 stopPropagation 把删除快捷键吃掉
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [copySelection, deleteNodes, messageApi, nodeConfigurationId, pushHistory, redo, save, selectedNodeIds, setEdges, setNodes, undo]);
+  }, [copySelection, deleteElements, messageApi, nodeConfigurationId, nodes, pushHistory, redo, save, selectedEdgeIds, selectedNodeIds, setEdges, setNodes, undo]);
 
   // 有未保存修改时拦截刷新 / 关闭页面
   useEffect(() => {
@@ -1484,7 +1497,7 @@ function Editor() {
     { key: 'breakpoint', label: `切换断点${contextTargetSuffix}`, disabled: !contextNode, onClick: toggleBreakpoint },
     { type: 'divider' },
     { key: 'copy', label: `复制节点${contextTargetSuffix}`, extra: 'Ctrl+C', onClick: copySelection },
-    { key: 'delete', label: `删除节点${contextTargetSuffix}`, extra: 'Del', danger: true, disabled: !contextNode, onClick: () => { if (nodeContextMenu) deleteNodes([nodeContextMenu.nodeId]); } }
+    { key: 'delete', label: `删除节点${contextTargetSuffix}`, extra: 'Del', danger: true, disabled: !contextNode, onClick: () => { if (nodeContextMenu) deleteElements([nodeContextMenu.nodeId], []); } }
   ];
 
   const deviceMenuItems: MenuProps['items'] = [

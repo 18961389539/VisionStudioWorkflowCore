@@ -196,6 +196,125 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task ShapeMatch_ExplicitTrainingModel_IsReusableWithoutTemplateInput_AndRejectsStaleSettings()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(165, 145, 20))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"angleRangeDeg":180,"angleStepDeg":2,"minArea":100}""");
+        Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]));
+        Assert.Contains(trained.Overlays!, overlay => overlay.Id.StartsWith("shape-training-contour-", StringComparison.Ordinal));
+        Assert.Contains(trained.Overlays!, overlay => overlay.Id == "shape-training-origin");
+        var trainedContours = Assert.IsType<VisionOverlayPoint[][]>(trained.Summary["trainingContours"]);
+        Assert.NotEmpty(trainedContours);
+        var modelContourPoints = trainedContours.SelectMany(points => points).ToArray();
+        Assert.InRange(modelContourPoints.Min(point => point.X), 17, 23);
+        Assert.InRange(modelContourPoints.Max(point => point.X), 86, 93);
+        Assert.InRange(modelContourPoints.Min(point => point.Y), 17, 23);
+        Assert.InRange(modelContourPoints.Max(point => point.Y), 106, 113);
+        var asset = Assert.IsType<string>(trained.Summary["trainingModelData"]);
+        Assert.NotEmpty(asset);
+
+        var runtimeParameters = JsonSerializer.Serialize(new
+        {
+            modelMode = "trained", trainedModelData = asset,
+            trainedModelConfig = trained.Summary["trainingConfig"],
+            trainedWidth = trained.Summary["trainingWidth"], trainedHeight = trained.Summary["trainingHeight"],
+            trainedOriginX = trained.Summary["trainingOriginX"], trainedOriginY = trained.Summary["trainingOriginY"],
+            angleRangeDeg = 180, angleStepDeg = 2, trainingOriginMode = "centroid", trainingOriginX = 0, trainingOriginY = 0,
+            minScore = 0.5, minArea = 100
+        });
+        var serializedNode = JsonSerializer.Serialize(new NodeDefinition("n1", "match.shape", "Shape", null, Params(runtimeParameters)));
+        var restoredNode = JsonSerializer.Deserialize<NodeDefinition>(serializedNode, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var restoredParameters = JsonSerializer.Serialize(restoredNode.Parameters);
+        typeof(ShapeMatchNode).Assembly.GetType("VisionStudio.Engine.Algorithms.JLVisionModelCache")!
+            .GetMethod("Clear", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!.Invoke(null, null);
+        var matched = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, restoredParameters);
+        Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));
+        Assert.Equal("workflow-asset", matched.Summary["modelSource"]);
+        using var expectedTransform = PasteMatrix(165, 145, 20);
+        var expectedPose = TemplateCentroidThrough(expectedTransform);
+        Assert.InRange(matched.Outputs["x"].Require<double>("x"), expectedPose.X - 3, expectedPose.X + 3);
+        Assert.InRange(matched.Outputs["y"].Require<double>("y"), expectedPose.Y - 3, expectedPose.Y + 3);
+
+        // Run-only acceptance thresholds may change without invalidating the trained model.
+        var changedScore = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+            restoredParameters.Replace("\"minScore\":0.5", "\"minScore\":0.51", StringComparison.Ordinal));
+        Assert.True(Convert.ToBoolean(changedScore.Summary["found"]), SummaryText(changedScore));
+
+        var stale = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(),
+                new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                restoredParameters.Replace("\"trainingOriginX\":0", "\"trainingOriginX\":1", StringComparison.Ordinal)));
+        Assert.Contains("Train the model again", stale.Message);
+        var staleRoi = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                restoredParameters.Replace("\"trainingOriginX\":0", "\"trainingOriginX\":0,\"roi\":{\"type\":\"Rectangle\",\"x\":1,\"y\":1,\"width\":100,\"height\":100}", StringComparison.Ordinal)));
+        Assert.Contains("Train the model again", staleRoi.Message);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_NewTrainedMode_RequiresExplicitTraining()
+    {
+        using var scene = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(0));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, """{"modelMode":"trained"}"""));
+        Assert.Contains("requires a trained model", error.Message);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_ExplicitLegacyMode_UsesTemplateInputEvenWhenTrainedAssetExists()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(165, 145, 0))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"angleRangeDeg":180,"angleStepDeg":2,"minArea":100}""");
+        var asset = Assert.IsType<string>(trained.Summary["trainingModelData"]);
+        var legacy = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            JsonSerializer.Serialize(new { modelMode = "legacy", trainedModelData = asset, trainedModelConfig = "deliberately-stale",
+                angleRangeDeg = 180, angleStepDeg = 2, minArea = 100, minScore = 0.5 }));
+
+        Assert.True(Convert.ToBoolean(legacy.Summary["found"]), SummaryText(legacy));
+        Assert.Equal("input-port", legacy.Summary["templateSource"]);
+        Assert.False(legacy.Summary.ContainsKey("modelSource"));
+    }
+
+    [Fact]
+    public async Task ShapeMatch_TrainingPreviewAndTrain_SupportTemplatePathAndColorImages()
+    {
+        using var template = BuildTemplate();
+        using var colorTemplate = new Mat();
+        Cv2.CvtColor(template, colorTemplate, ColorConversionCodes.GRAY2BGR);
+        var path = Path.Combine(Path.GetTempPath(), $"shape-template-{Guid.NewGuid():N}.png");
+        Cv2.ImWrite(path, colorTemplate);
+        try
+        {
+            using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+            var preview = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                JsonSerializer.Serialize(new { modelMode = "trained", trainingMode = true, trainingPreviewOnly = true, templatePath = path }));
+            Assert.True(Convert.ToBoolean(preview.Summary["trainingPreviewReady"]));
+            Assert.Equal(120, preview.Outputs["image"].Require<VisionImage>("image").Width);
+
+            var trained = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                JsonSerializer.Serialize(new { modelMode = "trained", trainingMode = true, templatePath = path, angleRangeDeg = 180, angleStepDeg = 2 }));
+            Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]));
+            Assert.Equal("template-path", trained.Summary["trainingSource"]);
+            Assert.NotEmpty((string)trained.Summary["trainingPreviewImage"]!);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task RoiTransform_Translation_RectangleStaysRectangle()
     {
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),

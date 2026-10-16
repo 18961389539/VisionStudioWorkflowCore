@@ -304,6 +304,7 @@ public static class Batch5PrecisionCatalog
                 new("x", VisionDataType.Double, Required: false),
                 new("y", VisionDataType.Double, Required: false),
                 new("angle", VisionDataType.Double, Required: false),
+                new("scale", VisionDataType.Double, Required: false),
                 new("center", VisionDataType.Point2D, Required: false),
                 new("pose", VisionDataType.Pose2D, Required: false),
                 new("rectangle", VisionDataType.Rectangle2D, Required: false),
@@ -313,6 +314,11 @@ public static class Batch5PrecisionCatalog
             ],
             [
                 new("templatePath", "Template Path", "text", "", Description: "Used only when the template port is not connected."),
+                new("modelMode", "Model Lifecycle", "select", "trained", Options:
+                [
+                    new("Trained model (recommended)", "trained"),
+                    new("Legacy image template", "legacy")
+                ], Group: "Training", Description: "New nodes require an explicitly trained model. Legacy workflows without this setting keep their previous template-image behavior."),
                 new("binarize", "Binarize", "select", "auto", Options:
                 [
                     new("Otsu (auto)", "auto"),
@@ -322,15 +328,26 @@ public static class Batch5PrecisionCatalog
                 new("threshold", "Threshold", "number", 128, 0, 255, 1, Group: "Binarize", Description: "Used when Binarize = fixed threshold."),
                 new("invert", "Dark Objects", "boolean", false, Group: "Binarize"),
                 new("minArea", "Min Area", "number", 200, 0, 99999999, 1, Unit: "px²", Group: "Candidates"),
-                new("angleRangeDeg", "Angle Range", "number", 180, 0, 180, 1, Unit: "deg", Group: "Matching"),
-                new("angleStepDeg", "Angle Step", "number", 1, 0.1, 30, 0.1, Unit: "deg", Group: "Matching"),
+                new("angleRangeDeg", "Angle Range", "number", 180, 0, 180, 1, Unit: "deg", Group: "Training", Description: "Model training angle range; matching searches within this trained range."),
+                new("angleStepDeg", "Angle Step", "number", 1, 0.1, 30, 0.1, Unit: "deg", Group: "Training", Description: "Model training angle step. Smaller steps improve angular coverage at additional model size."),
+                new("scaleTolerancePercent", "Scale Tolerance", "number", 0, 0, 50, 1, Unit: "%", Group: "Training", Description: "Train and search a symmetric scale range around 100%. Zero keeps fixed-scale matching."),
+                new("scaleStepPercent", "Scale Step", "number", 1, 0.1, 10, 0.1, Unit: "%", Group: "Training", Description: "Scale sampling step used when scale tolerance is enabled."),
+                new("ignorePolarity", "Ignore Polarity", "boolean", false, Group: "Training", Description: "Match the same contour when its light/dark polarity is reversed."),
+                new("minContrast", "Minimum Feature Contrast", "number", 5, 1, 255, 1, Group: "Training", Description: "Reject weak boundaries while training the shape model."),
+                new("trainingOriginMode", "Training Origin", "select", "centroid", Options:
+                [
+                    new("Contour centroid", "centroid"),
+                    new("Manual image coordinates", "manual")
+                ], Group: "Training"),
+                new("trainingOriginX", "Origin X", "number", 0, 0, 99999, 0.1, Unit: "px", Group: "Training", Description: "Used when Training Origin = manual; coordinates are relative to the full training image."),
+                new("trainingOriginY", "Origin Y", "number", 0, 0, 99999, 0.1, Unit: "px", Group: "Training", Description: "Used when Training Origin = manual; coordinates are relative to the full training image."),
                 new("minScore", "Min Score", "number", 0.6, 0, 1, 0.01, Group: "Matching"),
                 new("maxTargets", "Max Targets", "number", 5, 1, 100, 1, Group: "Multi-target"),
                 new("minCenterDistance", "Min Center Distance", "number", 20, 0, 10000, 1, Unit: "px", Group: "Multi-target")
             ],
-            "JLVision native shape-model matching with subpixel translation and rotation, fixed scale, bounded multi-target suppression and cached models. angle rotates the template CCW to align with the scene.",
+            "Feature-based shape model matching with explicit model/search regions, subpixel pose, optional scale tolerance, polarity control and bounded multi-target suppression. angle rotates the trained template CCW to align with the scene; scale is relative to the trained size.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true)),
+            new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true, SupportsRoi: true)),
         new(
             "roi.transform",
             "ROI Transform",

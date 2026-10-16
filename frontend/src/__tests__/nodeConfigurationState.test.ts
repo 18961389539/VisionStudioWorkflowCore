@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { cloneParameters, configurationIssues, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
+import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
+import { cloneParameters, configurationIssues, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
 import type { NodeCatalogItem, WorkflowPayload } from '../types';
 
 describe('node configuration snapshots', () => {
+  it('preserves legacy shape nodes across catalog hydration while new nodes stay in trained mode', () => {
+    const shape = fallbackCatalogRaw.find((item) => item.type === 'match.shape')!;
+    const defaults = makeDefaultParameters(shape);
+    const loadedLegacy = hydrateNodeParameters({ minScore: 0.7 }, shape, defaults);
+    expect(loadedLegacy.modelMode).toBe('legacy');
+    expect(loadedLegacy.minScore).toBe(0.7);
+    expect(hydrateNodeParameters(loadedLegacy, shape, defaults).modelMode).toBe('legacy');
+    expect(makeDefaultParameters(shape).modelMode).toBe('trained');
+  });
+
   it('compares nested ROI values without depending on object key order', () => {
     expect(parameterFingerprint({ roi: { x: 1, y: 2 }, threshold: 128 })).toBe(parameterFingerprint({ threshold: 128, roi: { y: 2, x: 1 } }));
     expect(parameterFingerprint({ roi: { x: 1 } })).not.toBe(parameterFingerprint({ roi: { x: 2 } }));

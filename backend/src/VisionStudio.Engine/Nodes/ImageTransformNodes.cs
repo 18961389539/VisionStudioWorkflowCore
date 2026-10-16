@@ -13,14 +13,83 @@ public sealed class ImageCropNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
-        var x = node.GetInt("x", 0); var y = node.GetInt("y", 0);
-        var width = node.GetInt("width", source.Width); var height = node.GetInt("height", source.Height);
-        if (x < 0 || y < 0 || width <= 0 || height <= 0 || (long)x + width > source.Width || (long)y + height > source.Height)
-            throw new InvalidOperationException($"Crop rectangle ({x},{y},{width},{height}) must be positive and fit inside {source.Width}x{source.Height}.");
-        using var image = JLVisionImages.FromMat(source);
-        using var region = image.CropRectangle1(y, x, y + height - 1, x + width - 1);
-        var output = JLVisionImages.ToMat(region);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["x"] = x, ["y"] = y, ["width"] = width, ["height"] = height }));
+        var roi = node.GetRoi() ?? new VisionRoi(
+            VisionRoiType.Rectangle,
+            X: node.GetDouble("x", 0),
+            Y: node.GetDouble("y", 0),
+            Width: node.GetDouble("width", source.Width),
+            Height: node.GetDouble("height", source.Height));
+        ValidateCropRoi(roi, source.Width, source.Height);
+
+        using var rasterMask = roi.BuildMask(source.Size());
+        using var binaryMask = new Mat();
+        Cv2.Threshold(rasterMask, binaryMask, 0, 255, ThresholdTypes.Binary);
+        var bounds = Cv2.BoundingRect(binaryMask);
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+
+        using var sourceCrop = new Mat(source, bounds);
+        using var cropMask = new Mat(binaryMask, bounds);
+        var croppedImage = new Mat(sourceCrop.Rows, sourceCrop.Cols, sourceCrop.Type(), Scalar.All(0));
+        var maskImage = cropMask.Clone();
+        try
+        {
+            // 非矩形 ROI 输出紧包围框；区域外清零。BGRA 输入会同时得到透明外区。
+            sourceCrop.CopyTo(croppedImage, cropMask);
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(VisionImage.Own(croppedImage)),
+                    ["roiMask"] = VisionValue.Image(VisionImage.Own(maskImage))
+                },
+                new Dictionary<string, object?>
+                {
+                    ["x"] = bounds.X, ["y"] = bounds.Y, ["width"] = bounds.Width, ["height"] = bounds.Height,
+                    ["roiType"] = roi.Type.ToString(), ["selectedPixels"] = Cv2.CountNonZero(cropMask)
+                }));
+        }
+        catch
+        {
+            croppedImage.Dispose();
+            maskImage.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidateCropRoi(VisionRoi roi, int width, int height)
+    {
+        static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+            {
+                var x = roi.X ?? 0; var y = roi.Y ?? 0; var w = roi.Width ?? 0; var h = roi.Height ?? 0;
+                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > width || y + h > height)
+                    throw new InvalidOperationException($"矩形裁剪区域必须为正尺寸且完全位于图像范围内（{width}×{height}）。");
+                break;
+            }
+            case VisionRoiType.Circle:
+            {
+                var x = roi.X ?? 0; var y = roi.Y ?? 0; var radius = roi.Radius ?? 0;
+                if (!Finite(roi.X, roi.Y, roi.Radius) || radius <= 0 || x - radius < 0 || y - radius < 0 || x + radius > width || y + radius > height)
+                    throw new InvalidOperationException($"圆形裁剪区域必须完全位于图像范围内（{width}×{height}）。");
+                break;
+            }
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y) || point.X < 0 || point.Y < 0 || point.X > width || point.Y > height))
+                    throw new InvalidOperationException($"多边形裁剪区域需要至少三个有效顶点，且所有顶点位于图像范围内（{width}×{height}）。");
+                var doubledArea = points.Select((point, index) =>
+                {
+                    var next = points[(index + 1) % points.Count];
+                    return point.X * next.Y - next.X * point.Y;
+                }).Sum();
+                if (Math.Abs(doubledArea) < 1e-6)
+                    throw new InvalidOperationException("多边形裁剪区域的顶点不能共线，且必须围成有效面积。");
+                break;
+            }
+        }
     }
 }
 

@@ -38,6 +38,116 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('node configuration draft', () => {
+  it('keeps trained models in the staged workflow until Apply, and excludes runtime thresholds from training status', async () => {
+    const shapeCatalog: NodeCatalogItem = {
+      type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',
+      inputs: [{ name: 'image', dataType: 'Image', required: true }, { name: 'template', dataType: 'Image' }],
+      outputs: [{ name: 'image', dataType: 'Image' }, { name: 'found', dataType: 'Boolean' }],
+      capabilities: { supportsRoi: true },
+      parameters: [
+        { name: 'modelMode', label: '模型生命周期', type: 'select', defaultValue: 'trained', options: [{ label: '训练模型', value: 'trained' }] },
+        { name: 'minScore', label: '最小匹配分数', type: 'number', defaultValue: 0.6, min: 0, max: 1, step: 0.01 }
+      ]
+    };
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', typeKey: 'match.shape', parameters: { modelMode: 'trained', minScore: 0.6 } } };
+    const trainingResult: RunResult = {
+      ...report, nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 3,
+        summary: { trainingSucceeded: true, trainingModelData: 'model-bytes', trainingModelHash: 'hash', trainingConfig: 'cfg',
+          trainingWidth: 20, trainingHeight: 20, trainingOriginX: 10, trainingOriginY: 10, trainingOriginImageX: 10, trainingOriginImageY: 10,
+          trainingContour: [{ x: 2, y: 2 }, { x: 10, y: 2 }, { x: 10, y: 10 }] } }]
+    };
+    const onPreview = vi.fn(async (parameters: Record<string, unknown>) => parameters.trainingMode ? trainingResult : report);
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview, onApply });
+    fireEvent.click(dialog.getByRole('button', { name: '训练模型' }));
+    await waitFor(() => expect(dialog.getByText('模型已训练，待应用到工作流')).toBeTruthy());
+    expect(onPreview).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ trainingMode: true, modelMode: 'trained' }));
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    const applied = onApply.mock.calls[0][0];
+    expect(applied.trainedModelData).toBe('model-bytes');
+    expect(applied.trainingMode).toBe(false);
+    expect(applied.trainedModelHash).toBe('hash');
+  });
+
+  it('keeps the training workspace in view after acquiring an image and training successfully', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const shapeCatalog: NodeCatalogItem = {
+      type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',
+      inputs: [{ name: 'image', dataType: 'Image', required: true }, { name: 'template', dataType: 'Image' }],
+      outputs: [{ name: 'image', dataType: 'Image' }, { name: 'found', dataType: 'Boolean' }],
+      capabilities: { supportsRoi: true },
+      parameters: [{ name: 'modelMode', label: '模型生命周期', type: 'select', defaultValue: 'trained', options: [{ label: '训练模型', value: 'trained' }] }]
+    };
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', typeKey: 'match.shape', parameters: { modelMode: 'trained' } } };
+    const response = (summary: Record<string, unknown>): RunResult => ({ ...report,
+      nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 2, summary }] });
+    const onPreview = vi.fn(async (parameters: Record<string, unknown>) => parameters.trainingPreviewOnly
+      ? response({ trainingPreviewReady: true })
+      : response({ trainingSucceeded: true, trainingModelData: 'model-bytes', trainingModelHash: 'hash', trainingConfig: 'cfg' }));
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview });
+    const toggle = dialog.getByRole('button', { name: '本节点运行结果' });
+    fireEvent.click(dialog.getByRole('button', { name: '获取训练图像' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+    await waitFor(() => expect(dialog.getByText('ROI 工具')).toBeTruthy());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    fireEvent.click(dialog.getByRole('button', { name: '训练模型' }));
+    await waitFor(() => expect(dialog.getByText('模型已训练，待应用到工作流')).toBeTruthy());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
+  });
+
+  it('shows the current file training source after reopening a trained node instead of its saved snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [{ nodeId: 'shape', portName: 'image', width: 200, height: 200 }] }) })));
+    const shapeCatalog: NodeCatalogItem = {
+      type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',
+      inputs: [{ name: 'image', dataType: 'Image', required: true }, { name: 'template', dataType: 'Image' }],
+      outputs: [{ name: 'image', dataType: 'Image' }, { name: 'found', dataType: 'Boolean' }],
+      capabilities: { supportsRoi: true },
+      parameters: [{ name: 'modelMode', label: '模型生命周期', type: 'select', defaultValue: 'trained', options: [{ label: '训练模型', value: 'trained' }] }]
+    };
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', typeKey: 'match.shape', parameters: {
+      modelMode: 'trained', templatePath: 'C:\\templates\\old.png', trainedModelData: 'saved-model', trainedPreviewImage: 'OLD-SNAPSHOT',
+      trainedModelSettings: { templatePath: 'C:\\templates\\old.png' }, trainedSourceWidth: 100, trainedSourceHeight: 100
+    } } };
+    const response: RunResult = { ...report, runId: 'fresh-source-run', previewAvailable: true, previewWidth: 200, previewHeight: 200,
+      nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 2, summary: { trainingPreviewReady: true } }] };
+    const onPreview = vi.fn(async () => response);
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview });
+    fireEvent.click(dialog.getByRole('button', { name: '查看已保存训练图像、轮廓与原点' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('OLD-SNAPSHOT'));
+    fireEvent.click(dialog.getByRole('button', { name: '获取训练图像' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/api/runs/fresh-source-run/nodes/shape/image'));
+    expect(dialog.getByTestId('image-url').textContent).not.toContain('OLD-SNAPSHOT');
+  });
+
+  it('shows compatibility mode after switching a trained node to legacy while retaining its model asset', async () => {
+    const shapeCatalog: NodeCatalogItem = {
+      type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',
+      inputs: [{ name: 'image', dataType: 'Image', required: true }, { name: 'template', dataType: 'Image' }],
+      outputs: [{ name: 'image', dataType: 'Image' }, { name: 'found', dataType: 'Boolean' }],
+      parameters: [{ name: 'modelMode', label: '模型生命周期', type: 'select', defaultValue: 'trained', options: [
+        { label: '训练模型', value: 'trained' }, { label: '兼容模板匹配', value: 'legacy' }
+      ] }]
+    };
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', typeKey: 'match.shape', parameters: {
+      modelMode: 'trained', trainedModelData: 'saved-model', trainedPreviewImage: 'saved-preview'
+    } } };
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog });
+    expect(dialog.getByText('模型已保存在此工作流')).toBeTruthy();
+    fireEvent.mouseDown(dialog.getByRole('combobox', { name: '模型生命周期' }));
+    fireEvent.click(screen.getByText('兼容模板匹配', { exact: true }));
+    expect(dialog.getByText(/本次运行使用 template 输入或模板路径/)).toBeTruthy();
+    expect(dialog.queryByText('模型已保存在此工作流')).toBeNull();
+    expect(dialog.getByRole('button', { name: '训练并切换到训练模式' })).toBeTruthy();
+  });
+
   it('keeps edits local and discards them when cancelled', () => {
     const { dialog, props, unmount } = mount();
     fireEvent.change(dialog.getByRole('textbox', { name: '预期内容' }), { target: { value: 'LOT-42' } });

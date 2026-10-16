@@ -11,7 +11,8 @@ type Props = {
   /** 运行/调试在飞时冻结参数编辑：结果对应提交时的流程，边跑边改会让人误以为新参数已被验证 */
   disabled?: boolean;
   /** 在图像查看器中居中显示当前节点的 ROI */
-  onLocateRoi?: () => void;
+  onLocateRoi?: (key?: string) => void;
+  roiFields?: { key: string; label: string; emptyText?: string; showEmpty?: boolean }[];
 };
 
 function sameValue(a: unknown, b: unknown) {
@@ -55,9 +56,24 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
     );
   }
   return (
-    <div className="roi-grid">
-      <Tag color="red">多边形</Tag>
-      <span className="roi-polygon-note">{roi.points.length} 个顶点 · 可在图像查看器中拖动调整</span>
+    <div>
+      <div className="roi-grid">
+        <Tag color="red">多边形</Tag>
+        <span className="roi-polygon-note">{roi.points.length} 个顶点 · 拖动图像上的控制点或输入坐标</span>
+      </div>
+      <div className="roi-polygon-vertices">
+        {roi.points.map((point, index) => (
+          <div className="roi-vertex-row" key={index}>
+            <span>点 {index + 1}</span>
+            <InputNumber size="small" aria-label={`点 ${index + 1} X`} value={Number(point.x.toFixed(2))}
+              disabled={disabled} onChange={(value) => onChange({ ...roi, points: roi.points.map((item, i) => i === index ? { ...item, x: Number(value ?? 0) } : item) })} />
+            <InputNumber size="small" aria-label={`点 ${index + 1} Y`} value={Number(point.y.toFixed(2))}
+              disabled={disabled} onChange={(value) => onChange({ ...roi, points: roi.points.map((item, i) => i === index ? { ...item, y: Number(value ?? 0) } : item) })} />
+            <Button type="text" size="small" danger aria-label={`删除点 ${index + 1}`} title="删除此顶点" disabled={disabled || roi.points.length <= 3}
+              onClick={() => onChange({ ...roi, points: roi.points.filter((_, i) => i !== index) })}>×</Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -75,7 +91,7 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
   return sections;
 }
 
-export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi }: Props) {
+export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields }: Props) {
   const sections = useMemo(() => buildSections(catalogItem), [catalogItem]);
 
   if (!node || !catalogItem) {
@@ -88,6 +104,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   }
 
   const parameters = (node.data.parameters ?? {}) as Record<string, unknown>;
+  const configuredRoiFields = roiFields ?? [{ key: 'roi', label: '感兴趣区域' }];
   const modified = catalogItem.parameters.filter((parameter) => parameters[parameter.name] !== undefined
     && parameter.defaultValue !== undefined
     && !sameValue(parameters[parameter.name], parameter.defaultValue));
@@ -217,22 +234,22 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       </div>}
 
       <div className="property-list">
-        {isVisionRoi(parameters.roi) && (
-          <div className="roi-property">
+        {configuredRoiFields.map((field) => {
+          const value = parameters[field.key];
+          if (value === undefined && !field.showEmpty) return null;
+          const roi = isVisionRoi(value) ? value : undefined;
+          return <div className="roi-property" key={field.key}>
             <div className="roi-property-title">
-              <span>感兴趣区域</span>
-              {onLocateRoi && <button type="button" className="text-button" onClick={onLocateRoi} title="在图像查看器中居中显示该选区">定位选区</button>}
+              <span>{field.label}</span>
+              {onLocateRoi && <button type="button" className="text-button" disabled={disabled}
+                onClick={() => onLocateRoi(field.key)} title="在图像查看器中编辑此选区">在图像中编辑</button>}
             </div>
-            <RoiEditor roi={parameters.roi} disabled={disabled} onChange={(roi) => onChange('roi', roi)} />
-          </div>
-        )}
-        {parameters.roi !== undefined && !isVisionRoi(parameters.roi) && (
-          <div className="roi-property">
-            <div className="roi-property-title">感兴趣区域</div>
-            <code>{JSON.stringify(parameters.roi)}</code>
-          </div>
-        )}
-        {catalogItem.parameters.length === 0 && !parameters.roi && <div className="property-empty">无可配置参数</div>}
+            {roi ? <RoiEditor roi={roi} disabled={disabled} onChange={(next) => onChange(field.key, next)} />
+              : value !== undefined ? <code>{JSON.stringify(value)}</code>
+                : <span className="roi-polygon-note">{field.emptyText ?? '未设置'}</span>}
+          </div>;
+        })}
+        {catalogItem.parameters.length === 0 && !parameters.roi && !roiFields && <div className="property-empty">无可配置参数</div>}
         {sections.map((section, index) => {
           const visibleParameters = section.parameters.filter((parameter) =>
             isParameterVisible(parameter, catalogItem.parameters, parameters));

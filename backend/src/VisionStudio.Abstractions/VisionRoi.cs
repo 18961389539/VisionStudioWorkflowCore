@@ -23,9 +23,9 @@ public sealed record VisionRoi(
 
 public static class VisionRoiParameterExtensions
 {
-    public static VisionRoi? GetRoi(this NodeDefinition node)
+    public static VisionRoi? GetRoi(this NodeDefinition node, string parameterName = "roi")
     {
-        if (node.Parameters is null || !node.Parameters.TryGetValue("roi", out var value) || value.ValueKind != JsonValueKind.Object)
+        if (node.Parameters is null || !node.Parameters.TryGetValue(parameterName, out var value) || value.ValueKind != JsonValueKind.Object)
             return null;
 
         try
