@@ -261,6 +261,11 @@ describe('NodeExecutionResult measurement status', () => {
     cleanup();
     mount('measure.caliperCircle', failedResult('The connected circle input must have a finite center and positive radius.'));
     expect(screen.getByText(/上游圆心或半径无效/)).toBeTruthy();
+
+    cleanup();
+    mount('measure.caliperCircle', failedResult('Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.'));
+    expect(screen.getByText(/坐标修正后的圆心必须是有效坐标/)).toBeTruthy();
+    expect(screen.getByText('Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.')).toBeTruthy();
   });
 
   it('uses localized parameter labels for invalid numeric execution errors', () => {

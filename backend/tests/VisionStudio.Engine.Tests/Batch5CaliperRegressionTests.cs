@@ -37,6 +37,21 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Contains("must be one of", error.Message);
     }
 
+    [Fact]
+    public async Task CaliperCircleReportsWhenCoordinateCorrectionMovesTheCenterOutOfRange()
+    {
+        using var image = VisionImage.Own(new Mat(32, 32, MatType.CV_8UC1, Scalar.All(0)));
+        var inputs = Inputs(image);
+        inputs["circle"] = VisionValue.Circle(new VisionCircle(100, 16, 8));
+        inputs["transform"] = VisionValue.Transform(new VisionTransform2D(
+            "ReferenceImage", "CurrentImage", "px", 1, 0, 10_000_001, 0, 1, 0, 0, 0, 1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new CaliperCircleNode().ExecuteAsync(
+            new NodeExecutionContext(inputs), Node("measure.caliperCircle", "{}"), CancellationToken.None).AsTask());
+
+        Assert.Equal("Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.", error.Message);
+    }
+
     [Theory]
     [InlineData("feature.edgeSubpixel")]
     [InlineData("measure.caliper")]

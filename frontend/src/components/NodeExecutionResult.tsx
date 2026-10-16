@@ -126,7 +126,8 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
       'Caliper circle measurement requires a non-empty image.': '卡尺找圆的输入图像为空。请检查 image 输入和上游节点输出。',
       'The connected circle input must have a finite center and positive radius.': '上游圆心或半径无效。请检查圆几何输出，半径必须为正数。',
       'Caliper circle requires a finite center and a positive radius.': '标称圆心必须是有效坐标，半径必须为正数。',
-      'Caliper circle coordinates and radius must be within 10000000 pixels.': '标称圆坐标和半径的绝对值不能超过 10000000 px。请检查上游几何和坐标系。'
+      'Caliper circle coordinates and radius must be within 10000000 pixels.': '标称圆坐标和半径的绝对值不能超过 10000000 px。请检查上游几何和坐标系。',
+      'Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.': '坐标修正后的圆心必须是有效坐标，且绝对值不能超过 10000000 px。请检查圆心、transform 和图像坐标系。'
     }
   };
   const exact = messages[type]?.[error];
