@@ -847,6 +847,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           title={roiInputConnected ? '当前 ROI 来自上游节点' : canEditRoi ? '正在编辑基准 ROI' : '基准 ROI 编辑说明'}
           description={<Space wrap>
             <span>{roiTransformEditHint}</span>
+            {roiInputConnected && roiSourceNode?.data.typeKey === 'roi.transform' && <span>
+              上游定位修正 ROI 已经过一次位姿变换；本节点仍会按自身的基准位姿与当前位姿再次变换。只有需要叠加第二次修正时才保留此连接；否则请将原始 ROI 接入本节点，或将上游 ROI 直接接到目标裁剪/测量节点。
+            </span>}
             {!debugImageConnected && <span>获取基准前，请将场景图像连接到“调试图像”端口。</span>}
             {referenceImage && roiImageView !== 'reference' && <Button size="small" disabled={locked}
               onClick={() => setRoiImageView('reference')}>切换到已保存基准</Button>}

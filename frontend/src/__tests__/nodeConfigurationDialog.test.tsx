@@ -248,6 +248,16 @@ describe('ROI reference workspace', () => {
     expect(dialog.queryByRole('button', { name: '在图像中编辑' })).toBeNull();
     expect(dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
   });
+
+  it('explains when an upstream corrected ROI will receive a second pose transform', () => {
+    const upstream: Node = { id: 'upstream-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '上游定位修正' } };
+    const upstreamEdges = [...edges, { id: 'roi-override', source: upstream.id, sourceHandle: 'roi', target: roiNode.id, targetHandle: 'roi' }];
+    const { dialog } = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode, upstream], edges: upstreamEdges });
+
+    expect(dialog.getByText(/上游定位修正 ROI 已经过一次位姿变换/)).toBeTruthy();
+    expect(dialog.getByText(/只有需要叠加第二次修正时才保留此连接/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 describe('crop workspace with a connected ROI', () => {
