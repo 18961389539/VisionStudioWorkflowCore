@@ -165,6 +165,29 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task SingleCaliper_RoiMaskExcludesEdgesOutsideTheSelectedRegion()
+    {
+        using var mat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(10));
+        using (var brightHalf = new Mat(mat, new Rect(32, 0, 32, 64))) brightHalf.SetTo(Scalar.All(220));
+        using var input = VisionImage.Own(mat.Clone());
+        var executor = new CaliperNode();
+        var node = Node(executor.Type, """{"startX":8,"startY":32,"endX":55,"endY":32,"sampleWidth":1,"edgeThreshold":20,"refine":"none"}""");
+
+        var unmasked = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(input)), node, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(unmasked.Summary["found"]));
+        (unmasked.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var masked = await executor.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, 0, 0, 24, 64))
+        }), node, CancellationToken.None);
+        Assert.False(Convert.ToBoolean(masked.Summary["found"]));
+        Assert.Equal("no-edge-above-threshold", masked.Summary["reason"]);
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CropTransform_MapsReferenceCaliperLineIntoCropCoordinates()
     {
         using var mat = MakeEdgeImage(0.5);

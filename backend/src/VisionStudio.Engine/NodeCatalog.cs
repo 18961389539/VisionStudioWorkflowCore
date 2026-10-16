@@ -464,7 +464,7 @@ public static class BuiltInNodeCatalog
             ],
             "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
             "builtin",
-            new VisionToolCapabilities(EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
             "measure.rotatedRect",
             "Rotated Rectangle",

@@ -334,7 +334,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         : shapeWorkspaceTab === 'search' && shapeImageMatchesTab && imageSource === 'output' && previewNodeId === node.id && Boolean(displayImageSource.url)
       : isImageCrop
         ? !cropRoiInputConnected && previewNodeId === node.id && imageSource === 'input' && selectedInputAvailable
-      : previewNodeId === node.id && imageSource !== 'preview' && !roiMaskInputConnected && !showMeasurementReferenceImage);
+      : previewNodeId === node.id && imageSource === 'input' && selectedInputAvailable && !roiMaskInputConnected && !showMeasurementReferenceImage);
+  const canLocateRoiInImage = showImage && supportsRoi && !cropRoiInputConnected && !roiMaskInputConnected
+    && !roiInputConnected && !referenceMismatch && !showMeasurementReferenceImage
+    && (isShapeMatch || (isRoiTransform ? Boolean(referenceImage) : selectedInputAvailable));
   const draftNode: Node = { ...node, data: { ...node.data, parameters: draft } };
   const changeParameter = (key: string, value: unknown) => {
     if (!locked) setDraft((current) => withParameter(current, key, value));
@@ -720,7 +723,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       : [{ key: 'searchRoi', label: '搜索区域', emptyText: '未设置 · 使用整幅场景图像', showEmpty: true }]
       : isImageCrop ? cropRoiInputConnected ? []
         : [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
-      : isRoiTransform ? [{ key: 'roi', label: '基准 ROI', emptyText: '设定基准后在基准图上绘制', showEmpty: true }]
+      : isRoiTransform ? roiInputConnected ? [] : [{ key: 'roi', label: '基准 ROI', emptyText: '设定基准后在基准图上绘制', showEmpty: true }]
         : roiMaskInputConnected || showMeasurementReferenceImage ? [] : undefined;
     return <div ref={bindWorkspace} tabIndex={-1} className={'node-configuration-workspace' + (showImage ? '' : ' without-image')}
       style={{ '--node-columns': columns(imageShare) } as CSSProperties}>
@@ -800,7 +803,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
           measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry)}
           onMeasurementGeometryChange={updateMeasurementGeometry}
-          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : String(node.data.label ?? node.id)}
+          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : roiInputImageSourceId ? `输入图像 · ${nodeLabels[roiInputImageSourceId] ?? roiInputImageSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
           emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? regionEditMode === 'clutter' ? '在训练图像上绘制预期为空的杂乱区域' : '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
           emptyAction={{
@@ -881,7 +884,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         </div>}
         {issues.length > 0 && <Alert type="error" title="请修正参数后再运行或应用" description={issues.join('；')} />}
         <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
-          roiFields={roiFields} onLocateRoi={showImage && supportsRoi && !cropRoiInputConnected && !roiMaskInputConnected && !showMeasurementReferenceImage ? locateRoi : undefined} />
+          roiFields={roiFields} onLocateRoi={canLocateRoiInImage ? locateRoi : undefined} />
       </section>
     </div>;
   };

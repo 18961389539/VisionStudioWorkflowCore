@@ -239,6 +239,8 @@ export const portNames: Record<string, string> = {
   region: '像素区域', domainImage: '限定域图像',
   contours: '轮廓列表', properties: '轮廓属性', roi: '感兴趣区域',
   fitError: '拟合误差', sampleCount: '有效采样数', radiusMin: '最小半径', radiusMax: '最大半径',
+  roiType: 'ROI 类型', thetaDeg: '角度修正', basePose: '基准位姿', regionCenter: '区域中心',
+  cropOriginX: '裁剪原点 X', cropOriginY: '裁剪原点 Y', selectedPixels: '选中像素',
   classId: '类别 ID',
   classIndex: '类别索引', label: '类别名称', confidence: '置信度', mask: '类别掩膜', roiMask: 'ROI 蒙版', cropOrigin: '裁剪原点', ignoredCount: '拟合剔除数', isAnomaly: '异常',
   results: '识别结果', text: '识别文字', format: '码格式', repeat: '下一轮', done: '完成',

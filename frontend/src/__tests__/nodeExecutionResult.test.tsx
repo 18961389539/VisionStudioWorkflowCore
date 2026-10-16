@@ -1,0 +1,74 @@
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import NodeExecutionResult from '../components/NodeExecutionResult';
+import type { NodeCatalogItem, RunResult } from '../types';
+
+const catalog: NodeCatalogItem = {
+  type: 'measure.caliperLine', displayName: '卡尺找线', category: 'Measurement', pluginId: 'builtin',
+  inputs: [], outputs: [{ name: 'found', dataType: 'Boolean' }], parameters: []
+};
+
+function result(found: boolean, reason: string): RunResult {
+  return {
+    runId: 'run-1', success: true, totalDurationMs: 1, previewAvailable: false,
+    nodeReports: [{ nodeId: 'caliper', nodeType: catalog.type, success: true, durationMs: 1,
+      summary: { found, reason }, outputs: { found: { type: 'Boolean', display: String(found), value: found } } }]
+  };
+}
+
+function mount(type = catalog.type, runResult = result(false, 'too-few-edge-points')) {
+  const selectedCatalog = { ...catalog, type };
+  return render(<NodeExecutionResult nodeId="caliper" catalog={selectedCatalog} result={runResult} stale={false}
+    expanded onExpandedChange={() => {}} />);
+}
+
+afterEach(cleanup);
+
+describe('NodeExecutionResult measurement status', () => {
+  it('shows a warning and a useful reason when the caliper ran but found too few edges', () => {
+    mount();
+
+    expect(screen.getByText('未找到有效结果')).toBeTruthy();
+    expect(screen.getByText('节点已运行，但未检出目标')).toBeTruthy();
+    expect(screen.getByText(/找到的边缘点不足 3 个，无法拟合/)).toBeTruthy();
+    expect(screen.queryByText('执行成功')).toBeNull();
+  });
+
+  it('keeps the successful status when the measurement found an edge', () => {
+    mount(catalog.type, result(true, 'ok'));
+
+    expect(screen.getByText('执行成功')).toBeTruthy();
+    expect(screen.queryByText('未找到有效结果')).toBeNull();
+  });
+
+  it('does not apply caliper detection status to unrelated nodes', () => {
+    mount('measure.distance', result(false, 'no-edge-above-threshold'));
+
+    expect(screen.getByText('执行成功')).toBeTruthy();
+    expect(screen.queryByText('节点已运行，但未检出目标')).toBeNull();
+  });
+
+  it('keeps crop dimensions and the input-image origin visible beside image outputs', () => {
+    const cropResult = result(true, 'ok');
+    cropResult.nodeReports[0].summary = { roiType: 'Rectangle', width: 120, height: 80, cropOriginX: 25, cropOriginY: 40 };
+    mount('image.crop', cropResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('宽度 120');
+    expect(summary.textContent).toContain('高度 80');
+    expect(summary.textContent).toContain('裁剪原点 X 25');
+    expect(summary.textContent).toContain('裁剪原点 Y 40');
+  });
+
+  it('shows the corrected angle and pose in the ROI transform result', () => {
+    const roiResult = result(true, 'ok');
+    roiResult.nodeReports[0].summary = { roiType: 'Polygon', thetaDeg: 12.5, basePose: '100,80,0', currentPose: '130,90,12.5' };
+    mount('roi.transform', roiResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('ROI 类型 Polygon');
+    expect(summary.textContent).toContain('角度修正 12.5');
+    expect(summary.textContent).toContain('基准位姿 100,80,0');
+    expect(summary.textContent).toContain('当前位姿 130,90,12.5');
+  });
+});

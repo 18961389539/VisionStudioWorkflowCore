@@ -874,6 +874,10 @@ public sealed class Batch5ShapeMatchTests
         Assert.Contains(extract.Inputs, x => x.Name == "roi" && x.DataType == VisionDataType.Roi && !x.Required);
         Assert.True(extract.Capabilities?.SupportsRoi);
 
+        var singleCaliper = BuiltInNodeCatalog.Require("measure.caliper");
+        Assert.Contains(singleCaliper.Inputs, x => x.Name == "roi" && x.DataType == VisionDataType.Roi && !x.Required);
+        Assert.True(singleCaliper.Capabilities?.SupportsRoi);
+
         var caliperCircle = BuiltInNodeCatalog.Require("measure.caliperCircle");
         Assert.Contains(caliperCircle.Inputs, x => x.Name == "circle" && x.DataType == VisionDataType.Circle);
 

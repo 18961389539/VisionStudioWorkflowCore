@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "cd4ae5daf59ce5959e6619f62c06bf9b2becd3d83e7190ba9658fc0b956591bd",
+  "hash": "90afed9e395aefb86dd685ba003e3e9f11140c31f1e8cc2a29e17ea3ad5c63a8",
   "items": [
     {
       "type": "image.acquire",
@@ -6527,7 +6527,7 @@
       "description": "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
+        "supportsRoi": true,
         "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,

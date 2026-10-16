@@ -6,14 +6,16 @@ import type { NodeCatalogItem, RunResult, VisionOverlay, VisionRoi } from '../ty
 import { fallbackCatalog } from '../catalog';
 
 vi.mock('../components/ImageViewer', () => ({
-  default: ({ previewUrl, showRoiTools, roiEnabled, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
+  default: ({ previewUrl, showRoiTools, roiEnabled, roiTargetLabel, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
     previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
+    roiTargetLabel?: string;
     measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number } }
       | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number };
     measurementGeometryEditable?: boolean;
     onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
   }) =>
-    <div><span data-testid="image-url">{previewUrl}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
+    <div><span data-testid="image-url">{previewUrl}</span><span data-testid="roi-enabled">{roiEnabled ? 'ROI 可编辑' : 'ROI 只读'}</span>
+      <span data-testid="roi-target">{roiTargetLabel}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
       <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
       {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
       {measurementGeometryEditable && measurementGeometry?.type === 'circle' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'circle', center: { x: 42, y: 51 }, radius: 17 })}>模拟调整标称圆</button>}
@@ -104,6 +106,17 @@ describe('ROI reference workspace', () => {
     expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
     expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('hides the overridden local ROI editor when an upstream ROI is connected', () => {
+    const upstream: Node = { id: 'upstream-roi', position: { x: 0, y: 0 }, data: { label: '上游选区' } };
+    const upstreamEdges = [...edges, { id: 'roi-override', source: upstream.id, sourceHandle: 'roi', target: roiNode.id, targetHandle: 'roi' }];
+    const { dialog } = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode, upstream], edges: upstreamEdges });
+
+    expect(dialog.getByText('当前 ROI 来自上游节点')).toBeTruthy();
+    expect(dialog.queryByText('基准 ROI')?.closest('.roi-property')).toBeNull();
+    expect(dialog.queryByRole('button', { name: '在图像中编辑' })).toBeNull();
+    expect(dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
   });
 });
 
@@ -228,6 +241,40 @@ describe('caliper geometry input guidance', () => {
     fireEvent.click(await dialog.findByRole('radio', { name: '输入' }));
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper-image/image'));
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
+
+  it('offers image-based local ROI editing for the single caliper', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺测量',
+      inputs: caliperCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 2, y: 3, width: 20, height: 15 } } } };
+    const imageNode: Node = { id: 'caliper-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: report });
+
+    expect(caliperCatalog.capabilities?.supportsRoi).toBe(true);
+    await waitFor(() => expect(dialog.getByText('ROI 工具')).toBeTruthy());
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 可编辑');
+    expect(dialog.getByTestId('roi-target').textContent).toBe('输入图像 · 场景图像');
+    expect(dialog.getByRole('button', { name: '在图像中编辑' })).toBeTruthy();
+  });
+
+  it('keeps ROI drawing read-only when the selected input image is missing and the viewer falls back to final preview', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺测量',
+      inputs: caliperCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 2, y: 3, width: 20, height: 15 } } } };
+    const imageNode: Node = { id: 'missing-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: report });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/preview'));
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 只读');
+    expect(dialog.queryByText('ROI 工具')).toBeNull();
+    expect(dialog.queryByRole('button', { name: '在图像中编辑' })).toBeNull();
   });
 
   it('hides local search-line coordinates when a searchLine input is connected', () => {
@@ -600,9 +647,17 @@ describe('node configuration draft', () => {
   });
 
   it('includes ROI removal in the staged snapshot instead of changing the original node', async () => {
-    const withRoi: Node = { ...node, data: { ...node.data, parameters: { expected: 'ABC', roi: { type: 'Rectangle', x: 1, y: 2, width: 3, height: 4 } } } };
     const imageCatalog: NodeCatalogItem = { ...catalog, inputs: [{ name: 'image', dataType: 'Image' }], capabilities: { supportsRoi: true } };
-    const { dialog, props } = mount({ node: withRoi, nodes: [withRoi], catalogItem: imageCatalog, result: report });
+    const withRoi: Node = { ...node, data: { ...node.data, inputs: imageCatalog.inputs,
+      parameters: { expected: 'ABC', roi: { type: 'Rectangle', x: 1, y: 2, width: 3, height: 4 } } } };
+    const imageNode: Node = { id: 'roi-image', position: { x: 0, y: 0 }, data: { outputs: [{ name: 'image', dataType: 'Image' }] } };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: withRoi.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog, props } = mount({ node: withRoi, nodes: [withRoi, imageNode],
+      edges: [{ id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: withRoi.id, targetHandle: 'image' }],
+      catalogItem: imageCatalog, result: report });
+    fireEvent.click(await dialog.findByRole('button', { name: '在图像中编辑' }));
     await waitFor(() => expect(dialog.getByRole('button', { name: '清除测试 ROI' })).toBeTruthy());
     fireEvent.click(dialog.getByRole('button', { name: '清除测试 ROI' }));
     expect((withRoi.data.parameters as Record<string, unknown>).roi).toBeTruthy();
