@@ -31,11 +31,42 @@ public sealed class Batch2ImageNodeTests
     }
 
     [Fact]
-    public async Task CropRejectsOutOfBoundsAndPerspectiveRejectsDegenerateCorners()
+    public async Task CropRejectsEmptyRoiAndPerspectiveRejectsDegenerateCorners()
     {
         using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source), """{"x":9,"y":0,"width":2,"height":2}"""));
+        var emptyCrop = await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source), """{"x":11,"y":0,"width":2,"height":2}"""));
+        Assert.Contains("没有覆盖任何图像像素", emptyCrop.Message);
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
+    }
+
+    [Theory]
+    [InlineData("""{"roi":{"type":"Rectangle","x":-2,"y":3,"width":7,"height":4}}""")]
+    [InlineData("""{"roi":{"type":"Circle","x":1,"y":5,"radius":3}}""")]
+    [InlineData("""{"roi":{"type":"Polygon","points":[{"x":-4,"y":2},{"x":5,"y":2},{"x":5,"y":8},{"x":-4,"y":8}]}}""")]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":4,"points":[{"x":-2,"y":4},{"x":5,"y":4}]}]}}""")]
+    public async Task CropClipsPartiallyVisibleRoiWithoutMovingItsGeometry(string json)
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(90));
+        using var expectedRaster = Node("image.crop", json).GetRoi()!.BuildMask(source.Size());
+        using var expectedBinary = new Mat();
+        Cv2.Threshold(expectedRaster, expectedBinary, 1, 255, ThresholdTypes.Binary);
+        using var selectedPixels = new Mat();
+        Cv2.FindNonZero(expectedBinary, selectedPixels);
+        var bounds = Cv2.BoundingRect(selectedPixels);
+        using var expectedMask = new Mat(expectedBinary, bounds);
+        using var sourceRegion = new Mat(source, bounds);
+        using var expectedImage = new Mat(bounds.Size, source.Type(), Scalar.All(0));
+        sourceRegion.CopyTo(expectedImage, expectedMask);
+
+        var result = await RunImage(new ImageCropNode(), Image(source), json);
+        using var actual = ImageFrom(result);
+        using var actualMask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        Assert.Equal((bounds.Width, bounds.Height), (actual.Width, actual.Height));
+        Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["cropOriginX"]));
+        Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["cropOriginY"]));
+        Assert.Equal(Cv2.CountNonZero(expectedBinary), Convert.ToInt32(result.Summary["selectedPixels"]));
+        Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
+        Assert.Equal(0d, Cv2.Norm(expectedImage, actual.Mat, NormTypes.INF));
     }
 
     [Theory]

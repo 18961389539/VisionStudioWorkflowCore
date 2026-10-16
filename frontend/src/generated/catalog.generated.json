@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "90afed9e395aefb86dd685ba003e3e9f11140c31f1e8cc2a29e17ea3ad5c63a8",
+  "hash": "1c3170e5954dc5ee4007529c77d3f8e949e92246f5d4fc6f05b33402234ac6c8",
   "items": [
     {
       "type": "image.acquire",
@@ -9562,7 +9562,7 @@
         }
       ],
       "parameters": [],
-      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

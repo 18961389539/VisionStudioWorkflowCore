@@ -154,6 +154,60 @@ describe('ROI reference workspace', () => {
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('invalidates a saved ROI reference when an upstream affine transform changes', async () => {
+    const warpCatalog = fallbackCatalog.find(item => item.type === 'image.warpAffine')!;
+    const transformCatalog = fallbackCatalog.find(item => item.type === 'coordinate.transformConstant')!;
+    const warpNode: Node = { id: 'warp', position: { x: 0, y: 0 }, data: { typeKey: warpCatalog.type, label: '仿射变换',
+      inputs: warpCatalog.inputs, parameters: { width: 100, height: 100 } } };
+    const transformNode: Node = { id: 'matrix', position: { x: 0, y: 0 }, data: { typeKey: transformCatalog.type, label: '坐标变换',
+      inputs: transformCatalog.inputs, parameters: { sourceFrame: 'px', targetFrame: 'px', unit: 'px', x: 0, y: 0, angleDeg: 0 } } };
+    const graphEdges = [
+      { id: 'warp-source', source: imageNode.id, sourceHandle: 'image', target: warpNode.id, targetHandle: 'image' },
+      { id: 'warp-matrix', source: transformNode.id, sourceHandle: 'transform', target: warpNode.id, targetHandle: 'transform' },
+      { id: 'debug-warped', source: warpNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      edges[1]
+    ];
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, warpNode, transformNode, imageNode, locateNode], edges: graphEdges,
+      onPreview: vi.fn(async () => capture) });
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const changedTransform = { ...transformNode, data: { ...transformNode.data, parameters: { ...transformNode.data.parameters as object, x: 8 } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, warpNode, changedTransform, imageNode, locateNode]} />);
+    expect(view.dialog.getByText(/图像或定位来源、模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('invalidates a saved ROI reference when upstream undistortion calibration changes', async () => {
+    const undistortCatalog = fallbackCatalog.find(item => item.type === 'image.undistort')!;
+    const calibrationCatalog = fallbackCatalog.find(item => item.type === 'calibration.cameraIntrinsics')!;
+    const undistortNode: Node = { id: 'undistort', position: { x: 0, y: 0 }, data: { typeKey: undistortCatalog.type, label: '镜头校正',
+      inputs: undistortCatalog.inputs, parameters: {} } };
+    const calibrationNode: Node = { id: 'calibration', position: { x: 0, y: 0 }, data: { typeKey: calibrationCatalog.type, label: '相机内参',
+      inputs: calibrationCatalog.inputs, parameters: { calibrationDataJson: '{"views":"model-a"}' } } };
+    const graphEdges = [
+      { id: 'undistort-source', source: imageNode.id, sourceHandle: 'image', target: undistortNode.id, targetHandle: 'image' },
+      { id: 'undistort-calibration', source: calibrationNode.id, sourceHandle: 'calibrationJson', target: undistortNode.id, targetHandle: 'calibrationJson' },
+      { id: 'debug-undistorted', source: undistortNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      edges[1]
+    ];
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, undistortNode, calibrationNode, imageNode, locateNode], edges: graphEdges,
+      onPreview: vi.fn(async () => capture) });
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const changedFallback = { ...undistortNode, data: { ...undistortNode.data, parameters: { calibrationJson: '{"camera":"unused-fallback"}' } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, changedFallback, calibrationNode, imageNode, locateNode]} />);
+    expect(view.dialog.queryByText(/图像或定位来源、模型原点已变化/)).toBeNull();
+
+    const changedCalibration = { ...calibrationNode, data: { ...calibrationNode.data, parameters: { calibrationDataJson: '{"views":"model-b"}' } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, changedFallback, changedCalibration, imageNode, locateNode]} />);
+    expect(view.dialog.getByText(/图像或定位来源、模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('hides the overridden local ROI editor when an upstream ROI is connected', () => {
     const upstream: Node = { id: 'upstream-roi', position: { x: 0, y: 0 }, data: { label: '上游选区' } };
     const upstreamEdges = [...edges, { id: 'roi-override', source: upstream.id, sourceHandle: 'roi', target: roiNode.id, targetHandle: 'roi' }];

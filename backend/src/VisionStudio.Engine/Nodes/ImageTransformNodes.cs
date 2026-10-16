@@ -21,7 +21,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 Y: node.GetDouble("y", 0),
                 Width: node.GetDouble("width", source.Width),
                 Height: node.GetDouble("height", source.Height));
-        ValidateCropRoi(roi, source.Width, source.Height);
+        ValidateCropRoi(roi);
 
         using var rasterMask = roi.BuildMask(source.Size());
         using var maskImageNative = JLVisionImages.FromMat(rasterMask);
@@ -69,30 +69,32 @@ public sealed class ImageCropNode : IVisionNodeExecutor
         }
     }
 
-    private static void ValidateCropRoi(VisionRoi roi, int width, int height)
+    private static void ValidateCropRoi(VisionRoi roi)
     {
         static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
+        static bool Bounded(params double?[] values) => values.All(value => value.HasValue && Math.Abs(value.Value) <= 10_000_000);
         switch (roi.Type)
         {
             case VisionRoiType.Rectangle:
             {
-                var x = roi.X ?? 0; var y = roi.Y ?? 0; var w = roi.Width ?? 0; var h = roi.Height ?? 0;
-                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > width || y + h > height)
-                    throw new InvalidOperationException($"矩形裁剪区域必须为正尺寸且完全位于图像范围内（{width}×{height}）。");
+                var w = roi.Width ?? 0; var h = roi.Height ?? 0;
+                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || !Bounded(roi.X, roi.Y, roi.Width, roi.Height) || w <= 0 || h <= 0)
+                    throw new InvalidOperationException("矩形裁剪区域必须为正尺寸，且坐标绝对值不超过 10000000 px。");
                 break;
             }
             case VisionRoiType.Circle:
             {
-                var x = roi.X ?? 0; var y = roi.Y ?? 0; var radius = roi.Radius ?? 0;
-                if (!Finite(roi.X, roi.Y, roi.Radius) || radius <= 0 || x - radius < 0 || y - radius < 0 || x + radius > width || y + radius > height)
-                    throw new InvalidOperationException($"圆形裁剪区域必须完全位于图像范围内（{width}×{height}）。");
+                var radius = roi.Radius ?? 0;
+                if (!Finite(roi.X, roi.Y, roi.Radius) || !Bounded(roi.X, roi.Y, roi.Radius) || radius <= 0)
+                    throw new InvalidOperationException("圆形裁剪区域必须为正半径，且坐标绝对值不超过 10000000 px。");
                 break;
             }
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
-                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y) || point.X < 0 || point.Y < 0 || point.X > width || point.Y > height))
-                    throw new InvalidOperationException($"多边形裁剪区域需要至少三个有效顶点，且所有顶点位于图像范围内（{width}×{height}）。");
+                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                    || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
+                    throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");
                 var doubledArea = points.Select((point, index) =>
                 {
                     var next = points[(index + 1) % points.Count];
@@ -118,8 +120,8 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("笔刷裁剪区域最多允许 500000 个笔迹点。");
                     if (stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
-                        || point.X < 0 || point.Y < 0 || point.X > width || point.Y > height))
-                        throw new InvalidOperationException($"笔刷点必须位于图像范围内（{width}×{height}）。");
+                        || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
+                        throw new InvalidOperationException("笔刷点必须为有限坐标，且绝对值不超过 10000000 px。");
                 }
                 break;
             }

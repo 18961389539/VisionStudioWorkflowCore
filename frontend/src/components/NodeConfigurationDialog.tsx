@@ -877,7 +877,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         </div>}
         {isImageCrop && <div className="shape-training-panel crop-settings-panel">
           <strong>选择裁剪区域</strong>
-          <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；笔刷支持添加和擦除，输出图像按选区紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。裁剪后原点移到新图左上角，可将“变换”端口连接到下游测量节点以换算原图坐标。</p>
+          <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；越出图像边缘的部分会裁切，完全未覆盖图像像素时会报错。笔刷支持添加和擦除，输出图像按选区与图像交集的紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。裁剪后原点移到新图左上角，可将“变换”端口连接到下游测量节点以换算原图坐标。</p>
           {cropRoiInputConnected && <Alert showIcon type="info" title={`裁剪区域来自上游：${nodeLabels[cropRoiSourceId!] ?? cropRoiSourceId}`}
             description="已连接的 roi 输入会覆盖本节点的本地选区。请在上游 ROI 节点编辑；本地选区不会参与本次裁剪。"
             style={{ marginBlock: 10 }} />}

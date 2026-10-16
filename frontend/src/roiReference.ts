@@ -8,12 +8,37 @@ const coordinateParameters: Record<string, string[]> = {
   'image.resize': ['width', 'height'],
   'image.rotate': ['angleDeg', 'expand'],
   'image.perspective': ['x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4', 'width', 'height'],
+  'image.undistort': ['calibrationJson'],
+  'image.warpAffine': ['width', 'height'],
+  'image.register': ['x', 'y', 'width', 'height', 'angleRangeDeg', 'angleStepDeg', 'minScore'],
+  'calibration.detectBoard': ['pattern', 'columns', 'rows', 'spacingMm', 'threshold', 'darkObjects', 'minArea', 'maxArea', 'minCircularity', 'maxGridError', 'saddleThreshold'],
+  'calibration.cameraIntrinsics': ['calibrationDataJson'],
+  'calibration.planar': ['sourceFrame', 'targetFrame', 'targetUnit', 'pairsJson'],
+  'calibration.handEye2D': ['mode', 'samplesJson', 'sourceFrame', 'targetFrame', 'sourceUnit', 'unit'],
+  'coordinate.transformConstant': ['sourceFrame', 'targetFrame', 'unit', 'x', 'y', 'angleDeg'],
+  'coordinate.frameTree': ['transformsJson'],
+  'coordinate.frameResolve': ['sourceFrame', 'targetFrame'],
+  'coordinate.pose': ['x', 'y', 'thetaDeg', 'frame', 'unit'],
+  'coordinate.poseToTransform': ['sourceFrame'],
   'roi.transform': ['roi', 'baseX', 'baseY', 'baseThetaDeg', 'anglePeriodDeg'],
   'match.shape': ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainedPoseOffsetX', 'trainedPoseOffsetY',
     'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
 };
 
-/** Fingerprint the coordinate-changing parts of an image/ROI source chain for saved ROI references. */
+const coordinateInputPorts: Record<string, string[]> = {
+  'image.undistort': ['calibrationJson'],
+  'image.warpAffine': ['transform'],
+  'coordinate.transformInverse': ['transform'],
+  'coordinate.transformCompose': ['transformA', 'transformB'],
+  'coordinate.frameResolve': ['tree'],
+  'coordinate.poseToTransform': ['pose'],
+  'coordinate.transformPose': ['pose', 'transform'],
+  'coordinate.transformCoordinatePose': ['pose', 'transform'],
+  'calibration.detectBoard': ['calibrationDataJson'],
+  'calibration.cameraIntrinsics': ['calibrationDataJson']
+};
+
+/** Fingerprint image and geometry inputs that define the pixel frame of a saved ROI reference. */
 export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]): string {
   if (!sourceNodeId) return parameterFingerprint(null);
   const byId = new Map(nodes.map(node => [node.id, node]));
@@ -29,15 +54,24 @@ export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: N
     active.add(nodeId);
     const type = typeof node.data.typeKey === 'string' ? node.data.typeKey : '';
     const parameters = (node.data.parameters ?? {}) as NodeParameters;
-    const keys = coordinateParameters[type] ?? [];
+    const nodeEdges = edges.filter(edge => edge.target === nodeId);
+    const connectedPorts = new Set(nodeEdges.map(edge => edge.targetHandle ?? ''));
+    const keys = (coordinateParameters[type] ?? []).filter(key => {
+      if (type === 'image.crop' && (connectedPorts.has('roi') || (parameters.roi != null && key !== 'roi'))) return false;
+      if (type === 'image.undistort' && connectedPorts.has('calibrationJson') && key === 'calibrationJson') return false;
+      if (type === 'calibration.cameraIntrinsics' && connectedPorts.has('calibrationDataJson') && key === 'calibrationDataJson') return false;
+      if (type === 'calibration.detectBoard' && connectedPorts.has('calibrationDataJson') && key === 'calibrationDataJson') return false;
+      if (type === 'roi.transform' && connectedPorts.has('roi') && key === 'roi') return false;
+      return true;
+    });
     const nodeInputs = Array.isArray(node.data.inputs) ? node.data.inputs as { name?: string; dataType?: string }[] : [];
     const imagePorts = new Set(nodeInputs.filter(port => port.dataType === 'Image' || port.dataType === 'DomainImage')
       .map(port => port.name).filter((name): name is string => typeof name === 'string'));
     if (imagePorts.size === 0) imagePorts.add('image');
-    const relevantPorts = new Set(imagePorts);
+    const relevantPorts = new Set([...imagePorts, ...(coordinateInputPorts[type] ?? [])]);
     if (type === 'image.crop') relevantPorts.add('roi');
     if (type === 'roi.transform') { relevantPorts.add('roi'); relevantPorts.add('currentPose'); }
-    const parents = edges.filter(edge => edge.target === nodeId && relevantPorts.has(edge.targetHandle ?? ''))
+    const parents = nodeEdges.filter(edge => relevantPorts.has(edge.targetHandle ?? ''))
       .sort((a, b) => `${a.targetHandle}:${a.source}:${a.sourceHandle}`.localeCompare(`${b.targetHandle}:${b.source}:${b.sourceHandle}`))
       .map(edge => ({ port: edge.targetHandle, sourcePort: edge.sourceHandle, frame: visit(edge.source) }));
     const signature = {

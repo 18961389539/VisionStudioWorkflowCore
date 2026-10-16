@@ -304,7 +304,7 @@ public sealed class Batch5CaliperRegressionTests
         registry.Register(BuiltInNodeCatalog.Require(cropExecutor.Type), cropExecutor, "test");
         var dispatcher = new VisionNodeDispatcher(registry);
         var corrected = await dispatcher.ExecuteAsync(
-            Node("roi.transform", """{"roi":{"type":"Rectangle","x":20,"y":10,"width":10,"height":12},"baseX":0,"baseY":0,"currentX":5,"currentY":7}"""),
+            Node("roi.transform", """{"roi":{"type":"Rectangle","x":20,"y":10,"width":10,"height":12},"baseX":0,"baseY":0,"currentX":-25,"currentY":7}"""),
             new Dictionary<string, VisionValue>(), null, CancellationToken.None);
         var cropped = await dispatcher.ExecuteAsync(
             Node("image.crop", """{"x":2,"y":3,"width":5,"height":4}"""),
@@ -312,12 +312,12 @@ public sealed class Batch5CaliperRegressionTests
             null, CancellationToken.None);
         using var cropImage = (VisionImage)cropped.Outputs["image"].Require<IVisionImage>("image");
 
-        Assert.Equal((10, 12), (cropImage.Width, cropImage.Height));
+        Assert.Equal((5, 12), (cropImage.Width, cropImage.Height));
         Assert.Equal("Rectangle", cropped.Summary["roiType"]);
-        Assert.Equal(25, Convert.ToInt32(cropped.Summary["cropOriginX"]));
+        Assert.Equal(0, Convert.ToInt32(cropped.Summary["cropOriginX"]));
         Assert.Equal(17, Convert.ToInt32(cropped.Summary["cropOriginY"]));
         var transform = cropped.Outputs["transform"].Require<VisionTransform2D>("transform");
-        Assert.Equal(new VisionPoint2D(0, 0), transform.Apply(new VisionPoint2D(25, 17)));
+        Assert.Equal(new VisionPoint2D(0, 0), transform.Apply(new VisionPoint2D(0, 17)));
         (cropped.Outputs["roiMask"].Value as IDisposable)?.Dispose();
     }
 
