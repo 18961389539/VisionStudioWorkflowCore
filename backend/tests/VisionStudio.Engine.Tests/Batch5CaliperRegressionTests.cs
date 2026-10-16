@@ -580,6 +580,44 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task RoiCorrectionAndCropTransformsRotateCaliperCircleArcIntoCropCoordinates()
+    {
+        using var sceneMat = new Mat(100, 120, MatType.CV_8UC1, Scalar.All(20));
+        Cv2.Ellipse(sceneMat, new Point(70, 30), new Size(15, 15), 0, -90, 90, Scalar.All(220), 2);
+        using var scene = VisionImage.Own(sceneMat.Clone());
+        var corrected = await new RoiTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
+            Node("roi.transform", """{"roi":{"type":"Circle","x":30,"y":30,"radius":15},"baseX":0,"baseY":0,"currentX":40,"currentY":60,"currentThetaDeg":90}"""),
+            CancellationToken.None);
+        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(scene)),
+            Node("image.crop", """{"x":5,"y":2,"width":110,"height":96}"""), CancellationToken.None);
+        using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
+        var composedResult = await new ComposeTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["transformA"] = corrected.Outputs["transform"],
+            ["transformB"] = crop.Outputs["transform"]
+        }), Node("coordinate.transformCompose", "{}"), CancellationToken.None);
+
+        var measurement = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(croppedImage),
+            ["circle"] = VisionValue.Circle(new VisionCircle(30, 30, 15)),
+            ["transform"] = composedResult.Outputs["transform"]
+        }), Node("measure.caliperCircle", """{"angleStartDeg":0,"angleEndDeg":180,"samplingMode":"count","caliperCount":36,"radialBand":5,"sampleWidth":1,"minContrast":20}"""),
+            CancellationToken.None);
+
+        Assert.True(Convert.ToBoolean(measurement.Summary["found"]), Convert.ToString(measurement.Summary["reason"]));
+        Assert.True(Convert.ToInt32(measurement.Summary["edgePoints"]) >= 10);
+        var circle = measurement.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.InRange(circle.X, 63, 67);
+        Assert.InRange(circle.Y, 26, 30);
+        Assert.InRange(circle.Radius, 13, 17);
+        Assert.Equal("ReferenceImage", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").SourceFrame);
+        Assert.Equal("CropImage", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").TargetFrame);
+        (measurement.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task Crop_UsesConnectedCorrectedRoiAheadOfLocalSelection()
     {
         using var source = new Mat(60, 60, MatType.CV_8UC1, Scalar.All(90));
