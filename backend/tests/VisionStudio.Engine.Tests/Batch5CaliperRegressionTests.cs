@@ -286,6 +286,29 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task SingleCaliper_ReportsInsufficientSamplingWhenRoiSplitsTheProfileIntoShortRuns()
+    {
+        using var image = MakeEdgeImage(0);
+        using var input = VisionImage.Own(image.Clone());
+        var sparseRoi = new VisionRoi(VisionRoiType.Brush, Strokes:
+        [
+            new(VisionRoiStrokeMode.Add, 1, [new VisionRoiPoint(20, 32)]),
+            new(VisionRoiStrokeMode.Add, 1, [new VisionRoiPoint(32, 32)]),
+            new(VisionRoiStrokeMode.Add, 1, [new VisionRoiPoint(64, 32)])
+        ]);
+        var result = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(sparseRoi)
+        }), Node("measure.caliper", """{"startX":10,"startY":32,"endX":70,"endY":32,"sampleWidth":1,"edgeThreshold":20}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("profile-has-no-finite-samples", result.Summary["reason"]);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CropTransform_MapsReferenceCaliperLineIntoCropCoordinates()
     {
         using var mat = MakeEdgeImage(0.5);

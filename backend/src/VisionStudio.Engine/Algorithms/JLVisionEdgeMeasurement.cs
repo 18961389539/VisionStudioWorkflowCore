@@ -12,6 +12,7 @@ internal static class JLVisionEdgeMeasurement
         var candidates = new List<(double Position, double Amplitude)>();
         var valid = profile.Count(double.IsFinite);
         if (valid < 3) return new(false, 0, 0, 0, valid, "profile-has-no-finite-samples");
+        var hasMeasurableSegment = false;
         for (var start = 0; start < profile.Length;)
         {
             while (start < profile.Length && !double.IsFinite(profile[start])) start++;
@@ -20,6 +21,7 @@ internal static class JLVisionEdgeMeasurement
             var length = end - start;
             if (length >= 3)
             {
+                hasMeasurableSegment = true;
                 using var pixels = new Mat(3, length, MatType.CV_32FC1);
                 for (var y = 0; y < 3; y++) for (var x = 0; x < length; x++) pixels.Set(y, x, (float)profile[start + x]);
                 using var image = JLVisionImages.FromMat(pixels);
@@ -31,7 +33,8 @@ internal static class JLVisionEdgeMeasurement
             }
             start = end + 1;
         }
-        if (candidates.Count == 0) return new(false, 0, 0, 0, valid, "no-edge-above-threshold");
+        if (candidates.Count == 0)
+            return new(false, 0, 0, 0, valid, hasMeasurableSegment ? "no-edge-above-threshold" : "profile-has-no-finite-samples");
         var edge = direction.ToLowerInvariant() switch
         { "firstfromstart" => candidates.MinBy(x => x.Position), "firstfromend" => candidates.MaxBy(x => x.Position), _ => candidates.MaxBy(x => x.Amplitude) };
         var position = refine == "none" ? Math.Round(edge.Position - .5) + .5 : edge.Position;
