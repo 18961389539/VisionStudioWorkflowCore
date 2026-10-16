@@ -220,7 +220,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         }
 
         var transform = new VisionTransform2D(
-            "BasePose", "CurrentPose", "px",
+            "ReferenceImage", "CurrentImage", "px",
             cos, sin, currentPose.X - (cos * basePose.X + sin * basePose.Y),
             -sin, cos, currentPose.Y - (-sin * basePose.X + cos * basePose.Y),
             0, 0, 1);

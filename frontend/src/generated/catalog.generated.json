@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "7d577b0dc0a21dcfdb99eb440bbebdd9b2fb2b0139136ff161908f6be6b5ed8a",
+  "hash": "eca22a3c5f6654b68343278df36b85b0dd228309dde399a53b7578d3fb4c1d1d",
   "items": [
     {
       "type": "image.acquire",
@@ -1475,7 +1475,7 @@
         }
       ],
       "parameters": [],
-      "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility.",
+      "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility. For image geometry, compose roi.transform (ReferenceImage→CurrentImage) as A with image.crop (CurrentImage→CropImage) as B.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -8501,7 +8501,7 @@
           "group": "Current Pose"
         }
       ],
-      "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
+      "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. The output transform maps ReferenceImage→CurrentImage; compose it as A with a following crop transform as B to map reference geometry directly into CropImage coordinates. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9568,7 +9568,7 @@
         }
       ],
       "parameters": [],
-      "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection, while croppedRoi outputs the same selection translated to crop coordinates and can connect to downstream measurement nodes to prevent masked crop boundaries from being detected as edges. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection, while croppedRoi outputs the same selection translated to crop coordinates and can connect to downstream measurement nodes to prevent masked crop boundaries from being detected as edges. cropOrigin is the crop top-left in input-image coordinates, and transform maps CurrentImage geometry to CropImage coordinates. Its transform can compose after roi.transform as A: ReferenceImage→CurrentImage, B: CurrentImage→CropImage. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

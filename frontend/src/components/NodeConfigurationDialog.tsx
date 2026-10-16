@@ -54,6 +54,23 @@ function parameterMeta(parameter: ParameterDescriptor) {
   return bits.join(' · ');
 }
 
+function transformSourceLineage(nodes: Node[], edges: Edge[], sourceId: string | undefined): Node[] {
+  const visited = new Set<string>();
+  const visit = (id: string): Node[] => {
+    if (visited.has(id)) return [];
+    visited.add(id);
+    const source = nodes.find((item) => item.id === id);
+    if (!source) return [];
+    const inputHandles = source.data.typeKey === 'coordinate.transformCompose' ? ['transformA', 'transformB'] : [];
+    const ancestors = inputHandles.flatMap((handle) => {
+      const input = edges.find((edge) => edge.target === source.id && edge.targetHandle === handle);
+      return input ? visit(input.source) : [];
+    });
+    return [source, ...ancestors];
+  };
+  return sourceId ? visit(sourceId) : [];
+}
+
 function connectedCircleGeometry(value: unknown): { x: number; y: number; radius: number } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const circle = value as Record<string, unknown>;
@@ -234,20 +251,24 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const transformInputEdge = ['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'transform')
     : undefined;
-  const transformSourceNode = transformInputEdge ? nodes.find((item) => item.id === transformInputEdge.source) : undefined;
+  const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
   const correctedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
-    && circleInputEdge.source === transformInputEdge.source && circleSourceNode?.data.typeKey === 'roi.transform');
+    && circleSourceNode?.data.typeKey === 'roi.transform'
+    && transformLineageNodes.some((source) => source.id === circleInputEdge.source));
   const correctedCircleTransformMessage = correctedCircleTransformConflict
     ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
     : undefined;
-  const transformSourceParameters = (transformSourceNode?.data.parameters ?? {}) as NodeParameters;
-  const savedMeasurementReference = transformSourceNode?.data.typeKey === 'roi.transform'
-    && typeof transformSourceParameters.referenceImage === 'string' && transformSourceParameters.referenceImage
-    ? { data: transformSourceParameters.referenceImage, width: Number(transformSourceParameters.referenceWidth ?? 0),
-      height: Number(transformSourceParameters.referenceHeight ?? 0) }
+  const referenceTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'roi.transform'
+    && typeof (source.data.parameters as NodeParameters | undefined)?.referenceImage === 'string'
+    && Boolean((source.data.parameters as NodeParameters).referenceImage));
+  const referenceTransformParameters = (referenceTransformNode?.data.parameters ?? {}) as NodeParameters;
+  const savedMeasurementReference = referenceTransformNode
+    ? { data: String(referenceTransformParameters.referenceImage), width: Number(referenceTransformParameters.referenceWidth ?? 0),
+      height: Number(referenceTransformParameters.referenceHeight ?? 0) }
     : undefined;
-  const cropMeasurementReferenceNodeId = transformSourceNode?.data.typeKey === 'image.crop'
-    ? edges.find((edge) => edge.target === transformSourceNode.id && edge.targetHandle === 'image')?.source
+  const cropTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'image.crop');
+  const cropMeasurementReferenceNodeId = cropTransformNode
+    ? edges.find((edge) => edge.target === cropTransformNode.id && edge.targetHandle === 'image')?.source
     : undefined;
   const debugImageSourceId = isRoiTransform
     ? edges.find(edge => edge.target === node.id && edge.targetHandle === 'debugImage')?.source

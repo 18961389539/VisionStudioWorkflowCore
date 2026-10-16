@@ -435,7 +435,7 @@ public static class Batch5PrecisionCatalog
                 new("currentY", "Current Y", "number", 0, -10000000, 10000000, 0.01, Unit: "px", Group: "Current Pose"),
                 new("currentThetaDeg", "Current Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Current Pose")
             ],
-            "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
+            "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. The output transform maps ReferenceImage→CurrentImage; compose it as A with a following crop transform as B to map reference geometry directly into CropImage coordinates. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true))
     ];

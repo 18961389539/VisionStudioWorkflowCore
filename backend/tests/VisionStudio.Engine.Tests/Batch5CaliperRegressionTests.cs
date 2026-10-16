@@ -541,6 +541,45 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task RoiCorrectionAndCropTransformsComposeForCaliperMeasurement()
+    {
+        using var sceneMat = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(20));
+        using (var brightSide = new Mat(sceneMat, new Rect(50, 0, 50, 100))) brightSide.SetTo(Scalar.All(220));
+        using var scene = VisionImage.Own(sceneMat.Clone());
+        var corrected = await new RoiTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
+            Node("roi.transform", """{"roi":{"type":"Circle","x":40,"y":30,"radius":5},"baseX":0,"baseY":0,"currentX":20,"currentY":10}"""),
+            CancellationToken.None);
+        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(scene)),
+            Node("image.crop", """{"x":5,"y":7,"width":90,"height":80}"""), CancellationToken.None);
+        using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
+        var poseCorrection = corrected.Outputs["transform"].Require<VisionTransform2D>("transform");
+        var cropTransform = crop.Outputs["transform"].Require<VisionTransform2D>("transform");
+
+        var composedResult = await new ComposeTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["transformA"] = VisionValue.Transform(poseCorrection),
+            ["transformB"] = VisionValue.Transform(cropTransform)
+        }), Node("coordinate.transformCompose", "{}"), CancellationToken.None);
+        var composed = composedResult.Outputs["transform"].Require<VisionTransform2D>("transform");
+        var measurement = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(croppedImage),
+            ["searchLine"] = VisionValue.Line(new(new(0, 20), new(80, 20))),
+            ["transform"] = VisionValue.Transform(composed)
+        }), Node("measure.caliper", """{"sampleWidth":1,"edgeThreshold":20,"direction":"strongest","refine":"none"}"""),
+            CancellationToken.None);
+
+        Assert.True(Convert.ToBoolean(measurement.Summary["found"]));
+        var point = measurement.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.InRange(point.X, 44, 46);
+        Assert.Equal(23, point.Y, 6);
+        Assert.Equal("ReferenceImage", composed.SourceFrame);
+        Assert.Equal("CropImage", composed.TargetFrame);
+        (measurement.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task Crop_UsesConnectedCorrectedRoiAheadOfLocalSelection()
     {
         using var source = new Mat(60, 60, MatType.CV_8UC1, Scalar.All(90));

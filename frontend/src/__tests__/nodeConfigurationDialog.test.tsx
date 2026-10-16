@@ -445,6 +445,31 @@ describe('caliper geometry input guidance', () => {
     expect(geometry.getAttribute('data-editable')).toBe('false');
   });
 
+  it('uses the ROI reference image to edit measurement geometry through a composed ROI-and-crop transform', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',
+      inputs: lineCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const roiNode: Node = { id: 'pose-correction', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正',
+      parameters: { referenceImage: 'saved-png', referenceWidth: 100, referenceHeight: 100 } } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: cropCatalog.type, label: '图像裁剪',
+      inputs: cropCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 10, y: 10, width: 70, height: 70 } } } };
+    const composeNode: Node = { id: 'compose', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformCompose', label: '组合变换' } };
+    const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '基准输入图像' } };
+    const edges = [
+      { id: 'crop-image-input', source: imageNode.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'roi-transform', source: roiNode.id, sourceHandle: 'transform', target: composeNode.id, targetHandle: 'transformA' },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: composeNode.id, targetHandle: 'transformB' },
+      { id: 'composed-transform', source: composeNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' },
+      { id: 'cropped-image', source: cropNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+    ];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, roiNode, cropNode, composeNode, imageNode], edges });
+
+    expect(await dialog.findByTestId('line-geometry')).toBeTruthy();
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-editable')).toBe('true');
+  });
+
   it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'] as const)(
     'warns %s when a cropped image has no matching croppedRoi mask', async type => {
       const measurementCatalog = fallbackCatalog.find(item => item.type === type)!;
@@ -876,6 +901,28 @@ describe('caliper geometry input guidance', () => {
       expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
     expect(dialog.queryByTestId('circle-geometry')).toBeNull();
     expect(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
+  });
+
+  it('detects a repeated circle correction inside a composed transform chain', () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 20, centerY: 30, radius: 10 } } };
+    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI' } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: 'image.crop', label: '裁剪变换' } };
+    const composeNode: Node = { id: 'compose', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformCompose', label: '组合变换' } };
+    const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'corrected-circle', source: roiNode.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' },
+      { id: 'pose-transform', source: roiNode.id, sourceHandle: 'transform', target: composeNode.id, targetHandle: 'transformA' },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: composeNode.id, targetHandle: 'transformB' },
+      { id: 'composed-transform', source: composeNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
+    ];
+
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, cropNode, composeNode, imageNode], edges });
+
+    expect(dialog.getByText('定位修正圆不能再次应用 transform')).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

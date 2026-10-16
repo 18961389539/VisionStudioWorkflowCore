@@ -624,7 +624,7 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("transformA", VisionDataType.Transform2D), new("transformB", VisionDataType.Transform2D)],
             [new("transform", VisionDataType.Transform2D), Next],
             [],
-            "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility.",
+            "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility. For image geometry, compose roi.transform (ReferenceImage→CurrentImage) as A with image.crop (CurrentImage→CropImage) as B.",
             "builtin"),
         new(
             "coordinate.frameTree",

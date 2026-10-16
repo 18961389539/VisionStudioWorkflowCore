@@ -65,7 +65,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                     ["croppedRoi"] = VisionValue.Roi(TranslateRoiToCrop(roi, bounds.X, bounds.Y)),
                     ["cropOrigin"] = VisionValue.Point(new VisionPoint2D(bounds.X, bounds.Y)),
                     ["transform"] = VisionValue.Transform(new VisionTransform2D(
-                        "InputImage", "CropImage", "px",
+                        "CurrentImage", "CropImage", "px",
                         1, 0, -bounds.X,
                         0, 1, -bounds.Y,
                         0, 0, 1))
