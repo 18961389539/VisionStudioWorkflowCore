@@ -347,6 +347,25 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.end).toEqual({ x: 50, y: 10 });
   });
 
+  it('moves a clipped search line without snapping it fully inside the image', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: -20, y: 50 }, end: { x: 80, y: 50 } }, onChange);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 130 }); // image (50, 50), on the visible line
+    fireEvent.mouseMove(stage, { clientX: 176.4, clientY: 130 }); // move left by 10 image pixels
+    fireEvent.mouseUp(document.body, { clientX: 176.4, clientY: 130 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('line');
+    if (result.type === 'line') {
+      expect(result.start.x).toBeCloseTo(-30);
+      expect(result.end.x).toBeCloseTo(70);
+      expect(result.start.y).toBe(50);
+      expect(result.end.y).toBe(50);
+    }
+  });
+
   it('commits a touch-drawn search line when touch ends outside the viewer', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);

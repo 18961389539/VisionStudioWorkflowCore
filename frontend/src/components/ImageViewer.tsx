@@ -822,10 +822,12 @@ export default function ImageViewer({
         if (mode === 'start' || mode === 'end') {
           setMeasurementDraft({ ...origin, [mode]: current });
         } else {
+          // Keep clipped search lines draggable: constrain their bounds to keep some
+          // overlap with the image, while allowing endpoints to remain outside.
           const minX = Math.min(origin.start.x, origin.end.x), maxX = Math.max(origin.start.x, origin.end.x);
           const minY = Math.min(origin.start.y, origin.end.y), maxY = Math.max(origin.start.y, origin.end.y);
-          const dx = clamp(current.x - start.x, -minX, actualWidth - maxX);
-          const dy = clamp(current.y - start.y, -minY, actualHeight - maxY);
+          const dx = clamp(current.x - start.x, -maxX, actualWidth - minX);
+          const dy = clamp(current.y - start.y, -maxY, actualHeight - minY);
           setMeasurementDraft({ type: 'line', start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
         }
       } else if (mode === 'center') {
