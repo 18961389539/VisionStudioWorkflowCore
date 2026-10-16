@@ -284,14 +284,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const circleInputSnapshot = circleInputEdge && (!resultStale || Boolean(preview))
     ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
     : undefined;
-  const connectedCircle = circleInputEdge && !transformInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
+  const connectedCircle = circleInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
   const searchLineInputSnapshot = searchLineInputEdge && (!resultStale || Boolean(preview))
     ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
     : undefined;
-  const connectedSearchLine = searchLineInputEdge && !transformInputEdge ? connectedSearchLineGeometry(searchLineInputSnapshot) : undefined;
-  const canDisplayConnectedSearchLine = Boolean(measurementGeometryType === 'line' && connectedSearchLine && !transformInputEdge && measurementGeometryFrameKind);
+  const connectedSearchLine = searchLineInputEdge ? connectedSearchLineGeometry(searchLineInputSnapshot) : undefined;
+  const canDisplayConnectedSearchLine = Boolean(measurementGeometryType === 'line' && connectedSearchLine && measurementGeometryFrameKind);
   const canEditMeasurementGeometry = Boolean(measurementGeometryType && !searchLineInputEdge
-    && (!circleInputEdge || connectedCircle) && measurementGeometryFrameKind);
+    && (!circleInputEdge || connectedCircle && !correctedCircleTransformConflict) && measurementGeometryFrameKind);
   useEffect(() => {
     if (!open || !canEditMeasurementGeometry && !canDisplayConnectedSearchLine) return;
     if (measurementGeometryFrameKind === 'saved-reference' || measurementGeometryFrameKind === 'current') {
@@ -364,7 +364,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const showTrainedTemplatePreview = Boolean(showSavedTrainingImage && trainingView && isShapeMatch && (trainedSourceImage || trainedPreviewData));
   const showCapturedTrainingImage = isShapeMatch && shapeWorkspaceTab === 'training' && !showSavedTrainingImage && capturedTrainingImage;
   const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && (showTrainedTemplatePreview || Boolean(showCapturedTrainingImage)));
-  const showMeasurementReferenceImage = Boolean(canEditMeasurementGeometry && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady);
+  const showMeasurementReferenceImage = Boolean((canEditMeasurementGeometry || canDisplayConnectedSearchLine)
+    && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady);
   const displayImageSource = isRoiTransform && roiImageView === 'reference'
     ? { url: referenceImage ? `data:image/png;base64,${referenceImage}` : '', width: Number(draft.referenceWidth ?? 0),
       height: Number(draft.referenceHeight ?? 0), label: referenceImage ? '已保存基准图像' : '尚未建立基准' }
@@ -850,14 +851,18 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         {searchLineInputEdge && <Alert showIcon type="info"
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge
-            ? `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
+            ? connectedSearchLine && measurementGeometryFrameKind
+              ? `蓝色线显示运行报告中的上游基准搜索线；它会在执行时经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”变换到当前图像。几何仅在匹配的基准图像上只读显示。`
+              : `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
             : connectedSearchLine
               ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
               : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。'} />}
         {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict ? 'error' : transformInputEdge ? 'warning' : 'info'}
           title={correctedCircleTransformConflict ? '定位修正圆不能再次应用 transform' : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
           description={correctedCircleTransformMessage ?? (transformInputEdge
-            ? `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`
+            ? connectedCircle && measurementGeometryFrameKind
+              ? `圆心和标称半径锁定为运行报告中的上游基准圆；图像预览显示对应基准图像，可拖动圆弧和搜索带手柄，变换会在执行时映射到当前图像。`
+              : `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`
             : connectedCircle
               ? '圆心和标称半径锁定为本次运行的上游输入；可在图像上拖动蓝/紫圆弧端点和青/绿搜索带手柄，调整本节点的搜索范围。'
               : '上游 circle 会覆盖本节点的圆心和标称半径参数；运行此节点以读取本次使用的圆，之后可在图像上调整圆弧和搜索带。')} />}

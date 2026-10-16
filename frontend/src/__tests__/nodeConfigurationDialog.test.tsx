@@ -361,6 +361,65 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'startX')!.label }) as HTMLInputElement).value).toBe('23'));
   });
 
+  it('shows a connected search line in its saved reference frame when transform is connected', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const roiNode: Node = { id: 'pose-correction', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 } } };
+    const lineSource: Node = { id: 'line-source', position: { x: 0, y: 0 }, data: { typeKey: 'measure.fitLine', label: '上游拟合线' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'search-line', source: lineSource.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' },
+      { id: 'pose-transform', source: roiNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' }
+    ];
+    const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { searchLine: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
+        value: { start: { x: 14, y: 22 }, end: { x: 88, y: 46 } } } } }] };
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, roiNode, lineSource, imageNode], edges, result: lineResult });
+
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
+    expect(dialog.getByText(/上游基准搜索线/)).toBeTruthy();
+    const geometry = await dialog.findByTestId('line-geometry');
+    expect(geometry.getAttribute('data-start-x')).toBe('14');
+    expect(geometry.getAttribute('data-end-y')).toBe('46');
+    expect(geometry.getAttribute('data-editable')).toBe('false');
+    expect(dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
+  });
+
+  it('shows a connected search line on the crop input image when crop transform is connected', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Rectangle', x: 20, y: 20, width: 50, height: 50 } } } };
+    const lineSource: Node = { id: 'line-source', position: { x: 0, y: 0 }, data: { typeKey: 'measure.fitLine', label: '上游拟合线' } };
+    const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '裁剪前图像' } };
+    const edges = [
+      { id: 'crop-image-input', source: imageNode.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'line-image-input', source: cropNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'line-search-input', source: lineSource.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' }
+    ];
+    const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { searchLine: { type: 'Line2D', display: '[(24, 27), (86, 39)]',
+        value: { start: { x: 24, y: 27 }, end: { x: 86, y: 39 } } } } }] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: lineNode.id, portName: 'image', width: 50, height: 50 }, { nodeId: cropNode.id, portName: 'image', width: 50, height: 50 },
+      { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, cropNode, lineSource, imageNode], edges, result: lineResult });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
+    expect(dialog.getByText(/上游基准搜索线/)).toBeTruthy();
+    const geometry = await dialog.findByTestId('line-geometry');
+    expect(geometry.getAttribute('data-start-x')).toBe('24');
+    expect(geometry.getAttribute('data-end-y')).toBe('39');
+    expect(geometry.getAttribute('data-editable')).toBe('false');
+  });
+
   it('writes an interactively adjusted search line back into the staged parameters', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
@@ -419,6 +478,38 @@ describe('caliper geometry input guidance', () => {
     expect(geometry.getAttribute('data-radius')).toBe('24');
     expect(geometry.getAttribute('data-center-editable')).toBe('false');
     expect(geometry.getAttribute('data-radius-editable')).toBe('false');
+
+    fireEvent.click(dialog.getByRole('button', { name: '模拟调整圆弧' }));
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0]).toMatchObject({ centerX: 20, centerY: 30, radius: 10, radialBand: 14, angleStartDeg: -10, angleEndDeg: 90 });
+  });
+
+  it('allows arc and search-band edits for a connected circle in the saved transform reference frame', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 20, centerY: 30, radius: 10, radialBand: 6, angleStartDeg: 0, angleEndDeg: 60 } } };
+    const circleSource: Node = { id: 'circle-source', position: { x: 0, y: 0 }, data: { typeKey: 'measure.fitCircle', label: '上游拟合圆' } };
+    const roiNode: Node = { id: 'pose-correction', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-input', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' },
+      { id: 'pose-transform', source: roiNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
+    ];
+    const circleResult: RunResult = { ...report, nodeReports: [{ nodeId: circleNode.id, nodeType: circleCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { circle: { type: 'Circle', display: '(68, 42, r=24)', value: { x: 68, y: 42, radius: 24 } } } }] };
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, circleSource, roiNode, imageNode], edges, result: circleResult, onApply });
+
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
+    expect(dialog.getByText(/图像预览显示对应基准图像/)).toBeTruthy();
+    const geometry = await dialog.findByTestId('circle-geometry');
+    expect(geometry.getAttribute('data-center-x')).toBe('68');
+    expect(geometry.getAttribute('data-center-y')).toBe('42');
+    expect(geometry.getAttribute('data-radius')).toBe('24');
+    expect(geometry.getAttribute('data-center-editable')).toBe('false');
 
     fireEvent.click(dialog.getByRole('button', { name: '模拟调整圆弧' }));
     fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
@@ -646,14 +737,17 @@ describe('caliper geometry input guidance', () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
       inputs: circleCatalog.inputs, parameters: { centerX: 20, centerY: 30, radius: 10 } } };
-    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI' } };
+    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 } } };
     const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
     const edges = [
       { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
       { id: 'circle-geometry-input', source: roiNode.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' },
       { id: 'circle-transform-input', source: roiNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
     ];
-    const { dialog, props } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges });
+    const correctedCircleResult: RunResult = { ...report, nodeReports: [{ nodeId: circleNode.id, nodeType: circleCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { circle: { type: 'Circle', display: '(20, 30, r=10)', value: { x: 20, y: 30, radius: 10 } } } }] };
+    const { dialog, props } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges, result: correctedCircleResult });
 
     expect(dialog.getByText('定位修正圆不能再次应用 transform')).toBeTruthy();
     expect(dialog.getByText(/圆已经是当前图像坐标，请断开这个 transform 输入/)).toBeTruthy();
@@ -662,6 +756,7 @@ describe('caliper geometry input guidance', () => {
     expect(props.onPreview).not.toHaveBeenCalled();
     for (const name of ['centerX', 'centerY', 'radius'])
       expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
+    expect(dialog.queryByTestId('circle-geometry')).toBeNull();
     expect(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
   });
 });
