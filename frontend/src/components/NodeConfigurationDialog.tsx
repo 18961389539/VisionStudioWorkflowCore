@@ -279,7 +279,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (geometry.type === 'line') {
       setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y }));
     } else {
-      setDraft(current => ({ ...current, centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }));
+      const startAngle = geometry.angleStartDeg ?? -180;
+      const endAngle = geometry.angleEndDeg ?? 180;
+      const wholeTurns = Math.round(((startAngle + endAngle) / 2) / 360);
+      const normalizedStartAngle = startAngle - wholeTurns * 360;
+      const normalizedEndAngle = endAngle - wholeTurns * 360;
+      setDraft(current => ({ ...current, centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius,
+        angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle }));
     }
   };
   const roiInputImageSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;

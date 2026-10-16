@@ -124,6 +124,61 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.angleEndDeg).toBe(90);
   });
 
+  it('drags a partial-circle endpoint across zero without reversing the sweep', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
+      angleStartDeg: 350, angleEndDeg: 10, samplingMode: 'count', caliperCount: 12 }, onChange);
+    const stage = screen.getByTestId('stage');
+    // The purple end handle sits outside the nominal radius; drag it from 10° to 90°.
+    fireEvent.mouseDown(stage, { clientX: 260.2, clientY: 140.6 });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 200 });
+    fireEvent.mouseUp(stage, { clientX: 200, clientY: 200 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.angleStartDeg).toBe(350);
+    expect(result.angleEndDeg).toBeCloseTo(450, 0);
+    expect(buildCaliperCircleAngles(result).length).toBe(12);
+  });
+
+  it('drags the start angle while keeping the circle arc endpoint fixed', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
+      angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 10 }, onChange);
+    const stage = screen.getByTestId('stage');
+    // The blue start handle sits inside the nominal radius; drag it from 0° to 30°.
+    fireEvent.mouseDown(stage, { clientX: 233.2, clientY: 130 });
+    fireEvent.mouseMove(stage, { clientX: 233.0, clientY: 148.9 });
+    fireEvent.mouseUp(stage, { clientX: 233.0, clientY: 148.9 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.angleStartDeg).toBeCloseTo(30, 0);
+    expect(result.angleEndDeg).toBe(90);
+  });
+
+  it('allows arc edits on a valid one-pixel-radius circle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 1,
+      angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 10 }, onChange);
+    const stage = screen.getByTestId('stage');
+    // Small-circle arc handles sit outside the nominal radius to stay separate from center/radius handles.
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 160.4 });
+    fireEvent.mouseMove(stage, { clientX: 152.8, clientY: 130 });
+    fireEvent.mouseUp(stage, { clientX: 152.8, clientY: 130 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.angleEndDeg).toBe(180);
+    expect(result.radius).toBe(1);
+  });
+
   it('commits a search-line endpoint drag released outside the viewer', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);

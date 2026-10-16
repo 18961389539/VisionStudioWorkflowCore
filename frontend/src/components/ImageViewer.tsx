@@ -8,7 +8,7 @@ type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
-type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius';
+type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd';
 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
@@ -69,6 +69,25 @@ export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, 
 
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
+
+function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
+  const start = geometry.angleStartDeg ?? -180;
+  const { span, fullCircle } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
+  if (fullCircle || width <= 0 || height <= 0) return undefined;
+  const offset = (HANDLE_HIT + 4) / scale;
+  const smallCircle = geometry.radius * scale < HANDLE_HIT * 3;
+  const atAngle = (angleDeg: number, radius: number): Point => {
+    const radians = angleDeg * Math.PI / 180;
+    return {
+      x: clamp(geometry.center.x + Math.max(0, radius) * Math.cos(radians), 0, width),
+      y: clamp(geometry.center.y + Math.max(0, radius) * Math.sin(radians), 0, height)
+    };
+  };
+  return {
+    start: atAngle(start, geometry.radius + (smallCircle ? offset : -offset)),
+    end: atAngle(start + span, geometry.radius + offset * (smallCircle ? 2 : 1))
+  };
+}
 
 function useHtmlImage(url?: string) {
   const [loaded, setLoaded] = useState<{ url: string; image: HTMLImageElement }>();
@@ -240,7 +259,9 @@ function RoiHandles({ roi, scale }: { roi: VisionRoi; scale: number }) {
   </Group>;
 }
 
-function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: MeasurementGeometry; scale: number; editable: boolean }) {
+function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, imageHeight }: {
+  geometry: MeasurementGeometry; scale: number; editable: boolean; imageWidth: number; imageHeight: number
+}) {
   const handleRadius = 5 / scale;
   if (geometry.type === 'line') {
     const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
@@ -270,6 +291,7 @@ function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: Mea
   const end = geometry.angleEndDeg ?? 180;
   const { span, fullCircle } = circleArcSpan(start, end);
   const angles = buildCaliperCircleAngles(geometry);
+  const arcHandles = editable ? caliperCircleArcHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const boundary = (angleDeg: number) => {
     const radians = angleDeg * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -297,6 +319,10 @@ function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: Mea
     {editable && <>
       <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
       <Circle x={geometry.center.x + geometry.radius} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+      {arcHandles && <>
+        <Circle x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+      </>}
     </>}
   </Group>;
 }
@@ -525,6 +551,9 @@ export default function ImageViewer({
       if (near(closest)) return 'moveLine';
       return undefined;
     }
+    const arcHandles = caliperCircleArcHandles(target, view.scale, actualWidth, actualHeight);
+    if (arcHandles && near(arcHandles.start)) return 'angleStart';
+    if (arcHandles && near(arcHandles.end)) return 'angleEnd';
     if (near(target.center)) return 'center';
     if (near({ x: target.center.x + target.radius, y: target.center.y })) return 'radius';
     return undefined;
@@ -663,6 +692,19 @@ export default function ImageViewer({
         } });
       } else if (mode === 'radius') {
         setMeasurementDraft({ ...origin, radius: clamp(Math.hypot(current.x - origin.center.x, current.y - origin.center.y), Math.min(2, maxCircleRadius(origin.center, actualWidth, actualHeight)), maxCircleRadius(origin.center, actualWidth, actualHeight)) });
+      } else if (mode === 'angleStart' || mode === 'angleEnd') {
+        const startAngle = origin.angleStartDeg ?? -180;
+        const arcEndAngle = startAngle + circleArcSpan(startAngle, origin.angleEndDeg ?? 180).span;
+        const pointerAngle = Math.atan2(current.y - origin.center.y, current.x - origin.center.x) * 180 / Math.PI;
+        const lower = mode === 'angleStart' ? arcEndAngle - 359.5 : startAngle + 0.5;
+        const upper = mode === 'angleStart' ? arcEndAngle - 0.5 : startAngle + 359.5;
+        let adjustedAngle = pointerAngle + 360 * Math.round(((lower + upper) / 2 - pointerAngle) / 360);
+        if (adjustedAngle < lower) adjustedAngle += 360;
+        if (adjustedAngle > upper) adjustedAngle -= 360;
+        adjustedAngle = clamp(adjustedAngle, lower, upper);
+        setMeasurementDraft(mode === 'angleStart'
+          ? { ...origin, angleStartDeg: adjustedAngle }
+          : { ...origin, angleEndDeg: adjustedAngle });
       }
       return;
     }
@@ -708,7 +750,7 @@ export default function ImageViewer({
       const next = measurementDraft;
       if (next && onMeasurementGeometryChange && (next.type === 'line'
         ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
-        : next.radius >= 2)) onMeasurementGeometryChange(next);
+        : next.radius >= 1)) onMeasurementGeometryChange(next);
       setMeasurementDraft(undefined);
       return;
     }
@@ -853,7 +895,9 @@ export default function ImageViewer({
             <span className="viewer-toolbar-divider" />
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
-              title={geometryDrawMode ? '退出绘制模式' : '在图像上拖动以重新绘制；也可拖动橙色控制点微调'}>
+              title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
+                ? '拖动以重新绘制圆；橙色控制点调整圆心或半径，蓝色/紫色控制点调整圆弧起点/终点'
+                : '在图像上拖动以重新绘制；也可拖动橙色端点或线段微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}
@@ -915,7 +959,8 @@ export default function ImageViewer({
             </Layer>
             {measurementGeometry && <Layer>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable} />
+                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable}
+                  imageWidth={actualWidth} imageHeight={actualHeight} />
               </Group>
             </Layer>}
             <Layer>
