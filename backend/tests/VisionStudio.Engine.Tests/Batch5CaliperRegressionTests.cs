@@ -60,6 +60,51 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Contains("Polygon ROI requires 3..500000 finite vertices", error.Message);
     }
 
+    [Fact]
+    public async Task CaliperLine_ClassifiesProfilesBeyondCoordinateLimitAsOutsideImage()
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperLine", """{"startX":10,"startY":10000000,"endX":110,"endY":10000000,"edgeLength":100,"caliperCount":3,"sampleWidth":1}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("search-region-outside-image", result.Summary["reason"]);
+        Assert.Equal(3, Convert.ToInt32(result.Summary["profilesOutsideImage"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperLine_ClipsIntersectingProfilesAfterTheirOffsetsCrossTheInputCoordinateLimit()
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperLine", """{"startX":10000000,"startY":100,"endX":-10000000,"endY":0,"edgeLength":2,"caliperCount":3,"sampleWidth":1}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("no-edge-above-threshold", result.Summary["reason"]);
+        Assert.Equal(3, Convert.ToInt32(result.Summary["profilesIntersectingImage"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperCircle_ClassifiesOffImageRadialBandAsOutsideImage()
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+
+        var result = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperCircle", """{"centerX":10000000,"centerY":64,"radius":100,"radialBand":8,"samplingMode":"count","caliperCount":12}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("search-region-outside-image", result.Summary["reason"]);
+        Assert.Equal(12, Convert.ToInt32(result.Summary["spokesOutsideImage"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
     [Theory]
     [InlineData(1.0)]
     [InlineData(0.5)]

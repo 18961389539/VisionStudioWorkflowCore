@@ -117,11 +117,17 @@ internal static class SubpixelEdgeCore
     }
 
     /// <summary>Clip the segment to the image rectangle without changing its direction.</summary>
-    public static (VisionPoint2D Start, VisionPoint2D End, bool Clamped, bool Intersects) ClampLine(VisionPoint2D start, VisionPoint2D end, int width, int height)
+    public static bool SegmentBoundsOutsideImage(VisionPoint2D start, VisionPoint2D end, int width, int height) =>
+        Math.Max(start.X, end.X) < 0 || Math.Min(start.X, end.X) > width - 1
+        || Math.Max(start.Y, end.Y) < 0 || Math.Min(start.Y, end.Y) > height - 1;
+
+    public static (VisionPoint2D Start, VisionPoint2D End, bool Clamped, bool Intersects) ClampLine(
+        VisionPoint2D start, VisionPoint2D end, int width, int height, double maximumCoordinate = 10_000_000)
     {
         if (width <= 0 || height <= 0) throw new InvalidOperationException("Cannot clip a search line to an empty image.");
-        if (new[] { start.X, start.Y, end.X, end.Y }.Any(value => !double.IsFinite(value) || Math.Abs(value) > 10_000_000))
-            throw new InvalidOperationException("Search line coordinates must be finite and within +/-10000000 pixels.");
+        if (!double.IsFinite(maximumCoordinate) || maximumCoordinate <= 0
+            || new[] { start.X, start.Y, end.X, end.Y }.Any(value => !double.IsFinite(value) || Math.Abs(value) > maximumCoordinate))
+            throw new InvalidOperationException($"Search line coordinates must be finite and within +/-{maximumCoordinate:0} pixels.");
 
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
@@ -349,8 +355,10 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     var offsetY = tangentY * offset;
                     var requestedStart = new VisionPoint2D(search.Start.X + offsetX, search.Start.Y + offsetY);
                     var requestedEnd = new VisionPoint2D(search.End.X + offsetX, search.End.Y + offsetY);
+                    if (SubpixelEdgeCore.SegmentBoundsOutsideImage(requestedStart, requestedEnd, gray.Cols, gray.Rows))
+                    { failures++; outsideImage++; continue; }
                     var (profileStart, profileEnd, profileClamped, profileIntersects) =
-                        SubpixelEdgeCore.ClampLine(requestedStart, requestedEnd, gray.Cols, gray.Rows);
+                        SubpixelEdgeCore.ClampLine(requestedStart, requestedEnd, gray.Cols, gray.Rows, 10_005_000);
                     if (profileClamped) { profilesClipped++; anyProfileClipped = true; }
                     if (!profileIntersects) { failures++; outsideImage++; continue; }
                     if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
@@ -560,6 +568,9 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             angleStart += rotation;
             angleEnd += rotation;
         }
+        if (!double.IsFinite(center.X) || !double.IsFinite(center.Y)
+            || Math.Abs(center.X) > 10_000_000 || Math.Abs(center.Y) > 10_000_000)
+            throw new InvalidOperationException("Caliper circle center after coordinate correction must be finite and within +/-10000000 pixels.");
         var requestedMode = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
         // Old workflows only have angleStepDeg. Keep their fixed-step spacing until the user
         // explicitly switches to count mode; new nodes use a direct caliper count.
@@ -618,8 +629,10 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     // Clip the inner limit at the center so first-from-start always searches outward.
                     var start = new VisionPoint2D(center.X + dirX * innerRadius, center.Y + dirY * innerRadius);
                     var end = new VisionPoint2D(center.X + dirX * outerRadius, center.Y + dirY * outerRadius);
+                    if (SubpixelEdgeCore.SegmentBoundsOutsideImage(start, end, gray.Cols, gray.Rows))
+                    { rejected++; spokesOutsideImage++; continue; }
                     var (profileStart, profileEnd, spokeClipped, spokeIntersects) =
-                        SubpixelEdgeCore.ClampLine(start, end, gray.Cols, gray.Rows);
+                        SubpixelEdgeCore.ClampLine(start, end, gray.Cols, gray.Rows, 20_000_500);
                     if (spokeClipped) spokesClipped++;
                     if (!spokeIntersects) { rejected++; spokesOutsideImage++; continue; }
                     if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
