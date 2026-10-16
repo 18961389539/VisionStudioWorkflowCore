@@ -712,14 +712,20 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper/image');
   });
 
-  it('keeps caliper result overlays visible while editing over the same-frame input image', async () => {
-    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
-    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺找线',
-      inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+  it.each(['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'] as const)(
+    'keeps %s result overlays visible while editing over the same-frame input image', async (type) => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === type)!;
+    const parameters = type === 'measure.caliperCircle'
+      ? { centerX: 50, centerY: 50, radius: 20 }
+      : { startX: 10, startY: 20, endX: 80, endY: 20 };
+    const labels: Record<string, string> = { 'measure.caliper': '卡尺测量', 'measure.caliperLine': '卡尺找线',
+      'measure.caliperCircle': '卡尺找圆', 'feature.edgeSubpixel': '亚像素找边' };
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: labels[type],
+      inputs: caliperCatalog.inputs, parameters } };
     const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
     const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
     const resultWithCandidate: RunResult = { ...report, runId: 'caliper-candidate-run', overlays: [
-      { id: 'caliper-line-candidate-point-0', nodeId: caliperNode.id, type: 'Point', x: 64, y: 32, stroke: '#faad14', strokeWidth: 2.5 }
+      { id: `${type}-result-point`, nodeId: caliperNode.id, type: 'Point', x: 64, y: 32, stroke: '#faad14', strokeWidth: 2.5 }
     ], nodeReports: [{ nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: true, durationMs: 1,
       summary: { found: false, reason: 'too-few-edge-points' } }] };
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
@@ -728,7 +734,7 @@ describe('caliper geometry input guidance', () => {
     const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: resultWithCandidate });
 
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
-    expect(dialog.getByTestId('overlay-ids').textContent).toContain('caliper-line-candidate-point-0');
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain(`${type}-result-point`);
   });
 
   it('hides local search-line coordinates when a searchLine input is connected', () => {
