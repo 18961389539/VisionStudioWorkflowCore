@@ -20,11 +20,12 @@ vi.mock('react-konva', async () => {
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
+    Arrow: () => <span data-testid="search-arrow" />,
     Image: () => null,
     Line: () => null,
     Circle: () => null,
     Rect: () => null,
-    Text: () => null
+    Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
 });
 
@@ -46,6 +47,23 @@ const imageView = (geometry: MeasurementGeometry, onChange: (geometry: Measureme
 );
 
 describe('ImageViewer measurement geometry editing', () => {
+  it('shows the search-line start, end, and direction in the geometry preview', () => {
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, vi.fn());
+
+    expect(screen.getByText('起点')).toBeTruthy();
+    expect(screen.getByText('终点')).toBeTruthy();
+    expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
+  it('shows radial search direction from the inner to outer end of a circle caliper', () => {
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: 0, angleEndDeg: 90 }, vi.fn());
+
+    expect(screen.getByText('起点')).toBeTruthy();
+    expect(screen.getByText('终点')).toBeTruthy();
+    expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
   it('matches backend circle-caliper angles for full circles and a single-ray arc', () => {
     const base: Extract<MeasurementGeometry, { type: 'circle' }> = {
       type: 'circle', center: { x: 50, y: 50 }, radius: 20, angleStartDeg: -180, angleEndDeg: 180,

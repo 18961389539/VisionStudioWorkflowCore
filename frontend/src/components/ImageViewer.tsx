@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
-import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { createPixelBuffer, readPixel } from '../imagePixels';
 
@@ -287,6 +287,9 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   if (geometry.type === 'line') {
     const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
     const length = Math.hypot(dx, dy);
+    const directionX = length > 0 ? dx / length : 1, directionY = length > 0 ? dy / length : 0;
+    const labelOffset = 7 / scale;
+    const labelNormalX = -directionY * labelOffset, labelNormalY = directionX * labelOffset;
     const count = geometry.profileCount === undefined ? 0 : Math.round(clamp(geometry.profileCount, 3, 101));
     const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
     const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
@@ -297,10 +300,15 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
         return <Line key={index} points={[geometry.start.x + x, geometry.start.y + y, geometry.end.x + x, geometry.end.y + y]}
           stroke="#91d5ff" opacity={0.6} strokeWidth={0.8 / scale} />;
       })}
-      <Line points={[geometry.start.x, geometry.start.y, geometry.end.x, geometry.end.y]} stroke="#fa8c16" strokeWidth={2.5 / scale} />
+      <Arrow points={[geometry.start.x, geometry.start.y, geometry.end.x, geometry.end.y]} stroke="#fa8c16" fill="#fa8c16"
+        pointerLength={8 / scale} pointerWidth={8 / scale} strokeWidth={2.5 / scale} />
+      <Text x={geometry.start.x - directionX * 15 / scale + labelNormalX} y={geometry.start.y - directionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
+        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
+      <Text x={geometry.end.x + directionX * 7 / scale + labelNormalX} y={geometry.end.y + directionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
+        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
       {editable && <>
-        <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
-        <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
       </>}
     </Group>;
   }
@@ -319,6 +327,12 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
       geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
   };
+  const firstSpoke = boundary(angles[0] ?? start);
+  const firstSpokeAngle = (angles[0] ?? start) * Math.PI / 180;
+  const labelOffset = 7 / scale;
+  const labelNormalX = -Math.sin(firstSpokeAngle) * labelOffset;
+  const labelNormalY = Math.cos(firstSpokeAngle) * labelOffset;
+  const labelDirectionX = Math.cos(firstSpokeAngle), labelDirectionY = Math.sin(firstSpokeAngle);
   return <Group listening={false}>
     {band > 0 && <>
       <Circle x={geometry.center.x} y={geometry.center.y} radius={inner} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
@@ -327,11 +341,17 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16" strokeWidth={2.5 / scale} />
     {angles.map((angleDeg, index) => {
       const radians = angleDeg * Math.PI / 180;
-      return <Line key={`spoke-${index}`} points={[
-        geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
-        geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)
-      ]} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
+      const points = [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
+        geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
+      return index === 0
+        ? <Arrow key={`spoke-${index}`} points={points} stroke="#fa8c16" fill="#fa8c16" opacity={0.9}
+          pointerLength={6 / scale} pointerWidth={6 / scale} strokeWidth={1.5 / scale} />
+        : <Line key={`spoke-${index}`} points={points} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
     })}
+    <Text x={firstSpoke[0] - labelDirectionX * 15 / scale + labelNormalX} y={firstSpoke[1] - labelDirectionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
+      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
+    <Text x={firstSpoke[2] + labelDirectionX * 7 / scale + labelNormalX} y={firstSpoke[3] + labelDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
+      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
     {!fullCircle && span > 0 && <>
       <Line points={boundary(start)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
       <Line points={boundary(start + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
@@ -937,8 +957,8 @@ export default function ImageViewer({
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '拖动重绘圆；橙色控制点调整圆心或半径，蓝色/紫色调整圆弧起点/终点，青色/绿色调整搜索带内外边界'
-                : '在图像上拖动以重新绘制；也可拖动橙色端点或线段微调搜索线'}>
+                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带'
+                : '箭头由起点指向终点；蓝色起点、紫色终点。拖动端点或线段可微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}
