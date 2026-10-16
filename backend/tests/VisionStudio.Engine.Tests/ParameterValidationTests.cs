@@ -182,6 +182,52 @@ public sealed class ParameterValidationTests
         Assert.Contains("measure", compiled.OrderedNodeIds);
     }
 
+    [Fact]
+    public void MeasurementRejectsRoiFromADifferentCropImageFrame()
+    {
+        var workflow = new WorkflowDefinition("mismatched-crop-roi", "Mismatched crop ROI",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-measure-control", "crop", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-crop", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("measurement-image", "scene", "image", "measure", "image", "data"),
+            new EdgeDefinition("wrong-roi", "crop", "croppedRoi", "measure", "roi", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'measure' ROI input 'roi'", error.Message);
+        Assert.Contains("crop.image (crop frame)", error.Message);
+        Assert.Contains("scene.image", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementAcceptsCroppedRoiFromTheMatchingCropImageFrame()
+    {
+        var workflow = new WorkflowDefinition("matching-crop-roi", "Matching crop ROI",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-measure-control", "crop", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-crop", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("crop-image", "crop", "image", "measure", "image", "data"),
+            new EdgeDefinition("cropped-roi", "crop", "croppedRoi", "measure", "roi", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
     [Theory]
     [InlineData("feature.edgeSubpixel")]
     [InlineData("measure.caliper")]

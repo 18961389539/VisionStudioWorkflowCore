@@ -165,6 +165,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         ValidateImageWarpFrames(workflow, byId);
         ValidateMeasurementImageFrames(workflow, byId);
         ValidateMeasurementGeometryFrames(workflow, byId);
+        ValidateRoiFrames(workflow, byId);
 
         foreach (var node in workflow.Nodes)
         {
@@ -380,6 +381,68 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                         "Connect geometry from the transform's source frame or choose a matching transform.");
             }
         }
+    }
+
+    /// <summary>
+    /// ROI values have image-pixel coordinates too. A croppedRoi connected to a different crop
+    /// or to the original image can otherwise mask the wrong pixels without any runtime error.
+    /// </summary>
+    private void ValidateRoiFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
+    {
+        foreach (var edge in workflow.Edges.Where(item => !WorkflowGraph.IsControlEdge(item)))
+        {
+            if (!byId.TryGetValue(edge.TargetNodeId, out var targetNode)) continue;
+            var targetCatalog = registry.Require(targetNode.Type).Catalog;
+            var targetPort = targetCatalog.Inputs.FirstOrDefault(port =>
+                port.Name.Equals(edge.TargetPort, StringComparison.OrdinalIgnoreCase));
+            if (targetPort?.DataType != VisionDataType.Roi) continue;
+
+            var imagePort = RoiImageInputPort(targetNode.Type, targetPort.Name);
+            if (imagePort is null) continue;
+            var roiFrame = ResolveRoiFrame(edge.SourceNodeId, edge.SourcePort, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            var imageFrame = ResolveImageInputFrame(targetNode.Id, imagePort, workflow, byId);
+            if (roiFrame is not { IsTraceable: true } || imageFrame is not { IsTraceable: true }
+                || string.Equals(roiFrame.Key, imageFrame.Key, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            throw new InvalidOperationException(
+                $"Node '{targetNode.Id}' ROI input '{targetPort.Name}' is in frame '{roiFrame.Label}', but its '{imagePort}' image is in frame '{imageFrame.Label}'. " +
+                "Connect an ROI from the same image frame; for a crop, use the croppedRoi output from the crop that supplies the image.");
+        }
+    }
+
+    private static string? RoiImageInputPort(string nodeType, string roiPort)
+    {
+        if (nodeType.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase))
+            return "image";
+        if (nodeType.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)) return "debugImage";
+        if (nodeType.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+            return roiPort.Equals("searchRoi", StringComparison.OrdinalIgnoreCase) ? "image"
+                : roiPort.Equals("roi", StringComparison.OrdinalIgnoreCase) || roiPort.Equals("clutterRoi", StringComparison.OrdinalIgnoreCase)
+                    ? "template" : null;
+        return null;
+    }
+
+    private CoordinateFrame? ResolveRoiFrame(
+        string nodeId,
+        string outputPort,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
+        if (node.Type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
+            && outputPort.Equals("croppedRoi", StringComparison.OrdinalIgnoreCase))
+            return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+        if (node.Type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
+            && outputPort.Equals("roi", StringComparison.OrdinalIgnoreCase))
+            return ResolveImageInputFrame(nodeId, "debugImage", workflow, byId);
+        return null;
     }
 
     private CoordinateFrame? ResolveGeometryFrame(
