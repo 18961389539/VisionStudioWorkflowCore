@@ -123,6 +123,27 @@ internal static partial class JLVisionOperators
     { using var image = JLVisionImages.FromMat(source); using var inverted = image.InvertImage(); JLVisionImages.Store(inverted, target); }
     public static int CountNonZero(Mat source)
     { using var image = JLVisionImages.FromMat(source); using var region = image.Threshold(1d, 255d); return region.AreaCenter(out double _, out double _); }
+    public static Mat CropBinaryMask(Mat source, out Rect bounds, out int selectedPixels)
+    {
+        if (source.Empty() || source.Type() != MatType.CV_8UC1)
+            throw new InvalidOperationException("A non-empty 8-bit single-channel mask is required.");
+
+        using var image = JLVisionImages.FromMat(source);
+        using var region = image.Threshold(1d, 255d);
+        selectedPixels = region.AreaCenter(out double _, out double _);
+        if (selectedPixels == 0)
+        {
+            bounds = default;
+            return new Mat();
+        }
+
+        region.SmallestRectangle1(out int top, out int left, out int bottom, out int right);
+        bounds = new Rect(left, top, right - left + 1, bottom - top + 1);
+        using var croppedMask = image.CropRectangle1(top, left, bottom, right);
+        using var croppedRegion = croppedMask.Threshold(1d, 255d);
+        using var binary = croppedRegion.RegionToBin(255, 0, bounds.Width, bounds.Height);
+        return JLVisionImages.ToMat(binary);
+    }
     public static void Resize(Mat source, Mat target, Size size, double fx = 0, double fy = 0, InterpolationFlags interpolation = InterpolationFlags.Linear)
     {
         using var image = JLVisionImages.FromMat(source);

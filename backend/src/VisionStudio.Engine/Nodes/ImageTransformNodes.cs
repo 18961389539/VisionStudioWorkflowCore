@@ -26,31 +26,10 @@ public sealed class ImageCropNode : IVisionNodeExecutor
         ValidateCropRoi(roi);
 
         using var rasterMask = roi.BuildMask(source.Size());
-        var selectedPixels = Cv2.CountNonZero(rasterMask);
+        using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var bounds, out var selectedPixels);
         if (selectedPixels == 0)
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
-        using var rowProjection = new Mat();
-        using var columnProjection = new Mat();
-        Cv2.Reduce(rasterMask, rowProjection, ReduceDimension.Column, ReduceTypes.Max, -1);
-        Cv2.Reduce(rasterMask, columnProjection, ReduceDimension.Row, ReduceTypes.Max, -1);
-        var imageRows = rasterMask.Rows;
-        var imageColumns = rasterMask.Cols;
-        var top = 0;
-        while (top < imageRows && rowProjection.At<byte>(top, 0) == 0) top++;
-        var bottom = imageRows - 1;
-        while (bottom >= top && rowProjection.At<byte>(bottom, 0) == 0) bottom--;
-        var left = 0;
-        while (left < imageColumns && columnProjection.At<byte>(0, left) == 0) left++;
-        var right = imageColumns - 1;
-        while (right >= left && columnProjection.At<byte>(0, right) == 0) right--;
-        var bounds = new Rect(left, top, right - left + 1, bottom - top + 1);
         using var sourceCrop = new Mat(source, bounds);
-        using var rasterCrop = new Mat(rasterMask, bounds);
-        using var cropMask = new Mat();
-        // Keep bounds discovery and binary conversion in OpenCV. Converting a full-frame raster
-        // mask into a native image/region allocates large temporary buffers before this tight crop.
-        // Only threshold the output bounds so all image-sized mask temporaries stay crop-sized.
-        Cv2.InRange(rasterCrop, Scalar.All(1), Scalar.All(255), cropMask);
         var croppedImage = new Mat(sourceCrop.Rows, sourceCrop.Cols, sourceCrop.Type(), Scalar.All(0));
         var maskImage = cropMask.Clone();
         try
