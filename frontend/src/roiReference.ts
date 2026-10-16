@@ -44,8 +44,7 @@ const coordinateInputPorts: Record<string, string[]> = {
   'calibration.cameraIntrinsics': ['calibrationDataJson']
 };
 
-/** Fingerprint image and geometry inputs that define the pixel frame of a saved ROI reference. */
-export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]): string {
+function graphSourceFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[], includeAllParameters: boolean): string {
   if (!sourceNodeId) return parameterFingerprint(null);
   const byId = new Map(nodes.map(node => [node.id, node]));
   const active = new Set<string>();
@@ -62,7 +61,10 @@ export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: N
     const parameters = (node.data.parameters ?? {}) as NodeParameters;
     const nodeEdges = edges.filter(edge => edge.target === nodeId);
     const connectedPorts = new Set(nodeEdges.map(edge => edge.targetHandle ?? ''));
-    const keys = (coordinateParameters[type] ?? []).filter(key => {
+    const keys = (includeAllParameters ? Object.keys(parameters).filter(key =>
+      // Trained model bytes are large; the persisted model hash identifies them. Training samples are
+      // authoring inputs and do not affect matching until a new trained model is produced.
+      key !== 'trainedModelData' && key !== 'trainingSamples') : (coordinateParameters[type] ?? [])).filter(key => {
       if (type === 'image.crop' && (connectedPorts.has('roi') || (parameters.roi != null && key !== 'roi'))) return false;
       if (type === 'image.undistort' && connectedPorts.has('calibrationJson') && key === 'calibrationJson') return false;
       if (type === 'calibration.cameraIntrinsics' && connectedPorts.has('calibrationDataJson') && key === 'calibrationDataJson') return false;
@@ -74,7 +76,18 @@ export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: N
     const imagePorts = new Set(nodeInputs.filter(port => port.dataType === 'Image' || port.dataType === 'DomainImage')
       .map(port => port.name).filter((name): name is string => typeof name === 'string'));
     if (imagePorts.size === 0) imagePorts.add('image');
-    const relevantPorts = new Set([...imagePorts, ...(coordinateInputPorts[type] ?? [])]);
+    const valueInputPorts = new Set(nodeInputs.filter(port => typeof port.name === 'string'
+      && !['control', 'exec'].includes(String(port.dataType ?? '').toLowerCase()))
+      .map(port => port.name!));
+    if (includeAllParameters && valueInputPorts.size === 0) {
+      for (const edge of nodeEdges) {
+        const port = edge.targetHandle ?? '';
+        if (port && !['exec', 'next', 'control', 'execution'].includes(port.toLowerCase())) valueInputPorts.add(port);
+      }
+    }
+    const relevantPorts = includeAllParameters
+      ? valueInputPorts
+      : new Set([...imagePorts, ...(coordinateInputPorts[type] ?? [])]);
     if (type === 'image.crop') relevantPorts.add('roi');
     if (type === 'roi.transform') { relevantPorts.add('roi'); relevantPorts.add('currentPose'); }
     const parents = nodeEdges.filter(edge => relevantPorts.has(edge.targetHandle ?? ''))
@@ -92,6 +105,16 @@ export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: N
   };
 
   return parameterFingerprint(visit(sourceNodeId));
+}
+
+/** Fingerprint image and geometry inputs that define the pixel frame of a saved ROI reference. */
+export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]): string {
+  return graphSourceFingerprint(sourceNodeId, nodes, edges, false);
+}
+
+/** Fingerprint every value dependency that can change the connected pose used by a saved ROI reference. */
+export function poseSourceFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]): string {
+  return graphSourceFingerprint(sourceNodeId, nodes, edges, true);
 }
 
 /** Re-author an existing region in a new reference frame without applying the motion twice. */

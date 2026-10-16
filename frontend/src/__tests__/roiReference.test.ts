@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { applyReferenceParameters, capturedReference, imageFrameFingerprint, rebaseRoi } from '../roiReference';
+import { applyReferenceParameters, capturedReference, imageFrameFingerprint, poseSourceFingerprint, rebaseRoi } from '../roiReference';
 
 describe('ROI reference capture', () => {
   it('captures pixels and the actual pose together and rebases a legacy ROI without mutating it', () => {
@@ -64,6 +64,43 @@ describe('ROI reference capture', () => {
     expect(imageFrameFingerprint('synthetic', [synthetic({ ...base, centerX: 321 })], [])).not.toBe(baseline);
     expect(imageFrameFingerprint('synthetic', [synthetic({ ...base, placementMode: 'sequence', sampleIndex: 2 })], [])).not.toBe(baseline);
     expect(imageFrameFingerprint('synthetic', [synthetic(base)], [])).toBe(baseline);
+  });
+
+  it('tracks the complete pose-producing graph while excluding training-only sample payloads', () => {
+    const matcher = (parameters: Record<string, unknown>): Node => ({ id: 'matcher', position: { x: 0, y: 0 }, data: {
+      typeKey: 'match.shape', inputs: [
+        { name: 'image', dataType: 'Image' }, { name: 'template', dataType: 'Image' }
+      ], parameters
+    } });
+    const scene = (angleDeg: number): Node => ({ id: 'scene', position: { x: 0, y: 0 }, data: {
+      typeKey: 'image.rotate', inputs: [{ name: 'image', dataType: 'Image' }], parameters: { angleDeg, expand: false }
+    } });
+    const source: Node = { id: 'camera', position: { x: 0, y: 0 }, data: {
+      typeKey: 'image.acquire', parameters: { cameraId: 'camera-a' }
+    } };
+    const edges: Edge[] = [
+      { id: 'scene-input', source: 'camera', sourceHandle: 'image', target: 'scene', targetHandle: 'image' },
+      { id: 'matcher-image', source: 'scene', sourceHandle: 'image', target: 'matcher', targetHandle: 'image' }
+    ];
+    const baseline = poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-a', searchAngleStartDeg: -30, trainingSamples: [{ data: 'sample-a' }]
+    }), scene(0), source], edges);
+    expect(poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-a', searchAngleStartDeg: -20, trainingSamples: [{ data: 'sample-a' }]
+    }), scene(0), source], edges)).not.toBe(baseline);
+    expect(poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-b', searchAngleStartDeg: -30, trainingSamples: [{ data: 'sample-a' }]
+    }), scene(0), source], edges)).not.toBe(baseline);
+    expect(poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-a', searchAngleStartDeg: -30, trainingSamples: [{ data: 'sample-b' }]
+    }), scene(0), source], edges)).toBe(baseline);
+    expect(poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-a', searchAngleStartDeg: -30, trainingSamples: [{ data: 'sample-a' }]
+    }), scene(12), source], edges)).not.toBe(baseline);
+    const changedCamera = { ...source, data: { ...source.data, parameters: { cameraId: 'camera-b' } } };
+    expect(poseSourceFingerprint('matcher', [matcher({
+      trainedModelHash: 'model-a', searchAngleStartDeg: -30, trainingSamples: [{ data: 'sample-a' }]
+    }), scene(0), changedCamera], edges)).not.toBe(baseline);
   });
 
   it('moves connected measurement parameters atomically when the reference changes', () => {

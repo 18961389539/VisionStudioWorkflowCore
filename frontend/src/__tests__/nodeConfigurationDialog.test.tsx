@@ -108,6 +108,26 @@ describe('ROI reference workspace', () => {
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('invalidates a saved ROI reference when shape-match search settings can change the connected pose', async () => {
+    const shapeCatalog = fallbackCatalog.find(item => item.type === 'match.shape')!;
+    const matcher: Node = { id: 'locate', position: { x: 0, y: 0 }, data: {
+      typeKey: 'match.shape', label: '形状匹配', inputs: shapeCatalog.inputs,
+      parameters: { modelMode: 'trained', trainedModelHash: 'model-a', searchAngleStartDeg: -180 }
+    } };
+    const onPreview = vi.fn(async () => capture);
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, matcher], edges, onPreview });
+
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const changedMatcher = { ...matcher, data: { ...matcher.data, parameters: { ...matcher.data.parameters as object, searchAngleStartDeg: -45 } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, imageNode, changedMatcher]} />);
+    expect(view.dialog.getByText(/图像或定位来源、模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('invalidates a saved ROI reference when an upstream image transform changes without changing dimensions', async () => {
     const rotateCatalog = fallbackCatalog.find(item => item.type === 'image.rotate')!;
     const rotateNode: Node = { id: 'rotate', position: { x: 0, y: 0 }, data: { typeKey: rotateCatalog.type, label: '旋转图像',
