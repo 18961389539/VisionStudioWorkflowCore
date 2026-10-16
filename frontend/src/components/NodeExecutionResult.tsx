@@ -11,8 +11,16 @@ const geometryResultNodeTypes = new Set(['image.crop', 'roi.transform', ...measu
 function measurementNotFoundMessage(type: string, summary: Record<string, unknown> | undefined) {
   if (!measurementNodeTypes.has(type) || summary?.found !== false) return undefined;
   const reason = typeof summary.reason === 'string' ? summary.reason : '';
+  if (reason === 'no-edge-above-threshold') {
+    const noEdgeMessages: Record<string, string> = {
+      'feature.edgeSubpixel': '搜索线内没有达到最小对比度的边缘。检查搜索线是否横穿目标边缘，并核对最小对比度、边缘极性、搜索方向和 ROI。',
+      'measure.caliper': '搜索线内没有达到最小对比度的边缘。检查搜索线是否横穿目标边缘，并核对最小对比度、边缘极性、搜索方向和 ROI。',
+      'measure.caliperLine': '沿边缘布置的平行搜索剖面没有检出达到最小对比度的边缘。检查搜索线、沿边缘跨度、最小对比度、极性、搜索方向和 ROI。',
+      'measure.caliperCircle': '标称圆的径向搜索弧内没有达到最小对比度的边缘。检查标称圆、圆弧范围、径向搜索带、最小对比度、极性、搜索方向和 ROI。'
+    };
+    return noEdgeMessages[type] ?? '搜索范围内没有达到最小对比度的边缘。请检查搜索几何、最小对比度、边缘极性、搜索方向和 ROI。';
+  }
   const messages: Record<string, string> = {
-    'no-edge-above-threshold': '搜索范围内没有达到最小对比度的边缘。检查搜索线或标称圆是否穿过目标边缘，并核对最小对比度、边缘极性、搜索方向和 ROI。',
     'search-line-outside-image': '搜索线完全位于输入图像之外。请调整搜索线，或检查图像裁剪和坐标变换。',
     'search-region-outside-image': '所有卡尺都落在输入图像之外。请移动搜索区域，或检查图像裁剪和坐标变换。',
     'search-line-clipped-too-short': '搜索线与图像只有很短的交集，裁切后不足 2 px。请调整线的位置或方向。',

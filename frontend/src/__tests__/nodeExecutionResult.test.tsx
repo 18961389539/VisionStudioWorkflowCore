@@ -57,6 +57,21 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText(/ROI 可能屏蔽了搜索线/)).toBeTruthy();
   });
 
+  it('tailors no-edge guidance to the caliper geometry', () => {
+    mount('measure.caliperLine', result(false, 'no-edge-above-threshold'));
+    expect(screen.getByText(/沿边缘布置的平行搜索剖面/)).toBeTruthy();
+    expect(screen.queryByText(/标称圆/)).toBeNull();
+
+    cleanup();
+    mount('measure.caliperCircle', result(false, 'no-edge-above-threshold'));
+    expect(screen.getByText(/标称圆的径向搜索弧/)).toBeTruthy();
+    expect(screen.queryByText(/搜索线/)).toBeNull();
+
+    cleanup();
+    mount('measure.caliper', result(false, 'no-edge-above-threshold'));
+    expect(screen.getByText(/搜索线内没有达到最小对比度/)).toBeTruthy();
+  });
+
   it('explains when circle points cannot support a stable fit', () => {
     mount('measure.caliperCircle', result(false, 'degenerate-circle-fit'));
 
