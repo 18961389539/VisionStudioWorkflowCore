@@ -681,6 +681,78 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task ShapeMatchRoiTransformCropAndCaliperCircle_KeepReferenceGeometryAligned()
+    {
+        using var template = BuildTemplate();
+        Cv2.Circle(template, new Point(80, 50), 12, Scalar.All(240), 2);
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(230, 205, 28))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        const string matchParameters = """{"minScore":0.5,"angleRangeDeg":180,"angleStepDeg":1,"minArea":300,"signatureSamples":360}""";
+        var referenceMatch = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(template), ["template"] = Image(template) }, matchParameters);
+        var currentMatch = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) }, matchParameters);
+        Assert.True(Convert.ToBoolean(referenceMatch.Summary["found"]), SummaryText(referenceMatch));
+        Assert.True(Convert.ToBoolean(currentMatch.Summary["found"]), SummaryText(currentMatch));
+        var basePose = referenceMatch.Outputs["pose"].Require<VisionPose2D>("pose");
+        var currentPose = currentMatch.Outputs["pose"].Require<VisionPose2D>("pose");
+
+        var corrected = await Run(new RoiTransformNode(),
+            new Dictionary<string, VisionValue> { ["currentPose"] = VisionValue.Pose(currentPose) },
+            JsonSerializer.Serialize(new
+            {
+                roi = new { type = "Circle", x = 80, y = 50, radius = 18 },
+                baseX = basePose.X, baseY = basePose.Y, baseThetaDeg = basePose.ThetaDeg
+            }));
+        using var sceneImage = VisionImage.Own(scene.Clone());
+        var crop = await new ImageCropNode().ExecuteAsync(
+            new NodeExecutionContext(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(sceneImage),
+                ["roi"] = corrected.Outputs["roi"]
+            }),
+            new NodeDefinition("crop", "image.crop", null, null, Params("{}")), CancellationToken.None);
+        using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
+
+        var composed = await new ComposeTransformNode().ExecuteAsync(
+            new NodeExecutionContext(new Dictionary<string, VisionValue>
+            {
+                ["transformA"] = corrected.Outputs["transform"],
+                ["transformB"] = crop.Outputs["transform"]
+            }),
+            new NodeDefinition("compose", "coordinate.transformCompose", null, null, Params("{}")), CancellationToken.None);
+        var composedTransform = composed.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.Equal("ReferenceImage", composedTransform.SourceFrame);
+        Assert.Equal("CropImage", composedTransform.TargetFrame);
+        var expectedCircleCenter = composedTransform.Apply(new VisionPoint2D(80, 50));
+        var measurement = await new CaliperCircleNode().ExecuteAsync(
+            new NodeExecutionContext(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(croppedImage),
+                ["circle"] = VisionValue.Circle(new VisionCircle(80, 50, 12)),
+                ["transform"] = composed.Outputs["transform"],
+                ["roi"] = crop.Outputs["croppedRoi"]
+            }),
+            new NodeDefinition("caliper", "measure.caliperCircle", null, null,
+                Params("""{"angleStartDeg":-180,"angleEndDeg":180,"samplingMode":"count","caliperCount":72,"radialBand":5,"sampleWidth":1,"minContrast":20,"polarity":"rising","searchDirection":"firstfromstart"}""")),
+            CancellationToken.None);
+
+        Assert.True(Convert.ToBoolean(measurement.Summary["found"]), SummaryText(measurement));
+        var fitted = measurement.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.InRange(Math.Abs(fitted.X - expectedCircleCenter.X), 0, 1.5);
+        Assert.InRange(Math.Abs(fitted.Y - expectedCircleCenter.Y), 0, 1.5);
+        // The rising/first-from-start setup selects the ring's inner edge, not its centerline.
+        Assert.InRange(fitted.Radius, 10, 11);
+
+        (referenceMatch.Outputs["image"].Value as IDisposable)?.Dispose();
+        (currentMatch.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        (measurement.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task ShapeMatch_TrainingPreviewAndTrain_SupportTemplatePathAndColorImages()
     {
         using var template = BuildTemplate();
