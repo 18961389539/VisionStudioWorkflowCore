@@ -13,12 +13,14 @@ public sealed class ImageCropNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
-        var roi = node.GetRoi() ?? new VisionRoi(
-            VisionRoiType.Rectangle,
-            X: node.GetDouble("x", 0),
-            Y: node.GetDouble("y", 0),
-            Width: node.GetDouble("width", source.Width),
-            Height: node.GetDouble("height", source.Height));
+        var roi = context.TryGetValue("roi", out var roiValue)
+            ? roiValue.Require<VisionRoi>("roi")
+            : node.GetRoi() ?? new VisionRoi(
+                VisionRoiType.Rectangle,
+                X: node.GetDouble("x", 0),
+                Y: node.GetDouble("y", 0),
+                Width: node.GetDouble("width", source.Width),
+                Height: node.GetDouble("height", source.Height));
         ValidateCropRoi(roi, source.Width, source.Height);
 
         using var rasterMask = roi.BuildMask(source.Size());

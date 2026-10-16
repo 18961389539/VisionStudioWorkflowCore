@@ -93,12 +93,47 @@ internal static class SubpixelEdgeCore
         return new VisionPoint2D(start.X + dx * position / length, start.Y + dy * position / length);
     }
 
-    /// <summary>把搜索线起点/终点收敛到图像范围内（钳制），返回是否发生修正。</summary>
-    public static (VisionPoint2D Start, VisionPoint2D End, bool Clamped) ClampLine(VisionPoint2D start, VisionPoint2D end, int width, int height)
+    /// <summary>Clip the segment to the image rectangle without changing its direction.</summary>
+    public static (VisionPoint2D Start, VisionPoint2D End, bool Clamped, bool Intersects) ClampLine(VisionPoint2D start, VisionPoint2D end, int width, int height)
     {
-        var s = new VisionPoint2D(Math.Clamp(start.X, 0, width - 1), Math.Clamp(start.Y, 0, height - 1));
-        var e = new VisionPoint2D(Math.Clamp(end.X, 0, width - 1), Math.Clamp(end.Y, 0, height - 1));
-        return (s, e, Math.Abs(s.X - start.X) > 1e-9 || Math.Abs(s.Y - start.Y) > 1e-9 || Math.Abs(e.X - end.X) > 1e-9 || Math.Abs(e.Y - end.Y) > 1e-9);
+        if (width <= 0 || height <= 0) throw new InvalidOperationException("Cannot clip a search line to an empty image.");
+        if (new[] { start.X, start.Y, end.X, end.Y }.Any(value => !double.IsFinite(value) || Math.Abs(value) > 10_000_000))
+            throw new InvalidOperationException("Search line coordinates must be finite and within +/-10000000 pixels.");
+
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var t0 = 0d;
+        var t1 = 1d;
+        bool Clip(double p, double q)
+        {
+            if (Math.Abs(p) < 1e-15) return q >= 0;
+            var r = q / p;
+            if (p < 0)
+            {
+                if (r > t1) return false;
+                t0 = Math.Max(t0, r);
+            }
+            else
+            {
+                if (r < t0) return false;
+                t1 = Math.Min(t1, r);
+            }
+            return t0 <= t1;
+        }
+
+        if (!Clip(-dx, start.X) || !Clip(dx, width - 1d - start.X)
+            || !Clip(-dy, start.Y) || !Clip(dy, height - 1d - start.Y) || t0 > t1)
+            return (start, end, true, false);
+
+        var clippedStart = new VisionPoint2D(
+            Math.Clamp(start.X + t0 * dx, 0, width - 1),
+            Math.Clamp(start.Y + t0 * dy, 0, height - 1));
+        var clippedEnd = new VisionPoint2D(
+            Math.Clamp(start.X + t1 * dx, 0, width - 1),
+            Math.Clamp(start.Y + t1 * dy, 0, height - 1));
+        var clamped = Math.Abs(clippedStart.X - start.X) > 1e-9 || Math.Abs(clippedStart.Y - start.Y) > 1e-9
+            || Math.Abs(clippedEnd.X - end.X) > 1e-9 || Math.Abs(clippedEnd.Y - end.Y) > 1e-9;
+        return (clippedStart, clippedEnd, clamped, true);
     }
 
     /// <summary>解析搜索线：searchLine 输入端口优先，否则用参数坐标。</summary>
@@ -150,15 +185,23 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
-                var (start, end, clamped) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
-                var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out var points, out var spacing);
-                var edge = SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
+                if (MeasurementMath.Hypot(search.End.X - search.Start.X, search.End.Y - search.Start.Y) < 2)
+                    throw new InvalidOperationException("The search line is too short (minimum 2 px).");
+                var (start, end, clamped, intersects) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
+                var clippedLine = new VisionLine2D(start, end);
+                var searchLine = intersects ? clippedLine : search;
+                var clippedLength = MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y);
+                var edge = !intersects
+                    ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-outside-image")
+                    : clippedLength < 2
+                        ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-clipped-too-short")
+                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine);
 
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(edge.Found),
-                    ["searchLine"] = VisionValue.Line(new VisionLine2D(start, end))
+                    ["searchLine"] = VisionValue.Line(searchLine)
                 };
                 if (edge.Found)
                 {
@@ -169,10 +212,10 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                     outputs["sampleCount"] = VisionValue.Integer(edge.SampleCount);
                 }
 
-                var overlays = new List<VisionOverlay>
-                {
-                    new("edge-search", VisionOverlayType.Line, X: start.X, Y: start.Y, X2: end.X, Y2: end.Y, Stroke: "#597ef7", StrokeWidth: 1.5)
-                };
+                var overlays = new List<VisionOverlay>();
+                if (intersects)
+                    overlays.Add(new VisionOverlay("edge-search", VisionOverlayType.Line,
+                        X: start.X, Y: start.Y, X2: end.X, Y2: end.Y, Stroke: "#597ef7", StrokeWidth: 1.5));
                 if (edge.Found)
                 {
                     var point = SubpixelEdgeCore.Locate(start, end, edge.Position);
@@ -210,6 +253,13 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
             mask?.Dispose();
         }
     }
+
+    private static SubpixelEdgeCore.EdgeResult FindClippedEdge(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end,
+        int sampleWidth, string polarity, double minContrast, string direction, string refine)
+    {
+        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
+        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
+    }
 }
 
 /// <summary>
@@ -245,25 +295,41 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
-                var (start, end, clamped) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
-                var length = MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y);
+                var (start, end, baseClamped, baseIntersects) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
+                var length = MeasurementMath.Hypot(search.End.X - search.Start.X, search.End.Y - search.Start.Y);
                 if (length < 2)
-                    throw new InvalidOperationException("The search line is too short after clamping to the image (minimum 2 px).");
+                    throw new InvalidOperationException("The search line is too short (minimum 2 px).");
                 var span = edgeLength > 0 ? edgeLength : length;
                 var caliperCount = Math.Clamp(node.GetInt("caliperCount", 9), 3, 101);
-                var tangentX = -(end.Y - start.Y) / length;
-                var tangentY = (end.X - start.X) / length;
+                var tangentX = -(search.End.Y - search.Start.Y) / length;
+                var tangentY = (search.End.X - search.Start.X) / length;
                 var points = new List<VisionPoint2D>(caliperCount);
                 var strengths = new List<double>(caliperCount);
                 var failures = 0;
+                var outsideImage = 0;
+                var shortAfterClip = 0;
+                var profilesClipped = 0;
+                var anyProfileClipped = false;
+                var overlays = new List<VisionOverlay>();
+                if (baseIntersects)
+                    overlays.Add(new("caliper-line-search", VisionOverlayType.Line, X: start.X, Y: start.Y, X2: end.X, Y2: end.Y, Stroke: "#597ef7", StrokeWidth: 1.5));
                 for (var i = 0; i < caliperCount; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var offset = caliperCount == 1 ? 0 : (i / (double)(caliperCount - 1) - 0.5) * span;
                     var offsetX = tangentX * offset;
                     var offsetY = tangentY * offset;
-                    var profileStart = new VisionPoint2D(start.X + offsetX, start.Y + offsetY);
-                    var profileEnd = new VisionPoint2D(end.X + offsetX, end.Y + offsetY);
+                    var requestedStart = new VisionPoint2D(search.Start.X + offsetX, search.Start.Y + offsetY);
+                    var requestedEnd = new VisionPoint2D(search.End.X + offsetX, search.End.Y + offsetY);
+                    var (profileStart, profileEnd, profileClamped, profileIntersects) =
+                        SubpixelEdgeCore.ClampLine(requestedStart, requestedEnd, gray.Cols, gray.Rows);
+                    if (profileClamped) { profilesClipped++; anyProfileClipped = true; }
+                    if (!profileIntersects) { failures++; outsideImage++; continue; }
+                    if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
+                    { failures++; shortAfterClip++; continue; }
+                    overlays.Add(new($"caliper-line-profile-{i}", VisionOverlayType.Line,
+                        X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
+                        Stroke: "#91d5ff", StrokeWidth: 0.8));
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var lineSpacing);
                     var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine);
                     if (!edge.Found) { failures++; continue; }
@@ -272,24 +338,21 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 }
                 var fit = FitCaliperLine(points, maxFitOutliers, fitOutlierThreshold);
                 var found = fit is not null;
+                var reportedSearchLine = baseIntersects ? new VisionLine2D(start, end) : search;
 
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(found),
-                    ["searchLine"] = VisionValue.Line(new VisionLine2D(start, end))
-                };
-                var overlays = new List<VisionOverlay>
-                {
-                    new("caliper-line-search", VisionOverlayType.Line, X: start.X, Y: start.Y, X2: end.X, Y2: end.Y, Stroke: "#597ef7", StrokeWidth: 1.5)
+                    ["searchLine"] = VisionValue.Line(reportedSearchLine),
+                    ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? points.Count),
+                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0)
                 };
 
                 if (fit is not null)
                 {
                     var usedPoints = fit.UsedIndices.Select(index => points[index]).ToArray();
                     var usedStrengths = fit.UsedIndices.Select(index => strengths[index]).ToArray();
-                    outputs["sampleCount"] = VisionValue.Integer(usedPoints.Length);
-                    outputs["ignoredCount"] = VisionValue.Integer(fit.IgnoredIndices.Length);
                     if (found)
                     {
                         outputs["point"] = VisionValue.Point(fit.Point);
@@ -314,7 +377,8 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     new Dictionary<string, object?>
                     {
                         ["found"] = found,
-                        ["reason"] = found ? "ok" : points.Count == 0 ? "no-edge-above-threshold" : points.Count < 3 ? "too-few-edge-points" : fit is not null ? "fit-rejected" : "degenerate-line-fit",
+                        ["reason"] = found ? "ok" : points.Count == 0 && outsideImage == caliperCount ? "search-region-outside-image"
+                            : points.Count == 0 ? "no-edge-above-threshold" : points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit",
                         ["edgeX"] = fit is not null ? Math.Round(fit.Point.X, 3) : null,
                         ["edgeY"] = fit is not null ? Math.Round(fit.Point.Y, 3) : null,
                         ["strength"] = fit is not null ? Math.Round(fit.UsedIndices.Select(index => strengths[index]).Average(), 3) : null,
@@ -329,7 +393,11 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         ["sampleWidth"] = sampleWidth,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
-                        ["lineClampedToImage"] = clamped,
+                        ["lineClampedToImage"] = baseClamped || anyProfileClipped,
+                        ["profilesIntersectingImage"] = caliperCount - outsideImage,
+                        ["profilesOutsideImage"] = outsideImage,
+                        ["profilesClippedToImage"] = profilesClipped,
+                        ["profilesTooShortAfterClip"] = shortAfterClip,
                         ["autoGray"] = autoGray,
                         ["roi"] = roi?.Type.ToString() ?? "FullImage"
                     },
@@ -430,6 +498,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         }
         if (!double.IsFinite(center.X) || !double.IsFinite(center.Y) || !double.IsFinite(nominalRadius) || nominalRadius <= 0)
             throw new InvalidOperationException("Caliper circle requires a finite center and a positive radius.");
+        if (Math.Abs(center.X) > 10_000_000 || Math.Abs(center.Y) > 10_000_000 || nominalRadius > 10_000_000)
+            throw new InvalidOperationException("Caliper circle coordinates and radius must be within 10000000 pixels.");
 
         var angleStart = node.GetDouble("angleStartDeg", -180);
         var angleEnd = node.GetDouble("angleEndDeg", 180);
@@ -461,6 +531,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         var maxFitOutliers = Math.Clamp(node.GetInt("maxFitOutliers", 0), 0, 16);
         var fitOutlierThreshold = Math.Max(0, node.GetDouble("fitOutlierThreshold", 2));
         var fitRadiusTolerance = Math.Max(0, node.GetDouble("fitRadiusTolerance", 0));
+        var innerRadius = Math.Max(0, nominalRadius - band);
+        var outerRadius = nominalRadius + band;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -476,20 +548,32 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var edgePoints = new List<VisionPoint2D>();
                 var rejected = 0;
                 var rejectedByDeviation = 0;
-                foreach (var angleDeg in angles)
+                var spokesClipped = 0;
+                var spokeOverlays = new List<VisionOverlay>(angles.Length);
+                for (var spokeIndex = 0; spokeIndex < angles.Length; spokeIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    var angleDeg = angles[spokeIndex];
                     var radians = angleDeg * Math.PI / 180.0;
                     var dirX = Math.Cos(radians);
                     var dirY = Math.Sin(radians);
-                    // 径向剖面：从 r-band 到 r+band 沿线采样（条带平均方向为切向）。
-                    var start = new VisionPoint2D(center.X + dirX * (nominalRadius - band), center.Y + dirY * (nominalRadius - band));
-                    var end = new VisionPoint2D(center.X + dirX * (nominalRadius + band), center.Y + dirY * (nominalRadius + band));
-                    if (!InsideImage(start, gray) && !InsideImage(end, gray)) { rejected++; continue; }
-                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spokeSpacing);
+                    // A radial search cannot continue through a negative radius and emerge on the far side.
+                    // Clip the inner limit at the center so first-from-start always searches outward.
+                    var start = new VisionPoint2D(center.X + dirX * innerRadius, center.Y + dirY * innerRadius);
+                    var end = new VisionPoint2D(center.X + dirX * outerRadius, center.Y + dirY * outerRadius);
+                    var (profileStart, profileEnd, spokeClipped, spokeIntersects) =
+                        SubpixelEdgeCore.ClampLine(start, end, gray.Cols, gray.Rows);
+                    if (spokeClipped) spokesClipped++;
+                    if (!spokeIntersects || MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
+                    { rejected++; continue; }
+                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing);
                     var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic");
+                    spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
+                        X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
+                        Stroke: edge.Found ? "#91d5ff" : "#bfbfbf", StrokeWidth: 0.7));
                     if (!edge.Found) { rejected++; continue; }
-                    var edgeRadius = nominalRadius - band + edge.Position;
+                    var clippedStartRadius = (profileStart.X - center.X) * dirX + (profileStart.Y - center.Y) * dirY;
+                    var edgeRadius = clippedStartRadius + edge.Position;
                     if (maxDeviation > 0 && Math.Abs(edgeRadius - nominalRadius) > maxDeviation)
                     {
                         rejected++;
@@ -509,6 +593,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 {
                     new("caliper-circle-nominal", VisionOverlayType.Circle, X: center.X, Y: center.Y, Radius: nominalRadius, Stroke: "#597ef7", StrokeWidth: 1)
                 };
+                overlays.AddRange(spokeOverlays);
                 var summary = new Dictionary<string, object?>
                 {
                     ["found"] = found,
@@ -521,11 +606,14 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["edgePoints"] = edgePoints.Count,
                     ["rejectedSpokes"] = rejected,
                     ["rejectedByDeviation"] = rejectedByDeviation,
+                    ["spokesClippedToImage"] = spokesClipped,
                     ["nominalRadius"] = Math.Round(nominalRadius, 3),
                     ["samplingMode"] = samplingMode,
                     ["caliperCount"] = angles.Length,
                     ["angleStepDeg"] = effectiveStep,
                     ["radialBand"] = band,
+                    ["radialSearchMinRadius"] = innerRadius,
+                    ["radialSearchMaxRadius"] = outerRadius,
                     ["fitRadiusTolerance"] = fitRadiusTolerance,
                     ["polarity"] = polarity,
                     ["searchDirection"] = searchDirection,
@@ -581,9 +669,6 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             mask?.Dispose();
         }
     }
-
-    private static bool InsideImage(VisionPoint2D p, Mat gray) =>
-        p.X >= 0 && p.Y >= 0 && p.X < gray.Cols && p.Y < gray.Rows;
 
     private sealed record CircleFitResult(VisionCircle Circle, int[] UsedIndices, int[] IgnoredIndices, double Rmse);
 

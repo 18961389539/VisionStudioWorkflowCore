@@ -217,7 +217,7 @@ public static class Batch5PrecisionCatalog
                 new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
                     Description: "A point can be excluded when its distance from the fitted line exceeds this value.")
             ],
-            "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
+            "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -261,7 +261,7 @@ public static class Batch5PrecisionCatalog
                 new("angleStepDeg", "Angle Step (Legacy)", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Arc",
                     VisibleWhen: new("samplingMode", ["step"])),
                 new("radialBand", "Radial Search Half-Width", "number", 8, 1, 500, 1, Unit: "px", Group: "Sampling",
-                    Description: "Searches from nominal radius minus this value to nominal radius plus this value."),
+                    Description: "Searches from max(0, nominal radius minus this value) to nominal radius plus this value; the radial search never crosses the center."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
@@ -285,7 +285,7 @@ public static class Batch5PrecisionCatalog
                 new("fitRadiusTolerance", "Fit Radius Tolerance (0=off)", "number", 0, 0, 5000, 0.1, Unit: "px", Group: "Fit",
                     Description: "Reject the fitted circle when its radius differs from the nominal radius by more than this amount.")
             ],
-            "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+            "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "09eb7d2cc0a3db561392fb1c263a7aabe997f83f11b3a2046afff36324a6823d",
+  "hash": "cd4ae5daf59ce5959e6619f62c06bf9b2becd3d83e7190ba9658fc0b956591bd",
   "items": [
     {
       "type": "image.acquire",
@@ -6197,7 +6197,7 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Searches from nominal radius minus this value to nominal radius plus this value."
+          "description": "Searches from max(0, nominal radius minus this value) to nominal radius plus this value; the radial search never crosses the center."
         },
         {
           "name": "minContrast",
@@ -6311,7 +6311,7 @@
           "description": "Reject the fitted circle when its radius differs from the nominal radius by more than this amount."
         }
       ],
-      "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+      "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6793,7 +6793,7 @@
           "description": "A point can be excluded when its distance from the fitted line exceeds this value."
         }
       ],
-      "description": "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
+      "description": "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9527,6 +9527,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
         }
       ],
       "outputs": [
@@ -9557,7 +9562,7 @@
         }
       ],
       "parameters": [],
-      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

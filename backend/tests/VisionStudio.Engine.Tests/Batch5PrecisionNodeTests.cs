@@ -290,7 +290,7 @@ public sealed class Batch5PrecisionNodeTests
         var line = result.Outputs["line"].Require<VisionLine2D>("line");
         Assert.InRange(line.Start.X, trueEdgeX - 0.5, trueEdgeX + 0.5);
         Assert.InRange(Convert.ToDouble(result.Summary["fitError"]), 0, 0.5);
-        Assert.Contains(result.Overlays, overlay => overlay.Id.StartsWith("caliper-line-ignored-point", StringComparison.Ordinal));
+        Assert.Contains(result.Overlays ?? [], overlay => overlay.Id.StartsWith("caliper-line-ignored-point", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -405,6 +405,28 @@ public sealed class Batch5PrecisionNodeTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await Run(new CaliperCircleNode(), Image(image), """{"centerX":200,"centerY":200,"radius":0}"""));
         Assert.Contains("positive radius", error.Message);
+    }
+
+    [Fact]
+    public async Task CaliperCircle_RadialSearchStopsAtTheCenterForSmallNominalRadius()
+    {
+        using var image = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(30));
+        Cv2.Circle(image, new Point(64, 64), 6, Scalar.All(220), -1, LineTypes.AntiAlias);
+        Cv2.Circle(image, new Point(64, 64), 4, Scalar.All(30), -1, LineTypes.AntiAlias);
+        Cv2.GaussianBlur(image, image, new Size(0, 0), 0.8);
+
+        var result = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":64,"centerY":64,"radius":1,"radialBand":8,"samplingMode":"count","caliperCount":25,"angleStartDeg":0,"angleEndDeg":60,"searchDirection":"firstfromstart","polarity":"rising","sampleWidth":1,"minContrast":15}""");
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal(0, Convert.ToDouble(result.Summary["radialSearchMinRadius"]));
+        Assert.InRange(result.Outputs["radius"].Require<double>("radius"), 4.2, 5.3);
+        var overlays = result.Overlays ?? [];
+        var points = overlays.Where(overlay => overlay.Id.StartsWith("caliper-circle-point-", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(25, overlays.Count(overlay => overlay.Id.StartsWith("caliper-circle-search-", StringComparison.Ordinal)));
+        Assert.NotEmpty(points);
+        Assert.True(points.Average(point => point.X) > 64);
+        Assert.True(points.Average(point => point.Y) > 64);
     }
 
     [Fact]

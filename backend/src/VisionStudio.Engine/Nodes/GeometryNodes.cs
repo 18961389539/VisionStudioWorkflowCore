@@ -201,20 +201,25 @@ public sealed class CaliperNode : IVisionNodeExecutor
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
-                var (start, end, clamped) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
-                var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
-                var edge = SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
-                var searchLine = new VisionLine2D(start, end);
+                if (MeasurementMath.Hypot(search.End.X - search.Start.X, search.End.Y - search.Start.Y) < 2)
+                    throw new InvalidOperationException("The search line is too short (minimum 2 px).");
+                var (start, end, clamped, intersects) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
+                var clippedLine = new VisionLine2D(start, end);
+                var searchLine = intersects ? clippedLine : search;
+                var clippedLength = MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y);
+                var edge = !intersects
+                    ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-outside-image")
+                    : clippedLength < 2
+                        ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-clipped-too-short")
+                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine);
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(edge.Found),
                     ["searchLine"] = VisionValue.Line(searchLine)
                 };
-                var overlays = new List<VisionOverlay>
-                {
-                    VisionGeometryHelpers.OverlayLine("caliper-search", searchLine, "#597ef7", 1.5)
-                };
+                var overlays = new List<VisionOverlay>();
+                if (intersects) overlays.Add(VisionGeometryHelpers.OverlayLine("caliper-search", searchLine, "#597ef7", 1.5));
                 VisionPoint2D? edgePoint = null;
                 if (edge.Found)
                 {
@@ -253,6 +258,13 @@ public sealed class CaliperNode : IVisionNodeExecutor
             finally { owned?.Dispose(); }
         }
         finally { mask?.Dispose(); }
+    }
+
+    private static SubpixelEdgeCore.EdgeResult FindClippedEdge(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end,
+        int sampleWidth, string polarity, double minContrast, string direction, string refine)
+    {
+        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
+        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
     }
 }
 
