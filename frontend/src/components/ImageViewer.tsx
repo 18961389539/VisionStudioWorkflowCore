@@ -8,7 +8,7 @@ type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
-type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd';
+type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
@@ -86,6 +86,27 @@ function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 
   return {
     start: atAngle(start, geometry.radius + (smallCircle ? offset : -offset)),
     end: atAngle(start + span, geometry.radius + offset * (smallCircle ? 2 : 1))
+  };
+}
+
+function caliperCircleBandHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
+  if (width <= 0 || height <= 0) return undefined;
+  const band = Math.max(0, geometry.band ?? 0);
+  const innerRadius = Math.max(0, geometry.radius - band);
+  const outerRadius = geometry.radius + band;
+  const offset = (HANDLE_HIT + 4) / scale;
+  const innerHandleRadius = Math.max(innerRadius, innerRadius * scale < HANDLE_HIT * 3 ? offset : 0);
+  const outerHandleRadius = Math.max(outerRadius, outerRadius * scale < HANDLE_HIT * 3 ? offset * 2 : 0);
+  const atAngle = (angleDeg: number, radius: number): Point => {
+    const radians = angleDeg * Math.PI / 180;
+    return {
+      x: clamp(geometry.center.x + Math.max(0, radius) * Math.cos(radians), 0, width),
+      y: clamp(geometry.center.y + Math.max(0, radius) * Math.sin(radians), 0, height)
+    };
+  };
+  return {
+    inner: atAngle(-90, innerHandleRadius),
+    outer: atAngle(90, outerHandleRadius)
   };
 }
 
@@ -292,6 +313,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   const { span, fullCircle } = circleArcSpan(start, end);
   const angles = buildCaliperCircleAngles(geometry);
   const arcHandles = editable ? caliperCircleArcHandles(geometry, scale, imageWidth, imageHeight) : undefined;
+  const bandHandles = editable ? caliperCircleBandHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const boundary = (angleDeg: number) => {
     const radians = angleDeg * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -322,6 +344,10 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       {arcHandles && <>
         <Circle x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+      </>}
+      {bandHandles && <>
+        <Circle x={bandHandles.inner.x} y={bandHandles.inner.y} radius={handleRadius} fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={bandHandles.outer.x} y={bandHandles.outer.y} radius={handleRadius} fill="#52c41a" stroke="#fff" strokeWidth={1.5 / scale} />
       </>}
     </>}
   </Group>;
@@ -552,11 +578,16 @@ export default function ImageViewer({
       return undefined;
     }
     const arcHandles = caliperCircleArcHandles(target, view.scale, actualWidth, actualHeight);
-    if (arcHandles && near(arcHandles.start)) return 'angleStart';
-    if (arcHandles && near(arcHandles.end)) return 'angleEnd';
-    if (near(target.center)) return 'center';
-    if (near({ x: target.center.x + target.radius, y: target.center.y })) return 'radius';
-    return undefined;
+    const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
+    const candidates: [MeasurementDragMode, Point][] = [
+      ['center', target.center], ['radius', { x: target.center.x + target.radius, y: target.center.y }]
+    ];
+    if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
+    if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
+    const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
+      screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)
+    ) })).sort((a, b) => a.distance - b.distance)[0];
+    return closest?.distance <= HANDLE_HIT ? closest.mode : undefined;
   };
 
   const onWheel = (event: any) => {
@@ -705,6 +736,15 @@ export default function ImageViewer({
         setMeasurementDraft(mode === 'angleStart'
           ? { ...origin, angleStartDeg: adjustedAngle }
           : { ...origin, angleEndDeg: adjustedAngle });
+      } else if (mode === 'innerBand' || mode === 'outerBand') {
+        const initialBand = Math.max(0, Math.min(500, origin.band ?? 0));
+        const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
+        const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
+        const initialInner = Math.max(0, origin.radius - initialBand);
+        const band = mode === 'innerBand'
+          ? clamp(origin.radius - Math.max(0, initialInner + currentDistance - startDistance), 1, 500)
+          : clamp(initialBand + currentDistance - startDistance, 1, 500);
+        setMeasurementDraft({ ...origin, band });
       }
       return;
     }
@@ -896,7 +936,7 @@ export default function ImageViewer({
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '拖动以重新绘制圆；橙色控制点调整圆心或半径，蓝色/紫色控制点调整圆弧起点/终点'
+                ? '拖动重绘圆；橙色控制点调整圆心或半径，蓝色/紫色调整圆弧起点/终点，青色/绿色调整搜索带内外边界'
                 : '在图像上拖动以重新绘制；也可拖动橙色端点或线段微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>

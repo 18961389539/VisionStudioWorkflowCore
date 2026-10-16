@@ -179,6 +179,40 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.radius).toBe(1);
   });
 
+  it('widens the radial search band when its inner handle is dragged inward', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,
+      angleStartDeg: 0, angleEndDeg: 60 }, onChange);
+    const stage = screen.getByTestId('stage');
+    // The cyan handle marks the inner radius (14 px); dragging it to 10 px widens the band to 10 px.
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 97 });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 106.4 });
+    fireEvent.mouseUp(stage, { clientX: 200, clientY: 106.4 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.band).toBeCloseTo(10, 0);
+  });
+
+  it('sets a nonzero radial band by dragging its outer handle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 0,
+      angleStartDeg: 0, angleEndDeg: 60 }, onChange);
+    const stage = screen.getByTestId('stage');
+    // With a zero-width band, the green handle stays separate from the nominal-radius handle.
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 177.2 });
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 186.6 });
+    fireEvent.mouseUp(stage, { clientX: 200, clientY: 186.6 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type !== 'circle') throw new Error('Expected circle geometry.');
+    expect(result.band).toBeCloseTo(4, 0);
+  });
+
   it('commits a search-line endpoint drag released outside the viewer', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);

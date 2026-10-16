@@ -285,7 +285,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const normalizedStartAngle = startAngle - wholeTurns * 360;
       const normalizedEndAngle = endAngle - wholeTurns * 360;
       setDraft(current => ({ ...current, centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius,
-        angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle }));
+        angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle, radialBand: Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
   const roiInputImageSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;

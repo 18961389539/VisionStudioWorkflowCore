@@ -19,7 +19,7 @@ vi.mock('../components/ImageViewer', () => ({
       <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
       {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
       {measurementGeometryEditable && measurementGeometry?.type === 'circle' && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
-        center: { x: 42, y: 51 }, radius: 17, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
+        center: { x: 42, y: 51 }, radius: 17, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
       {showRoiTools && roiEnabled && <button onClick={() => onRoiChange(undefined)}>清除测试 ROI</button>}</div>
 }));
 
@@ -354,7 +354,7 @@ describe('caliper geometry input guidance', () => {
   it('writes a dragged circle and wraparound arc back into staged parameters', async () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
-      parameters: { centerX: 20, centerY: 30, radius: 10, angleStartDeg: 350, angleEndDeg: 10 } } };
+      parameters: { centerX: 20, centerY: 30, radius: 10, radialBand: 8, angleStartDeg: 350, angleEndDeg: 10 } } };
     const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
     const edges = [{ id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' }];
     const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, imageNode], edges, result: report });
@@ -365,6 +365,7 @@ describe('caliper geometry input guidance', () => {
       expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radius')!.label }) as HTMLInputElement).value).toBe('17');
       expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'angleStartDeg')!.label }) as HTMLInputElement).value).toBe('-10');
       expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'angleEndDeg')!.label }) as HTMLInputElement).value).toBe('90');
+      expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radialBand')!.label }) as HTMLInputElement).value).toBe('14');
     });
   });
 
