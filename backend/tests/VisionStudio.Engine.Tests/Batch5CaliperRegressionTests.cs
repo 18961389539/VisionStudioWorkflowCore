@@ -576,6 +576,42 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CropTransformsComposeAcrossAnImagePreservingNode()
+    {
+        using var source = VisionImage.Own(new Mat(100, 100, MatType.CV_8UC1, Scalar.All(80)));
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("image.grayscale"), new GrayscaleNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("coordinate.transformCompose"), new ComposeTransformNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+
+        var firstCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop1", "image.crop",
+                """{"x":10,"y":10,"width":80,"height":80}"""), Inputs(source), null, CancellationToken.None);
+        using var firstImage = (VisionImage)firstCrop.Outputs["image"].Require<IVisionImage>("image");
+        var gray = await dispatcher.ExecuteAsync(ConfiguredNode("gray", "image.grayscale", "{}"), Inputs(firstImage), null, CancellationToken.None);
+        using var grayImage = (VisionImage)gray.Outputs["image"].Require<IVisionImage>("image");
+        var secondCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop2", "image.crop",
+                """{"x":5,"y":5,"width":60,"height":60}"""), Inputs(grayImage), null, CancellationToken.None);
+        using var secondImage = (VisionImage)secondCrop.Outputs["image"].Require<IVisionImage>("image");
+
+        var composed = await dispatcher.ExecuteAsync(ConfiguredNode("compose", "coordinate.transformCompose", "{}"),
+            new Dictionary<string, VisionValue>
+            {
+                ["transformA"] = firstCrop.Outputs["transform"],
+                ["transformB"] = secondCrop.Outputs["transform"]
+            }, null, CancellationToken.None);
+        var transform = composed.Outputs["transform"].Require<VisionTransform2D>("transform");
+
+        Assert.Equal("CurrentImage", transform.SourceFrame);
+        Assert.Equal("image:crop2:crop", transform.TargetFrame);
+        Assert.Equal(new VisionPoint2D(5, 5), transform.Apply(new VisionPoint2D(20, 20)));
+        (firstCrop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        (secondCrop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task RoiCorrectionAndCropTransformsComposeForCaliperMeasurement()
     {
         using var sceneMat = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(20));

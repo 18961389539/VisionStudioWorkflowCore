@@ -1,3 +1,5 @@
+using VisionStudio.Engine.Camera;
+
 namespace VisionStudio.Engine.Runtime;
 
 public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
@@ -13,8 +15,64 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
     {
         var registration = registry.Require(node.Type);
         var result = await registration.ExecuteAsync(new NodeExecutionContext(inputs, workflowScope), node, cancellationToken);
+        result = AttachImageCoordinateFrames(node, registration.Catalog, inputs, result);
         ValidateOutputs(node, registration.Catalog, result.Outputs);
         return result;
+    }
+
+    private static NodeExecutorResult AttachImageCoordinateFrames(
+        NodeDefinition node,
+        NodeCatalogItem catalog,
+        IReadOnlyDictionary<string, VisionValue> inputs,
+        NodeExecutorResult result)
+    {
+        var type = node.Type;
+        var imageInputPort = type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase) ? "debugImage" : "image";
+        var inputFrame = TryGetImageFrame(inputs, imageInputPort);
+        var outputFrame = type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
+            ? $"image:{node.Id}:crop"
+            : type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
+                || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
+                || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase)
+                ? $"image:{node.Id}:spatial"
+                : type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
+                    ? inputFrame ?? "CurrentImage"
+                    : inputFrame ?? $"image:{node.Id}:source";
+
+        Dictionary<string, VisionValue>? rewrittenOutputs = null;
+        foreach (var port in catalog.Outputs.Where(port => port.DataType == VisionDataType.Image))
+        {
+            if (!result.Outputs.TryGetValue(port.Name, out var value) || value.Value is not VisionImage image)
+                continue;
+            var inputImage = inputs.TryGetValue(imageInputPort, out var inputValue) ? inputValue.Value : null;
+            if (!ReferenceEquals(image, inputImage))
+                image.SetCoordinateFrame(outputFrame);
+        }
+
+        if (result.Outputs.TryGetValue("transform", out var transformValue)
+            && transformValue.Value is VisionTransform2D transform)
+        {
+            VisionTransform2D? framedTransform = null;
+            if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
+                framedTransform = transform with { SourceFrame = inputFrame ?? "CurrentImage", TargetFrame = outputFrame };
+            else if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
+                framedTransform = transform with { SourceFrame = $"roi:{node.Id}:reference", TargetFrame = inputFrame ?? "CurrentImage" };
+
+            if (framedTransform is not null)
+            {
+                rewrittenOutputs = result.Outputs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                rewrittenOutputs["transform"] = VisionValue.Transform(framedTransform);
+            }
+        }
+
+        return rewrittenOutputs is null ? result : result with { Outputs = rewrittenOutputs };
+    }
+
+    private static string? TryGetImageFrame(IReadOnlyDictionary<string, VisionValue> inputs, string port)
+    {
+        if (!inputs.TryGetValue(port, out var value) || value.Type != VisionDataType.Image)
+            return null;
+        return value.Value is VisionImage image ? image.CoordinateFrame : "CurrentImage";
     }
 
     private static Dictionary<string, VisionValue> ResolveInputs(
