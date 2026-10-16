@@ -89,6 +89,79 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLine_ExplainsClippedAndRoiMaskedProfiles()
+    {
+        using var mat = MakeEdgeImage(1);
+        using var input = VisionImage.Own(mat.Clone());
+        var executor = new CaliperLineNode();
+
+        var clipped = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node(executor.Type, """{"startX":-100,"startY":0,"endX":0,"endY":0,"edgeLength":10000,"caliperCount":3,"sampleWidth":1} """.Trim()),
+            CancellationToken.None);
+        Assert.False(Convert.ToBoolean(clipped.Summary["found"]));
+        Assert.Equal("search-region-clipped-too-short", clipped.Summary["reason"]);
+        Assert.Equal(1, Convert.ToInt32(clipped.Summary["profilesTooShortAfterClip"]));
+        (clipped.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var masked = await executor.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, 0, 0, 128, 16))
+        }), Node(executor.Type, """{"startX":24,"startY":64,"endX":104,"endY":64,"caliperCount":9,"sampleWidth":1} """.Trim()),
+            CancellationToken.None);
+        Assert.False(Convert.ToBoolean(masked.Summary["found"]));
+        Assert.Equal("profile-has-no-finite-samples", masked.Summary["reason"]);
+        Assert.Equal(9, Convert.ToInt32(masked.Summary["profilesWithoutFiniteSamples"]));
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperCircle_ExplainsOutsideAndRoiMaskedSpokes()
+    {
+        using var flat = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80));
+        using var input = VisionImage.Own(flat.Clone());
+        var executor = new CaliperCircleNode();
+
+        var outside = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node(executor.Type, """{"centerX":500,"centerY":500,"radius":25,"radialBand":5,"samplingMode":"count","caliperCount":12} """.Trim()),
+            CancellationToken.None);
+        Assert.False(Convert.ToBoolean(outside.Summary["found"]));
+        Assert.Equal("search-region-outside-image", outside.Summary["reason"]);
+        Assert.Equal(12, Convert.ToInt32(outside.Summary["spokesOutsideImage"]));
+        Assert.Equal(0L, outside.Outputs["sampleCount"].Require<long>("sampleCount"));
+        (outside.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var masked = await executor.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, 0, 0, 10, 10))
+        }), Node(executor.Type, """{"centerX":64,"centerY":64,"radius":25,"radialBand":5,"samplingMode":"count","caliperCount":12} """.Trim()),
+            CancellationToken.None);
+        Assert.False(Convert.ToBoolean(masked.Summary["found"]));
+        Assert.Equal("profile-has-no-finite-samples", masked.Summary["reason"]);
+        Assert.Equal(12, Convert.ToInt32(masked.Summary["spokesWithoutFiniteSamples"]));
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperCircle_ShortStraightEdgeArcDoesNotReportAnUnstableRadius()
+    {
+        using var image = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(20));
+        using (var brightHalf = new Mat(image, new Rect(64, 0, 64, 128))) brightHalf.SetTo(Scalar.All(220));
+        using var input = VisionImage.Own(image.Clone());
+        var result = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliperCircle", """{"centerX":32,"centerY":64,"radius":32,"radialBand":8,"samplingMode":"count","caliperCount":5,"angleStartDeg":-12,"angleEndDeg":12,"sampleWidth":1,"minContrast":20} """.Trim()),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.True(Convert.ToInt32(result.Summary["edgePoints"]) >= 3);
+        Assert.Equal("degenerate-circle-fit", result.Summary["reason"]);
+        Assert.Equal(Convert.ToInt32(result.Summary["edgePoints"]), result.Outputs["sampleCount"].Require<long>("sampleCount"));
+        Assert.False(result.Outputs.ContainsKey("circle"));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task EdgeSubpixel_FitErrorUsesOverdeterminedWindow()
     {
         using var mat = new Mat(64, 128, MatType.CV_8UC1, Scalar.All(30));

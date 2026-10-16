@@ -108,6 +108,52 @@ describe('ROI reference workspace', () => {
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('invalidates a saved ROI reference when an upstream image transform changes without changing dimensions', async () => {
+    const rotateCatalog = fallbackCatalog.find(item => item.type === 'image.rotate')!;
+    const rotateNode: Node = { id: 'rotate', position: { x: 0, y: 0 }, data: { typeKey: rotateCatalog.type, label: '旋转图像',
+      inputs: rotateCatalog.inputs, parameters: { angleDeg: 0, expand: false } } };
+    const graphEdges = [
+      { id: 'rotate-source', source: imageNode.id, sourceHandle: 'image', target: rotateNode.id, targetHandle: 'image' },
+      { id: 'debug-rotated', source: rotateNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      edges[1]
+    ];
+    const onPreview = vi.fn(async () => capture);
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, rotateNode, imageNode, locateNode], edges: graphEdges, onPreview });
+
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const changedRotate = { ...rotateNode, data: { ...rotateNode.data, parameters: { angleDeg: 12, expand: false } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, changedRotate, imageNode, locateNode]} />);
+    expect(view.dialog.getByText(/图像或定位来源、模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('invalidates a saved ROI reference when an upstream crop origin moves but its size stays fixed', async () => {
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const cropNode: Node = { id: 'crop-source', position: { x: 0, y: 0 }, data: { typeKey: cropCatalog.type, label: '图像裁剪',
+      inputs: cropCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 10, y: 10, width: 60, height: 60 } } } };
+    const graphEdges = [
+      { id: 'crop-source-image', source: imageNode.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'debug-cropped', source: cropNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      edges[1]
+    ];
+    const onPreview = vi.fn(async () => capture);
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, cropNode, imageNode, locateNode], edges: graphEdges, onPreview });
+
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const changedCrop = { ...cropNode, data: { ...cropNode.data, parameters: { roi: { type: 'Rectangle', x: 20, y: 10, width: 60, height: 60 } } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, changedCrop, imageNode, locateNode]} />);
+    expect(view.dialog.getByText(/图像或定位来源、模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('hides the overridden local ROI editor when an upstream ROI is connected', () => {
     const upstream: Node = { id: 'upstream-roi', position: { x: 0, y: 0 }, data: { label: '上游选区' } };
     const upstreamEdges = [...edges, { id: 'roi-override', source: upstream.id, sourceHandle: 'roi', target: roiNode.id, targetHandle: 'roi' }];

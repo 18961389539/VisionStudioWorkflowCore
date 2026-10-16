@@ -308,6 +308,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 var failures = 0;
                 var outsideImage = 0;
                 var shortAfterClip = 0;
+                var profilesWithoutFiniteSamples = 0;
                 var profilesClipped = 0;
                 var anyProfileClipped = false;
                 var overlays = new List<VisionOverlay>();
@@ -332,7 +333,12 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         Stroke: "#91d5ff", StrokeWidth: 0.8));
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var lineSpacing);
                     var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine);
-                    if (!edge.Found) { failures++; continue; }
+                    if (!edge.Found)
+                    {
+                        failures++;
+                        if (edge.Reason == "profile-has-no-finite-samples") profilesWithoutFiniteSamples++;
+                        continue;
+                    }
                     points.Add(SubpixelEdgeCore.Locate(profileStart, profileEnd, edge.Position));
                     strengths.Add(edge.Strength);
                 }
@@ -372,13 +378,20 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 }
                 else outputs["ignoredCount"] = VisionValue.Integer(0);
 
+                var reason = found ? "ok"
+                    : points.Count > 0 ? points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit"
+                    : outsideImage == caliperCount ? "search-region-outside-image"
+                    : outsideImage + shortAfterClip == caliperCount && shortAfterClip > 0 ? "search-region-clipped-too-short"
+                    : profilesWithoutFiniteSamples == caliperCount - outsideImage - shortAfterClip && profilesWithoutFiniteSamples > 0
+                        ? "profile-has-no-finite-samples"
+                    : "no-edge-above-threshold";
+
                 return ValueTask.FromResult(new NodeExecutorResult(
                     outputs,
                     new Dictionary<string, object?>
                     {
                         ["found"] = found,
-                        ["reason"] = found ? "ok" : points.Count == 0 && outsideImage == caliperCount ? "search-region-outside-image"
-                            : points.Count == 0 ? "no-edge-above-threshold" : points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit",
+                        ["reason"] = reason,
                         ["edgeX"] = fit is not null ? Math.Round(fit.Point.X, 3) : null,
                         ["edgeY"] = fit is not null ? Math.Round(fit.Point.Y, 3) : null,
                         ["strength"] = fit is not null ? Math.Round(fit.UsedIndices.Select(index => strengths[index]).Average(), 3) : null,
@@ -398,6 +411,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         ["profilesOutsideImage"] = outsideImage,
                         ["profilesClippedToImage"] = profilesClipped,
                         ["profilesTooShortAfterClip"] = shortAfterClip,
+                        ["profilesWithoutFiniteSamples"] = profilesWithoutFiniteSamples,
                         ["autoGray"] = autoGray,
                         ["roi"] = roi?.Type.ToString() ?? "FullImage"
                     },
@@ -548,6 +562,10 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var edgePoints = new List<VisionPoint2D>();
                 var rejected = 0;
                 var rejectedByDeviation = 0;
+                var spokesOutsideImage = 0;
+                var spokesTooShortAfterClip = 0;
+                var spokesWithoutFiniteSamples = 0;
+                var spokesWithEdgeCandidate = 0;
                 var spokesClipped = 0;
                 var spokeOverlays = new List<VisionOverlay>(angles.Length);
                 for (var spokeIndex = 0; spokeIndex < angles.Length; spokeIndex++)
@@ -564,14 +582,21 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     var (profileStart, profileEnd, spokeClipped, spokeIntersects) =
                         SubpixelEdgeCore.ClampLine(start, end, gray.Cols, gray.Rows);
                     if (spokeClipped) spokesClipped++;
-                    if (!spokeIntersects || MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
-                    { rejected++; continue; }
+                    if (!spokeIntersects) { rejected++; spokesOutsideImage++; continue; }
+                    if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
+                    { rejected++; spokesTooShortAfterClip++; continue; }
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing);
                     var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic");
                     spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
                         X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
                         Stroke: edge.Found ? "#91d5ff" : "#bfbfbf", StrokeWidth: 0.7));
-                    if (!edge.Found) { rejected++; continue; }
+                    if (!edge.Found)
+                    {
+                        rejected++;
+                        if (edge.Reason == "profile-has-no-finite-samples") spokesWithoutFiniteSamples++;
+                        continue;
+                    }
+                    spokesWithEdgeCandidate++;
                     var clippedStartRadius = (profileStart.X - center.X) * dirX + (profileStart.Y - center.Y) * dirY;
                     var edgeRadius = clippedStartRadius + edge.Position;
                     if (maxDeviation > 0 && Math.Abs(edgeRadius - nominalRadius) > maxDeviation)
@@ -588,24 +613,42 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var radiusOutsideTolerance = fit is not null && fitRadiusTolerance > 0
                     && Math.Abs(fit.Circle.Radius - nominalRadius) > fitRadiusTolerance;
                 var found = fit is not null && !radiusOutsideTolerance;
-                var outputs = new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(sourceImage.CloneOwned()), ["found"] = VisionValue.Boolean(found) };
+                var outputs = new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
+                    ["found"] = VisionValue.Boolean(found),
+                    ["sampleCount"] = VisionValue.Integer(fit?.UsedIndices.Length ?? edgePoints.Count),
+                    ["ignoredCount"] = VisionValue.Integer(fit?.IgnoredIndices.Length ?? 0)
+                };
                 var overlays = new List<VisionOverlay>
                 {
                     new("caliper-circle-nominal", VisionOverlayType.Circle, X: center.X, Y: center.Y, Radius: nominalRadius, Stroke: "#597ef7", StrokeWidth: 1)
                 };
                 overlays.AddRange(spokeOverlays);
+                var reason = found ? "ok"
+                    : radiusOutsideTolerance ? "fitted-radius-outside-tolerance"
+                    : edgePoints.Count == 0 && rejectedByDeviation > 0 && rejectedByDeviation == spokesWithEdgeCandidate
+                        ? "all-spokes-exceed-max-radius-deviation"
+                    : edgePoints.Count == 0 && spokesOutsideImage == angles.Length ? "search-region-outside-image"
+                    : edgePoints.Count == 0 && spokesOutsideImage + spokesTooShortAfterClip == angles.Length && spokesTooShortAfterClip > 0
+                        ? "search-region-clipped-too-short"
+                    : edgePoints.Count == 0 && spokesWithoutFiniteSamples == angles.Length - spokesOutsideImage - spokesTooShortAfterClip
+                        && spokesWithoutFiniteSamples > 0 ? "profile-has-no-finite-samples"
+                    : edgePoints.Count == 0 ? "no-edge-above-threshold"
+                    : edgePoints.Count < 3 ? "too-few-edge-points"
+                    : "degenerate-circle-fit";
                 var summary = new Dictionary<string, object?>
                 {
                     ["found"] = found,
-                    ["reason"] = found ? "ok"
-                        : radiusOutsideTolerance ? "fitted-radius-outside-tolerance"
-                        : rejectedByDeviation > 0 && edgePoints.Count == 0 ? "all-spokes-exceed-max-radius-deviation"
-                        : edgePoints.Count == 0 ? "no-edge-above-threshold"
-                        : "too-few-edge-points",
+                    ["reason"] = reason,
                     ["spokes"] = angles.Length,
                     ["edgePoints"] = edgePoints.Count,
                     ["rejectedSpokes"] = rejected,
                     ["rejectedByDeviation"] = rejectedByDeviation,
+                    ["spokesWithEdgeCandidate"] = spokesWithEdgeCandidate,
+                    ["spokesOutsideImage"] = spokesOutsideImage,
+                    ["spokesTooShortAfterClip"] = spokesTooShortAfterClip,
+                    ["spokesWithoutFiniteSamples"] = spokesWithoutFiniteSamples,
                     ["spokesClippedToImage"] = spokesClipped,
                     ["nominalRadius"] = Math.Round(nominalRadius, 3),
                     ["samplingMode"] = samplingMode,
@@ -672,11 +715,13 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
 
     private sealed record CircleFitResult(VisionCircle Circle, int[] UsedIndices, int[] IgnoredIndices, double Rmse);
 
-    private static CircleFitResult FitCircleWithOutlierRejection(IReadOnlyList<VisionPoint2D> points, int maxOutliers, double threshold)
+    private static CircleFitResult? FitCircleWithOutlierRejection(IReadOnlyList<VisionPoint2D> points, int maxOutliers, double threshold)
     {
         var used = Enumerable.Range(0, points.Count).ToList();
         var ignored = new List<int>();
-        var circle = MultiPointFit.Circle(used.Select(i => points[i]).ToArray());
+        var fittedCircle = TryFitCircle(used.Select(i => points[i]).ToArray());
+        if (fittedCircle is null) return null;
+        var circle = fittedCircle.Value;
         var residuals = Residuals(used, points, circle);
         for (var i = 0; i < maxOutliers && used.Count > 3; i++)
         {
@@ -684,15 +729,35 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             if (residuals[worst] <= threshold) break;
             var removedIndex = used[worst];
             var candidateUsed = used.Where((_, index) => index != worst).ToList();
-            VisionCircle candidateCircle;
-            try { candidateCircle = MultiPointFit.Circle(candidateUsed.Select(index => points[index]).ToArray()); }
-            catch (InvalidOperationException) { break; }
+            var candidateFit = TryFitCircle(candidateUsed.Select(index => points[index]).ToArray());
+            if (candidateFit is null) break;
             used = candidateUsed;
             ignored.Add(removedIndex);
-            circle = candidateCircle;
+            circle = candidateFit.Value;
             residuals = Residuals(used, points, circle);
         }
         return new(circle, used.ToArray(), ignored.ToArray(), Math.Sqrt(residuals.Sum(x => x * x) / residuals.Length));
+    }
+
+    private static VisionCircle? TryFitCircle(IReadOnlyList<VisionPoint2D> points)
+    {
+        if (points.Count < 3) return null;
+        var centerX = points.Average(point => point.X);
+        var centerY = points.Average(point => point.Y);
+        var xx = points.Sum(point => (point.X - centerX) * (point.X - centerX));
+        var yy = points.Sum(point => (point.Y - centerY) * (point.Y - centerY));
+        var xy = points.Sum(point => (point.X - centerX) * (point.Y - centerY));
+        var spread = xx + yy;
+        var determinant = xx * yy - xy * xy;
+        // A very short arc can look almost like a straight line and yield a finite but wildly
+        // incorrect circle. Reject poorly conditioned point clouds instead of reporting that
+        // unstable radius as a successful measurement.
+        const double minimumNormalizedSpread = 2e-3;
+        if (!double.IsFinite(spread) || !double.IsFinite(determinant) || spread < 1e-8
+            || determinant <= spread * spread * minimumNormalizedSpread)
+            return null;
+        try { return MultiPointFit.Circle(points.ToArray()); }
+        catch (InvalidOperationException) { return null; }
     }
 
     private static double[] Residuals(IReadOnlyList<int> indices, IReadOnlyList<VisionPoint2D> points, VisionCircle circle) =>

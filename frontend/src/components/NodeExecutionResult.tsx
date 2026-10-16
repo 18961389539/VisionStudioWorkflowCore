@@ -16,9 +16,17 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
     'search-line-outside-image': '搜索线完全位于输入图像之外。请调整搜索线，或检查图像裁剪和坐标变换。',
     'search-region-outside-image': '所有卡尺都落在输入图像之外。请移动搜索区域，或检查图像裁剪和坐标变换。',
     'search-line-clipped-too-short': '搜索线与图像只有很短的交集，裁切后不足 2 px。请调整线的位置或方向。',
-    'profile-has-no-finite-samples': '有效采样点不足，ROI 可能屏蔽了搜索线，或线段落在图像边缘之外。请检查 ROI 和搜索线。',
-    'too-few-edge-points': '找到的边缘点不足 3 个，无法拟合。请增加卡尺数量、扩大沿边缘跨度，或改善边缘对比度。',
+    'search-region-clipped-too-short': type === 'measure.caliperCircle'
+      ? '径向搜索线与图像相交的部分不足 2 px。请调整标称圆心和半径，让搜索弧落入图像。'
+      : '平行搜索剖面与图像相交的部分不足 2 px。请把搜索线移入图像，或缩小沿边缘跨度。',
+    'profile-has-no-finite-samples': type === 'measure.caliperCircle'
+      ? '有效径向采样点不足，ROI 可能屏蔽了搜索弧。请检查 ROI、标称圆和径向搜索带。'
+      : '有效采样点不足，ROI 可能屏蔽了搜索线，或线段落在图像边缘之外。请检查 ROI 和搜索线。',
+    'too-few-edge-points': type === 'measure.caliperCircle'
+      ? '找到的边缘点不足 3 个，无法拟合圆。请增加卡尺数量、扩大搜索弧角范围，或改善边缘对比度。'
+      : '找到的边缘点不足 3 个，无法拟合。请增加卡尺数量、扩大沿边缘跨度，或改善边缘对比度。',
     'degenerate-line-fit': '边缘点无法形成有效直线。请检查搜索线是否横穿目标边缘，并减少误检或扩大采样跨度。',
+    'degenerate-circle-fit': '检出的边缘点分布接近直线，无法稳定拟合圆。请扩大搜索弧角范围或检查标称圆、径向搜索带和误检点。',
     'all-spokes-exceed-max-radius-deviation': '所有候选边缘都超出最大半径偏差。请检查标称圆和搜索带，或放宽最大半径偏差。',
     'fitted-radius-outside-tolerance': '已拟合出候选圆，但半径超出允许偏差。请查看候选圆叠加，核对标称半径和拟合半径公差。'
   };

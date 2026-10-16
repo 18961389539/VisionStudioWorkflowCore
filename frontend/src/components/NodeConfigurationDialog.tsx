@@ -9,7 +9,7 @@ import NodeExecutionResult from './NodeExecutionResult';
 import SplitHandle from './SplitHandle';
 import { useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
-import { capturedReference } from '../roiReference';
+import { capturedReference, imageFrameFingerprint } from '../roiReference';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
@@ -196,6 +196,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const cropMeasurementReferenceNodeId = transformSourceNode?.data.typeKey === 'image.crop'
     ? edges.find((edge) => edge.target === transformSourceNode.id && edge.targetHandle === 'image')?.source
     : undefined;
+  const debugImageSourceId = isRoiTransform
+    ? edges.find(edge => edge.target === node.id && edge.targetHandle === 'debugImage')?.source
+    : undefined;
   const debugImageConnected = isRoiTransform && edges.some((edge) => edge.target === node.id && edge.targetHandle === 'debugImage');
   const poseEdge = edges.find(edge => edge.target === node.id && edge.targetHandle === 'currentPose');
   const poseSource = nodes.find(item => item.id === poseEdge?.source);
@@ -203,6 +206,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const referenceBindings = parameterFingerprint({
     inputs: edges.filter(edge => edge.target === node.id && ['currentPose', 'debugImage'].includes(edge.targetHandle ?? ''))
       .map(edge => ({ port: edge.targetHandle, source: edge.source, sourcePort: edge.sourceHandle })).sort((a, b) => String(a.port).localeCompare(String(b.port))),
+    imageFrame: imageFrameFingerprint(debugImageSourceId, nodes, edges),
     modelOrigin: ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainedPoseOffsetX', 'trainedPoseOffsetY', 'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
       .map(key => poseSourceParameters[key] ?? null)
   });

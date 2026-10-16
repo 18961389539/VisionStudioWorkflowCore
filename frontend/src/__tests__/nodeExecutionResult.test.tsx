@@ -41,6 +41,25 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.queryByText('未找到有效结果')).toBeNull();
   });
 
+  it('explains when the search geometry is clipped or excluded by the ROI', () => {
+    mount(catalog.type, result(false, 'search-region-clipped-too-short'));
+    expect(screen.getByText(/平行搜索剖面与图像相交的部分不足 2 px/)).toBeTruthy();
+
+    cleanup();
+    mount(catalog.type, result(false, 'profile-has-no-finite-samples'));
+    expect(screen.getByText(/ROI 可能屏蔽了搜索线/)).toBeTruthy();
+  });
+
+  it('explains when circle points cannot support a stable fit', () => {
+    mount('measure.caliperCircle', result(false, 'degenerate-circle-fit'));
+
+    expect(screen.getByText(/边缘点分布接近直线，无法稳定拟合圆/)).toBeTruthy();
+
+    cleanup();
+    mount('measure.caliperCircle', result(false, 'too-few-edge-points'));
+    expect(screen.getByText(/增加卡尺数量、扩大搜索弧角范围/)).toBeTruthy();
+  });
+
   it('does not apply caliper detection status to unrelated nodes', () => {
     mount('measure.distance', result(false, 'no-edge-above-threshold'));
 

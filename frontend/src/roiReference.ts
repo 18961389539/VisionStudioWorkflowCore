@@ -1,6 +1,58 @@
 import type { NodeParameters } from './nodeConfigurationState';
+import { parameterFingerprint } from './nodeConfigurationState';
 import type { OverlayPoint, VisionRoi } from './types';
 import type { Edge, Node } from '@xyflow/react';
+
+const coordinateParameters: Record<string, string[]> = {
+  'image.crop': ['roi', 'x', 'y', 'width', 'height'],
+  'image.resize': ['width', 'height'],
+  'image.rotate': ['angleDeg', 'expand'],
+  'image.perspective': ['x1', 'y1', 'x2', 'y2', 'x3', 'y3', 'x4', 'y4', 'width', 'height'],
+  'roi.transform': ['roi', 'baseX', 'baseY', 'baseThetaDeg', 'anglePeriodDeg'],
+  'match.shape': ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainedPoseOffsetX', 'trainedPoseOffsetY',
+    'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
+};
+
+/** Fingerprint the coordinate-changing parts of an image/ROI source chain for saved ROI references. */
+export function imageFrameFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]): string {
+  if (!sourceNodeId) return parameterFingerprint(null);
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const active = new Set<string>();
+  const cache = new Map<string, unknown>();
+
+  const visit = (nodeId: string): unknown => {
+    if (active.has(nodeId)) return { cycle: nodeId };
+    const cached = cache.get(nodeId);
+    if (cached !== undefined) return cached;
+    const node = byId.get(nodeId);
+    if (!node) return { nodeId, missing: true };
+    active.add(nodeId);
+    const type = typeof node.data.typeKey === 'string' ? node.data.typeKey : '';
+    const parameters = (node.data.parameters ?? {}) as NodeParameters;
+    const keys = coordinateParameters[type] ?? [];
+    const nodeInputs = Array.isArray(node.data.inputs) ? node.data.inputs as { name?: string; dataType?: string }[] : [];
+    const imagePorts = new Set(nodeInputs.filter(port => port.dataType === 'Image' || port.dataType === 'DomainImage')
+      .map(port => port.name).filter((name): name is string => typeof name === 'string'));
+    if (imagePorts.size === 0) imagePorts.add('image');
+    const relevantPorts = new Set(imagePorts);
+    if (type === 'image.crop') relevantPorts.add('roi');
+    if (type === 'roi.transform') { relevantPorts.add('roi'); relevantPorts.add('currentPose'); }
+    const parents = edges.filter(edge => edge.target === nodeId && relevantPorts.has(edge.targetHandle ?? ''))
+      .sort((a, b) => `${a.targetHandle}:${a.source}:${a.sourceHandle}`.localeCompare(`${b.targetHandle}:${b.source}:${b.sourceHandle}`))
+      .map(edge => ({ port: edge.targetHandle, sourcePort: edge.sourceHandle, frame: visit(edge.source) }));
+    const signature = {
+      nodeId,
+      type,
+      parameters: keys.map(key => [key, parameters[key] ?? null]),
+      parents
+    };
+    active.delete(nodeId);
+    cache.set(nodeId, signature);
+    return signature;
+  };
+
+  return parameterFingerprint(visit(sourceNodeId));
+}
 
 /** Re-author an existing region in a new reference frame without applying the motion twice. */
 export function rebaseRoi(roi: VisionRoi, previous: NodeParameters, x: number, y: number, thetaDeg: number): VisionRoi {
