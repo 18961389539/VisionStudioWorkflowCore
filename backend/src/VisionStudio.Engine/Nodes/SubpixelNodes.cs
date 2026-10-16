@@ -391,7 +391,13 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         Stroke: "#f5222d", StrokeWidth: 2.5));
                     overlays.Add(new VisionOverlay("caliper-line-point", VisionOverlayType.Point, X: fit.Point.X, Y: fit.Point.Y, Stroke: "#f5222d", StrokeWidth: 3));
                 }
-                else outputs["ignoredCount"] = VisionValue.Integer(0);
+                else
+                {
+                    outputs["ignoredCount"] = VisionValue.Integer(0);
+                    overlays.AddRange(points.Select((point, index) => new VisionOverlay(
+                        $"caliper-line-candidate-point-{index}", VisionOverlayType.Point,
+                        X: point.X, Y: point.Y, Stroke: "#faad14", StrokeWidth: 2.5)));
+                }
 
                 var reason = found ? "ok"
                     : points.Count > 0 ? points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit"
@@ -713,7 +719,13 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     overlays.AddRange(fit.IgnoredIndices.Select((index, i) => new VisionOverlay(
                         $"caliper-circle-ignored-{i}", VisionOverlayType.Point, X: edgePoints[index].X, Y: edgePoints[index].Y, Stroke: "#fa541c", StrokeWidth: 3)));
                 }
-                else outputs["ignoredCount"] = VisionValue.Integer(0);
+                else
+                {
+                    outputs["ignoredCount"] = VisionValue.Integer(0);
+                    overlays.AddRange(edgePoints.Select((point, index) => new VisionOverlay(
+                        $"caliper-circle-candidate-point-{index}", VisionOverlayType.Point,
+                        X: point.X, Y: point.Y, Stroke: "#faad14", StrokeWidth: 2.5)));
+                }
 
                 return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, overlays));
             }

@@ -64,6 +64,29 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLine_ShowsDetectedCandidatesWhenThereAreTooFewPointsToFit()
+    {
+        using var mat = MakeEdgeImage(0);
+        using var input = VisionImage.Own(mat.Clone());
+        var context = new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, 0, 31, 128, 2))
+        });
+        var result = await new CaliperLineNode().ExecuteAsync(context,
+            Node("measure.caliperLine", """{"startX":40,"startY":32,"endX":88,"endY":32,"caliperCount":3,"sampleWidth":1,"minContrast":20}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("too-few-edge-points", result.Summary["reason"]);
+        var candidates = result.Overlays?.Where(overlay => overlay.Id.StartsWith("caliper-line-candidate-point-", StringComparison.Ordinal)).ToArray();
+        Assert.Single(candidates!);
+        Assert.InRange(candidates![0].X ?? double.NaN, 63.5, 64.5);
+        Assert.InRange(candidates[0].Y ?? double.NaN, 31, 33);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperLine_RejectsZeroLengthSearchLine()
     {
         using var mat = MakeEdgeImage(1);
@@ -157,6 +180,8 @@ public sealed class Batch5CaliperRegressionTests
         Assert.True(Convert.ToInt32(result.Summary["edgePoints"]) >= 3);
         Assert.Equal("degenerate-circle-fit", result.Summary["reason"]);
         Assert.Equal(Convert.ToInt32(result.Summary["edgePoints"]), result.Outputs["sampleCount"].Require<long>("sampleCount"));
+        Assert.Equal(Convert.ToInt32(result.Summary["edgePoints"]), result.Overlays?.Count(overlay =>
+            overlay.Id.StartsWith("caliper-circle-candidate-point-", StringComparison.Ordinal)));
         Assert.False(result.Outputs.ContainsKey("circle"));
         (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
