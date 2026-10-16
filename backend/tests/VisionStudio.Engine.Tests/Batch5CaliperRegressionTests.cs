@@ -38,6 +38,7 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Theory]
+    [InlineData("feature.edgeSubpixel")]
     [InlineData("measure.caliper")]
     [InlineData("measure.caliperLine")]
     [InlineData("measure.caliperCircle")]
@@ -49,6 +50,7 @@ public sealed class Batch5CaliperRegressionTests
             Points: [new VisionRoiPoint(10, 10), new VisionRoiPoint(40, 10)]));
         IVisionNodeExecutor executor = type switch
         {
+            "feature.edgeSubpixel" => new EdgeSubpixelNode(),
             "measure.caliper" => new CaliperNode(),
             "measure.caliperLine" => new CaliperLineNode(),
             _ => new CaliperCircleNode()
