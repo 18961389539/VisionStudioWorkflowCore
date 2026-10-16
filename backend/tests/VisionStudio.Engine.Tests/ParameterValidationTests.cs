@@ -248,6 +248,88 @@ public sealed class ParameterValidationTests
     }
 
     [Fact]
+    public void MeasurementRejectsRoiAuthoredBeforeImageUndistortion()
+    {
+        var workflow = new WorkflowDefinition("raw-roi-on-undistorted-image", "Raw ROI on undistorted image",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("roi", "roi.transform", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-undistort-control", "scene", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("undistort-roi-control", "undistort", "next", "roi", "exec", "control"),
+            new EdgeDefinition("roi-measure-control", "roi", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("scene-roi", "scene", "image", "roi", "debugImage", "data"),
+            new EdgeDefinition("undistorted-measurement-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("raw-roi", "roi", "roi", "measure", "roi", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'measure' ROI input 'roi'", error.Message);
+        Assert.Contains("scene.image", error.Message);
+        Assert.Contains("undistort.image (undistorted frame)", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementRejectsSearchGeometryAuthoredBeforeImageUndistortion()
+    {
+        var workflow = new WorkflowDefinition("raw-line-on-undistorted-image", "Raw line on undistorted image",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("line", "feature.line", null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-line-control", "scene", "next", "line", "exec", "control"),
+            new EdgeDefinition("line-undistort-control", "line", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("undistort-measure-control", "undistort", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-line", "scene", "image", "line", "image", "data"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("undistorted-measurement-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("raw-line", "line", "line", "measure", "searchLine", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'measure' input 'searchLine' geometry is in frame 'scene.image'", error.Message);
+        Assert.Contains("measurement image is in frame 'undistort.image (undistorted frame)'", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementAcceptsRoiAndSearchGeometryAuthoredAfterImageUndistortion()
+    {
+        var workflow = new WorkflowDefinition("undistorted-roi-and-line", "ROI and line in undistorted frame",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("roi", "roi.transform", null, null, null),
+            new NodeDefinition("line", "feature.line", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-undistort-control", "scene", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("undistort-roi-control", "undistort", "next", "roi", "exec", "control"),
+            new EdgeDefinition("roi-line-control", "roi", "next", "line", "exec", "control"),
+            new EdgeDefinition("line-measure-control", "line", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("undistorted-roi", "undistort", "image", "roi", "debugImage", "data"),
+            new EdgeDefinition("undistorted-line", "undistort", "image", "line", "image", "data"),
+            new EdgeDefinition("undistorted-measurement-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("roi-measure", "roi", "roi", "measure", "roi", "data"),
+            new EdgeDefinition("line-measure", "line", "line", "measure", "searchLine", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Fact]
     public void MeasurementRejectsRoiFromADifferentCropImageFrame()
     {
         var workflow = new WorkflowDefinition("mismatched-crop-roi", "Mismatched crop ROI",

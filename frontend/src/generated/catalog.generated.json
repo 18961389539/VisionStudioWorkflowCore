@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "0b367e85f2c8c267d771de6e0be1cad8efa30071311e4e8db03f56e9131bf86d",
+  "hash": "6dd45e54b3498db05b01eb1feb1bb3a0bb4771f531e461148c7aad0f09bafcda",
   "items": [
     {
       "type": "image.acquire",
@@ -10819,7 +10819,7 @@
           "description": "Optional fallback when calibrationJson is not connected; accepts CameraCalibrationModel JSON from calibration.cameraIntrinsics."
         }
       ],
-      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs.",
+      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

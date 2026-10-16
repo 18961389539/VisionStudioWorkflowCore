@@ -570,6 +570,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 : ResolveTransformFrames(transformInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
             return targetFrame ?? new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (affine-warped frame)");
         }
+        if (type.Equals("image.undistort", StringComparison.OrdinalIgnoreCase))
+            return new CoordinateFrame($"image:{nodeId}:undistorted", $"{nodeId}.image (undistorted frame)");
         if (type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
