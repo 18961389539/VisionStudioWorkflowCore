@@ -253,6 +253,36 @@ public sealed class ParameterValidationTests
         Assert.NotEmpty(CreateCompiler().Compile(workflow).DslJson);
     }
 
+    [Fact]
+    public void CaliperCircleRejectsAnArcWithEqualStartAndEndAnglesDuringCompilation()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"angleStartDeg":30,"angleEndDeg":30}"""));
+        var workflow = new WorkflowDefinition("zero-span-circle-arc", "Zero span circle arc", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("only one radial caliper", error.Message);
+        Assert.Contains("Widen the arc angle range", error.Message);
+    }
+
+    [Theory]
+    [InlineData(350, 10)]
+    [InlineData(0, 360)]
+    public void CaliperCircleAllowsWraparoundAndFullCircleArcs(double start, double end)
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { angleStartDeg = start, angleEndDeg = end })));
+        var workflow = new WorkflowDefinition("valid-circle-arc", "Valid circle arc", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        Assert.NotEmpty(CreateCompiler().Compile(workflow).DslJson);
+    }
+
     [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]

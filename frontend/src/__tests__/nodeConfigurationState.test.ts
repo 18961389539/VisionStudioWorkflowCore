@@ -114,4 +114,13 @@ describe('node configuration snapshots', () => {
     expect(configurationIssues(line, { ...parameters, endX: 122 })).toEqual([]);
     expect(configurationIssues(line, parameters, { connectedInputPorts: ['searchLine'] })).toEqual([]);
   });
+
+  it('rejects a zero-span circle arc while preserving wraparound and full-circle arcs', () => {
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    const defaults = makeDefaultParameters(circle);
+
+    expect(configurationIssues(circle, { ...defaults, angleStartDeg: 30, angleEndDeg: 30 }).join(' ')).toContain('单条径向卡尺，无法拟合圆');
+    expect(configurationIssues(circle, { ...defaults, angleStartDeg: 350, angleEndDeg: 10 })).toEqual([]);
+    expect(configurationIssues(circle, { ...defaults, angleStartDeg: 0, angleEndDeg: 360 })).toEqual([]);
+  });
 });

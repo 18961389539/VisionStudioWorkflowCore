@@ -144,23 +144,29 @@ export function configurationIssues(
     ['centerX', 'centerY', 'radius'].forEach((name) => overriddenParameters.add(name));
   const issues = validateParameterValues(catalog.parameters.filter((parameter) => !overriddenParameters.has(parameter.name)), parameters)
     .map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
+  const numericParameter = (name: string) => {
+    const configured = parameters[name];
+    if (configured !== undefined) return typeof configured === 'number' && Number.isFinite(configured) ? configured : undefined;
+    const fallback = catalog.parameters.find((parameter) => parameter.name === name)?.defaultValue;
+    return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : undefined;
+  };
   const roiInputOverridesParameter = hasConnectedInput('roi', 'Roi');
   const searchLineInputOverridesGeometry = hasConnectedInput('searchLine', 'Line2D');
   if (!searchLineInputOverridesGeometry
     && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine'].includes(catalog.type)) {
-    const getCoordinate = (name: string) => {
-      const configured = parameters[name];
-      if (typeof configured === 'number') return configured;
-      const fallback = catalog.parameters.find((parameter) => parameter.name === name)?.defaultValue;
-      return typeof fallback === 'number' ? fallback : undefined;
-    };
-    const startX = getCoordinate('startX');
-    const startY = getCoordinate('startY');
-    const endX = getCoordinate('endX');
-    const endY = getCoordinate('endY');
+    const startX = numericParameter('startX');
+    const startY = numericParameter('startY');
+    const endX = numericParameter('endX');
+    const endY = numericParameter('endY');
     if ([startX, startY, endX, endY].every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))
       && Math.hypot(endX! - startX!, endY! - startY!) < 2)
       issues.push('搜索线长度至少需要 2 px；请调整起点/终点，或连接有效的 searchLine 输入。');
+  }
+  if (catalog.type === 'measure.caliperCircle') {
+    const angleStart = numericParameter('angleStartDeg');
+    const angleEnd = numericParameter('angleEndDeg');
+    if (angleStart !== undefined && angleEnd !== undefined && Math.abs(angleEnd - angleStart) < 1e-9)
+      issues.push('起止角相同会生成单条径向卡尺，无法拟合圆；请扩大搜索弧角范围。');
   }
   for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
     if (key === 'roi' && roiInputOverridesParameter) continue;

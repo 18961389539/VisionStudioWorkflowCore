@@ -198,6 +198,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 
             ValidateNodeParameters(node, catalog, connectedInputPorts);
             ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
+            ValidateCaliperCircleArc(node, catalog);
         }
     }
 
@@ -295,19 +296,29 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         if (catalog.Type is not ("feature.edgeSubpixel" or "measure.caliper" or "measure.caliperLine"))
             return;
 
-        double GetCoordinate(string name)
-        {
-            var descriptor = catalog.Parameters.First(parameter =>
-                parameter.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            var fallback = Convert.ToDouble(descriptor.DefaultValue, System.Globalization.CultureInfo.InvariantCulture);
-            return node.GetDouble(name, fallback);
-        }
-
-        var dx = GetCoordinate("endX") - GetCoordinate("startX");
-        var dy = GetCoordinate("endY") - GetCoordinate("startY");
+        var dx = GetNumericParameter(node, catalog, "endX") - GetNumericParameter(node, catalog, "startX");
+        var dy = GetNumericParameter(node, catalog, "endY") - GetNumericParameter(node, catalog, "startY");
         if (Math.Sqrt(dx * dx + dy * dy) < 2)
             throw new InvalidOperationException(
                 $"Node '{node.Id}' search line must be at least 2 px long. Adjust its start/end coordinates or connect a valid searchLine input.");
+    }
+
+    private static void ValidateCaliperCircleArc(NodeDefinition node, NodeCatalogItem catalog)
+    {
+        if (!catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)) return;
+        var start = GetNumericParameter(node, catalog, "angleStartDeg");
+        var end = GetNumericParameter(node, catalog, "angleEndDeg");
+        if (Math.Abs(end - start) < 1e-9)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' arc start and end angles are equal, producing only one radial caliper. Widen the arc angle range to fit a circle.");
+    }
+
+    private static double GetNumericParameter(NodeDefinition node, NodeCatalogItem catalog, string name)
+    {
+        var descriptor = catalog.Parameters.First(parameter =>
+            parameter.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var fallback = Convert.ToDouble(descriptor.DefaultValue, System.Globalization.CultureInfo.InvariantCulture);
+        return node.GetDouble(name, fallback);
     }
 
     private static bool IsParameterVisible(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)
