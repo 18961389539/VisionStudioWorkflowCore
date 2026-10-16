@@ -251,7 +251,11 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
   const dy = current.y - start.y;
   if (origin.type === 'Rectangle') {
     if (mode === 'move') {
-      return { ...origin, x: clamp(origin.x + dx, 0, Math.max(0, maxW - origin.width)), y: clamp(origin.y + dy, 0, Math.max(0, maxH - origin.height)) };
+      const { x: moveX, y: moveY } = clampRoiMove({
+        minX: origin.x, maxX: origin.x + origin.width,
+        minY: origin.y, maxY: origin.y + origin.height
+      }, { x: dx, y: dy }, maxW, maxH);
+      return { ...origin, x: origin.x + moveX, y: origin.y + moveY };
     }
     let x1 = origin.x; let y1 = origin.y; let x2 = origin.x + origin.width; let y2 = origin.y + origin.height;
     if (mode.includes('w')) x1 = clamp(origin.x + dx, 0, x2 - 2);

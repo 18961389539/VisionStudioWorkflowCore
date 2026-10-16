@@ -412,6 +412,21 @@ describe('ImageViewer measurement geometry editing', () => {
     ] });
   });
 
+  it('moves an oversized rectangle ROI without reversing the drag direction', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Rectangle', x: -50, y: 20, width: 200, height: 40 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 106.4 }); // image (50, 40), inside rectangle
+    fireEvent.mouseMove(stage, { clientX: 223.6, clientY: 118.2 }); // request offset (+10, +5)
+    fireEvent.mouseUp(document.body, { clientX: 223.6, clientY: 118.2 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    expect(onRoiChange).toHaveBeenCalledWith({ type: 'Rectangle', x: -40, y: 25, width: 200, height: 40 });
+  });
+
   it('keeps an oversized circle ROI center inside the image when moving it', () => {
     const onRoiChange = vi.fn();
     const roi: VisionRoi = { type: 'Circle', x: 50, y: 50, radius: 60 };
