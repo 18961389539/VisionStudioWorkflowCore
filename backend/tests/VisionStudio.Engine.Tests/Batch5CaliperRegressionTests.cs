@@ -187,6 +187,29 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperCircle_VisualizesCandidatesRejectedByRadiusDeviation()
+    {
+        using var image = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(20));
+        Cv2.Circle(image, new Point(67, 64), 25, Scalar.All(220), 2);
+        using var input = VisionImage.Own(image.Clone());
+
+        var result = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":25,"radialBand":8,"samplingMode":"count","caliperCount":36,"maxRadiusDeviation":1,"sampleWidth":1,"minContrast":20}"""),
+            CancellationToken.None);
+
+        var rejected = Convert.ToInt32(result.Summary["rejectedByDeviation"]);
+        Assert.True(rejected > 0);
+        var rejectedPoints = result.Overlays?.Where(overlay =>
+            overlay.Id.StartsWith("caliper-circle-radius-rejected-", StringComparison.Ordinal)).ToArray() ?? [];
+        Assert.Equal(rejected, rejectedPoints.Length);
+        Assert.All(rejectedPoints, overlay => Assert.Equal("#faad14", overlay.Stroke));
+        Assert.Equal(rejected, result.Overlays?.Count(overlay =>
+            overlay.Id.StartsWith("caliper-circle-search-", StringComparison.Ordinal)
+            && overlay.Stroke == "#faad14"));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task EdgeSubpixel_FitErrorUsesOverdeterminedWindow()
     {
         using var mat = new Mat(64, 128, MatType.CV_8UC1, Scalar.All(30));

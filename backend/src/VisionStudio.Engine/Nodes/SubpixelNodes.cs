@@ -608,11 +608,11 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     { rejected++; spokesTooShortAfterClip++; continue; }
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing);
                     var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic");
-                    spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
-                        X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
-                        Stroke: edge.Found ? "#91d5ff" : "#bfbfbf", StrokeWidth: 0.7));
                     if (!edge.Found)
                     {
+                        spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
+                            X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
+                            Stroke: "#bfbfbf", StrokeWidth: 0.7));
                         rejected++;
                         if (edge.Reason == "profile-has-no-finite-samples") spokesWithoutFiniteSamples++;
                         continue;
@@ -622,10 +622,20 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     var edgeRadius = clippedStartRadius + edge.Position;
                     if (maxDeviation > 0 && Math.Abs(edgeRadius - nominalRadius) > maxDeviation)
                     {
+                        var candidate = new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius);
+                        spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
+                            X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
+                            Stroke: "#faad14", StrokeWidth: 1));
+                        spokeOverlays.Add(new($"caliper-circle-radius-rejected-{spokeIndex}", VisionOverlayType.Point,
+                            Label: $"ΔR={edgeRadius - nominalRadius:+0.##;-0.##;0}", X: candidate.X, Y: candidate.Y,
+                            Stroke: "#faad14", StrokeWidth: 3));
                         rejected++;
                         rejectedByDeviation++;
                         continue;
                     }
+                    spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
+                        X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
+                        Stroke: "#91d5ff", StrokeWidth: 0.7));
                     edgePoints.Add(new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius));
                 }
 
