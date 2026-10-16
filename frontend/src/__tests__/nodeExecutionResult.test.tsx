@@ -258,14 +258,14 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText("Parameter 'polarity' must be one of [any, rising, falling].")).toBeTruthy();
   });
 
-  it('localizes malformed ROI geometry errors from caliper nodes', () => {
-    mount('measure.caliperLine', failedResult('Polygon ROI requires 3..500000 finite vertices within ±10000000 px.'));
+  it.each(['feature.edgeSubpixel', 'measure.caliperLine'])('localizes malformed ROI geometry errors from %s', type => {
+    mount(type, failedResult('Polygon ROI requires 3..500000 finite vertices within ±10000000 px.'));
 
     expect(screen.getByText('多边形 ROI 至少需要 3 个有效顶点，且坐标在允许范围内。')).toBeTruthy();
   });
 
-  it('localizes oversized connected polygon ROI errors', () => {
-    mount('measure.caliperCircle', failedResult('Polygon ROI exceeds the 500000-point limit.'));
+  it.each(['feature.edgeSubpixel', 'measure.caliperCircle'])('localizes oversized connected polygon ROI errors from %s', type => {
+    mount(type, failedResult('Polygon ROI exceeds the 500000-point limit.'));
 
     expect(screen.getByText('多边形 ROI 最多允许 500000 个顶点。')).toBeTruthy();
   });
