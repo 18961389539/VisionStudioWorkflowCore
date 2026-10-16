@@ -713,7 +713,7 @@ describe('caliper geometry input guidance', () => {
   });
 
   it.each(['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'] as const)(
-    'keeps %s result overlays visible while editing over the same-frame input image', async (type) => {
+    'shows %s result overlays until its measurement geometry changes', async (type) => {
     const caliperCatalog = fallbackCatalog.find(item => item.type === type)!;
     const parameters = type === 'measure.caliperCircle'
       ? { centerX: 50, centerY: 50, radius: 20 }
@@ -735,6 +735,28 @@ describe('caliper geometry input guidance', () => {
 
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
     expect(dialog.getByTestId('overlay-ids').textContent).toContain(`${type}-result-point`);
+    fireEvent.click(dialog.getByRole('button', { name: type === 'measure.caliperCircle' ? '模拟调整标称圆' : '模拟拖动搜索线' }));
+    await waitFor(() => expect(dialog.getByTestId('overlay-ids').textContent).not.toContain(`${type}-result-point`));
+  });
+
+  it('hides stale measurement overlays when geometry editing uses the node output image', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺找线',
+      inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'missing-input', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const resultWithCandidate: RunResult = { ...report, runId: 'caliper-output-overlay-run', overlays: [
+      { id: 'stale-output-edge-point', nodeId: caliperNode.id, type: 'Point', x: 64, y: 32, stroke: '#faad14', strokeWidth: 2.5 }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: resultWithCandidate });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('stale-output-edge-point');
+    fireEvent.click(dialog.getByRole('button', { name: '模拟拖动搜索线' }));
+    await waitFor(() => expect(dialog.getByTestId('overlay-ids').textContent).not.toContain('stale-output-edge-point'));
   });
 
   it('hides local search-line coordinates when a searchLine input is connected', () => {

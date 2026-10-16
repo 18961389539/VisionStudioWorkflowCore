@@ -357,10 +357,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     : [];
   // Measurement nodes pass the input image through unchanged, so their own result overlays
   // remain aligned when users switch to the input image to edit measurement geometry.
-  const sameFrameMeasurementOverlays = measurementGeometryType && imageSource === 'input'
+  const sameFrameMeasurementOverlays = !stale && measurementGeometryType && imageSource === 'input'
     && imageViewerSource.nodeId === imageInputSourceId
     ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === node.id)
     : [];
+  const resultOverlaysForViewer = stale && measurementGeometryType
+    ? viewerOverlays.filter((overlay) => overlay.nodeId !== node.id)
+    : viewerOverlays;
   useEffect(() => {
     if (open && isRoiTransform && roiImageView !== 'reference') setImageSource(roiImageView);
   }, [isRoiTransform, open, roiImageView, imageSource, setImageSource]);
@@ -395,7 +398,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? [...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polyline' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
       { id: 'saved-shape-training-origin', type: 'Point', x: Number(draft.trainedOriginImageX ?? 0), y: Number(draft.trainedOriginImageY ?? 0), label: '训练原点', stroke: '#fa541c', strokeWidth: 3 }]
     : (isRoiTransform && roiImageView === 'reference') || showCapturedTrainingImage || showMeasurementReferenceImage ? []
-      : [...new Map([...viewerOverlays, ...connectedRoiInputOverlays, ...sameFrameMeasurementOverlays]
+      : [...new Map([...resultOverlaysForViewer, ...connectedRoiInputOverlays, ...sameFrameMeasurementOverlays]
         .map(overlay => [`${overlay.nodeId ?? ''}:${overlay.id}`, overlay])).values()];
   const imagePorts = [...catalogItem.inputs, ...catalogItem.outputs].some((p) => p.dataType === 'Image' || p.dataType === 'DomainImage');
   const showImage = imagePorts || initialTab === 'image';
