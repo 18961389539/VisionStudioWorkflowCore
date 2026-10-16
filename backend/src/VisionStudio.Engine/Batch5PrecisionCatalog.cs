@@ -135,10 +135,10 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("startY", "Start Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endX", "End X", "number", 520, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endY", "End Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
@@ -187,10 +187,10 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("startY", "Start Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endX", "End X", "number", 520, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endY", "End Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
@@ -245,9 +245,9 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("centerX", "Center X", "number", 320, -100000, 100000, 1, Unit: "px", Group: "Nominal Circle"),
-                new("centerY", "Center Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Nominal Circle"),
-                new("radius", "Nominal Radius", "number", 100, 1, 100000, 1, Unit: "px", Group: "Nominal Circle"),
+                new("centerX", "Center X", "number", 320, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle"),
+                new("centerY", "Center Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle"),
+                new("radius", "Nominal Radius", "number", 100, 1, 10000000, 1, Unit: "px", Group: "Nominal Circle"),
                 new("angleStartDeg", "Angle Start", "number", -180, -360, 360, 1, Unit: "deg", Group: "Arc"),
                 new("angleEndDeg", "Angle End", "number", 180, -360, 360, 1, Unit: "deg", Group: "Arc"),
                 new("samplingMode", "Sampling Mode", "select", "count", Options:
@@ -424,15 +424,15 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("baseX", "Base X", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Base Pose",
+                new("baseX", "Base X", "number", 0, -10000000, 10000000, 0.01, Unit: "px", Group: "Base Pose",
                     Description: "The pose at which the ROI parameter was authored."),
-                new("baseY", "Base Y", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Base Pose"),
+                new("baseY", "Base Y", "number", 0, -10000000, 10000000, 0.01, Unit: "px", Group: "Base Pose"),
                 new("baseThetaDeg", "Base Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Base Pose"),
                 new("anglePeriodDeg", "Angle Period", "number", 360, 1, 360, 1, Unit: "deg", Group: "Base Pose",
                     Description: "Use 180 degrees for half-turn-symmetric locator models; use 360 degrees when orientation has a unique direction."),
-                new("currentX", "Current X", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Current Pose",
+                new("currentX", "Current X", "number", 0, -10000000, 10000000, 0.01, Unit: "px", Group: "Current Pose",
                     Description: "Used only when the currentPose port is not connected."),
-                new("currentY", "Current Y", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Current Pose"),
+                new("currentY", "Current Y", "number", 0, -10000000, 10000000, 0.01, Unit: "px", Group: "Current Pose"),
                 new("currentThetaDeg", "Current Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Current Pose")
             ],
             "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",

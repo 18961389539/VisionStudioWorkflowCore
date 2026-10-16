@@ -45,6 +45,7 @@ public sealed class ParameterValidationTests
     [InlineData("image.acquire", """{"frameMode":"next","timeoutMs":1500,"autoStart":true}""")]
     [InlineData("image.acquire", """{"timeoutMs":50}""")]
     [InlineData("image.acquire", """{"timeoutMs":10000}""")]
+    [InlineData("roi.transform", """{"baseX":120000,"baseY":80000,"currentX":160000,"currentY":80000}""")]
     public void AcceptedParameterValues_Compile(string nodeType, string parametersJson)
     {
         var compiler = CreateCompiler();
@@ -56,10 +57,10 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
-    [InlineData("measure.caliper", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
-    [InlineData("feature.edgeSubpixel", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
-    [InlineData("measure.caliperLine", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
-    [InlineData("measure.caliperCircle", """{"centerX":12000,"centerY":8000,"radius":8000}""")]
+    [InlineData("measure.caliper", """{"startX":120000,"startY":80000,"endX":160000,"endY":80000}""")]
+    [InlineData("feature.edgeSubpixel", """{"startX":120000,"startY":80000,"endX":160000,"endY":80000}""")]
+    [InlineData("measure.caliperLine", """{"startX":120000,"startY":80000,"endX":160000,"endY":80000}""")]
+    [InlineData("measure.caliperCircle", """{"centerX":120000,"centerY":80000,"radius":80000}""")]
     public void HighResolutionCaliperGeometry_Compiles(string nodeType, string parametersJson)
     {
         var source = new NodeDefinition("source", "image.synthetic", null, null, null);

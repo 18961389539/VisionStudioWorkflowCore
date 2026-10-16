@@ -438,10 +438,10 @@ public static class BuiltInNodeCatalog
                 Next
             ],
             [
-                new("startX", "Start X", "number", 120, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("startY", "Start Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endX", "End X", "number", 520, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
-                new("endY", "End Y", "number", 240, -100000, 100000, 1, Unit: "px", Group: "Search Line"),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("edgeThreshold", "Edge Threshold", "number", 12, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:

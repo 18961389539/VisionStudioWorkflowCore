@@ -48,12 +48,15 @@ describe('precision workflow catalog', () => {
     for (const type of types) {
       const item = fallbackCatalogRaw.find(entry => entry.type === type)!;
       for (const name of ['startX', 'startY', 'endX', 'endY'])
-        expect(item.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -100000, max: 100000 });
+        expect(item.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -10000000, max: 10000000 });
     }
     const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
     for (const name of ['centerX', 'centerY'])
-      expect(circle.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -100000, max: 100000 });
-    expect(circle.parameters.find(parameter => parameter.name === 'radius')).toMatchObject({ min: 1, max: 100000 });
+      expect(circle.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -10000000, max: 10000000 });
+    expect(circle.parameters.find(parameter => parameter.name === 'radius')).toMatchObject({ min: 1, max: 10000000 });
+    const roiTransform = fallbackCatalogRaw.find(item => item.type === 'roi.transform')!;
+    for (const name of ['baseX', 'baseY', 'currentX', 'currentY'])
+      expect(roiTransform.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -10000000, max: 10000000 });
   });
 
   it('validates caliper geometry across the full supported high-resolution range', () => {
@@ -62,7 +65,7 @@ describe('precision workflow catalog', () => {
       inputs: image.inputs, outputs: image.outputs, parameters: makeDefaultParameters(image) } };
     for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine']) {
       const item = fallbackCatalogRaw.find(entry => entry.type === type)!;
-      const parameters = { ...makeDefaultParameters(item), startX: 12_000, startY: 8_000, endX: 16_000, endY: 8_000 };
+      const parameters = { ...makeDefaultParameters(item), startX: 120_000, startY: 80_000, endX: 160_000, endY: 80_000 };
       expect(validateWorkflow([
         imageNode,
         { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: type, inputs: item.inputs, outputs: item.outputs, parameters } }
@@ -73,13 +76,24 @@ describe('precision workflow catalog', () => {
     }
 
     const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
-    const circleParameters = { ...makeDefaultParameters(circle), centerX: 12_000, centerY: 8_000, radius: 8_000 };
+    const circleParameters = { ...makeDefaultParameters(circle), centerX: 120_000, centerY: 80_000, radius: 80_000 };
     expect(validateWorkflow([
       imageNode,
       { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: circle.type, inputs: circle.inputs, outputs: circle.outputs, parameters: circleParameters } }
     ], fallbackCatalogRaw, [
       { id: 'control', source: 'image', sourceHandle: 'next', target: 'caliper', targetHandle: 'exec', data: { kind: 'control' } },
       { id: 'image', source: 'image', sourceHandle: 'image', target: 'caliper', targetHandle: 'image', data: { kind: 'data' } }
+    ])).toEqual([]);
+
+    const roiTransform = fallbackCatalogRaw.find(item => item.type === 'roi.transform')!;
+    const roiParameters = { ...makeDefaultParameters(roiTransform), baseX: 120_000, baseY: 80_000, currentX: 160_000, currentY: 80_000 };
+    const roiSource = { ...imageNode, id: 'roi-source' };
+    expect(validateWorkflow([
+      roiSource,
+      { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: roiTransform.type, inputs: roiTransform.inputs,
+        outputs: roiTransform.outputs, parameters: roiParameters } }
+    ], fallbackCatalogRaw, [
+      { id: 'roi-control', source: roiSource.id, sourceHandle: 'next', target: 'roi', targetHandle: 'exec', data: { kind: 'control' } }
     ])).toEqual([]);
   });
 
