@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
-import { cloneParameters, configurationIssues, cropRoiOutsideImageIssue, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
 import type { NodeCatalogItem, WorkflowPayload } from '../types';
 
 describe('node configuration snapshots', () => {
@@ -146,5 +146,27 @@ describe('node configuration snapshots', () => {
     expect(configurationIssues(circle, { ...defaults, angleStartDeg: 30, angleEndDeg: 30 }).join(' ')).toContain('单条径向卡尺，无法拟合圆');
     expect(configurationIssues(circle, { ...defaults, angleStartDeg: 350, angleEndDeg: 10 })).toEqual([]);
     expect(configurationIssues(circle, { ...defaults, angleStartDeg: 0, angleEndDeg: 360 })).toEqual([]);
+  });
+
+  it('preflights caliper quality gates against the number of profiles that can be sampled', () => {
+    const line = fallbackCatalogRaw.find(item => item.type === 'measure.caliperLine')!;
+    const lineDefaults = makeDefaultParameters(line);
+    expect(configurationIssues(line, { ...lineDefaults, caliperCount: 5, minValidCalipers: 6 }).join(' '))
+      .toContain('最少有效卡尺数超过卡尺总数');
+    expect(configurationIssues(line, { ...lineDefaults, caliperCount: 5, minValidCalipers: 5 })).toEqual([]);
+
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    const circleDefaults = makeDefaultParameters(circle);
+    expect(configurationIssues(circle, { ...circleDefaults, caliperCount: 5, minValidCalipers: 6 }).join(' '))
+      .toContain('超过当前设置可生成的 5 条卡尺');
+    expect(configurationIssues(circle, { ...circleDefaults, samplingMode: 'step', angleStartDeg: 10,
+      angleEndDeg: 30, angleStepDeg: 15 }).join(' ')).toContain('只会生成 2 条径向卡尺');
+    expect(configurationIssues(circle, { ...circleDefaults, samplingMode: 'step', angleStartDeg: 0,
+      angleEndDeg: 90, angleStepDeg: 30, minValidCalipers: 5 }).join(' '))
+      .toContain('超过当前设置可生成的 4 条卡尺');
+    const legacyParameters: Record<string, unknown> = { ...circleDefaults, angleStartDeg: -180, angleEndDeg: 180, angleStepDeg: 5 };
+    delete legacyParameters.samplingMode;
+    const legacyCircle = configurationParameters(legacyParameters, circle);
+    expect(configurationIssues(circle, legacyCircle)).toEqual([]);
   });
 });

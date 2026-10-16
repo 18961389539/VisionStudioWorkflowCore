@@ -221,6 +221,16 @@ export function configurationIssues(
     const fallback = catalog.parameters.find((parameter) => parameter.name === name)?.defaultValue;
     return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : undefined;
   };
+  const validNumericParameter = (name: string) => {
+    const value = numericParameter(name);
+    const descriptor = catalog.parameters.find((parameter) => parameter.name === name);
+    if (value === undefined
+      || (descriptor?.min !== undefined && value < descriptor.min)
+      || (descriptor?.max !== undefined && value > descriptor.max)) return undefined;
+    return value;
+  };
+  const roundedParameter = (value: number, minimum: number, maximum: number) =>
+    Math.max(minimum, Math.min(maximum, Math.floor(value + 0.5)));
   const roiInputOverridesParameter = hasConnectedInput('roi', 'Roi');
   const searchLineInputOverridesGeometry = hasConnectedInput('searchLine', 'Line2D');
   if (!searchLineInputOverridesGeometry
@@ -234,10 +244,52 @@ export function configurationIssues(
       issues.push('搜索线长度至少需要 2 px；请调整起点/终点，或连接有效的 searchLine 输入。');
   }
   if (catalog.type === 'measure.caliperCircle') {
-    const angleStart = numericParameter('angleStartDeg');
-    const angleEnd = numericParameter('angleEndDeg');
-    if (angleStart !== undefined && angleEnd !== undefined && Math.abs(angleEnd - angleStart) < 1e-9)
+    const angleStart = validNumericParameter('angleStartDeg');
+    const angleEnd = validNumericParameter('angleEndDeg');
+    const zeroSpan = angleStart !== undefined && angleEnd !== undefined && Math.abs(angleEnd - angleStart) < 1e-9;
+    if (zeroSpan)
       issues.push('起止角相同会生成单条径向卡尺，无法拟合圆；请扩大搜索弧角范围。');
+
+    const mode = typeof parameters.samplingMode === 'string'
+      ? parameters.samplingMode.toLowerCase()
+      : parameters.angleStepDeg !== undefined ? 'step' : 'count';
+    let availableCalipers: number | undefined;
+    if (!zeroSpan && mode === 'count') {
+      const count = validNumericParameter('caliperCount');
+      if (count !== undefined) availableCalipers = roundedParameter(count, 3, 361);
+    } else if (!zeroSpan && mode === 'step' && angleStart !== undefined && angleEnd !== undefined) {
+      const rawSpan = angleEnd - angleStart;
+      let span = rawSpan % 360;
+      const fullCircle = Math.abs(rawSpan) >= 1e-9 && Math.abs(span) < 1e-9;
+      if (fullCircle) span = 360;
+      else if (span < 0) span += 360;
+      const requestedStep = validNumericParameter('angleStepDeg');
+      if (requestedStep !== undefined) {
+        const step = Math.max(0.5, Math.min(45, requestedStep));
+        const intervalCount = span / step;
+        const nearestIntervalCount = Math.round(intervalCount);
+        const reachesEnd = nearestIntervalCount > 0
+          && Math.abs(nearestIntervalCount * step - span) <= 1e-9;
+        const count = fullCircle && reachesEnd
+          ? nearestIntervalCount
+          : Math.floor(intervalCount) + 1;
+        availableCalipers = Math.min(count, fullCircle ? 360 : 361);
+      }
+    }
+
+    const minimumValid = validNumericParameter('minValidCalipers');
+    if (availableCalipers !== undefined && availableCalipers < 3)
+      issues.push(`当前圆弧与角度步长只会生成 ${availableCalipers} 条径向卡尺；圆拟合至少需要 3 条。请扩大圆弧或减小角度步长。`);
+    else if (availableCalipers !== undefined && minimumValid !== undefined
+      && roundedParameter(minimumValid, 3, 361) > availableCalipers)
+      issues.push(`最少有效卡尺数超过当前设置可生成的 ${availableCalipers} 条卡尺；请降低门槛、扩大圆弧或提高采样密度。`);
+  }
+  if (catalog.type === 'measure.caliperLine') {
+    const count = validNumericParameter('caliperCount');
+    const minimum = validNumericParameter('minValidCalipers');
+    if (count !== undefined && minimum !== undefined
+      && roundedParameter(minimum, 3, 101) > roundedParameter(count, 3, 101))
+      issues.push('最少有效卡尺数超过卡尺总数；请降低门槛或增加卡尺数。');
   }
   for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
     if (key === 'roi' && roiInputOverridesParameter) continue;
