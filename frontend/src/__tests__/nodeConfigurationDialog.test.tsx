@@ -516,6 +516,40 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
   });
 
+  it('warns when a pose-corrected rectangular ROI can rotate into a masked polygon during cropping', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+      typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '定位区域裁剪', inputs: cropCatalog.inputs,
+      // This local rectangle is dormant because the connected corrected ROI takes precedence.
+      parameters: { roi: { type: 'Rectangle', x: 0, y: 0, width: 80, height: 80 } }
+    } };
+    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: {
+      typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { roi: { type: 'Rectangle', x: 20, y: 20, width: 30, height: 20 } }
+    } };
+    const edges = [
+      { id: 'crop-image', source: 'image-source', sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'corrected-roi', source: roiNode.id, sourceHandle: 'roi', target: cropNode.id, targetHandle: 'roi' },
+      { id: 'measurement-image', source: cropNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+    ];
+    const imageNode: Node = { id: 'image-source', position: { x: 0, y: 0 }, data: { label: '输入图像' } };
+    const nodes = [lineNode, cropNode, roiNode, imageNode];
+    const { dialog, unmount } = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges });
+
+    expect(dialog.getByText('测量图像来自裁剪节点')).toBeTruthy();
+    expect(dialog.getByText(/可能形成伪边缘/)).toBeTruthy();
+    unmount();
+    cleanup();
+
+    const masked = mount({ node: lineNode, catalogItem: lineCatalog, nodes,
+      edges: [...edges, { id: 'crop-mask', source: cropNode.id, sourceHandle: 'croppedRoi', target: lineNode.id, targetHandle: 'roi' }] });
+    expect(masked.dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+  });
+
   it('writes an interactively adjusted search line back into the staged parameters', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,

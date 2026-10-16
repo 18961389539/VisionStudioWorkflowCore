@@ -179,11 +179,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const cropRoiInputEdge = measurementImageSource?.data.typeKey === 'image.crop'
     ? edges.find((edge) => edge.target === measurementImageSource.id && edge.targetHandle === 'roi')
     : undefined;
-  const cropRoiSource = nodes.find((item) => item.id === cropRoiInputEdge?.source);
   const configuredCropRoi = (measurementImageSource?.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
-  const upstreamCropRoi = (cropRoiSource?.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
-  const cropRoiType = configuredCropRoi?.type ?? upstreamCropRoi?.type;
-  const cropMayZeroOutsideSelection = cropRoiType ? cropRoiType !== 'Rectangle' : Boolean(cropRoiInputEdge);
+  const roiSourceMayMaskCropBounds = (sourceId: string, visited = new Set<string>()): boolean => {
+    if (visited.has(sourceId)) return true;
+    visited.add(sourceId);
+    const source = nodes.find((item) => item.id === sourceId);
+    if (source?.data.typeKey === 'roi.transform') return true;
+    if (source?.data.typeKey !== 'image.crop') return true;
+    const sourceRoiEdge = edges.find((edge) => edge.target === sourceId && edge.targetHandle === 'roi');
+    if (sourceRoiEdge) return roiSourceMayMaskCropBounds(sourceRoiEdge.source, visited);
+    const sourceRoi = (source.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+    return sourceRoi ? sourceRoi.type !== 'Rectangle' : false;
+  };
+  const cropMayZeroOutsideSelection = cropRoiInputEdge
+    ? roiSourceMayMaskCropBounds(cropRoiInputEdge.source)
+    : Boolean(configuredCropRoi && configuredCropRoi.type !== 'Rectangle');
   const croppedRoiConnected = Boolean(measurementImageSource?.data.typeKey === 'image.crop'
     && roiInputEdge?.source === measurementImageInputEdge?.source && roiInputEdge?.sourceHandle === 'croppedRoi');
   const croppedImageNeedsRoiWarning = Boolean(measurementNodeTypes.includes(catalogItem.type)
