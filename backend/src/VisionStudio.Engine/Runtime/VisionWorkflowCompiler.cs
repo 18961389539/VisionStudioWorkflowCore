@@ -11,8 +11,11 @@ namespace VisionStudio.Engine.Runtime;
 /// </summary>
 public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 {
-    private sealed record CoordinateFrame(string Key, string Label);
-    private sealed record TransformFrames(CoordinateFrame? Source, CoordinateFrame? Target);
+    private sealed record CoordinateFrame(string Key, string Label, bool IsTraceable = true);
+    private sealed record TransformFrames(
+        CoordinateFrame? Source,
+        CoordinateFrame? Target,
+        IReadOnlyList<CoordinateFrame> MappedFrames);
 
     private const string ReservedPipelinePrefix = "__vs_pipeline_";
     private const int PlanSchemaVersion = 1;
@@ -160,6 +163,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         }
 
         ValidateMeasurementImageFrames(workflow, byId);
+        ValidateMeasurementGeometryFrames(workflow, byId);
 
         foreach (var node in workflow.Nodes)
         {
@@ -230,6 +234,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             var imageFrame = ResolveImageFrame(imageEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
             var targetFrame = transformFrames?.Target;
             if (targetFrame is null || imageFrame is null
+                || !targetFrame.IsTraceable || !imageFrame.IsTraceable
                 || string.Equals(targetFrame.Key, imageFrame.Key, StringComparison.OrdinalIgnoreCase))
                 continue;
 
@@ -252,23 +257,26 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             var input = FindInputEdge(workflow.Edges, nodeId, "image");
             var source = input is null ? null : ResolveImageFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
             var target = new CoordinateFrame($"image:{nodeId}:crop", $"{nodeId}.image (crop frame)");
-            return new TransformFrames(source, target);
+            return new TransformFrames(source, target, [target]);
         }
         if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
         {
             var input = FindInputEdge(workflow.Edges, nodeId, "debugImage");
             var target = input is null ? null : ResolveImageFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            return new TransformFrames(new CoordinateFrame($"roi:{nodeId}:reference", $"{nodeId} reference image"), target);
+            return new TransformFrames(
+                new CoordinateFrame($"roi:{nodeId}:reference", $"{nodeId} reference image", IsTraceable: false),
+                target,
+                target is null ? [] : [target]);
         }
         if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
         {
             var templateEdge = FindInputEdge(workflow.Edges, nodeId, "template");
             var imageInput = FindInputEdge(workflow.Edges, nodeId, "image");
             var source = templateEdge is null
-                ? new CoordinateFrame($"match:{nodeId}:template", $"{nodeId} trained template")
+                ? new CoordinateFrame($"match:{nodeId}:template", $"{nodeId} trained template", IsTraceable: false)
                 : ResolveImageFrame(templateEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
             var target = imageInput is null ? null : ResolveImageFrame(imageInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            return new TransformFrames(source, target);
+            return new TransformFrames(source, target, target is null ? [] : [target]);
         }
         if (type.Equals("coordinate.transformCompose", StringComparison.OrdinalIgnoreCase))
         {
@@ -278,21 +286,159 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
             var second = secondEdge is null ? null : ResolveTransformFrames(secondEdge.SourceNodeId, workflow, byId,
                 new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
-            if (first?.Target is { } firstTarget && second?.Source is { } secondSource
+            if (first?.Target is { IsTraceable: true } firstTarget
+                && second?.Source is { IsTraceable: true } secondSource
                 && !string.Equals(firstTarget.Key, secondSource.Key, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     $"Node '{nodeId}' cannot compose transforms: '{firstTarget.Label}' does not match '{secondSource.Label}'. " +
                     "Connect transforms whose intermediate image frames come from the same image path.");
-            return new TransformFrames(first?.Source, second?.Target);
+            var mappedFrames = (first?.MappedFrames ?? [])
+                .Concat(second?.MappedFrames ?? [])
+                .GroupBy(frame => frame.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            return new TransformFrames(first?.Source, second?.Target, mappedFrames);
         }
         if (type.Equals("coordinate.transformInverse", StringComparison.OrdinalIgnoreCase))
         {
             var input = FindInputEdge(workflow.Edges, nodeId, "transform");
             var source = input is null ? null : ResolveTransformFrames(input.SourceNodeId, workflow, byId, visited);
-            return source is null ? null : new TransformFrames(source.Target, source.Source);
+            if (source is null) return null;
+            var path = (source.Source is null ? source.MappedFrames : [source.Source, .. source.MappedFrames]).ToArray();
+            return new TransformFrames(source.Target, source.Source, path.Reverse().Skip(1).ToArray());
         }
         return null;
     }
+
+    private void ValidateMeasurementGeometryFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
+    {
+        var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "feature.edgeSubpixel", "measure.caliper", "measure.caliperLine", "measure.caliperCircle"
+        };
+
+        foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
+        {
+            var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
+            if (transformEdge is null) continue;
+            var transform = ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            if (transform is null) continue;
+
+            foreach (var inputPort in new[] { "searchLine", "circle" })
+            {
+                var geometryEdge = FindInputEdge(workflow.Edges, node.Id, inputPort);
+                if (geometryEdge is null) continue;
+                var geometryFrame = ResolveGeometryFrame(geometryEdge.SourceNodeId, geometryEdge.SourcePort,
+                    workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+                if (geometryFrame is null || !geometryFrame.IsTraceable) continue;
+
+                if (transform.Source is { IsTraceable: true } sourceFrame
+                    && string.Equals(geometryFrame.Key, sourceFrame.Key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (transform.MappedFrames.FirstOrDefault(frame =>
+                        string.Equals(frame.Key, geometryFrame.Key, StringComparison.OrdinalIgnoreCase)) is { } appliedFrame)
+                    throw new InvalidOperationException(
+                        $"Node '{node.Id}' input '{inputPort}' geometry from '{geometryEdge.SourceNodeId}' is already in transform frame '{appliedFrame.Label}'. " +
+                        "Remove the transform input or connect geometry from its source frame.");
+
+                if (transform.Source is { IsTraceable: true } expectedSource)
+                    throw new InvalidOperationException(
+                        $"Node '{node.Id}' input '{inputPort}' geometry is in frame '{geometryFrame.Label}', but the transform expects source frame '{expectedSource.Label}'. " +
+                        "Connect geometry from the transform's source frame or choose a matching transform.");
+            }
+        }
+    }
+
+    private CoordinateFrame? ResolveGeometryFrame(
+        string nodeId,
+        string outputPort,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
+        var type = node.Type;
+        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "roi", "rectangle", "circle", "center", "pose"))
+            return ResolveImageInputFrame(nodeId, "debugImage", workflow, byId);
+
+        if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "center", "rectangle", "pose"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+
+        if (type.Equals("feature.line", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "line"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        if (type.Equals("feature.circle", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "circle", "center"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+
+        if (type.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "point", "searchLine"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        if (type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "point", "searchLine"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        if (type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "point", "line", "searchLine"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        if (type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "circle", "center"))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+
+        if (type.Equals("measure.fitLine", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "line")
+            || type.Equals("measure.fitCircle", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "circle", "center"))
+            return ResolveFittedPointFrame(nodeId, workflow, byId, visited);
+
+        return null;
+    }
+
+    private CoordinateFrame? ResolveFittedPointFrame(
+        string nodeId,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        var pointEdges = workflow.Edges.Where(edge => edge.TargetNodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)
+                && !WorkflowGraph.IsControlEdge(edge)
+                && registry.Require(byId[nodeId].Type).Catalog.Inputs.Any(port => port.Name.Equals(edge.TargetPort, StringComparison.OrdinalIgnoreCase)
+                    && port.DataType == VisionDataType.Point2D))
+            .ToArray();
+        if (pointEdges.Length == 0) return null;
+
+        var pointFrames = pointEdges.Select(edge => ResolveGeometryFrame(edge.SourceNodeId, edge.SourcePort,
+            workflow, byId, new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase))).ToArray();
+        if (pointFrames.Any(frame => frame is null || !frame.IsTraceable)) return null;
+        var distinctFrames = pointFrames.Cast<CoordinateFrame>()
+            .GroupBy(frame => frame.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (distinctFrames.Length > 1)
+            throw new InvalidOperationException(
+                $"Node '{nodeId}' cannot fit points from different image frames ('{distinctFrames[0].Label}' and '{distinctFrames[1].Label}'). " +
+                "Connect points from the same image frame.");
+        return distinctFrames[0];
+    }
+
+    private CoordinateFrame? ResolveImageInputFrame(
+        string nodeId,
+        string inputPort,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId)
+    {
+        var edge = FindInputEdge(workflow.Edges, nodeId, inputPort);
+        return edge is null
+            ? null
+            : ResolveImageFrame(edge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsOneOf(string value, params string[] expected)
+        => expected.Any(item => value.Equals(item, StringComparison.OrdinalIgnoreCase));
 
     private CoordinateFrame? ResolveImageFrame(
         string nodeId,

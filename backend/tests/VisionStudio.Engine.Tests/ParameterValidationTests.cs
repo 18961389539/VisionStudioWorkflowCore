@@ -124,6 +124,65 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.line", "line", "measure.caliperLine", "searchLine")]
+    [InlineData("feature.circle", "circle", "measure.caliperCircle", "circle")]
+    public void MeasurementRejectsGeometryAlreadyInTheTransformTargetFrame(
+        string geometryType,
+        string geometryOutput,
+        string measurementType,
+        string measurementInput)
+    {
+        var workflow = new WorkflowDefinition("geometry-frame-conflict", "Geometry frame conflict",
+        [
+            new NodeDefinition("image", "image.synthetic", null, null, null),
+            new NodeDefinition("pose", "roi.transform", null, null, null),
+            new NodeDefinition("geometry", geometryType, null, null, null),
+            new NodeDefinition("measure", measurementType, null, null, null)
+        ],
+        [
+            new EdgeDefinition("image-pose-control", "image", "next", "pose", "exec", "control"),
+            new EdgeDefinition("pose-geometry-control", "pose", "next", "geometry", "exec", "control"),
+            new EdgeDefinition("geometry-measure-control", "geometry", "next", "measure", "exec", "control"),
+            new EdgeDefinition("pose-image", "image", "image", "pose", "debugImage", "data"),
+            new EdgeDefinition("geometry-image", "image", "image", "geometry", "image", "data"),
+            new EdgeDefinition("measurement-image", "image", "image", "measure", "image", "data"),
+            new EdgeDefinition("geometry-input", "geometry", geometryOutput, "measure", measurementInput, "data"),
+            new EdgeDefinition("pose-transform", "pose", "transform", "measure", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("already in transform frame 'image.image'", error.Message);
+        Assert.Contains("Remove the transform input", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementAcceptsSourceFrameGeometryWithCropTransform()
+    {
+        var workflow = new WorkflowDefinition("source-geometry-crop", "Source geometry with crop transform",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("line", "feature.line", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-line-control", "crop", "next", "line", "exec", "control"),
+            new EdgeDefinition("line-measure-control", "line", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-crop", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("scene-line", "scene", "image", "line", "image", "data"),
+            new EdgeDefinition("crop-measure", "crop", "image", "measure", "image", "data"),
+            new EdgeDefinition("line-measure", "line", "line", "measure", "searchLine", "data"),
+            new EdgeDefinition("crop-transform", "crop", "transform", "measure", "transform", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Theory]
     [InlineData("feature.edgeSubpixel")]
     [InlineData("measure.caliper")]
     [InlineData("measure.caliperLine")]
