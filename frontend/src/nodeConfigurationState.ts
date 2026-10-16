@@ -244,7 +244,7 @@ export function configurationIssues(
     const value = parameters[key];
     if (value === undefined || value === null) continue;
     const label = key === 'roi' ? 'ROI' : key === 'clutterRoi' ? '杂乱区域' : '搜索区域';
-    const issue = roiConfigurationIssue(value, label, catalog.type === 'image.crop' ? 512 : 1024);
+    const issue = roiConfigurationIssue(value, label, 1024);
     if (issue) issues.push(issue);
   }
   return issues;

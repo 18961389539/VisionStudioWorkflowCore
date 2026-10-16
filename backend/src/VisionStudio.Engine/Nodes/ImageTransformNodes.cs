@@ -311,9 +311,9 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                     if (stroke is null)
                         throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
-                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 512
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
                         || stroke.Points is null || stroke.Points.Count == 0)
-                        throw new InvalidOperationException("笔刷笔迹需要有效模式、1..512 px 笔宽和至少一个点。");
+                        throw new InvalidOperationException("笔刷笔迹需要有效模式、1..1024 px 笔宽和至少一个点。");
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("笔刷裁剪区域最多允许 500000 个笔迹点。");

@@ -97,10 +97,12 @@ describe('node configuration snapshots', () => {
     } });
     expect(clutterIssue.join(' ')).toContain('杂乱区域矩形');
 
-    const brush = { type: 'Brush', strokes: [{ mode: 'Add', width: 600, points: [{ x: 1, y: 1 }] }] };
-    expect(configurationIssues(crop, { roi: brush }).join(' ')).toContain('笔宽须在 0..512 px');
+    const brush = { type: 'Brush', strokes: [{ mode: 'Add', width: 1024, points: [{ x: 1, y: 1 }] }] };
+    expect(configurationIssues(crop, { roi: brush })).toEqual([]);
+    const oversizedBrush = { type: 'Brush', strokes: [{ mode: 'Add', width: 1025, points: [{ x: 1, y: 1 }] }] };
+    expect(configurationIssues(crop, { roi: oversizedBrush }).join(' ')).toContain('笔宽须在 0..1024 px');
     const transform = fallbackCatalogRaw.find(item => item.type === 'roi.transform')!;
-    expect(configurationIssues(transform, { ...makeDefaultParameters(transform), roi: brush })).toEqual([]);
+    expect(configurationIssues(transform, { ...makeDefaultParameters(transform), roi: oversizedBrush }).join(' ')).toContain('笔宽须在 0..1024 px');
   });
 
   it('does not validate a local ROI that a connected ROI input overrides', () => {

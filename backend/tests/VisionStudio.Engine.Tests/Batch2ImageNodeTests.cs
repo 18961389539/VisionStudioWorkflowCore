@@ -136,6 +136,28 @@ public sealed class Batch2ImageNodeTests
     }
 
     [Fact]
+    public async Task CropAcceptsMaximumWidthBrushProducedByRoiTransform()
+    {
+        using var source = new Mat(32, 32, MatType.CV_8UC1, Scalar.All(90));
+        using var image = VisionImage.Own(source.Clone());
+        var corrected = await new RoiTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
+            Node("roi.transform", """{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":1024,"points":[{"x":16,"y":16}]}]}}"""),
+            CancellationToken.None);
+
+        var cropped = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(image),
+            ["roi"] = corrected.Outputs["roi"]
+        }), Node("image.crop", "{}"), CancellationToken.None);
+
+        using var outputImage = ImageFrom(cropped);
+        Assert.Equal((32, 32), (outputImage.Width, outputImage.Height));
+        Assert.Equal("Brush", cropped.Summary["roiType"]);
+        Assert.Equal(32 * 32, Convert.ToInt32(cropped.Summary["selectedPixels"]));
+        (cropped.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CropKeepsExplicitNullRoiAsTheLegacyUnsetValue()
     {
         using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
