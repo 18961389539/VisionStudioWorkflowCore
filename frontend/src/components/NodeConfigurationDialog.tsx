@@ -345,10 +345,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     && (isShapeMatch || (isRoiTransform ? Boolean(referenceImage) : selectedInputAvailable));
   const draftNode: Node = { ...node, data: { ...node.data, parameters: draft } };
   const changeParameter = (key: string, value: unknown) => {
-    if (!locked) setDraft((current) => withParameter(current, key, value));
+    if (locked) return;
+    setDraft((current) => withParameter(current, key, value));
+    if (isImageCrop && key === 'roi') setImageSource('input');
   };
   const changeCropRoi = (roi?: VisionRoi) => {
     if (locked) return;
+    setImageSource('input');
     setDraft((current) => {
       const next = { ...current };
       for (const key of ['x', 'y', 'width', 'height']) delete next[key];

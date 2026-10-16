@@ -304,6 +304,14 @@ describe('crop workspace with a connected ROI', () => {
     fireEvent.click(dialog.getByRole('radio', { name: '输入图像' }));
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
     expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 可编辑');
+
+    fireEvent.click(dialog.getByRole('radio', { name: '裁剪输出' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/crop/image'));
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 只读');
+    fireEvent.click(dialog.getByRole('button', { name: '清除选区（使用整图）' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 可编辑');
+    expect(dialog.getByText('未绘制 · 使用旧版坐标或整幅图像')).toBeTruthy();
   });
 });
 
