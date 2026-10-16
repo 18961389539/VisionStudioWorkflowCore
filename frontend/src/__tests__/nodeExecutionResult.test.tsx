@@ -218,6 +218,12 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText("Parameter 'polarity' must be one of [any, rising, falling].")).toBeTruthy();
   });
 
+  it('localizes malformed ROI geometry errors from caliper nodes', () => {
+    mount('measure.caliperLine', failedResult('Polygon ROI requires 3..500000 finite vertices within ±10000000 px.'));
+
+    expect(screen.getByText('多边形 ROI 至少需要 3 个有效顶点，且坐标在允许范围内。')).toBeTruthy();
+  });
+
   it('keeps unknown native errors intact for diagnosis', () => {
     const nativeError = 'HALCON error #3022: Wrong size of filter for Gauss in operator measure_pos';
     mount('measure.caliper', failedResult(nativeError));

@@ -68,6 +68,24 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
       parameter?.options?.find(option => option.value.toLowerCase() === value.toLowerCase())?.label ?? value);
     return `参数“${label}”的选项值无效。可选项：${choices.join('、')}。`;
   }
+  if (['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+    if (error.startsWith('Rectangle ROI requires finite coordinates'))
+      return '矩形 ROI 必须具有有限坐标和正宽高，且边界在允许范围内。';
+    if (error.startsWith('Circle ROI requires finite center coordinates'))
+      return '圆形 ROI 必须具有有限圆心坐标和正半径，且坐标在允许范围内。';
+    if (error.startsWith('Polygon ROI requires 3..'))
+      return '多边形 ROI 至少需要 3 个有效顶点，且坐标在允许范围内。';
+    if (error === 'Polygon ROI vertices must enclose a finite non-zero area.')
+      return '多边形 ROI 顶点必须围成有限且非零的面积。';
+    if (error === 'Brush ROI requires 1..10000 strokes and at least one add stroke.')
+      return '笔刷 ROI 需要 1 至 10000 笔有效笔迹，并至少包含一笔添加选区。';
+    if (error.startsWith('Brush ROI strokes require a valid mode'))
+      return '笔刷 ROI 的笔迹模式、坐标或宽度无效。请检查 ROI 笔迹。';
+    if (error === 'Brush ROI may contain at most 500000 points.')
+      return '笔刷 ROI 最多允许 500000 个坐标点。';
+    const unsupportedRoi = error.match(/^ROI type '(.+)' is not supported\.$/);
+    if (unsupportedRoi) return `不支持此 ROI 类型（${unsupportedRoi[1]}）。请使用矩形、圆形、多边形或笔刷 ROI。`;
+  }
 
   const messages: Record<string, Record<string, string>> = {
     'image.crop': {

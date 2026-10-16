@@ -49,6 +49,35 @@ public sealed class Batch2ImageNodeTests
         Assert.Contains("is not supported", error.Message);
     }
 
+    [Fact]
+    public void MeasurementValidationRejectsDegenerateRoiGeometry()
+    {
+        var invalidRois = new (VisionRoi Roi, string Message)[]
+        {
+            (new(VisionRoiType.Rectangle, X: 0, Y: 0, Width: 0, Height: 5), "positive width/height"),
+            (new(VisionRoiType.Circle, X: 4, Y: 4, Radius: 0), "positive radius"),
+            (new(VisionRoiType.Polygon, Points: [new(1, 1), new(8, 1)]), "3..500000 finite vertices"),
+            (new(VisionRoiType.Polygon, Points: [new(1, 1), new(8, 1), new(4, 1)]), "non-zero area"),
+            (new(VisionRoiType.Brush, Strokes: [new(VisionRoiStrokeMode.Erase, 2, [new(4, 4)])]), "at least one add stroke")
+        };
+
+        foreach (var (roi, message) in invalidRois)
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => roi.ValidateForMeasurement());
+            Assert.Contains(message, error.Message);
+        }
+    }
+
+    [Fact]
+    public void GenericRoiMaskCanStillRepresentAnExplicitEmptyRegion()
+    {
+        using var rectangle = new VisionRoi(VisionRoiType.Rectangle, X: 2, Y: 2, Width: 0, Height: 5).BuildMask(new Size(16, 16));
+        using var circle = new VisionRoi(VisionRoiType.Circle, X: 4, Y: 4, Radius: 0).BuildMask(new Size(16, 16));
+
+        Assert.Equal(0, Cv2.CountNonZero(rectangle));
+        Assert.Equal(0, Cv2.CountNonZero(circle));
+    }
+
     [Theory]
     [InlineData("""{"roi":"Rectangle"}""", "must be an object or null")]
     [InlineData("""{"roi":[]}""", "must be an object or null")]
@@ -64,6 +93,17 @@ public sealed class Batch2ImageNodeTests
 
         Assert.Contains("ROI parameter 'roi'", error.Message);
         Assert.Contains(message, error.Message);
+    }
+
+    [Fact]
+    public async Task CropRejectsNullPolygonVerticesAsInvalidGeometry()
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RunImage(new ImageCropNode(), Image(source), """{"roi":{"type":"Polygon","points":[{"x":1,"y":1},null,{"x":8,"y":1}]}}"""));
+
+        Assert.Contains("有效顶点", error.Message);
     }
 
     [Fact]

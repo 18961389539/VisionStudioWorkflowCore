@@ -107,7 +107,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
-                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
                     || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
                     throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");
                 var doubledArea = points.Select((point, index) =>
@@ -122,14 +122,15 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                if (strokes.Count == 0 || strokes.Count > 10_000)
+                if (strokes.Count == 0 || strokes.Count > 10_000 || strokes.Any(stroke => stroke is null))
                     throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
                 var totalPoints = 0;
                 foreach (var stroke in strokes)
                 {
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 512
-                        || stroke.Points is null || stroke.Points.Count == 0)
+                        || stroke.Points is null || stroke.Points.Count == 0
+                        || stroke.Points.Any(point => point is null))
                         throw new InvalidOperationException("笔刷笔迹需要有效模式、1..512 px 笔宽和至少一个点。");
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)

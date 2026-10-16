@@ -114,12 +114,14 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                if (strokes.Count is < 1 or > 10_000) throw new InvalidOperationException("The brush ROI needs 1..10000 strokes.");
+                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null))
+                    throw new InvalidOperationException("The brush ROI needs 1..10000 valid strokes.");
                 var points = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).SelectMany(stroke => stroke.Points ?? []).ToArray();
-                if (points.Length == 0 || strokes.SelectMany(stroke => stroke.Points ?? []).Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+                if (points.Length == 0 || strokes.SelectMany(stroke => stroke.Points ?? []).Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
                     throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
                 if (strokes.Any(stroke => stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
-                    || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024 || stroke.Points is null || stroke.Points.Count == 0))
+                    || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024 || stroke.Points is null || stroke.Points.Count == 0
+                    || stroke.Points.Any(point => point is null)))
                     throw new InvalidOperationException("Brush ROI strokes need a valid mode, positive width and points.");
                 var movedStrokes = strokes.Select(stroke => stroke with
                 {
@@ -355,7 +357,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
-                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
                     || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
                     throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");
                 var area2 = points.Select((point, index) =>
@@ -371,14 +373,15 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             {
                 var strokes = roi.Strokes ?? [];
                 var totalPoints = 0;
-                if (strokes.Count is < 1 or > 10_000 || !strokes.Any(stroke => stroke.Mode == VisionRoiStrokeMode.Add))
+                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null)
+                    || !strokes.Any(stroke => stroke is not null && stroke.Mode == VisionRoiStrokeMode.Add))
                     throw new InvalidOperationException("The brush ROI needs 1..10000 strokes and at least one add stroke.");
                 foreach (var stroke in strokes)
                 {
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
                         || stroke.Points is null || stroke.Points.Count == 0
-                        || stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                        || stroke.Points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
                             || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
                         throw new InvalidOperationException($"Brush ROI strokes need a valid mode, finite points within ±{MaxRoiCoordinate:0} px and a width between 0 and 1024 px.");
                     totalPoints = checked(totalPoints + stroke.Points.Count);

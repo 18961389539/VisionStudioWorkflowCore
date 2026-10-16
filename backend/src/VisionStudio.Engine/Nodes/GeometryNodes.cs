@@ -195,7 +195,11 @@ public sealed class CaliperNode : IVisionNodeExecutor
         Mat? mask = null;
         try
         {
-            if (roi is not null) mask = roi.BuildMask(sourceImage.Mat.Size());
+            if (roi is not null)
+            {
+                roi.ValidateForMeasurement();
+                mask = roi.BuildMask(sourceImage.Mat.Size());
+            }
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {

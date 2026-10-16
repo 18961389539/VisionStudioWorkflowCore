@@ -38,6 +38,29 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Theory]
+    [InlineData("measure.caliper")]
+    [InlineData("measure.caliperLine")]
+    [InlineData("measure.caliperCircle")]
+    public async Task CaliperNodesRejectDegenerateConnectedRoiInsteadOfReportingNoEdge(string type)
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+        var inputs = Inputs(image);
+        inputs["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Polygon,
+            Points: [new VisionRoiPoint(10, 10), new VisionRoiPoint(40, 10)]));
+        IVisionNodeExecutor executor = type switch
+        {
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(
+            new NodeExecutionContext(inputs), Node(type, "{}"), CancellationToken.None).AsTask());
+
+        Assert.Contains("Polygon ROI requires 3..500000 finite vertices", error.Message);
+    }
+
+    [Theory]
     [InlineData(1.0)]
     [InlineData(0.5)]
     [InlineData(-0.7)]

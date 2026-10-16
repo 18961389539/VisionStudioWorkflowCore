@@ -4,8 +4,15 @@ namespace VisionStudio.Engine;
 
 public static class VisionRoiOpenCvExtensions
 {
+    private const double MaxCoordinate = 10_000_000;
+    private const int MaxPolygonPoints = 500_000;
+
     public static Mat BuildMask(this VisionRoi roi, Size size)
     {
+        ArgumentNullException.ThrowIfNull(roi);
+        if (size.Width <= 0 || size.Height <= 0)
+            throw new InvalidOperationException("ROI mask dimensions must be positive.");
+
         var mask = new Mat(size.Height, size.Width, MatType.CV_8UC1, Scalar.All(0));
         try
         {
@@ -55,6 +62,74 @@ public static class VisionRoiOpenCvExtensions
         catch { mask.Dispose(); throw; }
     }
 
+    /// <summary>Reject malformed or empty regions when an image measurement expects a usable ROI.</summary>
+    public static void ValidateForMeasurement(this VisionRoi roi)
+    {
+        ArgumentNullException.ThrowIfNull(roi);
+        ValidateMaskGeometry(roi);
+    }
+
+    private static void ValidateMaskGeometry(VisionRoi roi)
+    {
+        static bool IsBounded(double value) => double.IsFinite(value) && Math.Abs(value) <= MaxCoordinate;
+
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+                if (roi.X is not { } x || roi.Y is not { } y || roi.Width is not { } width || roi.Height is not { } height
+                    || !IsBounded(x) || !IsBounded(y) || !IsBounded(width) || !IsBounded(height)
+                    || width <= 0 || height <= 0 || !IsBounded(x + width) || !IsBounded(y + height))
+                    throw new InvalidOperationException("Rectangle ROI requires finite coordinates within ±10000000 px and positive width/height whose far edges remain within that range.");
+                break;
+
+            case VisionRoiType.Circle:
+                if (roi.X is not { } cx || roi.Y is not { } cy || roi.Radius is not { } radius
+                    || !IsBounded(cx) || !IsBounded(cy) || !IsBounded(radius) || radius <= 0)
+                    throw new InvalidOperationException("Circle ROI requires finite center coordinates within ±10000000 px and a positive radius within that range.");
+                break;
+
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                if (points.Count is < 3 or > MaxPolygonPoints
+                    || points.Any(point => point is null || !IsBounded(point.X) || !IsBounded(point.Y)))
+                    throw new InvalidOperationException($"Polygon ROI requires 3..{MaxPolygonPoints} finite vertices within ±10000000 px.");
+                var doubledArea = points.Select((point, index) =>
+                {
+                    var next = points[(index + 1) % points.Count];
+                    return point.X * next.Y - next.X * point.Y;
+                }).Sum();
+                if (!double.IsFinite(doubledArea) || Math.Abs(doubledArea) < 1e-6)
+                    throw new InvalidOperationException("Polygon ROI vertices must enclose a finite non-zero area.");
+                break;
+            }
+
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null)
+                    || !strokes.Any(stroke => stroke is not null && stroke.Mode == VisionRoiStrokeMode.Add))
+                    throw new InvalidOperationException("Brush ROI requires 1..10000 strokes and at least one add stroke.");
+                var totalPoints = 0;
+                foreach (var stroke in strokes)
+                {
+                    if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
+                        || stroke.Points is null || stroke.Points.Count == 0
+                        || stroke.Points.Any(point => point is null || !IsBounded(point.X) || !IsBounded(point.Y)))
+                        throw new InvalidOperationException("Brush ROI strokes require a valid mode, finite points within ±10000000 px, and a width between 0 and 1024 px.");
+                    totalPoints = checked(totalPoints + stroke.Points.Count);
+                    if (totalPoints > 500_000)
+                        throw new InvalidOperationException("Brush ROI may contain at most 500000 points.");
+                }
+                break;
+            }
+
+            default:
+                throw new InvalidOperationException($"ROI type '{roi.Type}' is not supported.");
+        }
+    }
+
     internal static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0)
     {
         if (target.Empty()) return;
@@ -66,7 +141,7 @@ public static class VisionRoiOpenCvExtensions
         var totalPoints = 0;
         foreach (var stroke in strokes)
         {
-            if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase))
+            if (stroke is null || stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase))
                 throw new InvalidOperationException("Brush ROI stroke mode must be Add or Erase.");
             if (!double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024)
                 throw new InvalidOperationException("Brush ROI width must be finite and in (0, 1024] pixels.");
@@ -77,7 +152,7 @@ public static class VisionRoiOpenCvExtensions
 
             var points = stroke.Points.Select(point =>
             {
-                if (!double.IsFinite(point.X) || !double.IsFinite(point.Y))
+                if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y))
                     throw new InvalidOperationException("Brush ROI points must be finite.");
                 // OpenCV clips drawing primitives; preserve off-canvas endpoints so strokes
                 // and erasers cannot be displaced onto the image border.

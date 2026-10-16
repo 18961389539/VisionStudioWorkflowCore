@@ -103,6 +103,15 @@ public sealed class RoiCorrectionSafetyTests : IDisposable
         Assert.Contains("10000000", correctedRoiError.Message);
     }
 
+    [Fact]
+    public async Task CorrectionRejectsNullPolygonVerticesAsInvalidGeometry()
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(), [],
+            """{"roi":{"type":"Polygon","points":[{"x":1,"y":1},null,{"x":8,"y":1}]}}"""));
+
+        Assert.Contains("at least three finite points", error.Message);
+    }
+
     [Theory]
     [InlineData("measure.caliperLine", false)]
     [InlineData("measure.caliperLine", true)]
