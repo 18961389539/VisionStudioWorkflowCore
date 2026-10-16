@@ -24,7 +24,7 @@ vi.mock('react-konva', async () => {
     Image: () => null,
     Line: () => null,
     Circle: () => null,
-    Rect: () => null,
+    Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
 });
@@ -53,6 +53,36 @@ describe('ImageViewer measurement geometry editing', () => {
       overlays={overlays} roi={invalidRoi} roiEnabled={false} onRoiChange={emptyRoi} />);
 
     expect(screen.getByTestId('stage')).toBeTruthy();
+  });
+
+  it('can focus a polygon ROI with hundreds of thousands of vertices', () => {
+    const points = Array.from({ length: 200_000 }, (_, index) => {
+      const angle = index * 2 * Math.PI / 200_000;
+      return { x: 50 + 20 * Math.cos(angle), y: 50 + 20 * Math.sin(angle) };
+    });
+    const roi: VisionRoi = { type: 'Polygon', points };
+    const onRoiChange = vi.fn();
+    const view = render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} focusTick={0} />);
+    expect(screen.getAllByTestId('roi-handle').length).toBeLessThanOrEqual(33);
+    expect(screen.getByText('复杂多边形 · 顶点抽样')).toBeTruthy();
+
+    view.rerender(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} focusTick={1} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 130 }); // image center after focus
+    fireEvent.mouseMove(stage, { clientX: 225.5, clientY: 130 }); // move 5 image pixels
+    fireEvent.mouseUp(document.body, { clientX: 225.5, clientY: 130 });
+
+    expect(screen.getByTestId('stage')).toBeTruthy();
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const moved = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(moved.type).toBe('Polygon');
+    if (moved.type === 'Polygon') {
+      expect(moved.points).toHaveLength(200_000);
+      expect(moved.points[0].x).toBeCloseTo(75);
+    }
   });
 
   it('shows the search-line start, end, and direction in the geometry preview', () => {

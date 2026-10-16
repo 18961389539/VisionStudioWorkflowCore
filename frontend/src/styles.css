@@ -966,6 +966,7 @@ body.resizing-x, body.resizing-y { user-select: none; }
 
 /* 图像查看器：工具栏分组分隔与加载失败态 */
 .viewer-toolbar-divider { width: 1px; height: 16px; align-self: center; background: var(--vs-border-toolbar); }
+.viewer-roi-handle-hint { color: var(--vs-text-4); font-size: 11px; white-space: nowrap; }
 .viewer-brush-size { display: inline-flex; align-items: center; gap: 4px; color: var(--vs-text-4); font-size: 11px; white-space: nowrap; }
 .viewer-brush-size .ant-input-number { width: 66px; }
 .image-placeholder.error { color: var(--vs-text-danger); }

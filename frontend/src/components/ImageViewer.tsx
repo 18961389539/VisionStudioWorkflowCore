@@ -8,7 +8,7 @@ import { createPixelBuffer, readPixel } from '../imagePixels';
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
-type BrushRoiBounds = { minX: number; maxX: number; minY: number; maxY: number };
+type RoiMoveBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
 type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
@@ -71,6 +71,14 @@ export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, 
 
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
+const MAX_POLYGON_HANDLES = 32;
+
+function polygonHandleIndices(pointCount: number): number[] {
+  const stride = Math.max(1, Math.ceil(pointCount / MAX_POLYGON_HANDLES));
+  const indices = Array.from({ length: Math.ceil(pointCount / stride) }, (_, index) => index * stride);
+  if (pointCount > 0 && indices.at(-1) !== pointCount - 1) indices.push(pointCount - 1);
+  return indices;
+}
 
 function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
   const start = geometry.angleStartDeg ?? -180;
@@ -151,11 +159,14 @@ function roiBounds(roi: VisionRoi) {
     if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 1, height: 1 };
     return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
   }
-  const xs = roi.points.map((p) => p.x);
-  const ys = roi.points.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  return { x: minX, y: minY, width: Math.max(1, Math.max(...xs) - minX), height: Math.max(1, Math.max(...ys) - minY) };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const point of roi.points) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
 }
 
 function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
@@ -192,7 +203,7 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
   return inside;
 }
 
-function brushRoiBounds(roi: Extract<VisionRoi, { type: 'Brush' }>): BrushRoiBounds | undefined {
+function brushRoiBounds(roi: Extract<VisionRoi, { type: 'Brush' }>): RoiMoveBounds | undefined {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const stroke of roi.strokes) {
     const radius = stroke.width / 2;
@@ -206,7 +217,18 @@ function brushRoiBounds(roi: Extract<VisionRoi, { type: 'Brush' }>): BrushRoiBou
   return Number.isFinite(minX) ? { minX, maxX, minY, maxY } : undefined;
 }
 
-function clampBrushMove(bounds: BrushRoiBounds, delta: Point, maxW: number, maxH: number): Point {
+function polygonRoiBounds(roi: Extract<VisionRoi, { type: 'Polygon' }>): RoiMoveBounds | undefined {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const point of roi.points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  return Number.isFinite(minX) ? { minX, maxX, minY, maxY } : undefined;
+}
+
+function clampRoiMove(bounds: RoiMoveBounds, delta: Point, maxW: number, maxH: number): Point {
   const clampAxis = (min: number, max: number, offset: number, limit: number) => {
     const minOffset = -min, maxOffset = limit - max;
     if (minOffset <= maxOffset) return clamp(offset, minOffset, maxOffset);
@@ -221,7 +243,7 @@ function clampBrushMove(bounds: BrushRoiBounds, delta: Point, maxW: number, maxH
 
 /** 按拖动模式生成新的 ROI：矩形四角缩放 / 圆形按半径 / 多边形整体平移；拖动过程始终限制在图像范围内 */
 function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, current: Point, maxW: number, maxH: number,
-  brushBounds?: BrushRoiBounds): VisionRoi | undefined {
+  moveBounds?: RoiMoveBounds): VisionRoi | undefined {
   const dx = current.x - start.x;
   const dy = current.y - start.y;
   if (origin.type === 'Rectangle') {
@@ -244,9 +266,9 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
   }
   if (origin.type === 'Brush') {
     if (mode !== 'move') return undefined;
-    const bounds = brushBounds ?? brushRoiBounds(origin);
+    const bounds = moveBounds ?? brushRoiBounds(origin);
     if (!bounds) return undefined;
-    const { x: moveX, y: moveY } = clampBrushMove(bounds, { x: dx, y: dy }, maxW, maxH);
+    const { x: moveX, y: moveY } = clampRoiMove(bounds, { x: dx, y: dy }, maxW, maxH);
     return { type: 'Brush', strokes: origin.strokes.map(stroke => ({
       ...stroke, points: stroke.points.map(point => ({ x: point.x + moveX, y: point.y + moveY }))
     })) };
@@ -259,16 +281,9 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
       : point) };
   }
   if (mode === 'move') {
-    const clampTranslation = (coordinates: number[], delta: number, limit: number) => {
-      const min = Math.min(...coordinates), max = Math.max(...coordinates);
-      const minDelta = -min, maxDelta = limit - max;
-      if (minDelta <= maxDelta) return clamp(delta, minDelta, maxDelta);
-      // An oversized polygon cannot fit fully inside the image; keep its center in-frame without distorting it.
-      const center = (min + max) / 2;
-      return clamp(delta, -center, limit - center);
-    };
-    const moveX = clampTranslation(origin.points.map(point => point.x), dx, maxW);
-    const moveY = clampTranslation(origin.points.map(point => point.y), dy, maxH);
+    const bounds = moveBounds ?? polygonRoiBounds(origin);
+    if (!bounds) return undefined;
+    const { x: moveX, y: moveY } = clampRoiMove(bounds, { x: dx, y: dy }, maxW, maxH);
     return { type: 'Polygon', points: origin.points.map(point => ({ x: point.x + moveX, y: point.y + moveY })) };
   }
   return undefined;
@@ -322,19 +337,21 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
   return <Line listening={false} points={flatten(roi.points)} closed={roi.points.length >= 3 && !draft} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
 }
 
-/** 选区控制点：矩形四角 / 圆形四向半径点 / 多边形顶点；缩放时手感不变 */
+/** 选区控制点：大型多边形均匀抽样，避免编辑复杂 ROI 时创建数十万个控制点。 */
 function RoiHandles({ roi, scale }: { roi: VisionRoi; scale: number }) {
   if (roi.type === 'Brush') return null;
   const size = 9 / scale;
-  const dots: Point[] = roi.type === 'Rectangle'
-    ? [{ x: roi.x, y: roi.y }, { x: roi.x + roi.width, y: roi.y }, { x: roi.x, y: roi.y + roi.height }, { x: roi.x + roi.width, y: roi.y + roi.height }]
+  const handles: { index: number; point: Point }[] = roi.type === 'Rectangle'
+    ? [{ index: 0, point: { x: roi.x, y: roi.y } }, { index: 1, point: { x: roi.x + roi.width, y: roi.y } },
+      { index: 2, point: { x: roi.x, y: roi.y + roi.height } }, { index: 3, point: { x: roi.x + roi.width, y: roi.y + roi.height } }]
     : roi.type === 'Circle'
-      ? [{ x: roi.x + roi.radius, y: roi.y }, { x: roi.x - roi.radius, y: roi.y }, { x: roi.x, y: roi.y - roi.radius }, { x: roi.x, y: roi.y + roi.radius }]
-      : roi.points;
-  if (dots.length === 0) return null;
+      ? [{ index: 0, point: { x: roi.x + roi.radius, y: roi.y } }, { index: 1, point: { x: roi.x - roi.radius, y: roi.y } },
+        { index: 2, point: { x: roi.x, y: roi.y - roi.radius } }, { index: 3, point: { x: roi.x, y: roi.y + roi.radius } }]
+      : polygonHandleIndices(roi.points.length).map(index => ({ index, point: roi.points[index] }));
+  if (handles.length === 0) return null;
   return <Group listening={false}>
-    {dots.map((dot, index) => (
-      <Rect key={index} x={dot.x - size / 2} y={dot.y - size / 2} width={size} height={size} fill="#ff4d4f" stroke="#ffffff" strokeWidth={1 / scale} />
+    {handles.map(({ index, point }) => (
+      <Rect key={index} name="roi-handle" x={point.x - size / 2} y={point.y - size / 2} width={size} height={size} fill="#ff4d4f" stroke="#ffffff" strokeWidth={1 / scale} />
     ))}
   </Group>;
 }
@@ -497,8 +514,8 @@ export default function ImageViewer({
   const geometryGestureStart = useRef<Point | undefined>(undefined);
   const geometryDrag = useRef<{ mode: MeasurementDragMode; origin: MeasurementGeometry; start: Point } | undefined>(undefined);
   const panStart = useRef<{ pointer: Point; view: ViewState } | undefined>(undefined);
-  const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point; brushBounds?: BrushRoiBounds } | undefined>(undefined);
-  const [brushDragOffset, setBrushDragOffset] = useState<Point>();
+  const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point; moveBounds?: RoiMoveBounds } | undefined>(undefined);
+  const [roiDragOffset, setRoiDragOffset] = useState<Point>();
   const polygonPoints = useRef<OverlayPoint[]>([]);
   const brushStroke = useRef<{ roi: Extract<VisionRoi, { type: 'Brush' }> } | undefined>(undefined);
   const lastFocusTick = useRef(focusTick ?? 0);
@@ -531,7 +548,7 @@ export default function ImageViewer({
       brushStroke.current = undefined;
       gestureStart.current = undefined;
       roiDrag.current = undefined;
-      setBrushDragOffset(undefined);
+      setRoiDragOffset(undefined);
     }
   }, [roiEnabled]);
   useEffect(() => {
@@ -545,7 +562,7 @@ export default function ImageViewer({
     polygonPoints.current = [];
     brushStroke.current = undefined;
     roiDrag.current = undefined;
-    setBrushDragOffset(undefined);
+    setRoiDragOffset(undefined);
   }, [previewUrl]);
   useEffect(() => {
     if (measurementGeometryEditable) return;
@@ -645,8 +662,10 @@ export default function ImageViewer({
       return undefined;
     }
     if (target.type === 'Brush') return undefined;
-    const vertexIndex = target.points.findIndex((point) => near(point.x, point.y));
-    if (vertexIndex >= 0) return `vertex:${vertexIndex}`;
+    for (const vertexIndex of polygonHandleIndices(target.points.length)) {
+      const point = target.points[vertexIndex];
+      if (near(point.x, point.y)) return `vertex:${vertexIndex}`;
+    }
     return undefined;
   };
 
@@ -752,9 +771,10 @@ export default function ImageViewer({
         return;
       }
       if (tool !== 'polygon' && pointInsideRoi(roi, imagePoint(p))) {
-        const brushBounds = roi.type === 'Brush' ? brushRoiBounds(roi) : undefined;
-        roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p), brushBounds };
-        if (roi.type === 'Brush') setBrushDragOffset({ x: 0, y: 0 });
+        const moveBounds = roi.type === 'Brush' ? brushRoiBounds(roi)
+          : roi.type === 'Polygon' ? polygonRoiBounds(roi) : undefined;
+        roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p), moveBounds };
+        if (roi.type === 'Brush' || roi.type === 'Polygon') setRoiDragOffset({ x: 0, y: 0 });
         return;
       }
     }
@@ -842,12 +862,12 @@ export default function ImageViewer({
     }
     if (roiDrag.current) {
       const active = roiDrag.current;
-      if (active.origin.type === 'Brush' && active.brushBounds) {
-        setBrushDragOffset(clampBrushMove(active.brushBounds,
+      if ((active.origin.type === 'Brush' || active.origin.type === 'Polygon') && active.moveBounds) {
+        setRoiDragOffset(clampRoiMove(active.moveBounds,
           { x: ip.x - active.start.x, y: ip.y - active.start.y }, actualWidth, actualHeight));
         return;
       }
-      const next = applyRoiDrag(active.origin, active.mode, active.start, ip, actualWidth, actualHeight, active.brushBounds);
+      const next = applyRoiDrag(active.origin, active.mode, active.start, ip, actualWidth, actualHeight, active.moveBounds);
       if (next) setDraft(next);
       return;
     }
@@ -895,14 +915,14 @@ export default function ImageViewer({
     if (roiDrag.current) {
       const active = roiDrag.current;
       roiDrag.current = undefined;
-      const next = active.origin.type === 'Brush'
-        ? applyRoiDrag(active.origin, active.mode, { x: 0, y: 0 }, brushDragOffset ?? { x: 0, y: 0 },
-          actualWidth, actualHeight, active.brushBounds)
+      const next = active.origin.type === 'Brush' || active.origin.type === 'Polygon' && active.mode === 'move'
+        ? applyRoiDrag(active.origin, active.mode, { x: 0, y: 0 }, roiDragOffset ?? { x: 0, y: 0 },
+          actualWidth, actualHeight, active.moveBounds)
         : draft;
       if (next && (next.type !== 'Rectangle' || (next.width >= 2 && next.height >= 2)) && (next.type !== 'Circle' || next.radius >= 2)) {
         onRoiChange(next);
       }
-      setBrushDragOffset(undefined);
+      setRoiDragOffset(undefined);
       setDraft(undefined);
       return;
     }
@@ -920,7 +940,7 @@ export default function ImageViewer({
     geometryGestureStart.current = undefined;
     geometryDrag.current = undefined;
     roiDrag.current = undefined;
-    setBrushDragOffset(undefined);
+    setRoiDragOffset(undefined);
     brushStroke.current = undefined;
     setDraft(undefined);
     setMeasurementDraft(undefined);
@@ -975,7 +995,7 @@ export default function ImageViewer({
         geometryGestureStart.current = undefined;
         geometryDrag.current = undefined;
         roiDrag.current = undefined;
-        setBrushDragOffset(undefined);
+        setRoiDragOffset(undefined);
         polygonPoints.current = [];
         brushStroke.current = undefined;
         setDraft(undefined);
@@ -1015,7 +1035,7 @@ export default function ImageViewer({
             value={tool}
             onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; gestureStart.current = undefined;
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
-              roiDrag.current = undefined; setBrushDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
+              roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
               { value: 'pan', label: <Tooltip title="平移">平移</Tooltip> },
               { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="矩形选区">矩形</Tooltip> },
@@ -1025,6 +1045,10 @@ export default function ImageViewer({
               { value: 'eraser', disabled: !roiEnabled || roi?.type !== 'Brush', label: <Tooltip title="橡皮：按住鼠标拖动擦除">橡皮</Tooltip> }
             ]}
           />}
+          {showRoiTools && roi?.type === 'Polygon' && roi.points.length > MAX_POLYGON_HANDLES && <Tooltip
+            title="复杂多边形只显示最多 32 个均匀抽样的顶点控制点；在选区内部拖动可整体移动。">
+            <span className="viewer-roi-handle-hint">复杂多边形 · 顶点抽样</span>
+          </Tooltip>}
           {showRoiTools && <span className="viewer-toolbar-divider" />}
           {showRoiTools && (tool === 'brush' || tool === 'eraser') && <span className="viewer-brush-size">
             <span title="笔刷直径（图像像素）">笔宽</span>
@@ -1108,13 +1132,16 @@ export default function ImageViewer({
             </Layer>}
             <Layer>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {brushDragOffset && roi?.type === 'Brush'
-                  ? <Group x={brushDragOffset.x} y={brushDragOffset.y}><RoiShape roi={roi} scale={view.scale} /></Group>
+                {roiDragOffset && (roi?.type === 'Brush' || roi?.type === 'Polygon')
+                  ? <Group x={roiDragOffset.x} y={roiDragOffset.y}>
+                    <RoiShape roi={roi} scale={view.scale} />
+                    {roi.type === 'Polygon' && roiEnabled && <RoiHandles roi={roi} scale={view.scale} />}
+                  </Group>
                   : <>
                     {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
                     <RoiShape roi={draft} scale={view.scale} draft />
                   </>}
-                {roi && roiEnabled && !draft && <RoiHandles roi={roi} scale={view.scale} />}
+                {roi && roiEnabled && !draft && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} />}
               </Group>
             </Layer>
           </Stage>
