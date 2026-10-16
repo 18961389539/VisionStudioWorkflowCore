@@ -41,6 +41,59 @@ public sealed class Batch5ImagePortTests
         Assert.IsAssignableFrom<IReadOnlyList<VisionContourProperties>>(reports.Single(report => report.NodeId == props.Id).Outputs!["properties"].Value);
     }
 
+    [Fact]
+    public async Task LargePolygonRoiSnapshotsKeepCountsAndBoundsWithoutCopyingEveryVertex()
+    {
+        const int vertexCount = 10_000;
+        var points = Enumerable.Range(0, vertexCount).Select(index => new
+        {
+            x = 64 + 40 * Math.Cos(2 * Math.PI * index / vertexCount),
+            y = 64 + 40 * Math.Sin(2 * Math.PI * index / vertexCount)
+        }).ToArray();
+        var parameters = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            JsonSerializer.Serialize(new { roi = new { type = "Polygon", points } }));
+        var node = new NodeDefinition("roi", "roi.transform", null, null, parameters);
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require(node.Type), new RoiTransformNode(), "builtin");
+        using var data = new VisionWorkflowData { Definition = new("large-roi-snapshot", "large-roi-snapshot", [node], []) };
+        await new VisionNodeRuntime(new VisionNodeDispatcher(registry)).ExecuteAsync(data, node.Id, default);
+
+        var snapshot = data.SnapshotReports().Single().Outputs!["roi"];
+        Assert.Contains("10,000 vertices", snapshot.Display);
+        Assert.True(snapshot.Display.Length < 160);
+        var compactPayload = JsonSerializer.SerializeToElement(snapshot.Value);
+        Assert.Equal(vertexCount, compactPayload.GetProperty("vertexCount").GetInt32());
+        Assert.Equal(32, compactPayload.GetProperty("samplePoints").GetArrayLength());
+        Assert.True(JsonSerializer.Serialize(snapshot.Value).Length < 8_000);
+    }
+
+    [Fact]
+    public async Task LargeBrushRoiSnapshotsKeepStrokeAndPointCountsWithBoundedSamples()
+    {
+        const int pointCount = 10_000;
+        var points = Enumerable.Range(0, pointCount).Select(index => new
+        {
+            x = 64 + 40 * Math.Cos(2 * Math.PI * index / pointCount),
+            y = 64 + 40 * Math.Sin(2 * Math.PI * index / pointCount)
+        }).ToArray();
+        var parameters = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            JsonSerializer.Serialize(new { roi = new { type = "Brush", strokes = new[] { new { mode = "Add", width = 4, points } } } }));
+        var node = new NodeDefinition("roi", "roi.transform", null, null, parameters);
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require(node.Type), new RoiTransformNode(), "builtin");
+        using var data = new VisionWorkflowData { Definition = new("large-brush-snapshot", "large-brush-snapshot", [node], []) };
+        await new VisionNodeRuntime(new VisionNodeDispatcher(registry)).ExecuteAsync(data, node.Id, default);
+
+        var snapshot = data.SnapshotReports().Single().Outputs!["roi"];
+        Assert.Contains("10,000 points", snapshot.Display);
+        Assert.True(snapshot.Display.Length < 160);
+        var compactPayload = JsonSerializer.SerializeToElement(snapshot.Value);
+        Assert.Equal(pointCount, compactPayload.GetProperty("pointCount").GetInt32());
+        Assert.Equal(1, compactPayload.GetProperty("sampleStrokes").GetArrayLength());
+        Assert.Equal(8, compactPayload.GetProperty("sampleStrokes")[0].GetProperty("samplePoints").GetArrayLength());
+        Assert.True(JsonSerializer.Serialize(snapshot.Value).Length < 8_000);
+    }
+
     [Theory]
     [InlineData("contour.extract", false)]
     [InlineData("contour.extract", true)]

@@ -225,6 +225,8 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
     private static VisionValueSnapshot SnapshotValue(VisionValue value)
     {
         if (value.Value is null) return new VisionValueSnapshot(value.Type.ToString(), "null");
+        if (value.Type == VisionDataType.Roi && value.Value is VisionRoi roi)
+            return SnapshotRoi(roi);
         if (value.Value is IVisionDomainImage scoped)
             return new VisionValueSnapshot(value.Type.ToString(), $"DomainImage {scoped.Width}x{scoped.Height}", new { scoped.Width, scoped.Height, scoped.Domain });
         if (value.Value is IVisionImage image)
@@ -247,9 +249,112 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             VisionDataType.Circle or VisionDataType.Transform2D or VisionDataType.CoordinatePoint2D or
             VisionDataType.CoordinateLine2D or VisionDataType.CoordinatePose2D or VisionDataType.RobotTarget2D or
             VisionDataType.DeviceTagValue or VisionDataType.Measurement or VisionDataType.DetectionList or
-            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Roi or VisionDataType.Region => value.Value,
+            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Region => value.Value,
             _ => value.Value.ToString()
         };
         return new VisionValueSnapshot(value.Type.ToString(), value.Value.ToString() ?? value.Type.ToString(), payload);
+    }
+
+    private static VisionValueSnapshot SnapshotRoi(VisionRoi roi)
+    {
+        const int maxPolygonSamples = 32;
+        const int maxFullPolygonPoints = 256;
+        const int maxBrushStrokeSamples = 16;
+        const int maxBrushPointsPerStroke = 8;
+        const int maxFullBrushPoints = 256;
+        var type = roi.Type.ToString();
+        object? payload;
+        string display;
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+            {
+                var x = roi.X ?? 0;
+                var y = roi.Y ?? 0;
+                var width = roi.Width ?? 0;
+                var height = roi.Height ?? 0;
+                payload = roi;
+                display = FormattableString.Invariant($"ROI Rectangle · x={x:0.##}, y={y:0.##}, {width:0.##}×{height:0.##}");
+                break;
+            }
+            case VisionRoiType.Circle:
+            {
+                var x = roi.X ?? 0;
+                var y = roi.Y ?? 0;
+                var radius = roi.Radius ?? 0;
+                payload = roi;
+                display = FormattableString.Invariant($"ROI Circle · center=({x:0.##}, {y:0.##}), r={radius:0.##}");
+                break;
+            }
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                var bounds = GetRoiBounds(points);
+                payload = points.Count <= maxFullPolygonPoints
+                    ? roi
+                    : new { type, vertexCount = points.Count, bounds, samplePoints = SampleRoiPoints(points, maxPolygonSamples) };
+                display = $"ROI Polygon · {points.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} vertices"
+                    + (bounds is { } box ? FormattableString.Invariant($" · bounds=({box.MinX:0.##}, {box.MinY:0.##})–({box.MaxX:0.##}, {box.MaxY:0.##})") : string.Empty);
+                break;
+            }
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                long pointCount = 0;
+                foreach (var stroke in strokes) pointCount += stroke?.Points?.Count ?? 0;
+                var addStrokeCount = strokes.Count(stroke => stroke?.Mode == VisionRoiStrokeMode.Add);
+                var eraseStrokeCount = strokes.Count(stroke => stroke?.Mode == VisionRoiStrokeMode.Erase);
+                var bounds = GetRoiBounds(strokes.Where(stroke => stroke is not null).SelectMany(stroke => stroke.Points ?? []));
+                var strokeSamples = strokes.Take(maxBrushStrokeSamples).Select(stroke => stroke is null ? null : new
+                {
+                    mode = stroke.Mode.ToString(),
+                    stroke.Width,
+                    pointCount = stroke.Points?.Count ?? 0,
+                    samplePoints = SampleRoiPoints(stroke.Points ?? [], maxBrushPointsPerStroke)
+                }).ToArray();
+                payload = pointCount <= maxFullBrushPoints && strokes.Count <= maxBrushStrokeSamples
+                    ? roi
+                    : new { type, strokeCount = strokes.Count, addStrokeCount, eraseStrokeCount, pointCount, bounds, sampleStrokes = strokeSamples };
+                display = $"ROI Brush · {strokes.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} strokes"
+                    + FormattableString.Invariant($" ({addStrokeCount:N0} add, {eraseStrokeCount:N0} erase) · {pointCount:N0} points");
+                break;
+            }
+            default:
+                payload = new { type };
+                display = $"ROI {type}";
+                break;
+        }
+        return new VisionValueSnapshot(VisionDataType.Roi.ToString(), display, payload);
+    }
+
+    private readonly record struct RoiBoundsSnapshot(double MinX, double MinY, double MaxX, double MaxY);
+
+    private static RoiBoundsSnapshot? GetRoiBounds(IEnumerable<VisionRoiPoint?> points)
+    {
+        var minX = double.PositiveInfinity;
+        var minY = double.PositiveInfinity;
+        var maxX = double.NegativeInfinity;
+        var maxY = double.NegativeInfinity;
+        foreach (var point in points)
+        {
+            if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)) continue;
+            minX = Math.Min(minX, point.X);
+            minY = Math.Min(minY, point.Y);
+            maxX = Math.Max(maxX, point.X);
+            maxY = Math.Max(maxY, point.Y);
+        }
+        return double.IsFinite(minX) ? new RoiBoundsSnapshot(minX, minY, maxX, maxY) : null;
+    }
+
+    private static object?[] SampleRoiPoints(IReadOnlyList<VisionRoiPoint> points, int maximum)
+    {
+        if (points.Count == 0) return [];
+        var count = Math.Min(points.Count, maximum);
+        return Enumerable.Range(0, count).Select(index =>
+        {
+            var pointIndex = count == points.Count ? index : (int)Math.Round(index * (points.Count - 1d) / (count - 1));
+            var point = points[pointIndex];
+            return point is null ? null : (object)new { point.X, point.Y };
+        }).ToArray();
     }
 }
