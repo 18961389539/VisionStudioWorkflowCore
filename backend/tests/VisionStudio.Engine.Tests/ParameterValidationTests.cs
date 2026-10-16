@@ -124,6 +124,152 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.edgeSubpixel")]
+    [InlineData("measure.caliper")]
+    [InlineData("measure.caliperLine")]
+    [InlineData("measure.caliperCircle")]
+    public void MeasurementRejectsCropTransformWhenSamplingTheUncroppedImage(string measurementType)
+    {
+        var workflow = new WorkflowDefinition("mismatched-crop-frame", "Mismatched crop frame",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("measure", measurementType, null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-measure-control", "crop", "next", "measure", "exec", "control"),
+            new EdgeDefinition("crop-image", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("measurement-image", "scene", "image", "measure", "image", "data"),
+            new EdgeDefinition("crop-transform", "crop", "transform", "measure", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("samples image frame 'scene.image'", error.Message);
+        Assert.Contains("transform targets 'crop.image (crop frame)'", error.Message);
+        Assert.Contains("compose", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementAcceptsImagePreservingNodesAfterTheTransformTarget()
+    {
+        var workflow = new WorkflowDefinition("crop-grayscale-measurement", "Crop grayscale measurement",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("gray", "image.grayscale", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-gray-control", "crop", "next", "gray", "exec", "control"),
+            new EdgeDefinition("gray-measure-control", "gray", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-crop", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("crop-gray", "crop", "image", "gray", "image", "data"),
+            new EdgeDefinition("gray-measure", "gray", "image", "measure", "image", "data"),
+            new EdgeDefinition("crop-transform", "crop", "transform", "measure", "transform", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Fact]
+    public void PoseTransformMustTargetTheSameImageFrameTheCaliperSamples()
+    {
+        WorkflowDefinition BuildWorkflow(string measurementImageSource) => new(
+            "pose-measurement-frame", "Pose measurement frame",
+            [
+                new NodeDefinition("scene-a", "image.synthetic", null, null, null),
+                new NodeDefinition("scene-b", "image.acquire", null, null, null),
+                new NodeDefinition("pose", "roi.transform", null, null, null),
+                new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+            ],
+            [
+                new EdgeDefinition("scene-a-control", "scene-a", "next", "scene-b", "exec", "control"),
+                new EdgeDefinition("scene-b-control", "scene-b", "next", "pose", "exec", "control"),
+                new EdgeDefinition("pose-control", "pose", "next", "measure", "exec", "control"),
+                new EdgeDefinition("pose-reference-image", "scene-a", "image", "pose", "debugImage", "data"),
+                new EdgeDefinition("measurement-image", measurementImageSource, "image", "measure", "image", "data"),
+                new EdgeDefinition("pose-transform", "pose", "transform", "measure", "transform", "data")
+            ]);
+
+        var valid = CreateCompiler().Compile(BuildWorkflow("scene-a"));
+        Assert.Contains("measure", valid.OrderedNodeIds);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(BuildWorkflow("scene-b")));
+        Assert.Contains("samples image frame 'scene-b.image'", error.Message);
+        Assert.Contains("transform targets 'scene-a.image'", error.Message);
+    }
+
+    [Fact]
+    public void PoseAndCropTransformsRejectDifferentIntermediateImageFrames()
+    {
+        var workflow = new WorkflowDefinition("mismatched-compose-frame", "Mismatched transform composition",
+        [
+            new NodeDefinition("scene-a", "image.synthetic", null, null, null),
+            new NodeDefinition("scene-b", "image.acquire", null, null, null),
+            new NodeDefinition("pose", "roi.transform", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("compose", "coordinate.transformCompose", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-a-control", "scene-a", "next", "scene-b", "exec", "control"),
+            new EdgeDefinition("scene-b-control", "scene-b", "next", "pose", "exec", "control"),
+            new EdgeDefinition("pose-control", "pose", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-control", "crop", "next", "compose", "exec", "control"),
+            new EdgeDefinition("compose-control", "compose", "next", "measure", "exec", "control"),
+            new EdgeDefinition("pose-reference-image", "scene-a", "image", "pose", "debugImage", "data"),
+            new EdgeDefinition("crop-input-image", "scene-b", "image", "crop", "image", "data"),
+            new EdgeDefinition("pose-crop-transform", "pose", "transform", "compose", "transformA", "data"),
+            new EdgeDefinition("crop-compose-transform", "crop", "transform", "compose", "transformB", "data"),
+            new EdgeDefinition("measurement-image", "crop", "image", "measure", "image", "data"),
+            new EdgeDefinition("composed-transform", "compose", "transform", "measure", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("cannot compose transforms", error.Message);
+        Assert.Contains("scene-a.image", error.Message);
+        Assert.Contains("scene-b.image", error.Message);
+    }
+
+    [Fact]
+    public void ComposedPoseAndCropTransformMustTargetTheMeasuredImageFrame()
+    {
+        WorkflowDefinition BuildWorkflow(string measurementImageSource) => new(
+            "composed-measurement-frame", "Composed measurement frame",
+            [
+                new NodeDefinition("scene", "image.synthetic", null, null, null),
+                new NodeDefinition("pose", "roi.transform", null, null, null),
+                new NodeDefinition("crop", "image.crop", null, null, null),
+                new NodeDefinition("compose", "coordinate.transformCompose", null, null, null),
+                new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+            ],
+            [
+                new EdgeDefinition("scene-pose-control", "scene", "next", "pose", "exec", "control"),
+                new EdgeDefinition("pose-crop-control", "pose", "next", "crop", "exec", "control"),
+                new EdgeDefinition("crop-compose-control", "crop", "next", "compose", "exec", "control"),
+                new EdgeDefinition("compose-measure-control", "compose", "next", "measure", "exec", "control"),
+                new EdgeDefinition("scene-pose", "scene", "image", "pose", "debugImage", "data"),
+                new EdgeDefinition("scene-crop", "scene", "image", "crop", "image", "data"),
+                new EdgeDefinition("pose-crop-transform", "pose", "transform", "compose", "transformA", "data"),
+                new EdgeDefinition("crop-compose-transform", "crop", "transform", "compose", "transformB", "data"),
+                new EdgeDefinition("measured-image", measurementImageSource, "image", "measure", "image", "data"),
+                new EdgeDefinition("composed-transform", "compose", "transform", "measure", "transform", "data")
+            ]);
+
+        var valid = CreateCompiler().Compile(BuildWorkflow("crop"));
+        Assert.Contains("measure", valid.OrderedNodeIds);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(BuildWorkflow("scene")));
+        Assert.Contains("transform targets 'crop.image (crop frame)'", error.Message);
+    }
+
+    [Theory]
     [InlineData("roi.transform", "roi", """{"type":"Ellipse"}""", "known string type")]
     [InlineData("match.shape", "searchRoi", """{"type":"Ellipse"}""", "known string type")]
     [InlineData("match.shape", "clutterRoi", "[]", "must be an object or null")]
