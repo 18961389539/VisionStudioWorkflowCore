@@ -105,4 +105,13 @@ describe('node configuration snapshots', () => {
 
     expect(configurationIssues(circle, { ...circleParameters, fitOutlierThreshold: -1 }, { connectedInputPorts: ['circle'] }).length).toBeGreaterThan(0);
   });
+
+  it('preflights a local search line shorter than the measurement minimum', () => {
+    const line = fallbackCatalogRaw.find(item => item.type === 'measure.caliperLine')!;
+    const parameters = { ...makeDefaultParameters(line), endX: 121.99 };
+
+    expect(configurationIssues(line, parameters).join(' ')).toContain('搜索线长度至少需要 2 px');
+    expect(configurationIssues(line, { ...parameters, endX: 122 })).toEqual([]);
+    expect(configurationIssues(line, parameters, { connectedInputPorts: ['searchLine'] })).toEqual([]);
+  });
 });

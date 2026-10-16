@@ -145,6 +145,23 @@ export function configurationIssues(
   const issues = validateParameterValues(catalog.parameters.filter((parameter) => !overriddenParameters.has(parameter.name)), parameters)
     .map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
   const roiInputOverridesParameter = hasConnectedInput('roi', 'Roi');
+  const searchLineInputOverridesGeometry = hasConnectedInput('searchLine', 'Line2D');
+  if (!searchLineInputOverridesGeometry
+    && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine'].includes(catalog.type)) {
+    const getCoordinate = (name: string) => {
+      const configured = parameters[name];
+      if (typeof configured === 'number') return configured;
+      const fallback = catalog.parameters.find((parameter) => parameter.name === name)?.defaultValue;
+      return typeof fallback === 'number' ? fallback : undefined;
+    };
+    const startX = getCoordinate('startX');
+    const startY = getCoordinate('startY');
+    const endX = getCoordinate('endX');
+    const endY = getCoordinate('endY');
+    if ([startX, startY, endX, endY].every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))
+      && Math.hypot(endX! - startX!, endY! - startY!) < 2)
+      issues.push('搜索线长度至少需要 2 px；请调整起点/终点，或连接有效的 searchLine 输入。');
+  }
   for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
     if (key === 'roi' && roiInputOverridesParameter) continue;
     const value = parameters[key];

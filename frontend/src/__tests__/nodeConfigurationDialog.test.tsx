@@ -403,6 +403,18 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
   });
 
+  it('blocks preview and identifies endpoints when the local search line is too short', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 20, startY: 30, endX: 21, endY: 30 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: report });
+
+    expect(dialog.getByText(/搜索线长度至少需要 2 px/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('allows preview when a connected circle replaces malformed local center and radius', async () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,

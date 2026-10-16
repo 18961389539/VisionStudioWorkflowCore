@@ -222,6 +222,38 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.edgeSubpixel")]
+    [InlineData("measure.caliper")]
+    [InlineData("measure.caliperLine")]
+    public void SearchLineShorterThanTwoPixelsIsRejectedDuringCompilation(string nodeType)
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", nodeType, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"startX":20,"startY":30,"endX":21.99,"endY":30}"""));
+        var workflow = new WorkflowDefinition("short-search-line", "Short search line", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("search line must be at least 2 px", error.Message);
+        Assert.Contains("Adjust its start/end coordinates", error.Message);
+    }
+
+    [Fact]
+    public void SearchLineExactlyTwoPixelsLongCompiles()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperLine", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"startX":20,"startY":30,"endX":22,"endY":30}"""));
+        var workflow = new WorkflowDefinition("minimum-search-line", "Minimum search line", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        Assert.NotEmpty(CreateCompiler().Compile(workflow).DslJson);
+    }
+
+    [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"open","kernelWidth":"inactive"}""")]

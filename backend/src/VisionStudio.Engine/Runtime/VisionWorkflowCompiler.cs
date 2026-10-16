@@ -197,6 +197,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             }
 
             ValidateNodeParameters(node, catalog, connectedInputPorts);
+            ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
         }
     }
 
@@ -280,6 +281,33 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         return hasConnectedCircle
             && catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
             && parameterName is "centerX" or "centerY" or "radius";
+    }
+
+    private static void ValidateMeasurementGeometry(
+        NodeDefinition node,
+        NodeCatalogItem catalog,
+        IReadOnlySet<string> connectedInputPorts)
+    {
+        if (connectedInputPorts.Contains("searchLine")
+            && catalog.Inputs.Any(input => input.Name.Equals("searchLine", StringComparison.OrdinalIgnoreCase)
+                && input.DataType == VisionDataType.Line2D))
+            return;
+        if (catalog.Type is not ("feature.edgeSubpixel" or "measure.caliper" or "measure.caliperLine"))
+            return;
+
+        double GetCoordinate(string name)
+        {
+            var descriptor = catalog.Parameters.First(parameter =>
+                parameter.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var fallback = Convert.ToDouble(descriptor.DefaultValue, System.Globalization.CultureInfo.InvariantCulture);
+            return node.GetDouble(name, fallback);
+        }
+
+        var dx = GetCoordinate("endX") - GetCoordinate("startX");
+        var dy = GetCoordinate("endY") - GetCoordinate("startY");
+        if (Math.Sqrt(dx * dx + dy * dy) < 2)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' search line must be at least 2 px long. Adjust its start/end coordinates or connect a valid searchLine input.");
     }
 
     private static bool IsParameterVisible(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)
