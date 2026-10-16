@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import NodeConfigurationDialog from '../components/NodeConfigurationDialog';
 import type { NodeCatalogItem, RunResult, VisionRoi } from '../types';
+import { fallbackCatalog } from '../catalog';
 
 vi.mock('../components/ImageViewer', () => ({
   default: ({ previewUrl, showRoiTools, roiEnabled, onRoiChange }: { previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void }) =>
@@ -36,6 +37,66 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [{ nodeId: 'test', portName: 'image', width: 100, height: 100 }, { nodeId: 'other', portName: 'image', width: 100, height: 100 }] }) })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+describe('ROI reference workspace', () => {
+  const roiCatalog = fallbackCatalog.find(item => item.type === 'roi.transform')!;
+  const roiNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+    inputs: roiCatalog.inputs, parameters: { baseX: 100, baseY: 50, baseThetaDeg: 0, roi: { type: 'Circle', x: 130, y: 60, radius: 8 } } } };
+  const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+  const locateNode: Node = { id: 'locate', position: { x: 0, y: 0 }, data: { label: '形状匹配', parameters: {} } };
+  const edges = [
+    { id: 'image', source: 'other', sourceHandle: 'image', target: 'test', targetHandle: 'debugImage' },
+    { id: 'pose', source: 'locate', sourceHandle: 'pose', target: 'test', targetHandle: 'currentPose' }
+  ];
+  const capture: RunResult = { ...report, nodeReports: [{ nodeId: 'test', nodeType: 'roi.transform', success: true, durationMs: 1,
+    summary: { referenceCaptured: true, referenceImage: 'saved-png', referenceWidth: 100, referenceHeight: 100,
+      referenceX: 200, referenceY: 70, referenceThetaDeg: 0 } }] };
+
+  it('edits only saved reference pixels, saves the pose and rebased ROI on Apply, and restores them after reopening', async () => {
+    const onPreview = vi.fn(async () => capture);
+    const onApply = vi.fn();
+    const first = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges, onPreview, onApply });
+    expect(first.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    fireEvent.click(first.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(first.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png'));
+    expect(onPreview).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ captureReference: true }));
+    expect(first.dialog.getByRole('button', { name: '清除测试 ROI' })).toBeTruthy();
+    expect(first.dialog.queryByRole('spinbutton', { name: '基准 X' })).toBeNull();
+    expect(first.dialog.queryByRole('spinbutton', { name: '当前 X' })).toBeNull();
+    await waitFor(() => expect((first.dialog.getByRole('radio', { name: '当前输入' }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(first.dialog.getByRole('radio', { name: '当前输入' }));
+    await waitFor(() => expect(first.dialog.getByTestId('image-url').textContent).toContain('/nodes/other/image'));
+    expect(first.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    fireEvent.click(first.dialog.getByRole('radio', { name: '已保存基准' }));
+    expect(first.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png');
+    fireEvent.click(first.dialog.getByRole('button', { name: /应\s*用/ }));
+    const applied = onApply.mock.calls[0][0];
+    expect(applied).toMatchObject({ baseX: 200, baseY: 70, referenceImage: 'saved-png', roi: { x: 230, y: 80, radius: 8 } });
+    expect(applied.captureReference).toBeUndefined();
+    expect((roiNode.data.parameters as Record<string, unknown>).referenceImage).toBeUndefined();
+    first.unmount();
+    const savedNode = { ...roiNode, data: { ...roiNode.data, parameters: applied } };
+    const reopened = mount({ node: savedNode, catalogItem: roiCatalog, nodes: [savedNode, imageNode, locateNode], edges });
+    expect(reopened.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png');
+    expect(reopened.dialog.getByRole('button', { name: '清除测试 ROI' })).toBeTruthy();
+  });
+
+  it('keeps the last reference intact after a failed capture and blocks editing when the pose origin changes', async () => {
+    const onPreview = vi.fn().mockResolvedValueOnce(capture).mockResolvedValueOnce({ ...report, success: false, error: '定位未找到目标', nodeReports: [] });
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges, onPreview });
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+    fireEvent.click(view.dialog.getByRole('button', { name: '重新设为基准' }));
+    await waitFor(() => expect(view.dialog.getByText('定位未找到目标')).toBeTruthy());
+    expect(view.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png');
+    const changedOrigin = { ...locateNode, data: { ...locateNode.data, parameters: { trainedOriginX: 35 } } };
+    view.rerender(<NodeConfigurationDialog {...view.props} nodes={[roiNode, imageNode, changedOrigin]} />);
+    expect(view.dialog.getByText(/模型原点已变化/)).toBeTruthy();
+    expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
 
 describe('node configuration draft', () => {
   it('keeps trained models in the staged workflow until Apply, and excludes runtime thresholds from training status', async () => {
@@ -89,7 +150,7 @@ describe('node configuration draft', () => {
       : response({ trainingSucceeded: true, trainingModelData: 'model-bytes', trainingModelHash: 'hash', trainingConfig: 'cfg' }));
     const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview });
     const toggle = dialog.getByRole('button', { name: '本节点运行结果' });
-    fireEvent.click(dialog.getByRole('button', { name: '获取训练图像' }));
+    fireEvent.click(dialog.getByRole('button', { name: /获取训练图像/ }));
     await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
     await waitFor(() => expect(dialog.getByText('ROI 工具')).toBeTruthy());
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -102,7 +163,7 @@ describe('node configuration draft', () => {
     delete (Element.prototype as Partial<Element>).scrollIntoView;
   });
 
-  it('shows the current file training source after reopening a trained node instead of its saved snapshot', async () => {
+  it('opens the saved training image without reacquiring and explicitly refreshes the training source', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [{ nodeId: 'shape', portName: 'image', width: 200, height: 200 }] }) })));
     const shapeCatalog: NodeCatalogItem = {
       type: 'match.shape', displayName: '形状匹配', category: '匹配', pluginId: 'builtin', description: '显式训练模型',
@@ -119,12 +180,80 @@ describe('node configuration draft', () => {
       nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 2, summary: { trainingPreviewReady: true } }] };
     const onPreview = vi.fn(async () => response);
     const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview });
-    fireEvent.click(dialog.getByRole('button', { name: '查看已保存训练图像、轮廓与原点' }));
+    fireEvent.click(dialog.getByRole('tab', { name: '模型训练' }));
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('OLD-SNAPSHOT'));
-    fireEvent.click(dialog.getByRole('button', { name: '获取训练图像' }));
+    expect(onPreview).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole('button', { name: /获取训练图像/ }));
     await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/api/runs/fresh-source-run/nodes/shape/image'));
     expect(dialog.getByTestId('image-url').textContent).not.toContain('OLD-SNAPSHOT');
+  });
+
+  it('trains from the acquired pixels and keeps them while switching pages', async () => {
+    const shapeCatalog = fallbackCatalog.find(item => item.type === 'match.shape')!;
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', parameters: { modelMode: 'trained' } } };
+    const response = (summary: Record<string, unknown>): RunResult => ({ ...report,
+      nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 2, summary }] });
+    const onPreview = vi.fn(async (p: Record<string, unknown>) => p.trainingPreviewOnly
+      ? response({ trainingPreviewReady: true, trainingImageData: 'CAPTURED-PNG', trainingSourceWidth: 120, trainingSourceHeight: 100 })
+      : p.searchPreviewOnly ? response({ searchPreviewReady: true })
+        : response({ trainingSucceeded: true, trainingModelData: 'trained-model', trainingModelHash: 'hash' }));
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, onPreview, onApply });
+    fireEvent.click(dialog.getByRole('button', { name: '获取训练图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('CAPTURED-PNG'));
+    fireEvent.click(dialog.getByRole('tab', { name: '搜索推理' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dialog.getByRole('tab', { name: '模型训练' }).getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(dialog.getByRole('tab', { name: '模型训练' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('CAPTURED-PNG'));
+    expect(onPreview).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect((dialog.getByRole('button', { name: '训练模型' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(dialog.getByRole('button', { name: '训练模型' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(3));
+    expect(onPreview.mock.calls[2][0]).toMatchObject({ trainingMode: true, trainingImageData: 'CAPTURED-PNG' });
+    await waitFor(() => expect(dialog.getByText('模型已训练，待应用到工作流')).toBeTruthy());
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(onApply.mock.calls[0][0]).not.toHaveProperty('trainingImageData');
+  });
+
+  it('groups model coverage with training and hides inactive controls', () => {
+    const shapeCatalog = fallbackCatalog.find(item => item.type === 'match.shape')!;
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', parameters: { modelMode: 'trained' } } };
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog });
+    expect(dialog.getByRole('spinbutton', { name: '角度搜索范围' })).toBeTruthy();
+    expect(dialog.getByRole('spinbutton', { name: '缩放容差' })).toBeTruthy();
+    expect(dialog.queryByRole('spinbutton', { name: '缩放步长' })).toBeNull();
+    expect(dialog.queryByRole('spinbutton', { name: '原点 X' })).toBeNull();
+    expect(dialog.queryByRole('spinbutton', { name: '阈值' })).toBeNull();
+    fireEvent.change(dialog.getByRole('spinbutton', { name: '缩放容差' }), { target: { value: '10' } });
+    expect(dialog.getByRole('spinbutton', { name: '缩放步长' })).toBeTruthy();
+  });
+
+  it('opens the last search image immediately and offers training when model settings change', async () => {
+    const shapeCatalog = fallbackCatalog.find(item => item.type === 'match.shape')!;
+    const settings = { binarize: 'auto', threshold: 128, invert: false, angleRangeDeg: 180, angleStepDeg: 1,
+      scaleTolerancePercent: 0, scaleStepPercent: 1, ignorePolarity: false, minContrast: 5,
+      trainingOriginMode: 'centroid', trainingOriginX: 0, trainingOriginY: 0, roi: null, templatePath: '' };
+    const shapeNode: Node = { id: 'shape', position: { x: 0, y: 0 }, data: { label: '形状匹配', parameters: {
+      modelMode: 'trained', trainedModelData: 'model', trainedPreviewImage: 'saved-image', trainedModelSettings: settings } } };
+    const matchingResult: RunResult = { ...report, nodeReports: [{ nodeId: 'shape', nodeType: 'match.shape', success: true, durationMs: 2, summary: { found: true, score: 0.95 } }] };
+    const onPreview = vi.fn(async () => matchingResult);
+    const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog, result: matchingResult, onPreview });
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).not.toBe(''));
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(dialog.queryByRole('spinbutton', { name: '角度搜索范围' })).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '调整模型范围' }));
+    fireEvent.change(dialog.getByRole('spinbutton', { name: '角度搜索范围' }), { target: { value: '90' } });
+    expect(dialog.getByText('训练参数已变化，需要重新训练')).toBeTruthy();
+    expect((dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('tab', { name: '搜索推理' }));
+    expect(dialog.getByRole('button', { name: '前往模型训练' })).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行搜索' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: '前往模型训练' }));
+    expect(dialog.getByRole('button', { name: '重新训练模型' })).toBeTruthy();
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it('shows compatibility mode after switching a trained node to legacy while retaining its model asset', async () => {
@@ -140,7 +269,9 @@ describe('node configuration draft', () => {
       modelMode: 'trained', trainedModelData: 'saved-model', trainedPreviewImage: 'saved-preview'
     } } };
     const { dialog } = mount({ node: shapeNode, nodes: [shapeNode], catalogItem: shapeCatalog });
+    fireEvent.click(dialog.getByRole('tab', { name: '模型训练' }));
     expect(dialog.getByText('模型已保存在此工作流')).toBeTruthy();
+    await waitFor(() => expect((dialog.getByRole('combobox', { name: '模型生命周期' }) as HTMLInputElement).disabled).toBe(false));
     fireEvent.mouseDown(dialog.getByRole('combobox', { name: '模型生命周期' }));
     fireEvent.click(screen.getByText('兼容模板匹配', { exact: true }));
     expect(dialog.getByText(/本次运行使用 template 输入或模板路径/)).toBeTruthy();

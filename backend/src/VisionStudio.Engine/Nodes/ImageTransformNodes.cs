@@ -22,11 +22,15 @@ public sealed class ImageCropNode : IVisionNodeExecutor
         ValidateCropRoi(roi, source.Width, source.Height);
 
         using var rasterMask = roi.BuildMask(source.Size());
-        using var binaryMask = new Mat();
-        Cv2.Threshold(rasterMask, binaryMask, 0, 255, ThresholdTypes.Binary);
-        var bounds = Cv2.BoundingRect(binaryMask);
-        if (bounds.Width <= 0 || bounds.Height <= 0)
+        using var maskImageNative = JLVisionImages.FromMat(rasterMask);
+        using var selectedRegion = maskImageNative.Threshold(1d, 255d);
+        var selectedPixels = selectedRegion.AreaCenter(out double _, out double _);
+        if (selectedPixels == 0)
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+        selectedRegion.SmallestRectangle1(out int top, out int left, out int bottom, out int right);
+        var bounds = new Rect(left, top, right - left + 1, bottom - top + 1);
+        using var binaryImage = selectedRegion.RegionToBin(255, 0, source.Width, source.Height);
+        using var binaryMask = JLVisionImages.ToMat(binaryImage);
 
         using var sourceCrop = new Mat(source, bounds);
         using var cropMask = new Mat(binaryMask, bounds);
@@ -45,7 +49,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 new Dictionary<string, object?>
                 {
                     ["x"] = bounds.X, ["y"] = bounds.Y, ["width"] = bounds.Width, ["height"] = bounds.Height,
-                    ["roiType"] = roi.Type.ToString(), ["selectedPixels"] = Cv2.CountNonZero(cropMask)
+                    ["roiType"] = roi.Type.ToString(), ["selectedPixels"] = selectedPixels
                 }));
         }
         catch
@@ -87,6 +91,27 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 }).Sum();
                 if (Math.Abs(doubledArea) < 1e-6)
                     throw new InvalidOperationException("多边形裁剪区域的顶点不能共线，且必须围成有效面积。");
+                break;
+            }
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                if (strokes.Count == 0 || strokes.Count > 10_000)
+                    throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
+                var totalPoints = 0;
+                foreach (var stroke in strokes)
+                {
+                    if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 512
+                        || stroke.Points is null || stroke.Points.Count == 0)
+                        throw new InvalidOperationException("笔刷笔迹需要有效模式、1..512 px 笔宽和至少一个点。");
+                    totalPoints = checked(totalPoints + stroke.Points.Count);
+                    if (totalPoints > 500_000)
+                        throw new InvalidOperationException("笔刷裁剪区域最多允许 500000 个笔迹点。");
+                    if (stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                        || point.X < 0 || point.Y < 0 || point.X > width || point.Y > height))
+                        throw new InvalidOperationException($"笔刷点必须位于图像范围内（{width}×{height}）。");
+                }
                 break;
             }
         }

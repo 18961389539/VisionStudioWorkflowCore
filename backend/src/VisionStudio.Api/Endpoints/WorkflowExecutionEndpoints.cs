@@ -183,8 +183,8 @@ public static class WorkflowExecutionEndpoints
     private static WorkflowRunResult RedactTrainingModelAssets(WorkflowRunResult result) => result with
     {
         NodeReports = result.NodeReports.Select(report =>
-            report.Summary.ContainsKey("trainingModelData")
-                ? report with { Summary = report.Summary.Where(pair => pair.Key is not ("trainingModelData" or "trainingPreviewImage")).ToDictionary(pair => pair.Key, pair => pair.Value) }
+            report.Summary.ContainsKey("trainingModelData") || report.Summary.ContainsKey("trainingImageData") || report.Summary.ContainsKey("referenceImage")
+                ? report with { Summary = report.Summary.Where(pair => pair.Key is not ("trainingModelData" or "trainingPreviewImage" or "trainingImageData" or "referenceImage")).ToDictionary(pair => pair.Key, pair => pair.Value) }
                 : report).ToArray()
     };
 

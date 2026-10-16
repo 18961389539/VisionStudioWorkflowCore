@@ -6,6 +6,9 @@ public static class WorkflowStoreEndpoints
 {
     public static IEndpointRouteBuilder MapWorkflowStoreEndpoints(this IEndpointRouteBuilder app)
     {
+        app.MapGet("/api/workflows", async (WorkflowStore store, CancellationToken ct) =>
+            Results.Ok(await store.ListAsync(ct)));
+
         app.MapPut("/api/workflows/{id}", async (
             string id,
             WorkflowDefinition workflow,

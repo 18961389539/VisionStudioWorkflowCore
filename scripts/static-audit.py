@@ -582,7 +582,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 232  # fcaea6b independent recipes: 236 - 5 product routes (/api/products GET+POST, /api/products/{productId}/recipes POST, /api/products/{productId}/parameters GET+PUT) + POST /api/recipes; prior base: 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
+expected_routes = 233  # fcaea6b independent recipes + POST /api/recipes + GET /api/workflows (saved-workflow picker); prior base: 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -1389,8 +1389,12 @@ ok(f'Test source: Fact={facts}, Theory={theories}, SoakTraits={soaks}')
 allowed_cv_node_calls = {'ImRead', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line'}
 for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
     body = source.read_text(encoding='utf-8-sig')
-    for call in re.findall(r'\bCv2\.(\w+)', body):
-        if call not in allowed_cv_node_calls:
+    for match in re.finditer(r'\bCv2\.(\w+)', body):
+        call = match.group(1)
+        enclosing_classes = re.findall(r'\bclass\s+(\w+)', body[:match.start()])
+        synthetic_polygon_drawing = (source.name == 'OpenCvNodes.cs' and call == 'FillConvexPoly'
+                                     and enclosing_classes and enclosing_classes[-1] == 'SyntheticImageNode')
+        if call not in allowed_cv_node_calls and not synthetic_polygon_drawing:
             fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call}')
     if 'OpenCvSharp.Dnn' in body:
         fail(f'OpenCV DNN dependency remains in node: {source.name}')

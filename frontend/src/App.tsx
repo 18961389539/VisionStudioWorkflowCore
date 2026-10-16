@@ -16,7 +16,7 @@ import {
   type OnConnectEnd,
   type OnNodesChange
 } from '@xyflow/react';
-import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
+import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Space, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
 import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
 import RunPanel from './components/RunPanel';
@@ -47,6 +47,7 @@ import { decideSaveBaseline, isLateLoadResponse, pickExpectedRevision, renameDec
 import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
 import { cloneParameters, hydrateNodeParameters, type NodeParameters } from './nodeConfigurationState';
+import { applyReferenceParameters } from './roiReference';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 
@@ -72,6 +73,7 @@ function LazyPanel({ open, children }: { open: boolean; children: ReactNode }) {
 const nodeTypes = { vision: VisionNode };
 type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
 type ConnectionPicker = PortRecommendation & { nodeId: string; portName: string; x: number; y: number; position: { x: number; y: number } };
+type WorkflowDocumentSummary = { id: string; name: string; nodeCount: number; edgeCount: number; updatedAt: string };
 
 // R06（2026-10-12 复审）：编辑器保存/加载是人工关键操作——请求必须有整体超时；失败必须给出
 // 可定位原因（状态码/业务码/关联号），且绝不在无法确认结果时改变本地 dirty/草稿状态。
@@ -89,7 +91,7 @@ const DEMO_LABELS: Record<DemoKey, string> = {
   defects: '缺陷检测与良品比对',
   regions: '区域处理与限定域',
   forEach: '逐目标顺序执行',
-  inspection: '多目标检测与判定', precision: '定位与精密测量',
+  inspection: '多目标检测与判定', precision: '形状模板匹配与精密测量',
   camera: '相机示例', cameraTrigger: '触发式相机', frameSet: '同步帧组',
   measurement: '测量示例', calibration: '标定示例',
   robotEyeToHand: '眼在手外示例', robotEyeInHand: '眼在手上示例', robotRuntime: '机器人运行时',
@@ -287,6 +289,11 @@ function Editor() {
   // undefined = 未知基线（保存前先探测后端）；revision='' = 后端尚无修订记录。
   const workflowRevisionRef = useRef<DocumentBaseline>(undefined);
   const [designerWorkflowId, setDesignerWorkflowId] = useState('demo-linear');
+  const [workflowPickerOpen, setWorkflowPickerOpen] = useState(false);
+  const [savedWorkflows, setSavedWorkflows] = useState<WorkflowDocumentSummary[]>([]);
+  const [workflowToLoad, setWorkflowToLoad] = useState<string>();
+  const [workflowListLoading, setWorkflowListLoading] = useState(false);
+  const [workflowListError, setWorkflowListError] = useState<string>();
   // F05：保存/加载的迟到响应不得改动"新文档"的基线状态——用 ref 读取完成时刻的当前文档 ID。
   const designerWorkflowIdRef = useRef(designerWorkflowId);
   useEffect(() => { designerWorkflowIdRef.current = designerWorkflowId; }, [designerWorkflowId]);
@@ -868,8 +875,7 @@ function Editor() {
     if (!nodeConfigurationId || anyBusy || !nodesRef.current.some((node) => node.id === nodeConfigurationId)) return false;
     pushHistory('应用节点参数');
     const committed = cloneParameters(parameters);
-    setNodes((current) => current.map((node) => node.id === nodeConfigurationId
-      ? { ...node, data: { ...node.data, stale: true, parameters: committed } } : node));
+    setNodes((current) => applyReferenceParameters(current, edges, nodeConfigurationId, committed));
     return true;
   };
 
@@ -1220,13 +1226,13 @@ function Editor() {
     }
   };
 
-  const load = async () => {
+  const load = async (requestedId = designerWorkflowId) => {
     // R06：加载失败原因可定位（状态码/业务码/关联号）；失败路径不触碰当前画布。
     // A03（2026-10-12 第三轮）：捕获请求代次与画布引用——迟到的响应不得替换新文档或新编辑。
     const loadEpoch = documentEpochRef.current;
     const nodesAtStart = nodesRef.current;
     const edgesAtStart = edgesRef.current;
-    const loadedId = designerWorkflowId;
+    const loadedId = requestedId;
     let response: Response;
     try {
       response = await fetch(`/api/workflows/${encodeURIComponent(loadedId)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
@@ -1277,6 +1283,34 @@ function Editor() {
     restoreWorkflow(workflow);
     workflowRevisionRef.current = { id: workflow.id, revision: response.headers.get('X-Workflow-Revision') ?? '' };
     messageApi.success('工作流已加载');
+  };
+
+  const openWorkflowPicker = async () => {
+    setWorkflowPickerOpen(true);
+    setWorkflowListLoading(true);
+    setWorkflowListError(undefined);
+    try {
+      const response = await fetch('/api/workflows', { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
+      const items = await response.json() as WorkflowDocumentSummary[];
+      setSavedWorkflows(items);
+      setWorkflowToLoad((current) => items.some((item) => item.id === current)
+        ? current
+        : items.some((item) => item.id === designerWorkflowId) ? designerWorkflowId : items[0]?.id);
+    } catch (error) {
+      setWorkflowListError(error instanceof Error ? error.message : '已保存工作流列表加载失败');
+      setSavedWorkflows([]);
+      setWorkflowToLoad(undefined);
+    } finally { setWorkflowListLoading(false); }
+  };
+
+  const loadSelectedSavedWorkflow = () => {
+    if (!workflowToLoad) return;
+    const targetId = workflowToLoad;
+    guardUnsaved('加载已保存的工作流', () => {
+      setWorkflowPickerOpen(false);
+      void load(targetId);
+    });
   };
 
   // 复制当前选中集合到画布剪贴板（快捷键 Ctrl+C 与节点右键菜单共用）；返回是否真的复制了内容
@@ -1536,7 +1570,7 @@ function Editor() {
     { key: 'layout-image', label: '布局：宽画布' },
     { key: 'layout-reset', label: '布局：复位为预设尺寸' },
     { type: 'divider' },
-    { key: 'load', label: '加载已保存工作流', onClick: () => guardUnsaved('加载已保存的工作流', () => void load()) },
+    { key: 'load', label: '加载已保存工作流', onClick: () => void openWorkflowPicker() },
     { key: 'theme', label: themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题', onClick: toggleTheme },
     { key: 'about', label: '关于 VisionStudio', onClick: () => setAboutOpen(true) }
   ];
@@ -1545,7 +1579,7 @@ function Editor() {
   const moreMenu: MenuProps = {
     items: [
       { key: 'more-template', label: '从模板新建', onClick: showTemplates },
-      { key: 'more-open', label: '打开已有流程', onClick: () => guardUnsaved('加载已保存的工作流', () => void load()) },
+      { key: 'more-open', label: '打开已有流程', onClick: () => void openWorkflowPicker() },
       { type: 'divider' },
       ...debugMenuItems,
       ...deviceMenuItems,
@@ -1585,7 +1619,7 @@ function Editor() {
 
           <div className="topbar-center">
             <Button className="topbar-file-action" type="text" onClick={showTemplates}>从模板新建</Button>
-            <Button className="topbar-file-action" type="text" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开流程</Button>
+              <Button className="topbar-file-action" type="text" onClick={() => void openWorkflowPicker()}>打开流程</Button>
             <span className="topbar-divider" />
             <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
               <Button className="topbar-domain-action" type={debugSession ? 'primary' : 'default'} title={debugSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debugSession ? `调试 · ${debugStatus.text}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
@@ -1759,6 +1793,11 @@ function Editor() {
                 title={`撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`} aria-label="撤销" onClick={undo}>↶</Button>
               <Button size="small" className="canvas-history-button" disabled={!history.canRedo || anyBusy}
                 title={`重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`} aria-label="重做" onClick={redo}>↷</Button>
+              {selectedEdgeIds.length > 0 && <Button size="small" danger disabled={anyBusy}
+                aria-label={`删除选中连线 ${selectedEdgeIds.length} 条`}
+                title="删除选中的连线（Delete / Backspace）"
+                onClick={() => deleteElements([], selectedEdgeIds)}>删除连线 · {selectedEdgeIds.length}</Button>}
+              {selectedEdgeIds.length === 0 && <span className="canvas-edge-delete-hint" title="单击画布中的连线将其选中">连线：选中后按 Del 删除</span>}
               <span className="canvas-toolbar-divider" />
               <label className="canvas-compact-toggle" title="紧凑模式：压缩节点标题与端口间距，适合多端口的大型流程">
                 <Switch size="small" checked={compactNodes} onChange={setCompactNodes} />
@@ -1830,7 +1869,7 @@ function Editor() {
                   <div className="canvas-empty-title">从左侧工具箱拖入节点，搭建你的第一条视觉流程</div>
                   <div className="canvas-empty-actions">
                     <Button size="small" type="primary" onClick={showTemplates}>从模板新建</Button>
-                    <Button size="small" onClick={() => guardUnsaved('加载已保存的工作流', () => void load())}>打开已有流程</Button>
+                    <Button size="small" onClick={() => void openWorkflowPicker()}>打开已有流程</Button>
                   </div>
                 </div>
               )}
@@ -2038,7 +2077,7 @@ function Editor() {
         width={780}
         onCancel={() => setTemplateOpen(false)}
         footer={[
-          <Button key="open" onClick={() => { setTemplateOpen(false); guardUnsaved('加载已保存的工作流', () => void load()); }}>打开已有流程…</Button>,
+          <Button key="open" onClick={() => { setTemplateOpen(false); void openWorkflowPicker(); }}>打开已有流程…</Button>,
           <Button key="cancel" onClick={() => setTemplateOpen(false)}>取消</Button>,
           <Button
             key="apply"
@@ -2099,6 +2138,40 @@ function Editor() {
           ))}
           {visibleTemplateGroups.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模板，请调整搜索或分类" />}
         </div>
+      </Modal>
+
+      <Modal
+        open={workflowPickerOpen}
+        title="打开已保存的工作流"
+        width={760}
+        onCancel={() => setWorkflowPickerOpen(false)}
+        footer={(
+          <Space>
+            <Button onClick={() => setWorkflowPickerOpen(false)}>取消</Button>
+            <Button type="primary" disabled={!workflowToLoad || workflowListLoading} onClick={loadSelectedSavedWorkflow}>加载选中流程</Button>
+          </Space>
+        )}
+      >
+        {workflowListError && <Alert type="error" showIcon message="工作流列表加载失败" description={workflowListError} style={{ marginBottom: 12 }} />}
+        <Table<WorkflowDocumentSummary>
+          rowKey="id"
+          size="small"
+          loading={workflowListLoading}
+          dataSource={savedWorkflows}
+          pagination={{ pageSize: 7, showSizeChanger: false }}
+          rowSelection={{
+            type: 'radio',
+            selectedRowKeys: workflowToLoad ? [workflowToLoad] : [],
+            onChange: (keys) => setWorkflowToLoad(keys[0] == null ? undefined : String(keys[0]))
+          }}
+          locale={{ emptyText: workflowListLoading ? '正在读取列表…' : '还没有已保存的工作流。先保存当前流程后可从这里打开。' }}
+          columns={[
+            { title: '名称', dataIndex: 'name', ellipsis: true },
+            { title: 'ID', dataIndex: 'id', width: 170, render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
+            { title: '节点 / 连线', width: 112, render: (_, item) => `${item.nodeCount} / ${item.edgeCount}` },
+            { title: '更新时间', dataIndex: 'updatedAt', width: 175, render: (value: string) => new Date(value).toLocaleString() }
+          ]}
+        />
       </Modal>
 
       {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}

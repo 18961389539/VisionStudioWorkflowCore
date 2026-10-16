@@ -279,6 +279,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .node-configuration-workspace > .split-handle { margin-inline: 2px; border-radius: 4px; }
 .node-configuration-workspace > .split-handle::after { content: '⋮'; position: relative; color: var(--vs-text-5); background: var(--vs-bg-app); font-size: 18px; }
 .node-configuration-image { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 7px; min-width: 0; min-height: 0; }
+.node-configuration-image.has-roi-reference { grid-template-rows: auto auto auto minmax(0, 1fr); }
 .node-configuration-viewer { min-height: 0; overflow: hidden; border: 1px solid var(--vs-border-subtle); border-radius: 6px; }
 .node-configuration-viewer .vision-viewer { grid-template-rows: auto minmax(0, 1fr) auto; }
 .node-configuration-viewer .viewer-toolbar { flex-wrap: wrap; gap: 5px; }
@@ -291,6 +292,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .shape-training-panel .ant-alert { padding: 7px 9px; }
 .shape-training-panel .ant-alert-message { font-size: 12px; }
 .shape-training-panel .ant-alert-description { font-size: 11px; }
+.shape-match-workspace-tabs .roi-property { border-color: var(--vs-border-subtle); background: var(--vs-bg-elevated); }
+.shape-match-workspace-tabs .roi-property-title { color: var(--vs-text-secondary); }
 /* 参数区标题右侧：脏状态徽标 + “还原为打开时” */
 .node-parameter-tools { display: flex; align-items: center; gap: 6px; }
 .node-parameter-dirty.ant-tag { margin-inline-end: 0; font-size: 10px; line-height: 16px; }
@@ -417,6 +420,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .canvas-search-item small { flex: none; color: var(--vs-text-6); font-size: 10px; }
 .canvas-search-empty { padding: 6px; color: var(--vs-text-6); font-size: 11px; }
 .canvas-toolbar-divider { width: 1px; height: 16px; background: var(--vs-border-frame); }
+.canvas-edge-delete-hint { color: var(--vs-text-6); font-size: 10px; white-space: nowrap; }
 /* 撤销 / 重做：图形按钮（↶ ↷），标题与禁用态由 antd Button 承担 */
 .canvas-history-button { padding-inline: 7px; font-size: 14px; line-height: 1; }
 .canvas-compact-toggle { display: flex; align-items: center; gap: 5px; color: var(--vs-text-4); font-size: 11px; cursor: pointer; }
@@ -962,6 +966,8 @@ body.resizing-x, body.resizing-y { user-select: none; }
 
 /* 图像查看器：工具栏分组分隔与加载失败态 */
 .viewer-toolbar-divider { width: 1px; height: 16px; align-self: center; background: var(--vs-border-toolbar); }
+.viewer-brush-size { display: inline-flex; align-items: center; gap: 4px; color: var(--vs-text-4); font-size: 11px; white-space: nowrap; }
+.viewer-brush-size .ant-input-number { width: 66px; }
 .image-placeholder.error { color: var(--vs-text-danger); }
 
 /* 工作区工具占据独立布局行，搜索结果和画布坐标仍以各自容器为基准。 */

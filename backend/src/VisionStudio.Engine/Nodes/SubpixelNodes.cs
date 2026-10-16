@@ -104,13 +104,13 @@ internal static class SubpixelEdgeCore
             var line = value.Require<VisionLine2D>("searchLine");
             if (!double.IsFinite(line.Start.X) || !double.IsFinite(line.Start.Y) || !double.IsFinite(line.End.X) || !double.IsFinite(line.End.Y))
                 throw new InvalidOperationException("The connected search line has non-finite endpoints.");
-            return line;
+            return MeasurementFixture.Apply(line, MeasurementFixture.Resolve(context));
         }
         var start = new VisionPoint2D(node.GetDouble("startX", 120), node.GetDouble("startY", 240));
         var end = new VisionPoint2D(node.GetDouble("endX", 520), node.GetDouble("endY", 240));
         if (!double.IsFinite(start.X) || !double.IsFinite(start.Y) || !double.IsFinite(end.X) || !double.IsFinite(end.Y))
             throw new InvalidOperationException("Search line parameters must be finite numbers.");
-        return new VisionLine2D(start, end);
+        return MeasurementFixture.Apply(new VisionLine2D(start, end), MeasurementFixture.Resolve(context));
     }
 }
 
@@ -378,6 +378,16 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
 
         var angleStart = node.GetDouble("angleStartDeg", -180);
         var angleEnd = node.GetDouble("angleEndDeg", 180);
+        var fixture = MeasurementFixture.Resolve(context);
+        if (fixture is not null)
+        {
+            center = fixture.Apply(center);
+            // Arc angles use image axes (positive clockwise). Preserve the unwrapped span,
+            // including a full 360-degree circle, when rotating both ends.
+            var rotation = Math.Atan2(fixture.H10, fixture.H00) * 180 / Math.PI;
+            angleStart += rotation;
+            angleEnd += rotation;
+        }
         var angleStep = Math.Clamp(node.GetDouble("angleStepDeg", 5), 0.5, 45);
         var band = Math.Clamp(node.GetDouble("radialBand", 8), 1, 500);
         var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));

@@ -23,7 +23,7 @@ function sameValue(a: unknown, b: unknown) {
 function isVisionRoi(value: unknown): value is VisionRoi {
   if (!value || typeof value !== 'object') return false;
   const type = (value as { type?: unknown }).type;
-  return type === 'Rectangle' || type === 'Circle' || type === 'Polygon';
+  return type === 'Rectangle' || type === 'Circle' || type === 'Polygon' || type === 'Brush';
 }
 
 /** ROI 结构化编辑：形状 + 位置/尺寸数值；数值与图像查看器中的拖动互为镜像 */
@@ -54,6 +54,15 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
         {field('半径', roi.radius, (v) => onChange({ ...roi, radius: Math.max(0, v) }))}
       </div>
     );
+  }
+  if (roi.type === 'Brush') {
+    const addCount = roi.strokes.filter((stroke) => stroke.mode === 'Add').length;
+    const eraseCount = roi.strokes.filter((stroke) => stroke.mode === 'Erase').length;
+    const lastBrush = [...roi.strokes].reverse().find((stroke) => stroke.mode === 'Add');
+    return <div className="roi-grid">
+      <Tag color="red">笔刷</Tag>
+      <span className="roi-polygon-note">{addCount} 笔 · {eraseCount} 次擦除{lastBrush ? ` · 笔宽 ${lastBrush.width}px` : ''}</span>
+    </div>;
   }
   return (
     <div>

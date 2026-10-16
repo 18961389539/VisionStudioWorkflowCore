@@ -29,6 +29,40 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var debugImage = context.TryGetValue("debugImage", out _)
+            ? context.RequireImage("debugImage")
+            : null;
+
+        var basePose = new VisionPose2D(node.GetDouble("baseX", 0), node.GetDouble("baseY", 0), node.GetDouble("baseThetaDeg", 0));
+        var currentPose = new VisionPose2D(node.GetDouble("currentX", 0), node.GetDouble("currentY", 0), node.GetDouble("currentThetaDeg", 0));
+        if (context.TryGetValue("currentPose", out var poseValue))
+            currentPose = poseValue.Require<VisionPose2D>("currentPose");
+        if (new[] { basePose.X, basePose.Y, basePose.ThetaDeg, currentPose.X, currentPose.Y, currentPose.ThetaDeg }.Any(v => !double.IsFinite(v)))
+            throw new InvalidOperationException("Base/current pose components must be finite (non-finite pose received).");
+
+        // A single node execution freezes pixels and the actual connected pose together.
+        // This also works before any ROI exists, without fabricating a correction result.
+        if (node.GetBool("captureReference", false))
+        {
+            if (debugImage is null || debugImage.Mat.Empty())
+                throw new InvalidOperationException("Connect a non-empty debugImage before capturing the reference.");
+            Cv2.ImEncode(".png", debugImage.Mat, out var bytes);
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(debugImage.CloneOwned()),
+                    ["pose"] = VisionValue.Pose(currentPose)
+                },
+                new Dictionary<string, object?>
+                {
+                    ["referenceCaptured"] = true, ["referenceImage"] = Convert.ToBase64String(bytes),
+                    ["referenceWidth"] = debugImage.Width, ["referenceHeight"] = debugImage.Height,
+                    ["referenceX"] = currentPose.X, ["referenceY"] = currentPose.Y, ["referenceThetaDeg"] = currentPose.ThetaDeg
+                }, []));
+        }
+        if (debugImage is not null && !string.IsNullOrEmpty(node.GetString("referenceImage", ""))
+            && (node.GetInt("referenceWidth", 0) != debugImage.Width || node.GetInt("referenceHeight", 0) != debugImage.Height))
+            throw new InvalidOperationException("Scene dimensions differ from the saved reference. Capture a new reference before correcting the ROI.");
 
         VisionRoi roi;
         if (context.TryGetValue("roi", out var roiValue))
@@ -37,23 +71,24 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         {
             var parameterRoi = node.GetRoi();
             if (parameterRoi is null)
+            {
+                if (node.GetBool("debugImagePreviewOnly", false) && debugImage is not null)
+                    return ValueTask.FromResult(new NodeExecutorResult(
+                        new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(debugImage.CloneOwned()) },
+                        new Dictionary<string, object?> { ["debugImageConnected"] = true, ["debugImagePreviewReady"] = true },
+                        []));
                 throw new InvalidOperationException("ROI transform requires either a connected 'roi' input or a 'roi' parameter.");
+            }
             roi = parameterRoi;
         }
 
-        var basePose = new VisionPose2D(node.GetDouble("baseX", 0), node.GetDouble("baseY", 0), node.GetDouble("baseThetaDeg", 0));
-        var currentPose = new VisionPose2D(node.GetDouble("currentX", 0), node.GetDouble("currentY", 0), node.GetDouble("currentThetaDeg", 0));
-        if (context.TryGetValue("currentPose", out var poseValue))
-        {
-            var pose = poseValue.Require<VisionPose2D>("currentPose");
-            if (!double.IsFinite(pose.X) || !double.IsFinite(pose.Y) || !double.IsFinite(pose.ThetaDeg))
-                throw new InvalidOperationException("The connected currentPose has non-finite components.");
-            currentPose = pose;
-        }
-        if (new[] { basePose.X, basePose.Y, basePose.ThetaDeg, currentPose.X, currentPose.Y, currentPose.ThetaDeg }.Any(v => !double.IsFinite(v)))
-            throw new InvalidOperationException("Base/current pose components must be finite.");
-
-        var thetaDeg = currentPose.ThetaDeg - basePose.ThetaDeg;
+        var anglePeriodDeg = node.GetDouble("anglePeriodDeg", 360);
+        if (!double.IsFinite(anglePeriodDeg) || anglePeriodDeg <= 0 || anglePeriodDeg > 360)
+            throw new InvalidOperationException("Angle period must be greater than 0 and at most 360 degrees.");
+        var thetaDeg = (currentPose.ThetaDeg - basePose.ThetaDeg) % anglePeriodDeg;
+        var halfPeriodDeg = anglePeriodDeg / 2;
+        if (thetaDeg > halfPeriodDeg) thetaDeg -= anglePeriodDeg;
+        else if (thetaDeg < -halfPeriodDeg) thetaDeg += anglePeriodDeg;
         var radians = thetaDeg * Math.PI / 180.0;
         var cos = Math.Cos(radians);
         var sin = Math.Sin(radians);
@@ -70,6 +105,37 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         List<VisionPoint2D> region;
         switch (roi.Type)
         {
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                if (strokes.Count is < 1 or > 10_000) throw new InvalidOperationException("The brush ROI needs 1..10000 strokes.");
+                var points = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).SelectMany(stroke => stroke.Points ?? []).ToArray();
+                if (points.Length == 0 || strokes.SelectMany(stroke => stroke.Points ?? []).Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+                    throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
+                if (strokes.Any(stroke => stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                    || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024 || stroke.Points is null || stroke.Points.Count == 0))
+                    throw new InvalidOperationException("Brush ROI strokes need a valid mode, positive width and points.");
+                var movedStrokes = strokes.Select(stroke => stroke with
+                {
+                    Points = stroke.Points.Select(point =>
+                    {
+                        var moved = Apply(new VisionPoint2D(point.X, point.Y));
+                        return new VisionRoiPoint(moved.X, moved.Y);
+                    }).ToArray()
+                }).ToArray();
+                transformed = roi with { Strokes = movedStrokes };
+                var radius = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).Max(stroke => stroke.Width / 2);
+                var minX = points.Min(point => point.X) - radius;
+                var minY = points.Min(point => point.Y) - radius;
+                var maxX = points.Max(point => point.X) + radius;
+                var maxY = points.Max(point => point.Y) + radius;
+                region = new[]
+                {
+                    new VisionPoint2D(minX, minY), new VisionPoint2D(maxX, minY),
+                    new VisionPoint2D(maxX, maxY), new VisionPoint2D(minX, maxY)
+                }.Select(Apply).ToList();
+                break;
+            }
             case VisionRoiType.Circle:
             {
                 var radius = roi.Radius ?? 0;
@@ -133,24 +199,40 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             -sin, cos, currentPose.Y - (-sin * basePose.X + cos * basePose.Y),
             0, 0, 1);
 
-        var overlays = new[]
+        var outputs = new Dictionary<string, VisionValue>
         {
-            new VisionOverlay("roi-transform-region", VisionOverlayType.Rectangle,
-                Label: $"dtheta={thetaDeg:0.##}deg",
-                X: rectangle.X, Y: rectangle.Y, Width: rectangle.Width, Height: rectangle.Height,
-                AngleDeg: rectangle.AngleDeg, Stroke: "#13c2c2", StrokeWidth: 2)
+            ["roi"] = VisionValue.Roi(transformed),
+            ["rectangle"] = VisionValue.Rectangle(rectangle),
+            ["circle"] = VisionValue.Circle(circle),
+            ["center"] = VisionValue.Point(center),
+            ["pose"] = VisionValue.Pose(currentPose),
+            ["transform"] = VisionValue.Transform(transform)
         };
+        var overlays = new List<VisionOverlay>();
+        if (debugImage is not null)
+        {
+            // A cloned pass-through image gives the run-image viewer the same coordinate space
+            // in which both ROIs and the base/current poses are defined.
+            outputs["image"] = VisionValue.Image(debugImage.CloneOwned());
+            overlays.AddRange(RoiDebugOverlays(roi, "roi-transform-base", "基准 ROI", "#faad14"));
+            overlays.AddRange(RoiDebugOverlays(transformed, "roi-transform-corrected", "修正后 ROI", "#13c2c2"));
+            overlays.Add(new VisionOverlay("roi-transform-base-pose", VisionOverlayType.Point,
+                Label: "基准位姿", X: basePose.X, Y: basePose.Y, Stroke: "#faad14", StrokeWidth: 3));
+            overlays.Add(new VisionOverlay("roi-transform-base-pose-label", VisionOverlayType.Text,
+                Label: $"基准 ({basePose.X:0.#}, {basePose.Y:0.#}, {basePose.ThetaDeg:0.#}°)",
+                X: basePose.X + 8, Y: basePose.Y - 8, Stroke: "#ffd666"));
+            overlays.Add(new VisionOverlay("roi-transform-pose-shift", VisionOverlayType.Line,
+                X: basePose.X, Y: basePose.Y, X2: currentPose.X, Y2: currentPose.Y,
+                Stroke: "#b37feb", StrokeWidth: 2));
+            overlays.Add(new VisionOverlay("roi-transform-current-pose", VisionOverlayType.Point,
+                Label: "当前位姿", X: currentPose.X, Y: currentPose.Y, Stroke: "#722ed1", StrokeWidth: 3));
+            overlays.Add(new VisionOverlay("roi-transform-current-pose-label", VisionOverlayType.Text,
+                Label: $"当前 ({currentPose.X:0.#}, {currentPose.Y:0.#}, {currentPose.ThetaDeg:0.#}°) · Δθ {thetaDeg:0.##}°",
+                X: currentPose.X + 8, Y: currentPose.Y + 16, Stroke: "#d3adf7"));
+        }
 
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["roi"] = VisionValue.Roi(transformed),
-                ["rectangle"] = VisionValue.Rectangle(rectangle),
-                ["circle"] = VisionValue.Circle(circle),
-                ["center"] = VisionValue.Point(center),
-                ["pose"] = VisionValue.Pose(currentPose),
-                ["transform"] = VisionValue.Transform(transform)
-            },
+            outputs,
             new Dictionary<string, object?>
             {
                 ["roiType"] = transformed.Type.ToString(),
@@ -158,9 +240,80 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 ["basePose"] = $"{basePose.X:0.##},{basePose.Y:0.##},{basePose.ThetaDeg:0.##}",
                 ["currentPose"] = $"{currentPose.X:0.##},{currentPose.Y:0.##},{currentPose.ThetaDeg:0.##}",
                 ["regionCenter"] = $"{center.X:0.##},{center.Y:0.##}",
-                ["boundingRadius"] = Math.Round(circle.Radius, 2)
+                ["boundingRadius"] = Math.Round(circle.Radius, 2),
+                ["debugImageConnected"] = outputs.ContainsKey("image")
             },
             overlays));
+    }
+
+    private static IReadOnlyList<VisionOverlay> RoiDebugOverlays(VisionRoi roi, string idPrefix, string label, string stroke)
+    {
+        switch (roi.Type)
+        {
+            case VisionRoiType.Circle:
+            {
+                var x = roi.X ?? 0;
+                var y = roi.Y ?? 0;
+                var radius = roi.Radius ?? 0;
+                return
+                [
+                    new VisionOverlay($"{idPrefix}-shape", VisionOverlayType.Circle, X: x, Y: y, Radius: radius, Stroke: stroke, StrokeWidth: 2.5),
+                    new VisionOverlay($"{idPrefix}-label", VisionOverlayType.Text, Label: label, X: x + radius + 4, Y: y - radius - 4, Stroke: stroke)
+                ];
+            }
+            case VisionRoiType.Polygon:
+            {
+                var points = (roi.Points ?? []).Select(point => new VisionOverlayPoint(point.X, point.Y)).ToArray();
+                if (points.Length == 0) return [];
+                return
+                [
+                    new VisionOverlay($"{idPrefix}-shape", VisionOverlayType.Polygon, Points: points, Stroke: stroke, StrokeWidth: 2.5),
+                    new VisionOverlay($"{idPrefix}-label", VisionOverlayType.Text, Label: label, X: points[0].X, Y: points[0].Y - 8, Stroke: stroke)
+                ];
+            }
+            case VisionRoiType.Brush:
+            {
+                var overlays = new List<VisionOverlay>();
+                foreach (var (brushStroke, index) in (roi.Strokes ?? []).Take(256).Select((item, index) => (item, index)))
+                {
+                    var points = SampleBrushPoints(brushStroke.Points, 96);
+                    if (points.Length == 0) continue;
+                    var brushColor = brushStroke.Mode == VisionRoiStrokeMode.Erase ? "#ff4d4f" : stroke;
+                    var brushLabel = $"{label} · {(brushStroke.Mode == VisionRoiStrokeMode.Erase ? "擦除" : "添加")}";
+                    if (points.Length == 1)
+                        overlays.Add(new VisionOverlay($"{idPrefix}-stroke-{index}", VisionOverlayType.Circle,
+                            Label: brushLabel, X: points[0].X, Y: points[0].Y, Radius: brushStroke.Width / 2,
+                            Stroke: brushColor, StrokeWidth: 2));
+                    else
+                        overlays.Add(new VisionOverlay($"{idPrefix}-stroke-{index}", VisionOverlayType.Polyline,
+                            Label: brushLabel, Points: points, Stroke: brushColor, StrokeWidth: brushStroke.Width));
+                }
+                return overlays;
+            }
+            default:
+            {
+                var x = roi.X ?? 0;
+                var y = roi.Y ?? 0;
+                var width = roi.Width ?? 0;
+                var height = roi.Height ?? 0;
+                return
+                [
+                    new VisionOverlay($"{idPrefix}-shape", VisionOverlayType.Rectangle,
+                        X: x, Y: y, Width: width, Height: height, Stroke: stroke, StrokeWidth: 2.5),
+                    new VisionOverlay($"{idPrefix}-label", VisionOverlayType.Text, Label: label, X: x, Y: y - 8, Stroke: stroke)
+                ];
+            }
+        }
+    }
+
+    private static VisionOverlayPoint[] SampleBrushPoints(IReadOnlyList<VisionRoiPoint> points, int maximum)
+    {
+        if (points.Count <= maximum) return points.Select(point => new VisionOverlayPoint(point.X, point.Y)).ToArray();
+        var stride = (points.Count - 1d) / (maximum - 1);
+        return Enumerable.Range(0, maximum)
+            .Select(index => points[(int)Math.Round(index * stride)])
+            .Select(point => new VisionOverlayPoint(point.X, point.Y))
+            .ToArray();
     }
 
     private static List<VisionPoint2D> CircleRegion(VisionPoint2D center, double radius)

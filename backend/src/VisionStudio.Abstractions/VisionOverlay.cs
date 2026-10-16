@@ -8,7 +8,8 @@ public enum VisionOverlayType
     Rectangle,
     Polygon,
     Contour,
-    Text
+    Text,
+    Polyline
 }
 
 public sealed record VisionOverlayPoint(double X, double Y);

@@ -19,7 +19,8 @@ public sealed class Batch5PrecisionIntegrationTests
         var result = await RunWorkflowAsync(workflow);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(8, result.NodeReports.Count);
+        Assert.Contains(result.NodeReports, report => report.NodeId == "locate-found");
+        Assert.DoesNotContain(result.NodeReports, report => report.NodeId == "locate-not-found-result");
 
         var locate = Assert.Single(result.NodeReports, r => r.NodeId == "locate");
         Assert.True(Convert.ToBoolean(locate.Summary["found"]));
@@ -68,13 +69,55 @@ public sealed class Batch5PrecisionIntegrationTests
         return JsonSerializer.Deserialize<WorkflowDefinition>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     }
 
-    private static async Task<WorkflowRunResult> RunWorkflowAsync(WorkflowDefinition workflow)
+    [Fact]
+    public async Task LocationNotFoundExportsNgWithoutResolvingMissingPoseOrExecutingMeasurements()
+    {
+        var workflow = await LoadSampleAsync("shape-locate-measure-workflow.json");
+        var result = await RunWorkflowAsync(workflow, new MissingLocationNode());
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("NG", result.QualityDisposition);
+        Assert.DoesNotContain(result.NodeReports, report => report.NodeId is "roi" or "measure" or "tol");
+        Assert.Equal("NG", Assert.Single(result.NodeReports, report => report.NodeId == "locate-not-found-result").Summary["disposition"]);
+        Assert.Contains(result.NodeReports, report => report.NodeId == "locate-not-found-export");
+        Assert.Contains(result.NodeReports, report => report.NodeId == "locate-join");
+    }
+
+    private sealed class MissingLocationNode : IVisionNodeExecutor
+    {
+        public string Type => "match.shape";
+        public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+            {
+                ["image"] = context.RequireValue("image"), ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0)
+            }, new Dictionary<string, object?> { ["found"] = false }));
+    }
+
+    [Theory]
+    [InlineData("source")]
+    [InlineData("locate")]
+    [InlineData("roi")]
+    public async Task ReferenceCaptureStopsAtTheDebugTargetWithoutEvaluatingUnexecutedBranches(string target)
+    {
+        var workflow = await LoadSampleAsync("shape-locate-measure-workflow.json");
+        workflow = workflow with { Nodes = workflow.Nodes.Select(node => node.Id == "roi" ? node with
+        {
+            Parameters = new Dictionary<string, JsonElement>(node.Parameters!) { ["captureReference"] = JsonSerializer.SerializeToElement(true) }
+        } : node).ToArray() };
+        var result = await RunWorkflowAsync(workflow, options: new VisionRunOptions(DebugRunMode.RunNode, TargetNodeId: target));
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(target, result.HaltNodeId);
+        Assert.DoesNotContain(result.NodeReports, report => report.NodeId is "measure" or "found" or "export");
+        if (target == "roi") Assert.True((bool)Assert.Single(result.NodeReports, report => report.NodeId == "roi").Summary["referenceCaptured"]!);
+    }
+
+    private static async Task<WorkflowRunResult> RunWorkflowAsync(WorkflowDefinition workflow, IVisionNodeExecutor? matching = null, VisionRunOptions? options = null)
     {
         var registry = new VisionNodeRegistry();
         IVisionNodeExecutor[] executors =
         [
-            new SyntheticImageNode(), new ImageCropNode(), new ShapeMatchNode(), new RoiTransformNode(),
-            new CaliperCircleNode(), new ValueRangeNode(), new ResultDispositionNode(), new ExportResultNode()
+            new SyntheticImageNode(), new ImageCropNode(), matching ?? new ShapeMatchNode(), new RoiTransformNode(),
+            new CaliperCircleNode(), new ValueRangeNode(), new ResultDispositionNode(), new ExportResultNode(),
+            new BooleanIfConditionNode(), new JoinNode()
         ];
         foreach (var executor in executors)
             registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "builtin");
@@ -86,6 +129,6 @@ public sealed class Batch5PrecisionIntegrationTests
         services.AddTransient<VisionNodeStep>(); services.AddTransient<VisionPipelineStep>();
         services.AddSingleton<WorkflowPlanCache>(); services.AddTransient<WorkflowCoreVisionRunner>();
         await using var provider = services.BuildServiceProvider();
-        return await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(workflow);
+        return await provider.GetRequiredService<WorkflowCoreVisionRunner>().RunAsync(workflow, options);
     }
 }

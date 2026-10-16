@@ -85,13 +85,32 @@ public static class BuiltInNodeCatalog
             [],
             [new("image", VisionDataType.Image), Next],
             [
-                new("width", "Width", "number", 640, 160, 1920, 1),
-                new("height", "Height", "number", 480, 120, 1080, 1),
-                new("centerX", "Circle X", "number", 320, 0, 1920, 1),
-                new("centerY", "Circle Y", "number", 240, 0, 1080, 1),
-                new("radius", "Radius", "number", 80, 5, 400, 1)
+                new("width", "Width", "number", 1280, 160, 1920, 1),
+                new("height", "Height", "number", 960, 120, 1080, 1),
+                new("centerX", "Circle X", "number", 640, 0, 1920, 1),
+                new("centerY", "Circle Y", "number", 480, 0, 1080, 1),
+                new("radius", "Radius", "number", 80, 5, 400, 1),
+                new("placementMode", "Placement Mode", "select", "fixed", Options:
+                [new("Fixed", "fixed"), new("Sequence", "sequence"), new("Seeded random", "seededRandom"), new("Random each run", "randomEachRun")]),
+                new("sampleIndex", "Sample Index", "number", 0, 0, 10000, 1,
+                    Description: "Zero-based sample identifier. The same mode, settings and index reproduce the same image.",
+                    VisibleWhen: new("placementMode", ["sequence", "seededRandom"])),
+                new("offsetStepX", "X Shift per Sample", "number", 20, -500, 500, 1,
+                    Description: "Horizontal translation per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
+                new("offsetStepY", "Y Shift per Sample", "number", 0, -500, 500, 1,
+                    Description: "Vertical translation per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
+                new("angleStepDeg", "Angle Step", "number", 5, -180, 180, 1,
+                    Description: "Rotation added per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
+                new("randomSeed", "Random Seed", "number", 1, 0, 2147483647, 1,
+                    Description: "Fixed seed for repeatable pseudo-random positions.", VisibleWhen: new("placementMode", ["seededRandom"])),
+                new("maxOffsetX", "Maximum X Shift", "number", 160, 0, 500, 1,
+                    Description: "Random horizontal shift is selected from this symmetric range.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"])),
+                new("maxOffsetY", "Maximum Y Shift", "number", 100, 0, 400, 1,
+                    Description: "Random vertical shift is selected from this symmetric range.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"])),
+                new("maxAngleDeg", "Maximum Angle", "number", 15, 0, 180, 1,
+                    Description: "Random angle is selected from the symmetric range -value..+value.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"]))
             ],
-            "Generate a deterministic test image for MVP validation.",
+            "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
             "builtin"),
         new(
             "image.threshold",
@@ -407,7 +426,7 @@ public static class BuiltInNodeCatalog
             "measure.caliper",
             "Caliper Edge",
             "Measurement",
-            [ExecIn, new("image", VisionDataType.Image)],
+            [ExecIn, new("image", VisionDataType.Image), new("searchLine", VisionDataType.Line2D, Required: false), new("transform", VisionDataType.Transform2D, Required: false)],
             [
                 new("image", VisionDataType.Image),
                 new("point", VisionDataType.Point2D),
@@ -429,7 +448,7 @@ public static class BuiltInNodeCatalog
                     new("Falling", "Falling")
                 ], Group: "Sampling")
             ],
-            "1D grayscale caliper along a configurable search line. Returns the strongest edge point.",
+            "1D grayscale caliper along a configurable search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction to the current image. Returns the strongest edge point.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(

@@ -7,10 +7,22 @@ public enum VisionRoiType
 {
     Rectangle,
     Circle,
-    Polygon
+    Polygon,
+    Brush
+}
+
+public enum VisionRoiStrokeMode
+{
+    Add,
+    Erase
 }
 
 public sealed record VisionRoiPoint(double X, double Y);
+
+public sealed record VisionRoiBrushStroke(
+    VisionRoiStrokeMode Mode,
+    double Width,
+    IReadOnlyList<VisionRoiPoint> Points);
 
 public sealed record VisionRoi(
     VisionRoiType Type,
@@ -19,7 +31,8 @@ public sealed record VisionRoi(
     double? Width = null,
     double? Height = null,
     double? Radius = null,
-    IReadOnlyList<VisionRoiPoint>? Points = null);
+    IReadOnlyList<VisionRoiPoint>? Points = null,
+    IReadOnlyList<VisionRoiBrushStroke>? Strokes = null);
 
 public static class VisionRoiParameterExtensions
 {

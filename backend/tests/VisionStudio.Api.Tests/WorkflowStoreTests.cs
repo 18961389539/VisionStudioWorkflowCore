@@ -33,6 +33,22 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SavedRoiReferenceImageAndPoseSurviveReloadTogether()
+    {
+        var parameters = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+            """{"referenceImage":"saved-png","referenceWidth":640,"referenceHeight":480,"baseX":123.125,"baseY":45.25,"baseThetaDeg":30,"referenceBindings":"image-and-pose","roi":{"type":"Circle","x":140,"y":50,"radius":12}}""")!;
+        var workflow = new WorkflowDefinition("roi-reference", "Reference", [new("roi", "roi.transform", null, null, parameters)], []);
+        await _store.SaveAsync(workflow.Id, workflow, CancellationToken.None);
+        var loaded = await _store.LoadAsync(workflow.Id, CancellationToken.None);
+        var saved = Assert.Single(loaded!.Nodes).Parameters!;
+        Assert.Equal("saved-png", saved["referenceImage"].GetString());
+        Assert.Equal(123.125, saved["baseX"].GetDouble());
+        Assert.Equal(30, saved["baseThetaDeg"].GetDouble());
+        Assert.Equal(140, saved["roi"].GetProperty("x").GetInt32());
+        Assert.Equal("image-and-pose", saved["referenceBindings"].GetString());
+    }
+
+    [Fact]
     public async Task SaveThenLoad_RoundTripsWorkflowWithSameId()
     {
         await _store.SaveAsync("demo-linear", new WorkflowDefinition("whatever", "Linear", [], []), CancellationToken.None);

@@ -315,6 +315,24 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task ShapeMatch_TrainingUsesCapturedImage_WhenUpstreamTemplateChanges()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        var acquired = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"trainingPreviewOnly":true}""");
+        var captured = Assert.IsType<string>(acquired.Summary["trainingImageData"]);
+        using var changedTemplate = new Mat(120, 120, MatType.CV_8UC1, Scalar.All(0));
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(changedTemplate) },
+            JsonSerializer.Serialize(new { modelMode = "trained", trainingMode = true, trainingImageData = captured, angleStepDeg = 2 }));
+        Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]));
+        var shown = trained.Outputs["image"].Require<VisionImage>("image");
+        Assert.Equal(0d, Cv2.Norm(template, shown.Mat, NormTypes.INF));
+    }
+
+    [Fact]
     public async Task RoiTransform_Translation_RectangleStaysRectangle()
     {
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
@@ -355,6 +373,19 @@ public sealed class Batch5ShapeMatchTests
         var summary = result.Summary;
         Assert.Equal(90d, Convert.ToDouble(summary["thetaDeg"]));
         Assert.Equal("Polygon", summary["roiType"]);
+    }
+
+    [Fact]
+    public async Task RoiTransform_HalfTurnSymmetry_UsesEquivalentOrientation()
+    {
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Circle","x":320,"y":240,"radius":80},"baseX":128,"baseY":100.5,"baseThetaDeg":-180,"anglePeriodDeg":180,"currentX":173.56,"currentY":99.71,"currentThetaDeg":-5.77}""");
+
+        var roi = result.Outputs["roi"].Require<VisionRoi>("roi");
+        Assert.Equal(VisionRoiType.Circle, roi.Type);
+        Assert.InRange(roi.X!.Value, 350, 351);
+        Assert.InRange(roi.Y!.Value, 256, 258);
+        Assert.Equal(-5.77, Convert.ToDouble(result.Summary["thetaDeg"]), 2);
     }
 
     [Fact]

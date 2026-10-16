@@ -57,7 +57,16 @@ export function configurationIssues(catalog: NodeCatalogItem, parameters: NodePa
     if (roi.type === 'Rectangle' && (!finite(roi.x, roi.y, roi.width, roi.height) || roi.width <= 0 || roi.height <= 0)) issues.push(`${label} 的位置须有效，宽和高须大于 0。`);
     else if (roi.type === 'Circle' && (!finite(roi.x, roi.y, roi.radius) || roi.radius <= 0)) issues.push(`${label} 的位置须有效，半径须大于 0。`);
     else if (roi.type === 'Polygon' && (!Array.isArray(roi.points) || roi.points.length < 3 || roi.points.some((p) => !p || !finite(p.x, p.y)))) issues.push(`${label}多边形需要至少三个有效顶点。`);
-    else if (!['Rectangle', 'Circle', 'Polygon'].includes(roi.type)) issues.push(`${label}类型无效。`);
+    else if (roi.type === 'Brush') {
+      const strokes = Array.isArray(roi.strokes) ? roi.strokes : [];
+      const pointCount = strokes.reduce((count, stroke) => count + (Array.isArray(stroke.points) ? stroke.points.length : 0), 0);
+      if (strokes.length === 0 || strokes.length > 10000 || pointCount > 500000
+        || strokes.some((stroke) => !['Add', 'Erase'].includes(stroke.mode) || !finite(stroke.width)
+          || stroke.width <= 0 || stroke.width > 512 || !Array.isArray(stroke.points) || stroke.points.length === 0
+          || stroke.points.some((point) => !point || !finite(point.x, point.y)))) issues.push(`${label}笔刷需要有效笔迹、1..512 px 笔宽和有限坐标（最多 10000 笔 / 500000 点）。`);
+      else if (!strokes.some((stroke) => stroke.mode === 'Add')) issues.push(`${label}笔刷至少需要一笔添加选区。`);
+    }
+    else if (!['Rectangle', 'Circle', 'Polygon', 'Brush'].includes(roi.type)) issues.push(`${label}类型无效。`);
   }
   return issues;
 }

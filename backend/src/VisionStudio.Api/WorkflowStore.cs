@@ -5,6 +5,8 @@ using VisionStudio.Engine;
 
 namespace VisionStudio.Api;
 
+public sealed record WorkflowDocumentSummary(string Id, string Name, int NodeCount, int EdgeCount, DateTimeOffset UpdatedAt);
+
 /// <summary>
 /// 工作流文档的持久化存储（data/workflows 下的 JSON 文件 + 旁路修订记录）。
 ///
@@ -36,6 +38,44 @@ public sealed class WorkflowStore
     {
         _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "workflows");
         Directory.CreateDirectory(_root);
+    }
+
+    public async Task<IReadOnlyList<WorkflowDocumentSummary>> ListAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var documents = new List<WorkflowDocumentSummary>();
+            foreach (var path in Directory.EnumerateFiles(_root, "*.json", SearchOption.TopDirectoryOnly))
+            {
+                var fileName = Path.GetFileName(path);
+                if (fileName.EndsWith(".revision.json", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var id = Path.GetFileNameWithoutExtension(path);
+                try
+                {
+                    await using var stream = File.OpenRead(path);
+                    var workflow = await JsonSerializer.DeserializeAsync<WorkflowDefinition>(stream, _json, cancellationToken);
+                    if (workflow is null) continue;
+                    documents.Add(new WorkflowDocumentSummary(
+                        id,
+                        string.IsNullOrWhiteSpace(workflow.Name) ? id : workflow.Name,
+                        workflow.Nodes.Count,
+                        workflow.Edges.Count,
+                        new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero)));
+                }
+                catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+                {
+                    // A damaged document should not prevent other saved workflows from being listed.
+                }
+            }
+
+            return documents
+                .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        finally { _gate.Release(); }
     }
 
     /// <summary>R07：当前修订的轻量读取（不经内容校验）。一致性读取请用 <see cref="LoadWithRevisionAsync"/>。</summary>

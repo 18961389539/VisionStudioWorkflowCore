@@ -58,9 +58,12 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
   const [filter, setFilter] = useState<FilterMode>('all');
   const [sort, setSort] = useState<SortMode>('sequence');
 
-  const isPaused = result.debugState === 'Breakpoint' || result.debugState === 'Stopped';
+  const isPaused = result.debugState === 'Breakpoint' || (result.debugState === 'Stopped' && !result.success);
   const decisions = result.controlFlowDecisions ?? [];
   const nameOf = (nodeId: string) => nodeLabels[nodeId] ?? nodeId;
+  const executionStateLabel = result.debugState === 'Stopped' && result.success
+    ? `目标节点已执行${result.haltNodeId ? ` · ${nameOf(result.haltNodeId)}` : ''}`
+    : localizeStatus(result.debugState ?? 'Complete');
 
   // 失败节点与最早执行的失败节点：运行完成后先回答“判定、耗时、哪个节点失败”，一键定位无需先筛再点
   const failedCount = useMemo(() => result.nodeReports.filter((row) => !row.success).length, [result]);
@@ -109,7 +112,7 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
         message={
           <span>
             {result.success
-              ? `${localizeStatus(result.debugState ?? 'Complete')} · ${result.qualityDisposition ? localizeStatus(result.qualityDisposition) : '执行成功'} · ${result.totalDurationMs.toFixed(2)} 毫秒`
+              ? `${executionStateLabel} · ${result.qualityDisposition ? localizeStatus(result.qualityDisposition) : '执行成功'} · ${result.totalDurationMs.toFixed(2)} 毫秒`
               : `执行失败 · ${result.totalDurationMs.toFixed(2)} 毫秒`}
             <span className="run-outcome-count"> · {result.nodeReports.length} 次节点执行 · {failedCount} 次失败</span>
             {stale && (

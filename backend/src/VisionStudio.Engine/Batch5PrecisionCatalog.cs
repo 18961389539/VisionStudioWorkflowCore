@@ -121,6 +121,7 @@ public static class Batch5PrecisionCatalog
                 new("exec", VisionDataType.Control),
                 new("image", VisionDataType.Image),
                 new("searchLine", VisionDataType.Line2D, Required: false),
+                new("transform", VisionDataType.Transform2D, Required: false),
                 new("roi", VisionDataType.Roi, Required: false)
             ],
             [
@@ -158,7 +159,7 @@ public static class Batch5PrecisionCatalog
                     new("None (integer)", "none")
                 ], Group: "Sampling")
             ],
-            "Subpixel edge location along a search line: parabolic refinement on the gradient peak with fit error and valid sample count. No edge above the contrast threshold returns found=false, not a failure.",
+            "Subpixel edge location along a search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -169,6 +170,7 @@ public static class Batch5PrecisionCatalog
                 new("exec", VisionDataType.Control),
                 new("image", VisionDataType.Image),
                 new("searchLine", VisionDataType.Line2D, Required: false),
+                new("transform", VisionDataType.Transform2D, Required: false),
                 new("roi", VisionDataType.Roi, Required: false)
             ],
             [
@@ -209,7 +211,7 @@ public static class Batch5PrecisionCatalog
                 new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles perpendicular to the search line; zero uses the search line length."),
                 new("caliperCount", "Caliper Count", "number", 9, 3, 101, 2, Group: "Sampling", Description: "Number of parallel search profiles along the edge span; at least 3 valid edge points are required for a line fit.")
             ],
-            "Caliper line measurement: detects edges on multiple parallel profiles across the configured edge span, then fits the measured edge points to a line with orthogonal RMS fit error. At least three valid points are required.",
+            "Caliper line measurement with orthogonal RMS fit error. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points are required.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -220,6 +222,7 @@ public static class Batch5PrecisionCatalog
                 new("exec", VisionDataType.Control),
                 new("image", VisionDataType.Image),
                 new("circle", VisionDataType.Circle, Required: false),
+                new("transform", VisionDataType.Transform2D, Required: false),
                 new("roi", VisionDataType.Roi, Required: false)
             ],
             [
@@ -253,7 +256,7 @@ public static class Batch5PrecisionCatalog
                 new("maxRadiusDeviation", "Max Radius Deviation (0=off)", "number", 0, 0, 5000, 1, Unit: "px", Group: "Sampling",
                     Description: "Reject spokes whose found edge deviates more than this from the nominal radius.")
             ],
-            "Caliper circle measurement: radial caliper spokes around a nominal circle, least-squares circle fit over the valid edge points, with roundness (radius spread) and fit error. The optional circle input overrides the nominal parameters (use it with roi.transform for workpiece-following measurement).",
+            "Caliper circle measurement with least-squares fit and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -355,10 +358,12 @@ public static class Batch5PrecisionCatalog
             [
                 new("exec", VisionDataType.Control),
                 new("roi", VisionDataType.Roi, Required: false),
-                new("currentPose", VisionDataType.Pose2D, Required: false)
+                new("currentPose", VisionDataType.Pose2D, Required: false),
+                new("debugImage", VisionDataType.Image, Required: false)
             ],
             [
                 new("roi", VisionDataType.Roi),
+                new("image", VisionDataType.Image, Required: false),
                 new("rectangle", VisionDataType.Rectangle2D),
                 new("circle", VisionDataType.Circle),
                 new("center", VisionDataType.Point2D),
@@ -371,12 +376,14 @@ public static class Batch5PrecisionCatalog
                     Description: "The pose at which the ROI parameter was authored."),
                 new("baseY", "Base Y", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Base Pose"),
                 new("baseThetaDeg", "Base Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Base Pose"),
+                new("anglePeriodDeg", "Angle Period", "number", 360, 1, 360, 1, Unit: "deg", Group: "Base Pose",
+                    Description: "Use 180 degrees for half-turn-symmetric locator models; use 360 degrees when orientation has a unique direction."),
                 new("currentX", "Current X", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Current Pose",
                     Description: "Used only when the currentPose port is not connected."),
                 new("currentY", "Current Y", "number", 0, -100000, 100000, 0.01, Unit: "px", Group: "Current Pose"),
                 new("currentThetaDeg", "Current Theta", "number", 0, -3600, 3600, 0.01, Unit: "deg", Group: "Current Pose")
             ],
-            "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Rectangle ROIs stay rectangles for pure translation and become polygons when rotated; circle ROIs translate. Outputs a Roi value (feed it into the roi port of downstream measurement nodes), the bounding rectangle/circle and the base->current Transform2D.",
+            "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true))
     ];

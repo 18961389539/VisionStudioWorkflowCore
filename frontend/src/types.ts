@@ -75,7 +75,7 @@ export type OverlayPoint = { x: number; y: number };
 
 export type VisionOverlay = {
   id: string;
-  type: 'Point' | 'Line' | 'Circle' | 'Rectangle' | 'Polygon' | 'Contour' | 'Text';
+  type: 'Point' | 'Line' | 'Circle' | 'Rectangle' | 'Polygon' | 'Contour' | 'Text' | 'Polyline';
   nodeId?: string | null;
   label?: string | null;
   x?: number | null;
@@ -95,7 +95,14 @@ export type VisionOverlay = {
 export type VisionRoi =
   | { type: 'Rectangle'; x: number; y: number; width: number; height: number }
   | { type: 'Circle'; x: number; y: number; radius: number }
-  | { type: 'Polygon'; points: OverlayPoint[] };
+  | { type: 'Polygon'; points: OverlayPoint[] }
+  | { type: 'Brush'; strokes: VisionRoiBrushStroke[] };
+
+export type VisionRoiBrushStroke = {
+  mode: 'Add' | 'Erase';
+  width: number;
+  points: OverlayPoint[];
+};
 
 export type ControlFlowDecision = {
   nodeId: string;

@@ -91,6 +91,9 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
   const [busy, setBusy] = useState(false);
   const [recipeParams, setRecipeParams] = useState('{}');
   const [bindings, setBindings] = useState<Record<string,string>>({});
+  const [baseWorkflowId, setBaseWorkflowId] = useState<string>();
+  const [baseWorkflowRecipeId, setBaseWorkflowRecipeId] = useState<string>();
+  const [baseWorkflowVersion, setBaseWorkflowVersion] = useState<number>();
   const [bindingTarget, setBindingTarget] = useState<string>();
   const [bindingKey, setBindingKey] = useState('MatchThreshold');
   const [resolved, setResolved] = useState<ResolvedRecipeParameterization>();
@@ -133,7 +136,7 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
     let cancelled = false;
     const controller = new AbortController();
     setParameterLoading(true); setParameterError(undefined);
-    setRecipeParams('{}'); setBindings({}); setResolved(undefined);
+    setRecipeParams('{}'); setBindings({}); setResolved(undefined); setBaseWorkflowId(undefined); setBaseWorkflowRecipeId(undefined); setBaseWorkflowVersion(undefined);
     void (async () => {
       try {
         const requests = [
@@ -146,6 +149,9 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
         if (cancelled) return;
         setRecipeParams(JSON.stringify(recipe.values ?? {}, null, 2));
         setBindings(parameterization.parameterBindings ?? {});
+        setBaseWorkflowId(parameterization.baseWorkflow?.id ?? parameterization.effectiveWorkflow?.id);
+        setBaseWorkflowRecipeId(selected.id);
+        setBaseWorkflowVersion(selected.latestVersion);
       } catch (error) {
         if (!cancelled) setParameterError(error instanceof Error ? error.message : '参数加载失败');
       } finally { if (!cancelled) setParameterLoading(false); }
@@ -157,14 +163,20 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
     setCandidates([]); setCandidatesVersion(undefined); setDependency(undefined);
   }, [selected?.id]);
   const saveRecipeParameters = () => selected && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(recipeParams)})}); const data=await response.json(); if(!response.ok) throw new Error(data.detail??'保存配方参数失败'); setRecipeParams(JSON.stringify(data.values,null,2)); messageApi.success('配方参数草稿已保存'); });
-  const resolveBindings = () => selected && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameterization/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow,bindings})}); const data:ResolvedRecipeParameterization & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'解析参数绑定失败'); setResolved(data); messageApi.success(`已解析 ${data.bindingCount} 个绑定`); });
+  const workflowMatchesSelectedRecipe = Boolean(selected
+    && baseWorkflowRecipeId === selected.id
+    && baseWorkflowVersion === selected.latestVersion
+    && baseWorkflowId
+    && workflow.id === baseWorkflowId);
+  const canSaveSelectedVersion = workflowMatchesSelectedRecipe && !parameterLoading && !parameterError;
+  const resolveBindings = () => selected && workflowMatchesSelectedRecipe && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameterization/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow,bindings})}); const data:ResolvedRecipeParameterization & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'解析参数绑定失败'); setResolved(data); messageApi.success(`已解析 ${data.bindingCount} 个绑定`); });
   const addBinding = () => { if(!bindingTarget || !bindingKey.trim()) return; setBindings(x=>({...x,[bindingTarget]:`recipe.${bindingKey.trim()}`})); };
 
   const createRecipe = () => invoke(async () => {
     const response = await fetch('/api/recipes', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建配方失败'); setSelectedId(data.id); setRecipeCreateOpen(false); setQuery(''); setStatusFilter('all'); setTab('versions'); messageApi.success('配方 V1 草稿已创建，验证通过后即可发布');
   });
-  const saveVersion = () => selected && invoke(async () => {
+  const saveVersion = () => selected && workflowMatchesSelectedRecipe && invoke(async () => {
     const response = await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ workflow, note, parameterBindings:bindings }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '保存版本失败'); messageApi.success(`草稿 V${data.version} 已创建`);
   });
@@ -326,11 +338,18 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
               </Space>
             </div>
             <Space wrap>
-              <Button onClick={saveVersion} loading={busy} disabled={parameterLoading || Boolean(parameterError) || !workflow.nodes.length} title="使用当前设计器中的工作流和参数绑定创建新的不可变版本">保存草稿版本</Button>
+              <Button onClick={saveVersion} loading={busy} disabled={!canSaveSelectedVersion || !workflow.nodes.length} title={workflowMatchesSelectedRecipe ? '使用当前配方工作流创建新的不可变版本' : '先载入所选配方的基础版本，再编辑并保存'}>保存草稿版本</Button>
               <Button onClick={runPublished} disabled={!selected.publishedVersion||!selected.publishedDependencyManifestHash}>运行当前版本</Button>
               <Dropdown menu={{ items: headingMenu }} trigger={['click']}><Button>更多 ▾</Button></Dropdown>
             </Space>
           </div>
+          {baseWorkflowRecipeId === selected.id && baseWorkflowVersion === selected.latestVersion && baseWorkflowId && workflow.id !== baseWorkflowId && <Alert
+            type="warning"
+            showIcon
+            message="当前画布不属于所选配方，已阻止保存新版本"
+            description={<Space wrap>配方基础工作流：<Typography.Text code>{baseWorkflowId}</Typography.Text>；当前画布：<Typography.Text code>{workflow.id}</Typography.Text><Button size="small" onClick={() => void loadBaseVersion(selected.latestVersion)} disabled={busy}>载入 V{selected.latestVersion} 基础工作流</Button></Space>}
+            style={{ marginBottom: 10 }}
+          />}
           <div className="job-lifecycle">
             <Steps size="small" items={[
               { title: `V${selected.latestVersion} 已保存`, status: 'finish' },
@@ -364,7 +383,7 @@ export default function JobPanel({ open, onClose, workflow, onLoadWorkflow, onRu
                     </div>
                     <Divider titlePlacement="left" style={{ margin: 0 }}>配方参数绑定</Divider>
                     <Space wrap>
-                      <Select disabled={busy || parameterLoading || Boolean(parameterError)} showSearch placeholder="节点参数" style={{width:280}} value={bindingTarget} onChange={setBindingTarget} options={bindingTargets}/><Input disabled={busy || parameterLoading || Boolean(parameterError)} style={{width:190}} value={bindingKey} onChange={e=>setBindingKey(e.target.value)} placeholder="参数键"/><Button disabled={busy || parameterLoading || Boolean(parameterError) || !bindingTarget || !bindingKey.trim()} onClick={addBinding}>添加绑定</Button><Button type="primary" disabled={busy || parameterLoading || Boolean(parameterError)} onClick={resolveBindings}>解析预览</Button>{resolved&&<Button onClick={()=>onLoadWorkflow(resolved.effectiveWorkflow)}>加载有效版本到设计器</Button>}
+                      <Select disabled={busy || parameterLoading || Boolean(parameterError) || !workflowMatchesSelectedRecipe} showSearch placeholder="节点参数" style={{width:280}} value={bindingTarget} onChange={setBindingTarget} options={bindingTargets}/><Input disabled={busy || parameterLoading || Boolean(parameterError) || !workflowMatchesSelectedRecipe} style={{width:190}} value={bindingKey} onChange={e=>setBindingKey(e.target.value)} placeholder="参数键"/><Button disabled={busy || parameterLoading || Boolean(parameterError) || !workflowMatchesSelectedRecipe || !bindingTarget || !bindingKey.trim()} onClick={addBinding}>添加绑定</Button><Button type="primary" disabled={busy || parameterLoading || Boolean(parameterError) || !workflowMatchesSelectedRecipe} onClick={resolveBindings}>解析预览</Button>{resolved&&<Button onClick={()=>onLoadWorkflow(resolved.effectiveWorkflow)}>加载有效版本到设计器</Button>}
                     </Space>
                     <Table size="small" pagination={false} rowKey="target" dataSource={bindingsRows} locale={{ emptyText: '尚未配置绑定' }} columns={[
                       {title:'工作流参数',dataIndex:'target'},

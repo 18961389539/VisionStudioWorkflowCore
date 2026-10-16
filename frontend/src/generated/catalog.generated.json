@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "ad9614c5baf3c47f7c5dc8698d7477bc62160c9301babe16a9d751af5b5274dd",
+  "hash": "3a2d366ca85c9428a4a5ab699b1f50b39bda8f84e57368bbdcac0ebf65f98708",
   "items": [
     {
       "type": "image.acquire",
@@ -301,7 +301,7 @@
           "name": "width",
           "label": "Width",
           "type": "number",
-          "defaultValue": 640,
+          "defaultValue": 1280,
           "min": 160,
           "max": 1920,
           "step": 1
@@ -310,7 +310,7 @@
           "name": "height",
           "label": "Height",
           "type": "number",
-          "defaultValue": 480,
+          "defaultValue": 960,
           "min": 120,
           "max": 1080,
           "step": 1
@@ -319,7 +319,7 @@
           "name": "centerX",
           "label": "Circle X",
           "type": "number",
-          "defaultValue": 320,
+          "defaultValue": 640,
           "min": 0,
           "max": 1920,
           "step": 1
@@ -328,7 +328,7 @@
           "name": "centerY",
           "label": "Circle Y",
           "type": "number",
-          "defaultValue": 240,
+          "defaultValue": 480,
           "min": 0,
           "max": 1080,
           "step": 1
@@ -341,9 +341,165 @@
           "min": 5,
           "max": 400,
           "step": 1
+        },
+        {
+          "name": "placementMode",
+          "label": "Placement Mode",
+          "type": "select",
+          "defaultValue": "fixed",
+          "options": [
+            {
+              "label": "Fixed",
+              "value": "fixed"
+            },
+            {
+              "label": "Sequence",
+              "value": "sequence"
+            },
+            {
+              "label": "Seeded random",
+              "value": "seededRandom"
+            },
+            {
+              "label": "Random each run",
+              "value": "randomEachRun"
+            }
+          ]
+        },
+        {
+          "name": "sampleIndex",
+          "label": "Sample Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "description": "Zero-based sample identifier. The same mode, settings and index reproduce the same image.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "sequence",
+              "seededRandom"
+            ]
+          }
+        },
+        {
+          "name": "offsetStepX",
+          "label": "X Shift per Sample",
+          "type": "number",
+          "defaultValue": 20,
+          "min": -500,
+          "max": 500,
+          "step": 1,
+          "description": "Horizontal translation per sample index in sequence mode.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "sequence"
+            ]
+          }
+        },
+        {
+          "name": "offsetStepY",
+          "label": "Y Shift per Sample",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -500,
+          "max": 500,
+          "step": 1,
+          "description": "Vertical translation per sample index in sequence mode.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "sequence"
+            ]
+          }
+        },
+        {
+          "name": "angleStepDeg",
+          "label": "Angle Step",
+          "type": "number",
+          "defaultValue": 5,
+          "min": -180,
+          "max": 180,
+          "step": 1,
+          "description": "Rotation added per sample index in sequence mode.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "sequence"
+            ]
+          }
+        },
+        {
+          "name": "randomSeed",
+          "label": "Random Seed",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 2147483647,
+          "step": 1,
+          "description": "Fixed seed for repeatable pseudo-random positions.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "seededRandom"
+            ]
+          }
+        },
+        {
+          "name": "maxOffsetX",
+          "label": "Maximum X Shift",
+          "type": "number",
+          "defaultValue": 160,
+          "min": 0,
+          "max": 500,
+          "step": 1,
+          "description": "Random horizontal shift is selected from this symmetric range.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "seededRandom",
+              "randomEachRun"
+            ]
+          }
+        },
+        {
+          "name": "maxOffsetY",
+          "label": "Maximum Y Shift",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0,
+          "max": 400,
+          "step": 1,
+          "description": "Random vertical shift is selected from this symmetric range.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "seededRandom",
+              "randomEachRun"
+            ]
+          }
+        },
+        {
+          "name": "maxAngleDeg",
+          "label": "Maximum Angle",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "description": "Random angle is selected from the symmetric range -value..+value.",
+          "visibleWhen": {
+            "parameter": "placementMode",
+            "values": [
+              "seededRandom",
+              "randomEachRun"
+            ]
+          }
         }
       ],
-      "description": "Generate a deterministic test image for MVP validation.",
+      "description": "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -3311,6 +3467,11 @@
           "required": false
         },
         {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": false
+        },
+        {
           "name": "roi",
           "dataType": "Roi",
           "required": false
@@ -3485,7 +3646,7 @@
           "group": "Sampling"
         }
       ],
-      "description": "Subpixel edge location along a search line: parabolic refinement on the gradient peak with fit error and valid sample count. No edge above the contrast threshold returns found=false, not a failure.",
+      "description": "Subpixel edge location along a search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -5635,6 +5796,11 @@
           "required": false
         },
         {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": false
+        },
+        {
           "name": "roi",
           "dataType": "Roi",
           "required": false
@@ -5826,7 +5992,7 @@
           "description": "Reject spokes whose found edge deviates more than this from the nominal radius."
         }
       ],
-      "description": "Caliper circle measurement: radial caliper spokes around a nominal circle, least-squares circle fit over the valid edge points, with roundness (radius spread) and fit error. The optional circle input overrides the nominal parameters (use it with roi.transform for workpiece-following measurement).",
+      "description": "Caliper circle measurement with least-squares fit and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -5853,6 +6019,16 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "searchLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": false
         }
       ],
       "outputs": [
@@ -5971,7 +6147,7 @@
           "group": "Sampling"
         }
       ],
-      "description": "1D grayscale caliper along a configurable search line. Returns the strongest edge point.",
+      "description": "1D grayscale caliper along a configurable search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction to the current image. Returns the strongest edge point.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6002,6 +6178,11 @@
         {
           "name": "searchLine",
           "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
           "required": false
         },
         {
@@ -6207,7 +6388,7 @@
           "description": "Number of parallel search profiles along the edge span; at least 3 valid edge points are required for a line fit."
         }
       ],
-      "description": "Caliper line measurement: detects edges on multiple parallel profiles across the configured edge span, then fits the measured edge points to a line with orthogonal RMS fit error. At least three valid points are required.",
+      "description": "Caliper line measurement with orthogonal RMS fit error. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points are required.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -7783,6 +7964,11 @@
           "name": "currentPose",
           "dataType": "Pose2D",
           "required": false
+        },
+        {
+          "name": "debugImage",
+          "dataType": "Image",
+          "required": false
         }
       ],
       "outputs": [
@@ -7790,6 +7976,11 @@
           "name": "roi",
           "dataType": "Roi",
           "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
         },
         {
           "name": "rectangle",
@@ -7858,6 +8049,18 @@
           "group": "Base Pose"
         },
         {
+          "name": "anglePeriodDeg",
+          "label": "Angle Period",
+          "type": "number",
+          "defaultValue": 360,
+          "min": 1,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Base Pose",
+          "description": "Use 180 degrees for half-turn-symmetric locator models; use 360 degrees when orientation has a unique direction."
+        },
+        {
           "name": "currentX",
           "label": "Current X",
           "type": "number",
@@ -7892,7 +8095,7 @@
           "group": "Current Pose"
         }
       ],
-      "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Rectangle ROIs stay rectangles for pure translation and become polygons when rotated; circle ROIs translate. Outputs a Roi value (feed it into the roi port of downstream measurement nodes), the bounding rectangle/circle and the base->current Transform2D.",
+      "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -8939,7 +9142,7 @@
         }
       ],
       "parameters": [],
-      "description": "Crop a rectangular, circular, or polygon ROI to its tight bounding box. Pixels outside non-rectangular ROIs are cleared; roiMask outputs the binary selection. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. Brush supports add and erase strokes; roiMask outputs the binary selection. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -11511,7 +11714,7 @@
           "step": 1
         }
       ],
-      "description": "Rasterize a connected or configured rectangle/circle/polygon ROI into one native pixel region, clipped to the canvas. Optional image supplies canvas dimensions only. Rectangle includes pixel centres in [x,x+width) and [y,y+height); circle and polygon use native rasterization. Missing ROI is an error. Zero rectangle size or circle radius is empty. Limits: 64 million canvas pixels, 1000 polygon points, coordinates within +/-32768.",
+      "description": "Rasterize a connected or configured rectangle/circle/polygon/brush ROI into one native pixel region, clipped to the canvas. Brush strokes support ordered add and erase operations. Optional image supplies canvas dimensions only. Rectangle includes pixel centres in [x,x+width) and [y,y+height); circle and polygon use native rasterization. Missing ROI is an error. Zero rectangle size or circle radius is empty. Limits: 64 million canvas pixels, 1000 polygon points, coordinates within +/-32768.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

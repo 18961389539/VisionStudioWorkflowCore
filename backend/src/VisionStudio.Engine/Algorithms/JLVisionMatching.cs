@@ -280,6 +280,35 @@ internal static class JLVisionMatching
                 right = points.Max(point => point.X); bottom = points.Max(point => point.Y);
                 if (right <= left || bottom <= top) throw new InvalidOperationException("Polygon ROI must enclose a non-empty area.");
                 break;
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                if (strokes.Count is < 1 or > 10_000) throw new InvalidOperationException("Brush ROI needs 1..10000 strokes.");
+                var additions = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).ToArray();
+                if (additions.Length == 0) throw new InvalidOperationException("Brush ROI needs at least one add stroke.");
+                var brushPoints = new List<(VisionRoiPoint Point, double Radius)>();
+                var pointCount = 0;
+                foreach (var stroke in strokes)
+                {
+                    if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
+                        || stroke.Points is null || stroke.Points.Count == 0)
+                        throw new InvalidOperationException("Brush ROI strokes need a valid mode, positive width and points.");
+                    pointCount = checked(pointCount + stroke.Points.Count);
+                    if (pointCount > 500_000) throw new InvalidOperationException("Brush ROI exceeds the 500000-point limit.");
+                    if (stroke.Mode != VisionRoiStrokeMode.Add) continue;
+                    foreach (var point in stroke.Points)
+                    {
+                        if (!double.IsFinite(point.X) || !double.IsFinite(point.Y)) throw new InvalidOperationException("Brush ROI points must be finite.");
+                        brushPoints.Add((point, stroke.Width / 2));
+                    }
+                }
+                left = brushPoints.Min(item => item.Point.X - item.Radius);
+                top = brushPoints.Min(item => item.Point.Y - item.Radius);
+                right = brushPoints.Max(item => item.Point.X + item.Radius);
+                bottom = brushPoints.Max(item => item.Point.Y + item.Radius);
+                break;
+            }
             default:
                 throw new InvalidOperationException("Unsupported ROI type.");
         }
@@ -288,7 +317,7 @@ internal static class JLVisionMatching
             || right - left > int.MaxValue || bottom - top > int.MaxValue)
             throw new InvalidOperationException("ROI coordinates exceed the supported image-coordinate range.");
         var x = (int)Math.Floor(left); var y = (int)Math.Floor(top);
-        var inclusiveBoundary = roi.Type is VisionRoiType.Circle or VisionRoiType.Polygon;
+        var inclusiveBoundary = roi.Type is VisionRoiType.Circle or VisionRoiType.Polygon or VisionRoiType.Brush;
         var endX = (int)Math.Ceiling(right) + (inclusiveBoundary ? 1 : 0);
         var endY = (int)Math.Ceiling(bottom) + (inclusiveBoundary ? 1 : 0);
         return new Rect(x, y, Math.Max(0, endX - x), Math.Max(0, endY - y));
@@ -319,6 +348,9 @@ internal static class JLVisionMatching
                 Cv2.FillPoly(mask, [points], Scalar.All(255));
                 break;
             }
+            case VisionRoiType.Brush:
+                VisionRoiOpenCvExtensions.DrawBrushStrokes(mask, roi.Strokes, cropRect.X, cropRect.Y);
+                break;
         }
     }
 
@@ -344,7 +376,36 @@ internal static class JLVisionMatching
                 }
                 return inside;
             }
+            case VisionRoiType.Brush:
+            {
+                var selected = false;
+                foreach (var stroke in roi.Strokes ?? [])
+                {
+                    if (stroke.Points.Count == 0) continue;
+                    var radiusSquared = stroke.Width * stroke.Width / 4;
+                    var included = false;
+                    for (var index = 0; index < stroke.Points.Count; index++)
+                    {
+                        var a = stroke.Points[index];
+                        if (index == 0 && DistanceSquared(x, y, a.X, a.Y) <= radiusSquared) included = true;
+                        if (index == 0) continue;
+                        var b = stroke.Points[index - 1];
+                        var dx = a.X - b.X; var dy = a.Y - b.Y;
+                        var lengthSquared = dx * dx + dy * dy;
+                        var t = lengthSquared <= 1e-12 ? 0 : Math.Clamp(((x - b.X) * dx + (y - b.Y) * dy) / lengthSquared, 0, 1);
+                        if (DistanceSquared(x, y, b.X + t * dx, b.Y + t * dy) <= radiusSquared) included = true;
+                    }
+                    if (included) selected = stroke.Mode == VisionRoiStrokeMode.Add;
+                }
+                return selected;
+            }
             default: return false;
+        }
+
+        static double DistanceSquared(double x1, double y1, double x2, double y2)
+        {
+            var dx = x1 - x2; var dy = y1 - y2;
+            return dx * dx + dy * dy;
         }
     }
 
@@ -355,7 +416,16 @@ internal static class JLVisionMatching
         try
         {
         Mat trainingMat;
-        if (fromPort) trainingMat = context.RequireImage("template").Mat;
+        var capturedImage = node.GetString("trainingImageData", string.Empty);
+        if (!string.IsNullOrEmpty(capturedImage))
+        {
+            if (capturedImage.Length > 24 * 1024 * 1024)
+                throw new InvalidOperationException("Captured training image exceeds the 16 MB image limit.");
+            fileTemplate = Cv2.ImDecode(Convert.FromBase64String(capturedImage), ImreadModes.Unchanged);
+            if (fileTemplate.Empty()) throw new InvalidOperationException("Captured training image could not be decoded. Acquire the training image again.");
+            trainingMat = fileTemplate;
+        }
+        else if (fromPort) trainingMat = context.RequireImage("template").Mat;
         else
         {
             var path = node.GetString("templatePath", string.Empty).Trim();
@@ -367,10 +437,13 @@ internal static class JLVisionMatching
         if (trainingMat.Empty()) throw new InvalidOperationException("Training requires a non-empty template image.");
         if (node.GetBool("trainingPreviewOnly", false))
         {
-            var preview = fromPort ? context.RequireImage("template").CloneOwned() : VisionImage.Own(fileTemplate!.Clone());
+            Cv2.ImEncode(".png", trainingMat, out var capturedBytes);
+            if (capturedBytes.Length > 16 * 1024 * 1024)
+                throw new InvalidOperationException("Training image exceeds the 16 MB capture limit; crop the image before acquiring it.");
+            var preview = VisionImage.Own(trainingMat.Clone());
             return new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(preview), ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["count"] = VisionValue.Integer(0) },
-                new Dictionary<string, object?> { ["trainingPreviewReady"] = true, ["trainingSource"] = fromPort ? "template-input" : "template-path", ["trainingSourceWidth"] = trainingMat.Width, ["trainingSourceHeight"] = trainingMat.Height });
+                new Dictionary<string, object?> { ["trainingPreviewReady"] = true, ["trainingImageData"] = Convert.ToBase64String(capturedBytes), ["trainingSource"] = fromPort ? "template-input" : "template-path", ["trainingSourceWidth"] = trainingMat.Width, ["trainingSourceHeight"] = trainingMat.Height });
         }
         var roi = node.GetRoi();
         var cropRect = new Rect(0, 0, trainingMat.Width, trainingMat.Height);
@@ -446,7 +519,7 @@ internal static class JLVisionMatching
             }
         }
         var contourPoints = previewContours.FirstOrDefault() ?? [];
-        var previewImage = fromPort ? context.RequireImage("template").CloneOwned() : VisionImage.Own(fileTemplate!.Clone());
+        var previewImage = VisionImage.Own(trainingMat.Clone());
         var result = new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(previewImage), ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["count"] = VisionValue.Integer(0) },
             new Dictionary<string, object?>
@@ -493,13 +566,22 @@ internal static class JLVisionMatching
         && !node.GetBool("ignorePolarity", false)
         && node.GetInt("minContrast", 5) == 5;
 
-    private static string RoiFingerprint(VisionRoi? roi) => roi is null ? "none" : roi.Type switch
+    private static string RoiFingerprint(VisionRoi? roi)
     {
-        VisionRoiType.Rectangle => FormattableString.Invariant($"Rectangle:{roi.X:R},{roi.Y:R},{roi.Width:R},{roi.Height:R}"),
-        VisionRoiType.Circle => FormattableString.Invariant($"Circle:{roi.X:R},{roi.Y:R},{roi.Radius:R}"),
-        VisionRoiType.Polygon => "Polygon:" + string.Join(';', (roi.Points ?? []).Select(point => FormattableString.Invariant($"{point.X:R},{point.Y:R}"))),
-        _ => roi.Type.ToString()
-    };
+        if (roi is null) return "none";
+        return roi.Type switch
+        {
+            VisionRoiType.Rectangle => FormattableString.Invariant($"Rectangle:{roi.X:R},{roi.Y:R},{roi.Width:R},{roi.Height:R}"),
+            VisionRoiType.Circle => FormattableString.Invariant($"Circle:{roi.X:R},{roi.Y:R},{roi.Radius:R}"),
+            VisionRoiType.Polygon => "Polygon:" + string.Join(';', (roi.Points ?? []).Select(point => FormattableString.Invariant($"{point.X:R},{point.Y:R}"))),
+            VisionRoiType.Brush => "Brush:" + string.Join(';', (roi.Strokes ?? []).Select(FormatBrushStroke)),
+            _ => roi.Type.ToString()
+        };
+
+        static string FormatBrushStroke(VisionRoiBrushStroke stroke) =>
+            FormattableString.Invariant($"{stroke.Mode}:{stroke.Width:R}:")
+            + string.Join(',', stroke.Points.Select(point => FormattableString.Invariant($"{point.X:R},{point.Y:R}")));
+    }
 
     private static string Key(Mat template, bool shape, double range, double step, double x, double y, int levels = 0,
         double scaleMin = 1, double scaleMax = 1, double scaleStep = 0, bool ignorePolarity = false, int minContrast = 5)

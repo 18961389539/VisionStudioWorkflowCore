@@ -38,6 +38,32 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Theory]
+    [InlineData("""{"roi":{"type":"Circle","x":20,"y":20,"radius":8}}""")]
+    [InlineData("""{"roi":{"type":"Polygon","points":[{"x":5,"y":4},{"x":30,"y":8},{"x":14,"y":32}]}}""")]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":8,"points":[{"x":8,"y":10},{"x":28,"y":26}]},{"mode":"Erase","width":4,"points":[{"x":18,"y":18}]}]}}""")]
+    public async Task CropNonRectangularRoi_PreservesTightBoundsAndBinaryMask(string json)
+    {
+        using var source = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(90));
+        using var raster = Node("image.crop", json).GetRoi()!.BuildMask(source.Size());
+        using var binary = new Mat();
+        Cv2.Threshold(raster, binary, 0, 255, ThresholdTypes.Binary);
+        var bounds = Cv2.BoundingRect(binary);
+        using var expectedMask = new Mat(binary, bounds);
+        using var expectedSource = new Mat(source, bounds);
+        using var expected = new Mat(bounds.Size, source.Type(), Scalar.All(0));
+        expectedSource.CopyTo(expected, expectedMask);
+
+        var result = await RunImage(new ImageCropNode(), Image(source), json);
+        using var actual = ImageFrom(result);
+        using var actualMask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["x"]));
+        Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["y"]));
+        Assert.Equal(Cv2.CountNonZero(expectedMask), Convert.ToInt32(result.Summary["selectedPixels"]));
+        Assert.Equal(0d, Cv2.Norm(expected, actual.Mat, NormTypes.INF));
+        Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
+    }
+
     [Fact]
     public async Task PointToLineAndCircleSpacing_ComputeSignedGeometry()
     {

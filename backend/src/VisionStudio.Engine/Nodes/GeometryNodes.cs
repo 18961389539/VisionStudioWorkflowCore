@@ -180,8 +180,9 @@ public sealed class CaliperNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         var sourceImage = context.RequireImage("image");
-        var start = new VisionPoint2D(node.GetDouble("startX", 120), node.GetDouble("startY", 240));
-        var end = new VisionPoint2D(node.GetDouble("endX", 520), node.GetDouble("endY", 240));
+        var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
+        var start = search.Start;
+        var end = search.End;
         var width = Math.Max(1, node.GetInt("sampleWidth", 5));
         var threshold = Math.Max(0, node.GetDouble("edgeThreshold", 12));
         var polarity = node.GetString("polarity", "Any");

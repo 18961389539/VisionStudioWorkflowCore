@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using JLVisionLib;
+using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
@@ -116,12 +118,12 @@ public sealed class RegionFromRoiNode : IVisionNodeExecutor
             throw new InvalidOperationException("ROI canvas must be 1..16384 per axis and at most 64000000 pixels.");
         var roi = context.TryGetValue("roi", out var input) ? input.Require<VisionRoi>("roi") : node.GetRoi();
         if (roi is null) throw new InvalidOperationException("Connect a ROI or configure a valid roi parameter.");
-        using var native = Rasterize(roi);
+        using var native = Rasterize(roi, width, height);
         using var bounds = new JlRegion(0d, 0d, (double)height - 1, (double)width - 1);
         using var clipped = native.Intersection(bounds);
         return ValueTask.FromResult(RegionShapeProcessing.Result(clipped, width, height, cancellationToken));
     }
-    private static JlRegion Rasterize(VisionRoi roi)
+    private static JlRegion Rasterize(VisionRoi roi, int canvasWidth, int canvasHeight)
     {
         static void Check(params double[] values)
         {
@@ -151,6 +153,38 @@ public sealed class RegionFromRoiNode : IVisionNodeExecutor
                     using (var rows = new JlTuple(points.Select(p => p.Y).ToArray()))
                     using (var cols = new JlTuple(points.Select(p => p.X).ToArray())) result.GenRegionPolygonFilled(rows, cols);
                     break;
+                case VisionRoiType.Brush:
+                {
+                    using var mask = roi.BuildMask(new Size(canvasWidth, canvasHeight));
+                    var pixels = new byte[checked(canvasWidth * canvasHeight)];
+                    Marshal.Copy(mask.Data, pixels, 0, pixels.Length);
+                    var rows = new List<int>();
+                    var starts = new List<int>();
+                    var ends = new List<int>();
+                    for (var row = 0; row < canvasHeight; row++)
+                    {
+                        var column = 0;
+                        while (column < canvasWidth)
+                        {
+                            while (column < canvasWidth && pixels[row * canvasWidth + column] == 0) column++;
+                            if (column >= canvasWidth) break;
+                            var start = column;
+                            while (column < canvasWidth && pixels[row * canvasWidth + column] > 0) column++;
+                            rows.Add(row); starts.Add(start); ends.Add(column - 1);
+                            if (rows.Count > VisionRegion.MaxRuns)
+                                throw new InvalidOperationException("Brush ROI exceeds the 1000000-run limit.");
+                        }
+                    }
+                    if (rows.Count == 0) result.GenEmptyRegion();
+                    else
+                    {
+                        using var nativeRows = new JlTuple(rows.ToArray());
+                        using var nativeStarts = new JlTuple(starts.ToArray());
+                        using var nativeEnds = new JlTuple(ends.ToArray());
+                        result.GenRegionRuns(nativeRows, nativeStarts, nativeEnds);
+                    }
+                    break;
+                }
                 default: throw new InvalidOperationException("Unsupported ROI shape.");
             }
             return result;

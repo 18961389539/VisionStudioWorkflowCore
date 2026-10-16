@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { Alert, Button, Collapse, Modal, Select, Segmented, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, Collapse, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
 import type { NodeCatalogItem, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi } from '../types';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import PropertyPanel from './PropertyPanel';
@@ -9,6 +9,7 @@ import NodeExecutionResult from './NodeExecutionResult';
 import SplitHandle from './SplitHandle';
 import { useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
+import { capturedReference } from '../roiReference';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
@@ -57,9 +58,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
   const [shapeWorkspaceTab, setShapeWorkspaceTab] = useState<'training' | 'search'>(() => {
     const parameters = (node.data.parameters ?? {}) as NodeParameters;
-    return typeof parameters.trainedModelData === 'string' && parameters.trainedModelData ? 'search' : 'training';
+    return parameters.modelMode === 'legacy' || typeof parameters.trainedModelData === 'string' && parameters.trainedModelData ? 'search' : 'training';
   });
-  const [shapeImageKind, setShapeImageKind] = useState<'training' | 'search'>();
+  const existingSearchReport = result?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
+  const hasExistingSearch = Boolean(existingSearchReport && !existingSearchReport.summary.trainingMode
+    && !existingSearchReport.summary.trainingSucceeded && !existingSearchReport.summary.trainingPreviewReady && !existingSearchReport.summary.searchPreviewReady);
+  const [shapeImageKind, setShapeImageKind] = useState<'training' | 'search' | undefined>(hasExistingSearch ? 'search' : undefined);
   const [maximized, setMaximized] = useState(false);
   const [imageShare, setImageShare] = useState(67);
   const [workspaceWidth, setWorkspaceWidth] = useState(1000);
@@ -97,8 +101,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const [trainingView, setTrainingView] = useState(false);
   const [regionEditMode, setRegionEditMode] = useState<'model' | 'search'>('model');
   const [showSavedTrainingImage, setShowSavedTrainingImage] = useState(false);
+  const [trainingImage, setTrainingImage] = useState<{ data: string; width: number; height: number; sourceKey: string; trained: boolean; receivedAt: string }>();
+  const [roiImageView, setRoiImageView] = useState<'reference' | 'input' | 'output'>('reference');
   const [previewError, setPreviewError] = useState<string>();
   const [preview, setPreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string; preserveTrainingWorkspace?: boolean }>();
+  const [searchPreview, setSearchPreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string }>();
+  const [searchWorkspacePreview, setSearchWorkspacePreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string; preserveTrainingWorkspace?: boolean }>();
   const [focusTick, setFocusTick] = useState(0);
   const draftFingerprint = parameterFingerprint(draft);
   const dirty = draftFingerprint !== parameterFingerprint(baseline);
@@ -111,6 +119,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const issues = configurationIssues(catalogItem, draft);
   const isShapeMatch = catalogItem.type === 'match.shape';
   const isImageCrop = catalogItem.type === 'image.crop';
+  const isRoiTransform = catalogItem.type === 'roi.transform';
   const trainedModelData = typeof draft.trainedModelData === 'string' ? draft.trainedModelData : '';
   const legacyWorkflow = isShapeMatch && draft.modelMode === 'legacy';
   const trainedSettings = draft.trainedModelSettings && typeof draft.trainedModelSettings === 'object'
@@ -132,6 +141,24 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const shapeSearchBlocked = isShapeMatch && (!trainedModelData && !legacyWorkflow || trainingStale);
   const trainingBusy = trainBusy;
   const templateSourceNodeId = edges.find((edge) => edge.target === node.id && (edge.targetHandle === 'template' || edge.targetHandle?.endsWith('template')))?.source;
+  const trainingSourceKey = templateSourceNodeId ?? String(draft.templatePath ?? '');
+  const capturedTrainingImage = trainingImage?.sourceKey === trainingSourceKey ? trainingImage : undefined;
+  const changedTrainingLabels = trainingSettingsWithDefaults ? Object.keys(currentTrainingSettings)
+    .filter(key => parameterFingerprint(trainingSettingsWithDefaults[key as keyof typeof trainingSettingsWithDefaults]) !== parameterFingerprint(currentTrainingSettings[key as keyof typeof currentTrainingSettings]))
+    .map(key => catalogItem.parameters.find(parameter => parameter.name === key)?.label ?? (key === 'roi' ? '模型区域' : key)).join('、') : '';
+  const roiInputConnected = isRoiTransform && edges.some((edge) => edge.target === node.id && edge.targetHandle === 'roi');
+  const debugImageConnected = isRoiTransform && edges.some((edge) => edge.target === node.id && edge.targetHandle === 'debugImage');
+  const poseEdge = edges.find(edge => edge.target === node.id && edge.targetHandle === 'currentPose');
+  const poseSource = nodes.find(item => item.id === poseEdge?.source);
+  const poseSourceParameters = (poseSource?.data.parameters ?? {}) as NodeParameters;
+  const referenceBindings = parameterFingerprint({
+    inputs: edges.filter(edge => edge.target === node.id && ['currentPose', 'debugImage'].includes(edge.targetHandle ?? ''))
+      .map(edge => ({ port: edge.targetHandle, source: edge.source, sourcePort: edge.sourceHandle })).sort((a, b) => String(a.port).localeCompare(String(b.port))),
+    modelOrigin: ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
+      .map(key => poseSourceParameters[key] ?? null)
+  });
+  const referenceImage = isRoiTransform && typeof draft.referenceImage === 'string' ? draft.referenceImage : '';
+  const referenceMismatch = Boolean(referenceImage && draft.referenceBindings !== referenceBindings);
   const displayedResult = preview?.result ?? result;
   const resultFailed = Boolean(displayedResult && (!displayedResult.success || displayedResult.nodeReports?.filter((report) => report.nodeId === node.id).slice(-1).some((report) => !report.success)));
   const [resultExpanded, setResultExpanded] = useState(() => initialTab === 'result' || resultFailed);
@@ -148,10 +175,19 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   }, [preview]);
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
+  const matchReport = (searchPreview?.result ?? result)?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
+  const matchStale = Boolean(previewError) || (searchPreview ? searchPreview.fingerprint !== draftFingerprint : resultStale || dirty);
+  const matchNumber = (port: string, summaryKey = port, digits = 2) => {
+    const value = matchReport?.outputs?.[port]?.value ?? matchReport?.summary[summaryKey];
+    return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—';
+  };
   const nodeLabels = Object.fromEntries(nodes.map((item) => [item.id, String(item.data.label ?? item.id)]));
   const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
     imageCatalogLoading, imageCatalogError, retryImageCatalog } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
+  useEffect(() => {
+    if (open && isRoiTransform && roiImageView !== 'reference') setImageSource(roiImageView);
+  }, [isRoiTransform, open, roiImageView, imageSource, setImageSource]);
   useEffect(() => {
     if (!open || !isImageCrop) return;
     setPreviewNodeId(node.id);
@@ -160,29 +196,36 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const trainingContours = Array.isArray(draft.trainedContours) ? draft.trainedContours as { x: number; y: number }[][]
     : Array.isArray(draft.trainedContour) ? [draft.trainedContour as { x: number; y: number }[]] : [];
   const trainedPreviewData = typeof draft.trainedPreviewImage === 'string' ? draft.trainedPreviewImage : '';
-  const showTrainedTemplatePreview = Boolean(showSavedTrainingImage && trainingView && isShapeMatch && trainedPreviewData && imageSource === 'output' &&
-    (previewNodeId === templateSourceNodeId || (!templateSourceNodeId && previewNodeId === node.id)));
-  const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && showTrainedTemplatePreview);
-  const displayImageSource = showTrainedTemplatePreview ? { ...imageViewerSource,
+  const showTrainedTemplatePreview = Boolean(showSavedTrainingImage && trainingView && isShapeMatch && trainedPreviewData);
+  const showCapturedTrainingImage = isShapeMatch && shapeWorkspaceTab === 'training' && !showSavedTrainingImage && capturedTrainingImage;
+  const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && (showTrainedTemplatePreview || Boolean(showCapturedTrainingImage)));
+  const displayImageSource = isRoiTransform && roiImageView === 'reference'
+    ? { url: referenceImage ? `data:image/png;base64,${referenceImage}` : '', width: Number(draft.referenceWidth ?? 0),
+      height: Number(draft.referenceHeight ?? 0), label: referenceImage ? '已保存基准图像' : '尚未建立基准' }
+    : showCapturedTrainingImage ? { url: `data:image/png;base64,${capturedTrainingImage.data}`, width: capturedTrainingImage.width,
+      height: capturedTrainingImage.height, label: '已锁定训练图像 · 训练使用当前显示的图像' }
+    : showTrainedTemplatePreview ? { ...imageViewerSource,
     url: `data:image/jpeg;base64,${trainedPreviewData}`, width: Number(draft.trainedSourceWidth ?? imageViewerSource.width),
     height: Number(draft.trainedSourceHeight ?? imageViewerSource.height), label: '已保存训练图像' }
     : isShapeMatch && !shapeImageMatchesTab ? { ...imageViewerSource, url: '', label: shapeWorkspaceTab === 'training' ? '训练图像' : '搜索场景图像' }
       : imageViewerSource;
-  const overlaysWithTrainedContour: VisionOverlay[] = showSavedTrainingImage && trainingView && isShapeMatch && trainedModelData &&
-    (previewNodeId === templateSourceNodeId || (!templateSourceNodeId && previewNodeId === node.id))
-    ? [...viewerOverlays, ...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polygon' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
+  const overlaysWithTrainedContour: VisionOverlay[] = trainingView && isShapeMatch && trainedModelData &&
+    (showTrainedTemplatePreview || capturedTrainingImage?.trained)
+    ? [...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polygon' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
       { id: 'saved-shape-training-origin', type: 'Point', x: Number(draft.trainedOriginImageX ?? 0), y: Number(draft.trainedOriginImageY ?? 0), label: '训练原点', stroke: '#fa541c', strokeWidth: 3 }]
-    : viewerOverlays;
+    : (isRoiTransform && roiImageView === 'reference') || showCapturedTrainingImage ? [] : viewerOverlays;
   const imagePorts = [...catalogItem.inputs, ...catalogItem.outputs].some((p) => p.dataType === 'Image' || p.dataType === 'DomainImage');
   const showImage = imagePorts || initialTab === 'image';
   const supportsRoi = catalogItem.capabilities?.supportsRoi === true;
-  const canEditRoi = supportsRoi && (isShapeMatch
-    ? regionEditMode === 'model'
-      ? shapeWorkspaceTab === 'training' && shapeImageMatchesTab && imageSource === 'output' && (previewNodeId === templateSourceNodeId || previewNodeId === node.id)
-      : shapeWorkspaceTab === 'search' && shapeImageMatchesTab && imageSource === 'output' && previewNodeId === node.id && Boolean(displayImageSource.url)
-    : isImageCrop
-      ? previewNodeId === node.id && imageSource === 'input' && selectedInputAvailable
-      : previewNodeId === node.id && imageSource !== 'preview');
+  const canEditRoi = supportsRoi && (isRoiTransform
+    ? !roiInputConnected && !referenceMismatch && roiImageView === 'reference' && Boolean(referenceImage)
+    : isShapeMatch
+      ? regionEditMode === 'model'
+        ? shapeWorkspaceTab === 'training' && shapeImageMatchesTab && (Boolean(showCapturedTrainingImage) || showTrainedTemplatePreview || imageSource === 'output' && (previewNodeId === templateSourceNodeId || previewNodeId === node.id))
+        : shapeWorkspaceTab === 'search' && shapeImageMatchesTab && imageSource === 'output' && previewNodeId === node.id && Boolean(displayImageSource.url)
+      : isImageCrop
+        ? previewNodeId === node.id && imageSource === 'input' && selectedInputAvailable
+        : previewNodeId === node.id && imageSource !== 'preview');
   const draftNode: Node = { ...node, data: { ...node.data, parameters: draft } };
   const changeParameter = (key: string, value: unknown) => {
     if (!locked) setDraft((current) => withParameter(current, key, value));
@@ -197,21 +240,46 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     });
   };
   const runPreview = async () => {
-    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked) return;
+    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch) return;
     if (isShapeMatch) { setShapeWorkspaceTab('search'); setShapeImageKind(undefined); setRegionEditMode('search'); }
     setTrainingView(false);
     setShowSavedTrainingImage(false);
     const submitted = cloneParameters(draft);
+    if (isRoiTransform && debugImageConnected && !roiInputConnected && !draft.roi)
+      submitted.debugImagePreviewOnly = true;
+    else if (isRoiTransform)
+      delete submitted.debugImagePreviewOnly;
     setPreviewBusy(true);
     setPreviewError(undefined);
     try {
       const next = await onPreview(submitted);
-      setPreview({ result: next, fingerprint: parameterFingerprint(submitted), receivedAt: new Date().toISOString() });
+      const completedPreview = { result: next, fingerprint: parameterFingerprint(submitted), receivedAt: new Date().toISOString() };
+      setPreview(completedPreview);
+      if (isShapeMatch) { setSearchPreview(completedPreview); setSearchWorkspacePreview(completedPreview); setPreviewNodeId(node.id); setImageSource('output'); }
+      if (isRoiTransform) { setRoiImageView('output'); setImageSource('output'); }
       if (isShapeMatch) setShapeImageKind('search');
       if (isImageCrop) { setPreviewNodeId(node.id); setImageSource('input'); }
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : '节点测试失败。');
       setResultExpanded(true);
+    } finally { setPreviewBusy(false); }
+  };
+  const captureRoiReference = async () => {
+    if (locked || externalChange || previewBlockedReason || !debugImageConnected) return;
+    setPreviewBusy(true); setPreviewError(undefined);
+    try {
+      const next = await onPreview({ ...cloneParameters(draft), captureReference: true });
+      const report = next.nodeReports.filter(item => item.nodeId === node.id).slice(-1)[0];
+      if (!next.success || !report?.success)
+        throw new Error(report?.error || next.error || '无法建立基准，请确认定位已找到目标。');
+      const receivedAt = new Date().toISOString();
+      const completed = capturedReference(draft, report.summary, referenceBindings, receivedAt);
+      setDraft(completed); setRoiImageView('reference'); setPreviewNodeId(node.id); setResultExpanded(false);
+      const safeResult = { ...next, nodeReports: next.nodeReports.map(item => ({ ...item,
+        summary: Object.fromEntries(Object.entries(item.summary).filter(([key]) => key !== 'referenceImage')) })) };
+      setPreview({ result: safeResult, fingerprint: parameterFingerprint(completed), receivedAt, preserveTrainingWorkspace: true });
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : '基准建立失败。'); setResultExpanded(true);
     } finally { setPreviewBusy(false); }
   };
   const fetchTrainingImage = async () => {
@@ -224,7 +292,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const report = next.nodeReports.filter((item) => item.nodeId === node.id).slice(-1)[0];
       if (!next.success || !report?.success || report.summary.trainingPreviewReady !== true)
         throw new Error(report?.error || next.error || '无法获取训练图像，请连接 template 输入或填写模板路径。');
-      setPreview({ result: next, fingerprint: draftFingerprint, receivedAt: new Date().toISOString(), preserveTrainingWorkspace: true });
+      if (typeof report.summary.trainingImageData === 'string') setTrainingImage({ data: report.summary.trainingImageData,
+        width: Number(report.summary.trainingSourceWidth), height: Number(report.summary.trainingSourceHeight), sourceKey: trainingSourceKey, trained: false, receivedAt: new Date().toISOString() });
+      const safeResult = { ...next, nodeReports: next.nodeReports.map(item => ({ ...item,
+        summary: Object.fromEntries(Object.entries(item.summary).filter(([key]) => key !== 'trainingImageData')) })) };
+      setPreview({ result: safeResult, fingerprint: draftFingerprint, receivedAt: new Date().toISOString(), preserveTrainingWorkspace: true });
       setShapeImageKind('training');
       setPreviewNodeId(node.id); setImageSource('output');
     } catch (error) {
@@ -241,7 +313,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const report = next.nodeReports.filter((item) => item.nodeId === node.id).slice(-1)[0];
       if (!next.success || !report?.success || report.summary.searchPreviewReady !== true)
         throw new Error(report?.error || next.error || '无法获取场景图像，请确认形状匹配节点已连接 image 输入。');
-      setPreview({ result: next, fingerprint: draftFingerprint, receivedAt: new Date().toISOString(), preserveTrainingWorkspace: true });
+      const scenePreview = { result: next, fingerprint: draftFingerprint, receivedAt: new Date().toISOString(), preserveTrainingWorkspace: true };
+      setPreview(scenePreview); setSearchWorkspacePreview(scenePreview);
       setShapeImageKind('search');
       setPreviewNodeId(node.id); setImageSource('output');
     } catch (error) {
@@ -250,7 +323,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   };
   const trainShapeModel = async () => {
     if (locked || issues.length || externalChange || previewBlockedReason) return;
-    const submitted = cloneParameters({ ...draft, modelMode: 'trained', trainingMode: true });
+    const submitted = cloneParameters({ ...draft, modelMode: 'trained', trainingMode: true,
+      trainingImageData: showTrainedTemplatePreview ? trainedPreviewData : capturedTrainingImage?.data });
     setShapeWorkspaceTab('training'); setShapeImageKind(undefined); setTrainingView(true);
     setShowSavedTrainingImage(false);
     setPreviewBusy(true); setTrainBusy(true); setPreviewError(undefined);
@@ -281,6 +355,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         trainedOriginX: Number(summary.trainingOriginX ?? 0), trainedOriginY: Number(summary.trainingOriginY ?? 0),
         trainedOriginImageX: Number(summary.trainingOriginImageX ?? 0), trainedOriginImageY: Number(summary.trainingOriginImageY ?? 0) };
       setDraft(completed);
+      if (capturedTrainingImage && !showTrainedTemplatePreview) setTrainingImage({ ...capturedTrainingImage, trained: true });
       setShapeImageKind('training');
       const safeResult = { ...next, nodeReports: next.nodeReports.map((item) => {
         if (item.nodeId !== node.id || !item.summary.trainingSucceeded) return item;
@@ -293,7 +368,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     } finally { setPreviewBusy(false); setTrainBusy(false); }
   };
   const apply = () => {
-    if (locked || issues.length || externalChange || !dirty) return;
+    if (locked || issues.length || externalChange || referenceMismatch || !dirty || isShapeMatch && !legacyWorkflow && trainingStale) return;
     if (onApply(cloneParameters(draft)) !== false) onClose();
   };
 
@@ -312,7 +387,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   // P1（评审）：弹窗打开时主程序会吞掉 Ctrl+S（preventDefault 后无动作，属“按键黑洞”）。
   // 这里把它变成“应用”，并补 Ctrl+Enter“运行此节点”；用 ref 读取最新闭包，避免每次渲染重注册监听。
   const applyRef = useRef(apply); applyRef.current = apply;
-  const runPreviewRef = useRef(runPreview); runPreviewRef.current = runPreview;
+  const runPreviewRef = useRef(runPreview); runPreviewRef.current = isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel : runPreview;
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -341,6 +416,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     }
     setActiveTab('workspace');
     setPreviewNodeId(node.id);
+    if (isRoiTransform) { setRoiImageView('reference'); setFocusTick(value => value + 1); return; }
     if (isImageCrop) {
       setImageSource('input');
       setFocusTick((value) => value + 1);
@@ -353,14 +429,27 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     setShapeWorkspaceTab('training'); setShapeImageKind('training'); setRegionEditMode('model');
     setTrainingView(true); setShowSavedTrainingImage(true); setPreviewNodeId(templateSourceNodeId ?? node.id); setImageSource('output'); setFocusTick((value) => value + 1);
   };
+  const roiTransformEditHint = roiInputConnected
+    ? 'roi 输入端口已连接，上游 ROI 优先于本节点参数。请在上游 ROI 节点编辑区域。'
+    : referenceMismatch ? '图像或定位来源、模型原点已变化，请重新设为基准后再编辑、运行或应用。'
+      : !referenceImage ? '先获取图像并设为基准，系统会同时保存该次图像与实际位姿，再在基准图上绘制 ROI。旧流程的手动基准参数继续兼容。'
+        : roiImageView === 'reference' ? '在已保存基准图上编辑 ROI。重新设为基准会同步迁移已有区域；当前图与修正结果只读。'
+          : '当前图像只读。切回已保存基准图像编辑区域，避免对当前图上的选区重复施加位移。';
   const changeShapeWorkspaceTab = (key: string) => {
     if (locked) return;
     const next = key === 'search' ? 'search' : 'training';
     setShapeWorkspaceTab(next);
     setShapeImageKind(undefined);
-    setShowSavedTrainingImage(false);
-    if (next === 'training') void fetchTrainingImage();
-    else void fetchSearchImage();
+    if (next === 'training') {
+      setTrainingView(true); setRegionEditMode('model');
+      if (capturedTrainingImage) { setShowSavedTrainingImage(false); setShapeImageKind('training'); }
+      else if (trainedPreviewData) locateSavedTrainingImage();
+      else void fetchTrainingImage();
+    } else {
+      setTrainingView(false); setRegionEditMode('search'); setShowSavedTrainingImage(false);
+      if (searchWorkspacePreview || hasExistingSearch) { setPreview(searchWorkspacePreview); setShapeImageKind('search'); setPreviewNodeId(node.id); setImageSource('output'); }
+      else void fetchSearchImage();
+    }
   };
   const details = <div className="node-info">
     <p className="node-info-description">{catalogItem.description || '暂无节点说明。'}</p>
@@ -399,25 +488,33 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       parameters: catalogItem.parameters.filter((parameter) => {
         const group = parameter.group ?? 'General';
         const searchRange = parameter.name === 'angleRangeDeg' || parameter.name === 'scaleTolerancePercent';
+        if (parameter.name === 'templatePath' && templateSourceNodeId) return false;
+        if (parameter.name === 'threshold' && draft.binarize !== 'fixed') return false;
+        if (['trainingOriginX', 'trainingOriginY'].includes(parameter.name) && draft.trainingOriginMode !== 'manual') return false;
+        if (parameter.name === 'scaleStepPercent' && Number(draft.scaleTolerancePercent ?? 0) === 0) return false;
+        if (parameter.name === 'minArea') return !trainingMode;
         return trainingMode
-          ? ['Training', 'Binarize', 'Candidates', 'General'].includes(group) && !searchRange
-          : ['Matching', 'Multi-target', 'Search'].includes(group) || searchRange;
+          ? ['Training', 'Binarize', 'General'].includes(group)
+          : ['Matching', 'Multi-target', 'Search'].includes(group) || legacyWorkflow && searchRange;
       }).map((parameter) => ({
         ...parameter,
         group: ({
           Training: '模型训练', Binarize: '图像预处理', Candidates: '特征筛选', General: '训练图像来源',
           Matching: '匹配条件', 'Multi-target': '多目标定位', Search: '搜索范围'
         } as Record<string, string>)[parameter.name === 'angleRangeDeg' || parameter.name === 'scaleTolerancePercent'
-          ? 'Search' : parameter.group ?? 'General'] ?? parameter.group
+          ? 'Training' : parameter.group ?? 'General'] ?? parameter.group
       }))
-    } : catalogItem;
+    } : isRoiTransform ? { ...catalogItem, parameters: catalogItem.parameters.filter(parameter =>
+      !(referenceImage && ['baseX', 'baseY', 'baseThetaDeg'].includes(parameter.name))
+      && !(poseEdge && ['currentX', 'currentY', 'currentThetaDeg'].includes(parameter.name))) } : catalogItem;
     const roiFields = shapeMode ? [trainingMode
       ? { key: 'roi', label: '模型区域', emptyText: '未设置 · 使用整幅训练图像', showEmpty: true }
       : { key: 'searchRoi', label: '搜索区域', emptyText: '未设置 · 使用整幅场景图像', showEmpty: true }
-    ] : isImageCrop ? [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }] : undefined;
+    ] : isImageCrop ? [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
+      : isRoiTransform ? [{ key: 'roi', label: '基准 ROI', emptyText: '设定基准后在基准图上绘制', showEmpty: true }] : undefined;
     return <div ref={bindWorkspace} tabIndex={-1} className={'node-configuration-workspace' + (showImage ? '' : ' without-image')}
       style={{ '--node-columns': columns(imageShare) } as CSSProperties}>
-      {showImage && <section className="node-configuration-image" aria-label={shapeMode === 'training' ? '模型训练图像' : shapeMode === 'search' ? '搜索推理图像' : '图像预览'}>
+      {showImage && <section className={'node-configuration-image' + (isRoiTransform ? ' has-roi-reference' : '')} aria-label={shapeMode === 'training' ? '模型训练图像' : shapeMode === 'search' ? '搜索推理图像' : '图像预览'}>
         <div className="node-configuration-image-source">
           {shapeMode ? <>
             <span>{trainingMode ? '训练图像' : '搜索场景图像'}</span>
@@ -428,11 +525,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
               {trainingMode ? '获取训练图像' : '获取场景图像'}
             </Button>
             {trainingMode && trainedModelData && trainedPreviewData &&
-              <Button size="small" onClick={locateSavedTrainingImage}>查看已保存训练图像</Button>}
+              <Button size="small" disabled={locked} onClick={locateSavedTrainingImage}>查看已保存训练图像</Button>}
           </> : isImageCrop ? <>
             <span>裁剪输入图像</span>
             <Segmented size="small" value={imageSource === 'output' ? 'output' : 'input'} onChange={(value) => setImageSource(value as 'input' | 'output')}
               options={[{ label: '输入图像', value: 'input', disabled: !selectedInputAvailable }, { label: '裁剪输出', value: 'output', disabled: !selectedOutputAvailable }]} />
+          </> : isRoiTransform ? <>
+            <Button size="small" type={referenceImage ? 'default' : 'primary'} loading={previewBusy}
+              aria-label={referenceImage ? '重新设为基准' : '获取图像并设为基准'}
+              disabled={locked || externalChange || Boolean(previewBlockedReason) || !debugImageConnected}
+              title={!debugImageConnected ? '请先将场景图像连接到调试图像端口' : previewBlockedReason || '同时保存本次图像与实际定位位姿，并迁移已有 ROI'}
+              onClick={() => void captureRoiReference()}>{referenceImage ? '重新设为基准' : '获取图像并设为基准'}</Button>
+            <Segmented size="small" value={roiImageView} onChange={value => setRoiImageView(value as typeof roiImageView)}
+              options={[{ label: '已保存基准', value: 'reference', disabled: !referenceImage },
+                { label: '当前输入', value: 'input', disabled: !selectedInputAvailable },
+                { label: '修正结果', value: 'output', disabled: !selectedOutputAvailable }]} />
           </> : <>
             <span>预览节点</span><Select size="small" aria-label="预览节点" showSearch optionFilterProp="label" value={previewNodeId}
               style={{ minWidth: 130, flex: '1 1 130px' }} options={nodes.map((item) => ({ value: item.id, label: nodeLabels[item.id] }))}
@@ -444,18 +551,29 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         <div className="node-image-provenance"><span>{displayImageSource.label}</span>
           {imageCatalogLoading && <span>正在加载节点图像…</span>}
           {imageCatalogError && <span role="alert" title={imageCatalogError}>节点图像加载失败 <Button size="small" onClick={retryImageCatalog}>重试加载</Button></span>}
-          {receivedAt && <span>更新于 {new Date(receivedAt).toLocaleString()}</span>}
-          {stale && displayedResult && <Tag color="gold">上次运行图像 · 当前参数待验证</Tag>}
+          {isRoiTransform && roiImageView === 'reference' && draft.referenceCapturedAt
+            ? <span>基准采集于 {new Date(String(draft.referenceCapturedAt)).toLocaleString()}</span>
+            : showCapturedTrainingImage ? <span>采集于 {new Date(capturedTrainingImage.receivedAt).toLocaleString()}</span>
+              : !showTrainedTemplatePreview && receivedAt && <span>更新于 {new Date(receivedAt).toLocaleString()}</span>}
+          {stale && displayedResult && !(isRoiTransform && roiImageView === 'reference') && <Tag color="gold">上次运行图像 · 当前参数待验证</Tag>}
         </div>
+        {isRoiTransform && <Alert showIcon type={roiInputConnected || referenceMismatch || !referenceImage ? 'warning' : canEditRoi ? 'success' : 'info'}
+          title={roiInputConnected ? '当前 ROI 来自上游节点' : canEditRoi ? '正在编辑基准 ROI' : '基准 ROI 编辑说明'}
+          description={<Space wrap>
+            <span>{roiTransformEditHint}</span>
+            {!debugImageConnected && <span>获取基准前，请将场景图像连接到“调试图像”端口。</span>}
+            {referenceImage && roiImageView !== 'reference' && <Button size="small" disabled={locked}
+              onClick={() => setRoiImageView('reference')}>切换到已保存基准</Button>}
+          </Space>} />}
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
-          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi}
-          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : shapeMode === 'search' ? '搜索区域' : shapeMode === 'training' ? '模型区域' : String(node.data.label ?? node.id)}
+          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
+          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : shapeMode === 'training' ? '模型区域' : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
-          emptyHint={isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
+          emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
           emptyAction={{
-            label: isImageCrop ? '运行以获取输入图像' : shapeMode === 'training' ? '获取训练图像' : shapeMode === 'search' ? '获取场景图像' : '运行此节点',
-            onClick: () => void (shapeMode === 'training' ? fetchTrainingImage() : shapeMode === 'search' ? fetchSearchImage() : runPreview()),
-            disabled: locked || (!shapeMode && issues.length > 0) || externalChange || Boolean(previewBlockedReason),
+            label: isRoiTransform ? '获取图像并设为基准' : isImageCrop ? '运行以获取输入图像' : shapeMode === 'training' ? '获取训练图像' : shapeMode === 'search' ? '获取场景图像' : '运行此节点',
+            onClick: () => void (isRoiTransform ? captureRoiReference() : shapeMode === 'training' ? fetchTrainingImage() : shapeMode === 'search' ? fetchSearchImage() : runPreview()),
+            disabled: locked || (!shapeMode && !isRoiTransform && issues.length > 0) || externalChange || Boolean(previewBlockedReason) || (isRoiTransform && !debugImageConnected),
             title: previewBlockedReason || (shapeMode ? '读取当前步骤的图像' : '使用暂存参数测试此节点（Ctrl+Enter）')
           }} /></div>
       </section>}
@@ -469,40 +587,51 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             <Button size="small" type="link" disabled={!dirty || locked} onClick={() => setDraft(cloneParameters(baseline))}>还原为打开时</Button>
           </span>
         </div>
+        {isRoiTransform && <div className="shape-training-panel">
+          <strong>{referenceImage ? '已保存基准位姿' : '建立基准'}</strong>
+          {referenceImage && <p>X {Number(draft.baseX).toFixed(2)} px · Y {Number(draft.baseY).toFixed(2)} px · 角度 {Number(draft.baseThetaDeg).toFixed(2)}°</p>}
+          <p>{poseEdge ? `当前位姿来自 ${String(poseSource?.data.label ?? poseEdge.source)}；以每次运行的实际定位结果为准。` : '当前位姿使用下方手动参数。'}</p>
+          <p>下游测量：将“变换”输出连接到测量节点的 transform，搜索线、方向和采样布局即可跟随。ROI 输出已经是当前图像坐标，不要重复变换。</p>
+        </div>}
         {shapeMode === 'training' && <div className="shape-training-panel">
           <strong>建立形状模型</strong>
-          <p>选择训练图像和模型区域，设置特征提取、角度/缩放采样步长及训练原点，然后显式训练模型。模型会按搜索页配置的角度与缩放范围构建并随工作流保存。</p>
+          <p>获取图像 → 绘制模型区域 → 训练模型 → 测试搜索。取图后锁定训练图像，切换页面不会重新采集。</p>
+          <p>训练来源：{templateSourceNodeId ? `模板输入 ← ${nodeLabels[templateSourceNodeId] ?? templateSourceNodeId}（优先使用此输入）` : String(draft.templatePath || '请填写下方模板图像路径或连接模板输入')}</p>
+          {showCapturedTrainingImage && !capturedTrainingImage.trained && <p>当前图像尚未用于训练；测试搜索仍使用原有模型。点击“{trainedModelData ? '重新训练模型' : '训练模型'}”后使用当前图像。</p>}
           {legacyWorkflow
             ? <Alert showIcon type="info" title="旧模板图像兼容模式" description="本次运行使用 template 输入或模板路径；已保存的训练模型仍保留，训练后可切换到训练模型模式。" />
             : trainedModelData
-              ? <Alert showIcon type={trainingStale ? 'warning' : 'success'} title={trainingStale ? '训练参数已变化，需要重新训练' : dirty ? '模型已训练，待应用到工作流' : '模型已保存在此工作流'} description={trainingStale ? '应用前请重新训练，运行阶段会拒绝使用过期模型。' : `模型尺寸 ${draft.trainedWidth} × ${draft.trainedHeight} px · 原点 (${Number(draft.trainedOriginX).toFixed(1)}, ${Number(draft.trainedOriginY).toFixed(1)}) px`} />
+              ? <Alert showIcon type={trainingStale ? 'warning' : 'success'} title={trainingStale ? '训练参数已变化，需要重新训练' : draft.trainedModelData !== baseline.trainedModelData ? '模型已训练，待应用到工作流' : '模型已保存在此工作流'} description={trainingStale ? `已修改：${changedTrainingLabels}。重新训练后即可测试搜索。` : `模型尺寸 ${draft.trainedWidth ?? '—'} × ${draft.trainedHeight ?? '—'} px · 可直接测试搜索，满意后点击“应用”。`} />
               : <Alert showIcon type="info" title="尚未训练" description="先获取训练图像并设置模型区域，再训练形状模型。" />}
-          <Button type="primary" onClick={() => void trainShapeModel()} loading={trainingBusy}
-            disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}
-            title={previewBlockedReason || '使用当前训练图像、模型区域及训练参数创建并预览形状模型'}>
-            {legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型'}
-          </Button>
+          {trainedModelData && !trainingStale && !legacyWorkflow && <Button onClick={() => void runPreview()}
+            disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}>下一步：测试搜索</Button>}
         </div>}
         {shapeMode === 'search' && <div className="shape-training-panel shape-search-panel">
           <strong>搜索与定位</strong>
-          <p>设置角度/缩放搜索范围、最低分数和多目标约束；搜索区域仅作用于当前场景图像。角度与缩放范围参与模型构建，修改后需重新训练。</p>
+          <p>设置最低分数、目标数量和搜索区域，然后运行搜索。匹配分数为 0～1；区域留空时搜索整张场景图。</p>
+          {matchReport?.success && typeof matchReport.summary.found === 'boolean' && <Alert showIcon
+            type={matchStale ? 'info' : matchReport.summary.found ? 'success' : 'warning'}
+            title={`${matchStale ? '上次搜索 · ' : ''}${matchReport.summary.found ? '已找到目标' : '未找到目标'}${matchStale ? ' · 当前参数待验证' : ''}`}
+            description={matchReport.summary.found
+              ? `数量 ${matchNumber('count', 'count', 0)} · 最佳分数 ${matchNumber('score', 'bestScore', 3)} · X ${matchNumber('x')} / Y ${matchNumber('y')} px · 角度 ${matchNumber('angle', 'matchedAngle')}°`
+              : '请检查目标是否在搜索区域内、场景与模型是否一致，以及最小匹配分数设置。'} />}
+          {!legacyWorkflow && <p>模型覆盖：角度 ±{String(trainedSettings?.angleRangeDeg ?? draft.angleRangeDeg ?? 180)}° · 尺度 {100 - Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%～{100 + Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%
+            <Button size="small" type="link" disabled={locked} onClick={() => changeShapeWorkspaceTab('training')}>调整模型范围</Button></p>}
           {draft.searchRoi && <Button size="small" onClick={() => changeParameter('searchRoi', undefined)} disabled={locked}>清除搜索区域（恢复全图搜索）</Button>}
-          {!trainedModelData && !legacyWorkflow && <Alert showIcon type="warning" title="尚未训练模型" description="先到“模型训练”页建立并应用模型，才能运行搜索。" />}
-          {trainedModelData && trainingStale && <Alert showIcon type="warning" title="搜索范围已变化，模型需要重新训练" description="当前训练模型与角度/缩放范围不一致。请到“模型训练”页重新训练后再运行搜索。" />}
-          <Button type="primary" onClick={() => void runPreview()} loading={previewBusy}
-            disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || shapeSearchBlocked}
-            title={previewBlockedReason || '使用当前搜索图像与匹配参数定位目标'}>运行搜索</Button>
+          {!trainedModelData && !legacyWorkflow && <Alert showIcon type="warning" title="尚未训练模型" description="先建立模型，即可在当前窗口运行搜索；无需先应用或关闭窗口。" />}
+          {trainedModelData && trainingStale && <Alert showIcon type="warning" title="训练参数已变化，需要重新训练" description={`已修改：${changedTrainingLabels}。`} />}
+          {shapeSearchBlocked && <Button disabled={locked} onClick={() => changeShapeWorkspaceTab('training')}>前往模型训练</Button>}
         </div>}
         {isImageCrop && <div className="shape-training-panel crop-settings-panel">
           <strong>选择裁剪区域</strong>
-          <p>在输入图像上绘制矩形、圆形或多边形；拖动控制点可微调。输出图像按选区紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。</p>
+          <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；笔刷支持添加和擦除，输出图像按选区紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。</p>
           {draft.roi && <Button size="small" disabled={locked} onClick={() => changeCropRoi(undefined)}>清除选区（使用整图）</Button>}
           <Button type="primary" size="small" onClick={() => void runPreview()} loading={previewBusy}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}
             title={previewBlockedReason || '按当前 ROI 预览裁剪图像与 ROI 蒙版'}>预览裁剪结果</Button>
         </div>}
         {issues.length > 0 && <Alert type="error" title="请修正参数后再运行或应用" description={issues.join('；')} />}
-        <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked}
+        <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
           roiFields={roiFields} onLocateRoi={showImage && supportsRoi ? locateRoi : undefined} />
       </section>
     </div>;
@@ -518,10 +647,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       footer={<div className="node-configuration-footer">
         <span>{dirty ? '修改已暂存；取消或关闭将丢弃本次修改' : '参数与当前流程一致'}{previewBusy ? ' · 测试中' : ''}</span>
         <div>
-          <Tooltip title={previewBlockedReason || '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）'}>
-            <Button onClick={() => void runPreview()} loading={previewBusy} disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || shapeSearchBlocked}>运行此节点</Button>
+          <Tooltip title={previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
+            <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
+              onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || referenceMismatch}>
+              {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
+            </Button>
           </Tooltip>
-          <Button onClick={onClose}>取消</Button><Button type="primary" onClick={apply} disabled={locked || !dirty || issues.length > 0 || externalChange} title="应用暂存参数到流程（Ctrl+S）">应用</Button>
+          <Button onClick={onClose}>取消</Button><Button type="primary" onClick={apply} disabled={locked || !dirty || issues.length > 0 || externalChange || referenceMismatch || isShapeMatch && !legacyWorkflow && trainingStale} title="应用暂存参数到流程（Ctrl+S）">应用</Button>
         </div>
       </div>}>
       {externalChange && <Alert type="warning" showIcon title="流程中的节点参数已更新，请关闭后重新打开，避免覆盖其他修改。" />}
@@ -534,8 +667,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             ]} />
             : renderWorkspace()}
           <div ref={resultRef} tabIndex={-1} className="node-result-anchor">
-            <NodeExecutionResult nodeId={node.id} catalog={catalogItem} result={displayedResult}
-              receivedAt={receivedAt} stale={stale} draftResult={Boolean(preview)}
+            <NodeExecutionResult nodeId={node.id} catalog={catalogItem} result={isShapeMatch ? searchPreview?.result ?? result : displayedResult}
+              receivedAt={isShapeMatch ? searchPreview?.receivedAt ?? resultReceivedAt : receivedAt}
+              stale={isShapeMatch ? matchStale : stale} draftResult={isShapeMatch ? Boolean(searchPreview) : Boolean(preview)}
               expanded={resultExpanded} onExpandedChange={setResultExpanded} requestError={previewError} />
           </div>
         </> },

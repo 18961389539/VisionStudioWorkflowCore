@@ -333,7 +333,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         {
             ["Id"] = truePrimitiveId,
             ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = conditionExpression },
+            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"data.Halted == false && {conditionExpression}" },
             ["Do"] = new object[] { CompileSequence(conditional.TrueBranch, continuationStepId: null, context, loopNodeId).ToArray() },
             ["NextStepId"] = falsePrimitiveId,
             ["ErrorBehavior"] = "Terminate"
@@ -342,7 +342,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         {
             ["Id"] = falsePrimitiveId,
             ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
-            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"{conditionExpression} == false" },
+            ["Inputs"] = new Dictionary<string, string> { ["Condition"] = $"data.Halted == false && {conditionExpression} == false" },
             ["Do"] = new object[] { CompileSequence(conditional.FalseBranch, continuationStepId: null, context, loopNodeId).ToArray() },
             ["ErrorBehavior"] = "Terminate"
         };
@@ -365,7 +365,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         {
             var item = branch.Branches[index];
             var primitiveId = $"{branch.Node.Id}.__switch_{item.Port}";
-            var condition = $"data.SwitchSelections[{JsonSerializer.Serialize(branch.Node.Id)}] == {JsonSerializer.Serialize(item.Port)}";
+            var condition = $"data.Halted == false && data.SwitchSelections[{JsonSerializer.Serialize(branch.Node.Id)}] == {JsonSerializer.Serialize(item.Port)}";
             var primitive = new Dictionary<string, object?>
             {
                 ["Id"] = primitiveId,

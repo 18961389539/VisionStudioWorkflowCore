@@ -15,6 +15,40 @@ public sealed class RunNodeImageApiTests : IClassFixture<VisionStudioApiFactory>
     public RunNodeImageApiTests(VisionStudioApiFactory factory) => _client = factory.CreateClient();
 
     [Fact]
+    public async Task DebugReferenceCaptureReturnsPersistentPixelsWithTheActualPose()
+    {
+        var response = await _client.PostAsJsonAsync("/api/debug/run", new
+        {
+            workflow = new
+            {
+                id = "roi-reference-api", name = "ROI reference capture",
+                nodes = new object[]
+                {
+                    new { id = "source", type = "image.synthetic", parameters = new { width = 320, height = 240, centerX = 160, centerY = 120, radius = 45 } },
+                    new { id = "roi", type = "roi.transform", parameters = new { captureReference = true, currentX = 160.125, currentY = 120.25, currentThetaDeg = 15 } }
+                },
+                edges = new object[]
+                {
+                    new { id = "control", sourceNodeId = "source", sourcePort = "next", targetNodeId = "roi", targetPort = "exec", kind = "control" },
+                    new { id = "image", sourceNodeId = "source", sourcePort = "image", targetNodeId = "roi", targetPort = "debugImage", kind = "data" }
+                }
+            },
+            options = new { mode = "RunNode", targetNodeId = "roi" }
+        });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
+        var report = result.GetProperty("nodeReports").EnumerateArray().Single(item => item.GetProperty("nodeId").GetString() == "roi");
+        var summary = report.GetProperty("summary");
+        Assert.True(summary.GetProperty("referenceCaptured").GetBoolean());
+        Assert.Equal(160.125, summary.GetProperty("referenceX").GetDouble());
+        Assert.Equal(15, summary.GetProperty("referenceThetaDeg").GetDouble());
+        Assert.Equal(320, summary.GetProperty("referenceWidth").GetInt32());
+        var png = Convert.FromBase64String(summary.GetProperty("referenceImage").GetString()!);
+        Assert.Equal(new byte[] { 137, 80, 78, 71 }, png.Take(4).ToArray());
+    }
+
+    [Fact]
     public async Task Run_ExposesPerNodeImageCatalog_AndServesJpeg()
     {
         var run = await _client.PostAsJsonAsync("/api/run", Workflow());
