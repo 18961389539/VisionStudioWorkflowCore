@@ -16,17 +16,55 @@ namespace VisionStudio.Engine.Nodes;
 /// </summary>
 internal static class PreprocessImageHelpers
 {
-    /// <summary>把任意通道输入规范化为单通道 CV_8U（1 通道原样借用；3/4 通道转灰度）。</summary>
+    /// <summary>把输入规范化为单通道 CV_8U（3/4 通道转灰度；UInt16 按全量程缩放到 8 位）。</summary>
     public static Mat ToGray8(Mat source, out bool converted, out Mat? owned)
     {
         converted = false;
         owned = null;
-        if (source.Channels() == 1) return source;
-        var gray = new Mat();
-        JLVisionOperators.CvtColor(source, gray, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
-        converted = true;
-        owned = gray;
-        return gray;
+        var gray = source;
+        if (source.Channels() != 1)
+        {
+            if (source.Channels() is not (3 or 4))
+                throw new InvalidOperationException($"Grayscale conversion supports 1, 3, or 4 channels; received {source.Channels()}.");
+            var convertedGray = new Mat();
+            try
+            {
+                JLVisionOperators.CvtColor(source, convertedGray, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            }
+            catch
+            {
+                convertedGray.Dispose();
+                throw;
+            }
+            gray = convertedGray;
+            converted = true;
+        }
+
+        if (gray.Depth() == MatType.CV_8U)
+        {
+            if (converted) owned = gray;
+            return gray;
+        }
+
+        var gray8 = new Mat();
+        try
+        {
+            // Match the recognition pipeline: map the full UInt16 sensor range to byte gray.
+            // Other numeric depths use OpenCV's saturating conversion without an implicit
+            // image-dependent normalization that would change edge-threshold meaning per frame.
+            var scale = gray.Depth() == MatType.CV_16U ? 1d / 257d : 1d;
+            gray.ConvertTo(gray8, MatType.CV_8UC1, scale);
+        }
+        catch
+        {
+            gray8.Dispose();
+            if (converted) gray.Dispose();
+            throw;
+        }
+
+        if (converted) gray.Dispose();
+        owned = gray8;
+        return gray8;
     }
 
     /// <summary>ROI 掩膜：ROI 外清零（调用方交出 processed 的所有权；返回可继续持有的新 Mat）。</summary>

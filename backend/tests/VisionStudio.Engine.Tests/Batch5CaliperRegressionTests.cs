@@ -93,6 +93,41 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperFamily_HandlesUInt16ImagesWithoutReadingOnlyTheLowByte()
+    {
+        using var lineMat = new Mat(128, 128, MatType.CV_16UC1, Scalar.All(0));
+        using (var bright = new Mat(lineMat, new Rect(64, 0, 64, 128))) bright.SetTo(Scalar.All(51200));
+        using var lineImage = VisionImage.Own(lineMat.Clone());
+
+        var single = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(Inputs(lineImage)),
+            Node("measure.caliper", """{"startX":30,"startY":64,"endX":96,"endY":64,"sampleWidth":1,"edgeThreshold":30}"""), CancellationToken.None);
+        Assert.True(Convert.ToBoolean(single.Summary["found"]), Convert.ToString(single.Summary["reason"]));
+        Assert.InRange(single.Outputs["point"].Require<VisionPoint2D>("point").X, 63, 65);
+        (single.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var subpixel = await new EdgeSubpixelNode().ExecuteAsync(new NodeExecutionContext(Inputs(lineImage)),
+            Node("feature.edgeSubpixel", """{"startX":30,"startY":64,"endX":96,"endY":64,"sampleWidth":1,"minContrast":30}"""), CancellationToken.None);
+        Assert.True(Convert.ToBoolean(subpixel.Summary["found"]), Convert.ToString(subpixel.Summary["reason"]));
+        Assert.InRange(subpixel.Outputs["point"].Require<VisionPoint2D>("point").X, 63, 65);
+        (subpixel.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var line = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(lineImage)),
+            Node("measure.caliperLine", """{"startX":30,"startY":64,"endX":96,"endY":64,"edgeLength":70,"caliperCount":9,"sampleWidth":1,"minContrast":30}"""), CancellationToken.None);
+        Assert.True(Convert.ToBoolean(line.Summary["found"]), Convert.ToString(line.Summary["reason"]));
+        Assert.InRange(line.Outputs["point"].Require<VisionPoint2D>("point").X, 63, 65);
+        (line.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        using var circleMat = new Mat(128, 128, MatType.CV_16UC1, Scalar.All(0));
+        Cv2.Circle(circleMat, new Point(64, 64), 30, Scalar.All(51200), 2);
+        using var circleImage = VisionImage.Own(circleMat.Clone());
+        var circle = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(circleImage)),
+            Node("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"radialBand":5,"samplingMode":"count","caliperCount":72,"sampleWidth":1,"minContrast":30}"""), CancellationToken.None);
+        Assert.True(Convert.ToBoolean(circle.Summary["found"]), Convert.ToString(circle.Summary["reason"]));
+        Assert.InRange(circle.Outputs["radius"].Require<double>("radius"), 28, 32);
+        (circle.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperCircle_ClassifiesOffImageRadialBandAsOutsideImage()
     {
         using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));

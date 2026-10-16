@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "eca22a3c5f6654b68343278df36b85b0dd228309dde399a53b7578d3fb4c1d1d",
+  "hash": "d4195323d0c452850b5d78907d56c3019b357b9925e4491d74fcbb84e0cca070",
   "items": [
     {
       "type": "image.acquire",
@@ -3647,7 +3647,7 @@
           "group": "Sampling"
         }
       ],
-      "description": "Subpixel edge location along a search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
+      "description": "Subpixel edge location along a search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6312,7 +6312,7 @@
           "description": "Reject the fitted circle when its radius differs from the nominal radius by more than this amount."
         }
       ],
-      "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+      "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6525,7 +6525,7 @@
           "group": "Sampling"
         }
       ],
-      "description": "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
+      "description": "Single-caliper grayscale edge location along a configurable search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6794,7 +6794,7 @@
           "description": "A point can be excluded when its distance from the fitted line exceeds this value."
         }
       ],
-      "description": "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
+      "description": "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

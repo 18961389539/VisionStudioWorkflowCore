@@ -26,6 +26,16 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('explains the UInt16 to byte-gray scaling used by caliper thresholds', () => {
+    const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
+    for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine', 'measure.caliperCircle']) {
+      const item = translated.find(entry => entry.type === type)!;
+      expect(item.description).toContain('UInt16');
+      const contrast = item.parameters.find(parameter => parameter.name === (type === 'measure.caliper' ? 'edgeThreshold' : 'minContrast'));
+      expect(contrast?.description).toContain('65535→255');
+    }
+  });
+
   it('localizes parameter groups for ROI and caliper workspaces while preserving English catalogs', () => {
     const english = localizeCatalog(fallbackCatalogRaw, 'en');
     const chinese = localizeCatalog(fallbackCatalogRaw, 'zh');
