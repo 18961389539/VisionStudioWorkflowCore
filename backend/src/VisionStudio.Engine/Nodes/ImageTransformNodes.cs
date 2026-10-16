@@ -33,11 +33,13 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
         selectedRegion.SmallestRectangle1(out int top, out int left, out int bottom, out int right);
         var bounds = new Rect(left, top, right - left + 1, bottom - top + 1);
-        using var binaryImage = selectedRegion.RegionToBin(255, 0, source.Width, source.Height);
-        using var binaryMask = JLVisionImages.ToMat(binaryImage);
-
         using var sourceCrop = new Mat(source, bounds);
-        using var cropMask = new Mat(binaryMask, bounds);
+        using var rasterCrop = new Mat(rasterMask, bounds);
+        using var cropMask = new Mat();
+        // RegionToBin used to allocate and convert a second full-frame mask before cropping it.
+        // The raster mask already has the same selected-pixel coverage; threshold only the tight
+        // output bounds to keep large source images from carrying another full-size buffer.
+        Cv2.InRange(rasterCrop, Scalar.All(1), Scalar.All(255), cropMask);
         var croppedImage = new Mat(sourceCrop.Rows, sourceCrop.Cols, sourceCrop.Type(), Scalar.All(0));
         var maskImage = cropMask.Clone();
         try
