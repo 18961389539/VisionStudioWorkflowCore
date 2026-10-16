@@ -20,6 +20,9 @@ export function configurationParameters(parameters: NodeParameters, catalog: Nod
   // Older shape workflows have no lifecycle field. Preserve their image-template behavior when editing;
   // newly created nodes receive modelMode=trained from makeDefaultParameters.
   if (catalog.type === 'match.shape' && parameters.modelMode === undefined && !parameters.trainedModelData) merged.modelMode = 'legacy';
+  if (catalog.type === 'match.shape' && parameters.trainingAngleRangeDeg === undefined
+    && typeof parameters.trainedModelConfig === 'string' && /^shape-v[12]\|/.test(parameters.trainedModelConfig))
+    merged.trainingAngleRangeDeg = typeof parameters.angleRangeDeg === 'number' ? parameters.angleRangeDeg : 180;
   return merged;
 }
 
@@ -30,6 +33,9 @@ export function hydrateNodeParameters(parameters: NodeParameters, catalog: NodeC
   // New nodes use makeDefaultParameters directly and therefore keep modelMode=trained.
   if (catalog.type === 'match.shape' && parameters.modelMode === undefined && !parameters.trainedModelData)
     merged.modelMode = 'legacy';
+  if (catalog.type === 'match.shape' && parameters.trainingAngleRangeDeg === undefined
+    && typeof parameters.trainedModelConfig === 'string' && /^shape-v[12]\|/.test(parameters.trainedModelConfig))
+    merged.trainingAngleRangeDeg = typeof parameters.angleRangeDeg === 'number' ? parameters.angleRangeDeg : 180;
   return merged;
 }
 

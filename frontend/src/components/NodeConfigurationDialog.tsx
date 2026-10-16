@@ -99,9 +99,18 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const [trainingImageBusy, setTrainingImageBusy] = useState(false);
   const [searchImageBusy, setSearchImageBusy] = useState(false);
   const [trainingView, setTrainingView] = useState(false);
-  const [regionEditMode, setRegionEditMode] = useState<'model' | 'search'>('model');
+  const [regionEditMode, setRegionEditMode] = useState<'model' | 'search' | 'clutter'>('model');
   const [showSavedTrainingImage, setShowSavedTrainingImage] = useState(false);
   const [trainingImage, setTrainingImage] = useState<{ data: string; width: number; height: number; sourceKey: string; trained: boolean; receivedAt: string }>();
+  const [trainingSamples, setTrainingSamples] = useState<{ data: string; width: number; height: number }[]>(() => {
+    const parameters = (node.data.parameters ?? {}) as NodeParameters;
+    const saved = parameters.trainedSourceImages;
+    return Array.isArray(saved) && saved.length > 0
+      ? saved.filter((item): item is { data: string; width: number; height: number } => Boolean(item && typeof item === 'object'
+        && typeof (item as { data?: unknown }).data === 'string' && typeof (item as { width?: unknown }).width === 'number'
+        && typeof (item as { height?: unknown }).height === 'number'))
+      : [];
+  });
   const [roiImageView, setRoiImageView] = useState<'reference' | 'input' | 'output'>('reference');
   const [previewError, setPreviewError] = useState<string>();
   const [preview, setPreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string; preserveTrainingWorkspace?: boolean }>();
@@ -121,20 +130,31 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';
   const trainedModelData = typeof draft.trainedModelData === 'string' ? draft.trainedModelData : '';
+  const trainedSourceImage = typeof draft.trainedSourceImage === 'string' ? draft.trainedSourceImage : '';
   const legacyWorkflow = isShapeMatch && draft.modelMode === 'legacy';
   const trainedSettings = draft.trainedModelSettings && typeof draft.trainedModelSettings === 'object'
     ? draft.trainedModelSettings as Record<string, unknown> : undefined;
   const currentTrainingSettings = {
     binarize: draft.binarize ?? 'auto', threshold: draft.threshold ?? 128, invert: draft.invert ?? false,
-    angleRangeDeg: draft.angleRangeDeg ?? 180, angleStepDeg: draft.angleStepDeg ?? 1,
-    scaleTolerancePercent: draft.scaleTolerancePercent ?? 0, scaleStepPercent: Number(draft.scaleTolerancePercent ?? 0) > 0 ? draft.scaleStepPercent ?? 1 : 0,
+    trainingAngleRangeDeg: draft.trainingAngleRangeDeg ?? draft.angleRangeDeg ?? 180, angleStepDeg: draft.angleStepDeg ?? 1,
+    pyramidLevels: draft.pyramidLevels ?? 0,
+    scaleTolerancePercent: draft.scaleTolerancePercent ?? 0, scaleToleranceXPercent: draft.scaleToleranceXPercent ?? 0,
+    scaleToleranceYPercent: draft.scaleToleranceYPercent ?? 0,
+    scaleStepPercent: Number(draft.scaleTolerancePercent ?? 0) > 0 || Number(draft.scaleToleranceXPercent ?? 0) > 0 || Number(draft.scaleToleranceYPercent ?? 0) > 0 ? draft.scaleStepPercent ?? 1 : 0,
+    trainingMinSampleFraction: draft.trainingMinSampleFraction ?? 0.75, trainingFeatureTolerancePx: draft.trainingFeatureTolerancePx ?? 2,
     ignorePolarity: draft.ignorePolarity ?? false, minContrast: draft.minContrast ?? 5,
+    clutterContrast: draft.clutterRoi ? draft.clutterContrast ?? draft.minContrast ?? 5 : 0,
     trainingOriginMode: draft.trainingOriginMode ?? 'centroid', trainingOriginX: draft.trainingOriginX ?? 0,
-    trainingOriginY: draft.trainingOriginY ?? 0, roi: draft.roi ?? null, templatePath: draft.templatePath ?? ''
+    trainingOriginY: draft.trainingOriginY ?? 0, roi: draft.roi ?? null, clutterRoi: draft.clutterRoi ?? null,
+    templatePath: draft.templatePath ?? ''
   };
   const trainingSettingsWithDefaults = trainedSettings && (() => {
-    const normalized = { scaleTolerancePercent: 0, scaleStepPercent: 1, ignorePolarity: false, minContrast: 5, ...trainedSettings };
-    if (Number(normalized.scaleTolerancePercent) === 0) normalized.scaleStepPercent = 0;
+    const normalized: Record<string, unknown> = { scaleTolerancePercent: 0, scaleToleranceXPercent: 0, scaleToleranceYPercent: 0, scaleStepPercent: 1,
+      trainingMinSampleFraction: 0.75, trainingFeatureTolerancePx: 2, ignorePolarity: false, minContrast: 5, clutterContrast: 0,
+      clutterRoi: null, pyramidLevels: 0, ...trainedSettings };
+    if (normalized.trainingAngleRangeDeg === undefined) normalized.trainingAngleRangeDeg = normalized.angleRangeDeg ?? 180;
+    delete normalized.angleRangeDeg;
+    if (Number(normalized.scaleTolerancePercent) === 0 && Number(normalized.scaleToleranceXPercent) === 0 && Number(normalized.scaleToleranceYPercent) === 0) normalized.scaleStepPercent = 0;
     return normalized;
   })();
   const trainingStale = Boolean(trainedModelData && trainingSettingsWithDefaults && parameterFingerprint(trainingSettingsWithDefaults) !== parameterFingerprint(currentTrainingSettings));
@@ -143,6 +163,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const templateSourceNodeId = edges.find((edge) => edge.target === node.id && (edge.targetHandle === 'template' || edge.targetHandle?.endsWith('template')))?.source;
   const trainingSourceKey = templateSourceNodeId ?? String(draft.templatePath ?? '');
   const capturedTrainingImage = trainingImage?.sourceKey === trainingSourceKey ? trainingImage : undefined;
+  const hasLosslessTrainingImage = Boolean(capturedTrainingImage?.data || trainedSourceImage || trainingSamples.length);
+  const trainingSampleData = new Set(trainingSamples.map(sample => sample.data));
+  const currentTrainingSampleData = capturedTrainingImage?.data || trainedSourceImage;
+  const effectiveTrainingSampleCount = trainingSamples.length + (currentTrainingSampleData && !trainingSampleData.has(currentTrainingSampleData) ? 1 : 0);
   const changedTrainingLabels = trainingSettingsWithDefaults ? Object.keys(currentTrainingSettings)
     .filter(key => parameterFingerprint(trainingSettingsWithDefaults[key as keyof typeof trainingSettingsWithDefaults]) !== parameterFingerprint(currentTrainingSettings[key as keyof typeof currentTrainingSettings]))
     .map(key => catalogItem.parameters.find(parameter => parameter.name === key)?.label ?? (key === 'roi' ? '模型区域' : key)).join('、') : '';
@@ -154,7 +178,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const referenceBindings = parameterFingerprint({
     inputs: edges.filter(edge => edge.target === node.id && ['currentPose', 'debugImage'].includes(edge.targetHandle ?? ''))
       .map(edge => ({ port: edge.targetHandle, source: edge.source, sourcePort: edge.sourceHandle })).sort((a, b) => String(a.port).localeCompare(String(b.port))),
-    modelOrigin: ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
+    modelOrigin: ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainedPoseOffsetX', 'trainedPoseOffsetY', 'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']
       .map(key => poseSourceParameters[key] ?? null)
   });
   const referenceImage = isRoiTransform && typeof draft.referenceImage === 'string' ? draft.referenceImage : '';
@@ -196,7 +220,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const trainingContours = Array.isArray(draft.trainedContours) ? draft.trainedContours as { x: number; y: number }[][]
     : Array.isArray(draft.trainedContour) ? [draft.trainedContour as { x: number; y: number }[]] : [];
   const trainedPreviewData = typeof draft.trainedPreviewImage === 'string' ? draft.trainedPreviewImage : '';
-  const showTrainedTemplatePreview = Boolean(showSavedTrainingImage && trainingView && isShapeMatch && trainedPreviewData);
+  const showTrainedTemplatePreview = Boolean(showSavedTrainingImage && trainingView && isShapeMatch && (trainedSourceImage || trainedPreviewData));
   const showCapturedTrainingImage = isShapeMatch && shapeWorkspaceTab === 'training' && !showSavedTrainingImage && capturedTrainingImage;
   const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && (showTrainedTemplatePreview || Boolean(showCapturedTrainingImage)));
   const displayImageSource = isRoiTransform && roiImageView === 'reference'
@@ -205,13 +229,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     : showCapturedTrainingImage ? { url: `data:image/png;base64,${capturedTrainingImage.data}`, width: capturedTrainingImage.width,
       height: capturedTrainingImage.height, label: '已锁定训练图像 · 训练使用当前显示的图像' }
     : showTrainedTemplatePreview ? { ...imageViewerSource,
-    url: `data:image/jpeg;base64,${trainedPreviewData}`, width: Number(draft.trainedSourceWidth ?? imageViewerSource.width),
-    height: Number(draft.trainedSourceHeight ?? imageViewerSource.height), label: '已保存训练图像' }
+    url: `data:${trainedSourceImage ? 'image/png' : 'image/jpeg'};base64,${trainedSourceImage || trainedPreviewData}`, width: Number(draft.trainedSourceWidth ?? imageViewerSource.width),
+    height: Number(draft.trainedSourceHeight ?? imageViewerSource.height), label: trainedSourceImage ? '已保存无损训练图像' : '旧模型压缩预览 · 重新训练前请重新获取原图' }
     : isShapeMatch && !shapeImageMatchesTab ? { ...imageViewerSource, url: '', label: shapeWorkspaceTab === 'training' ? '训练图像' : '搜索场景图像' }
       : imageViewerSource;
   const overlaysWithTrainedContour: VisionOverlay[] = trainingView && isShapeMatch && trainedModelData &&
     (showTrainedTemplatePreview || capturedTrainingImage?.trained)
-    ? [...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polygon' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
+    ? [...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polyline' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
       { id: 'saved-shape-training-origin', type: 'Point', x: Number(draft.trainedOriginImageX ?? 0), y: Number(draft.trainedOriginImageY ?? 0), label: '训练原点', stroke: '#fa541c', strokeWidth: 3 }]
     : (isRoiTransform && roiImageView === 'reference') || showCapturedTrainingImage ? [] : viewerOverlays;
   const imagePorts = [...catalogItem.inputs, ...catalogItem.outputs].some((p) => p.dataType === 'Image' || p.dataType === 'DomainImage');
@@ -220,7 +244,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const canEditRoi = supportsRoi && (isRoiTransform
     ? !roiInputConnected && !referenceMismatch && roiImageView === 'reference' && Boolean(referenceImage)
     : isShapeMatch
-      ? regionEditMode === 'model'
+      ? regionEditMode !== 'search'
         ? shapeWorkspaceTab === 'training' && shapeImageMatchesTab && (Boolean(showCapturedTrainingImage) || showTrainedTemplatePreview || imageSource === 'output' && (previewNodeId === templateSourceNodeId || previewNodeId === node.id))
         : shapeWorkspaceTab === 'search' && shapeImageMatchesTab && imageSource === 'output' && previewNodeId === node.id && Boolean(displayImageSource.url)
       : isImageCrop
@@ -303,6 +327,26 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       setPreviewError(error instanceof Error ? error.message : '训练图像获取失败。'); setResultExpanded(true);
     } finally { setPreviewBusy(false); setTrainingImageBusy(false); }
   };
+  const addCurrentTrainingSample = () => {
+    if (!capturedTrainingImage?.data || locked) return;
+    const current = { data: capturedTrainingImage.data, width: capturedTrainingImage.width, height: capturedTrainingImage.height };
+    const samples = trainingSamples.filter(sample => sample.data !== current.data);
+    const reference = samples[0];
+    if (reference && (reference.width !== current.width || reference.height !== current.height)) {
+      setPreviewError('多样本训练要求图像尺寸一致。请采集与现有样本相同尺寸的图像。');
+      return;
+    }
+    if (samples.length >= 4) {
+      setPreviewError('最多可联合训练 4 张图像。');
+      return;
+    }
+    if (samples.reduce((total, sample) => total + sample.data.length, current.data.length) > 32 * 1024 * 1024) {
+      setPreviewError('样本图像总大小超过限制，请裁剪图像或减少样本数量。');
+      return;
+    }
+    setTrainingSamples([...samples, current]);
+    setPreviewError(undefined);
+  };
   const fetchSearchImage = async () => {
     if (locked || externalChange || previewBlockedReason) return;
     setShapeWorkspaceTab('search'); setShapeImageKind(undefined);
@@ -323,38 +367,109 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   };
   const trainShapeModel = async () => {
     if (locked || issues.length || externalChange || previewBlockedReason) return;
-    const submitted = cloneParameters({ ...draft, modelMode: 'trained', trainingMode: true,
-      trainingImageData: showTrainedTemplatePreview ? trainedPreviewData : capturedTrainingImage?.data });
+    if (!hasLosslessTrainingImage) {
+      setPreviewError('请先获取训练图像，再训练模型。这样保存的模型才能关联原始无损图像。');
+      return;
+    }
+    const currentImage = capturedTrainingImage?.data ? { data: capturedTrainingImage.data, width: capturedTrainingImage.width, height: capturedTrainingImage.height }
+      : trainedSourceImage ? { data: trainedSourceImage, width: Number(draft.trainedSourceWidth ?? 0), height: Number(draft.trainedSourceHeight ?? 0) } : undefined;
+    const sampleSet = [...trainingSamples];
+    if (currentImage && !sampleSet.some(sample => sample.data === currentImage.data)) sampleSet.push(currentImage);
+    if (!sampleSet.length) {
+      setPreviewError('请先获取训练图像，再训练模型。这样保存的模型才能关联原始无损图像。');
+      return;
+    }
+    if (sampleSet.length > 4 || sampleSet.some(sample => sample.width !== sampleSet[0].width || sample.height !== sampleSet[0].height)) {
+      setPreviewError('多样本训练最多支持 4 张同尺寸图像。请清除不兼容样本后重试。');
+      return;
+    }
+    const totalSourceLength = sampleSet.reduce((total, sample) => total + sample.data.length, 0);
+    if (sampleSet.length > 1 && totalSourceLength > 32 * 1024 * 1024) {
+      setPreviewError('样本图像总大小超过限制，请清除样本或裁剪训练图像。');
+      return;
+    }
     setShapeWorkspaceTab('training'); setShapeImageKind(undefined); setTrainingView(true);
     setShowSavedTrainingImage(false);
     setPreviewBusy(true); setTrainBusy(true); setPreviewError(undefined);
     try {
-      const next = await onPreview(submitted);
-      const report = next.nodeReports.filter((item) => item.nodeId === node.id).slice(-1)[0];
-      const summary = report?.summary ?? {};
-      const modelData = typeof summary.trainingModelData === 'string' ? summary.trainingModelData : '';
-      if (!next.success || !report?.success || summary.trainingSucceeded !== true || !modelData) {
-        throw new Error(report?.error || next.error || '训练没有生成模型，请检查训练图像、ROI 和轮廓参数。');
+      const trainingRuns: { result: RunResult; summary: Record<string, unknown> }[] = [];
+      for (let sampleIndex = 0; sampleIndex < sampleSet.length; sampleIndex++) {
+        const sample = sampleSet[sampleIndex];
+        const firstSample = trainingRuns[0]?.summary;
+        const submitted = cloneParameters({ ...draft, modelMode: 'trained', trainingMode: true, trainingImageData: sample.data,
+          ...(sampleIndex > 0 && firstSample ? {
+            trainingReferenceModelData: String(firstSample.trainingModelData ?? ''),
+            trainingReferenceOriginImageX: Number(firstSample.trainingOriginImageX ?? 0),
+            trainingReferenceOriginImageY: Number(firstSample.trainingOriginImageY ?? 0)
+          } : {}) });
+        const next = await onPreview(submitted);
+        const report = next.nodeReports.filter((item) => item.nodeId === node.id).slice(-1)[0];
+        const summary = report?.summary ?? {};
+        if (!next.success || !report?.success || summary.trainingSucceeded !== true || typeof summary.trainingModelData !== 'string' || !summary.trainingModelData)
+          throw new Error(report?.error || next.error || `第 ${trainingRuns.length + 1} 张样本训练失败，请检查图像和模型区域。`);
+        trainingRuns.push({ result: next, summary });
       }
+      const modelVariants = trainingRuns.map(run => ({ data: String(run.summary.trainingModelData), width: Number(run.summary.trainingWidth),
+        height: Number(run.summary.trainingHeight), originX: Number(run.summary.trainingOriginX), originY: Number(run.summary.trainingOriginY),
+        sourceOriginX: Number(run.summary.trainingOriginImageX), sourceOriginY: Number(run.summary.trainingOriginImageY) }));
+      const combinedModelBytes = modelVariants.reduce((total, variant) => total + Math.floor(variant.data.length * 3 / 4), 0);
+      if (combinedModelBytes > 16 * 1024 * 1024)
+        throw new Error('多样本模型输入超过 16 MB 限制，请减少样本数量或裁剪模型区域。');
+      let next = trainingRuns[trainingRuns.length - 1].result;
+      let summary = trainingRuns[0].summary;
+      let combinedModelData = modelVariants[0].data;
+      if (modelVariants.length > 1) {
+        const modelSetData = `shape-model-set-v1:${JSON.stringify({ version: 1, models: modelVariants })}`;
+        if (new TextEncoder().encode(modelSetData).length > 24 * 1024 * 1024)
+          throw new Error('多样本模型输入超过 24 MB 工作流请求限制，请减少样本数量或裁剪图像。');
+        const combined = await onPreview(cloneParameters({ ...draft, modelMode: 'trained', trainingMode: true,
+          trainingImageData: sampleSet[0].data, trainingCombineModelData: modelSetData,
+          trainingCombineSourceImages: JSON.stringify(sampleSet.map(sample => sample.data)) }));
+        const combinedReport = combined.nodeReports.filter((item) => item.nodeId === node.id).slice(-1)[0];
+        const combinedSummary = combinedReport?.summary ?? {};
+        if (!combined.success || !combinedReport?.success || combinedSummary.trainingSucceeded !== true
+          || typeof combinedSummary.trainingModelData !== 'string' || !combinedSummary.trainingModelData)
+          throw new Error(combinedReport?.error || combined.error || '复合模型训练失败，请检查样本对齐、模型区域和特征出现比例。');
+        next = combined;
+        summary = combinedSummary;
+        combinedModelData = String(combinedSummary.trainingModelData);
+      }
+      if (new TextEncoder().encode(combinedModelData).length > 24 * 1024 * 1024)
+        throw new Error('训练模型超过工作流资产大小限制，请减少样本数量或裁剪图像。');
       const snapshot = {
         binarize: draft.binarize ?? 'auto', threshold: draft.threshold ?? 128, invert: draft.invert ?? false,
-        angleRangeDeg: draft.angleRangeDeg ?? 180, angleStepDeg: draft.angleStepDeg ?? 1,
-        scaleTolerancePercent: draft.scaleTolerancePercent ?? 0, scaleStepPercent: draft.scaleStepPercent ?? 1,
+        trainingAngleRangeDeg: draft.trainingAngleRangeDeg ?? draft.angleRangeDeg ?? 180, angleStepDeg: draft.angleStepDeg ?? 1,
+        pyramidLevels: draft.pyramidLevels ?? 0,
+        scaleTolerancePercent: draft.scaleTolerancePercent ?? 0, scaleToleranceXPercent: draft.scaleToleranceXPercent ?? 0,
+        scaleToleranceYPercent: draft.scaleToleranceYPercent ?? 0, scaleStepPercent: draft.scaleStepPercent ?? 1,
+        trainingMinSampleFraction: draft.trainingMinSampleFraction ?? 0.75, trainingFeatureTolerancePx: draft.trainingFeatureTolerancePx ?? 2,
         ignorePolarity: draft.ignorePolarity ?? false, minContrast: draft.minContrast ?? 5,
+        clutterContrast: draft.clutterRoi ? draft.clutterContrast ?? draft.minContrast ?? 5 : 0,
         trainingOriginMode: draft.trainingOriginMode ?? 'centroid', trainingOriginX: draft.trainingOriginX ?? 0,
-        trainingOriginY: draft.trainingOriginY ?? 0, roi: draft.roi ?? null, templatePath: draft.templatePath ?? ''
+        trainingOriginY: draft.trainingOriginY ?? 0, roi: draft.roi ?? null, clutterRoi: draft.clutterRoi ?? null,
+        templatePath: draft.templatePath ?? ''
       };
-      const completed = { ...draft, modelMode: 'trained', trainingMode: false, trainedModelData: modelData,
-        trainedModelHash: String(summary.trainingModelHash ?? ''),
+      const completed = { ...draft, modelMode: 'trained', trainingMode: false, trainedModelData: combinedModelData,
+        trainedModelHash: String(summary.trainingModelHash ?? trainingRuns.map(run => String(run.summary.trainingModelHash ?? '')).filter(Boolean).join(':')),
         trainedModelConfig: String(summary.trainingConfig ?? ''), trainedModelSettings: snapshot,
+        trainedSourceImage: sampleSet[0].data, trainedSourceImages: sampleSet.length > 1 ? sampleSet : undefined,
         trainedContour: Array.isArray(summary.trainingContour) ? summary.trainingContour : [],
         trainedContours: Array.isArray(summary.trainingContours) ? summary.trainingContours : [],
+        trainedModelWarnings: [...(Array.isArray(summary.trainingWarnings) ? summary.trainingWarnings as string[] : []),
+          ...trainingRuns.flatMap((run, index) => Array.isArray(run.summary.trainingWarnings)
+            ? (run.summary.trainingWarnings as string[]).map(warning => `样本 ${index + 1}：${warning}`) : [])],
+        trainedSampleCount: sampleSet.length,
+        trainedFeaturePointCount: Number(summary.trainingFeaturePointCount ?? 0),
+        trainedContourCount: Number(summary.trainingContourCount ?? 0),
+        trainedSymmetryPeriodDeg: summary.trainingSymmetryPeriodDeg ?? null,
         trainedPreviewImage: typeof summary.trainingPreviewImage === 'string' ? summary.trainingPreviewImage : '',
         trainedSourceWidth: Number(summary.trainingSourceWidth ?? 0), trainedSourceHeight: Number(summary.trainingSourceHeight ?? 0),
         trainedWidth: Number(summary.trainingWidth ?? 0), trainedHeight: Number(summary.trainingHeight ?? 0),
         trainedOriginX: Number(summary.trainingOriginX ?? 0), trainedOriginY: Number(summary.trainingOriginY ?? 0),
-        trainedOriginImageX: Number(summary.trainingOriginImageX ?? 0), trainedOriginImageY: Number(summary.trainingOriginImageY ?? 0) };
+        trainedOriginImageX: Number(summary.trainingOriginImageX ?? 0), trainedOriginImageY: Number(summary.trainingOriginImageY ?? 0),
+        trainedPoseOffsetX: Number(summary.trainingPoseOffsetX ?? 0), trainedPoseOffsetY: Number(summary.trainingPoseOffsetY ?? 0) };
       setDraft(completed);
+      setTrainingSamples(sampleSet.length > 1 ? sampleSet : []);
       if (capturedTrainingImage && !showTrainedTemplatePreview) setTrainingImage({ ...capturedTrainingImage, trained: true });
       setShapeImageKind('training');
       const safeResult = { ...next, nodeReports: next.nodeReports.map((item) => {
@@ -410,7 +525,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (isShapeMatch) {
       if (key === 'searchRoi') { setShapeWorkspaceTab('search'); void fetchSearchImage(); return; }
       setShapeWorkspaceTab('training');
-      setRegionEditMode('model');
+      setRegionEditMode(key === 'clutterRoi' ? 'clutter' : 'model');
       void fetchTrainingImage();
       return;
     }
@@ -443,7 +558,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (next === 'training') {
       setTrainingView(true); setRegionEditMode('model');
       if (capturedTrainingImage) { setShowSavedTrainingImage(false); setShapeImageKind('training'); }
-      else if (trainedPreviewData) locateSavedTrainingImage();
+      else if (trainedSourceImage || trainedPreviewData) locateSavedTrainingImage();
       else void fetchTrainingImage();
     } else {
       setTrainingView(false); setRegionEditMode('search'); setShowSavedTrainingImage(false);
@@ -487,30 +602,33 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       ...catalogItem,
       parameters: catalogItem.parameters.filter((parameter) => {
         const group = parameter.group ?? 'General';
-        const searchRange = parameter.name === 'angleRangeDeg' || parameter.name === 'scaleTolerancePercent';
+        if (parameter.name === 'angleRangeDeg' && !legacyWorkflow) return false;
         if (parameter.name === 'templatePath' && templateSourceNodeId) return false;
-        if (parameter.name === 'threshold' && draft.binarize !== 'fixed') return false;
         if (['trainingOriginX', 'trainingOriginY'].includes(parameter.name) && draft.trainingOriginMode !== 'manual') return false;
-        if (parameter.name === 'scaleStepPercent' && Number(draft.scaleTolerancePercent ?? 0) === 0) return false;
+        if (parameter.name === 'scaleStepPercent' && Number(draft.scaleTolerancePercent ?? 0) === 0
+          && Number(draft.scaleToleranceXPercent ?? 0) === 0 && Number(draft.scaleToleranceYPercent ?? 0) === 0) return false;
         if (parameter.name === 'minArea') return !trainingMode;
         return trainingMode
-          ? ['Training', 'Binarize', 'General'].includes(group)
-          : ['Matching', 'Multi-target', 'Search'].includes(group) || legacyWorkflow && searchRange;
+          ? ['Training', 'Origin Estimation', 'General'].includes(group)
+          : ['Matching', 'Multi-target', 'Search'].includes(group);
       }).map((parameter) => ({
         ...parameter,
         group: ({
-          Training: '模型训练', Binarize: '图像预处理', Candidates: '特征筛选', General: '训练图像来源',
+          Training: '模型训练', 'Origin Estimation': '原点估算', Candidates: '特征筛选', General: '训练图像来源',
           Matching: '匹配条件', 'Multi-target': '多目标定位', Search: '搜索范围'
-        } as Record<string, string>)[parameter.name === 'angleRangeDeg' || parameter.name === 'scaleTolerancePercent'
+        } as Record<string, string>)[['trainingAngleRangeDeg', 'scaleTolerancePercent', 'scaleToleranceXPercent', 'scaleToleranceYPercent'].includes(parameter.name)
           ? 'Training' : parameter.group ?? 'General'] ?? parameter.group
       }))
     } : isRoiTransform ? { ...catalogItem, parameters: catalogItem.parameters.filter(parameter =>
       !(referenceImage && ['baseX', 'baseY', 'baseThetaDeg'].includes(parameter.name))
       && !(poseEdge && ['currentX', 'currentY', 'currentThetaDeg'].includes(parameter.name))) } : catalogItem;
-    const roiFields = shapeMode ? [trainingMode
-      ? { key: 'roi', label: '模型区域', emptyText: '未设置 · 使用整幅训练图像', showEmpty: true }
-      : { key: 'searchRoi', label: '搜索区域', emptyText: '未设置 · 使用整幅场景图像', showEmpty: true }
-    ] : isImageCrop ? [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
+    const roiFields = shapeMode ? trainingMode
+      ? [
+        { key: 'roi', label: '模型区域', emptyText: '未设置 · 使用整幅训练图像', showEmpty: true },
+        { key: 'clutterRoi', label: '杂乱区域', emptyText: '未设置 · 不启用杂乱度评分', showEmpty: true }
+      ]
+      : [{ key: 'searchRoi', label: '搜索区域', emptyText: '未设置 · 使用整幅场景图像', showEmpty: true }]
+      : isImageCrop ? [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
       : isRoiTransform ? [{ key: 'roi', label: '基准 ROI', emptyText: '设定基准后在基准图上绘制', showEmpty: true }] : undefined;
     return <div ref={bindWorkspace} tabIndex={-1} className={'node-configuration-workspace' + (showImage ? '' : ' without-image')}
       style={{ '--node-columns': columns(imageShare) } as CSSProperties}>
@@ -524,7 +642,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
               title={previewBlockedReason || (trainingMode ? '读取训练源图像并编辑模型区域' : '读取运行场景图像并编辑搜索区域')}>
               {trainingMode ? '获取训练图像' : '获取场景图像'}
             </Button>
-            {trainingMode && trainedModelData && trainedPreviewData &&
+            {trainingMode && trainedModelData && (trainedSourceImage || trainedPreviewData) &&
               <Button size="small" disabled={locked} onClick={locateSavedTrainingImage}>查看已保存训练图像</Button>}
           </> : isImageCrop ? <>
             <span>裁剪输入图像</span>
@@ -566,10 +684,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
               onClick={() => setRoiImageView('reference')}>切换到已保存基准</Button>}
           </Space>} />}
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
-          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
-          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : shapeMode === 'training' ? '模型区域' : String(node.data.label ?? node.id)}
-          loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
-          emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
+          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
+            : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
+          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : String(node.data.label ?? node.id)}
+          loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
+          emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? regionEditMode === 'clutter' ? '在训练图像上绘制预期为空的杂乱区域' : '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
           emptyAction={{
             label: isRoiTransform ? '获取图像并设为基准' : isImageCrop ? '运行以获取输入图像' : shapeMode === 'training' ? '获取训练图像' : shapeMode === 'search' ? '获取场景图像' : '运行此节点',
             onClick: () => void (isRoiTransform ? captureRoiReference() : shapeMode === 'training' ? fetchTrainingImage() : shapeMode === 'search' ? fetchSearchImage() : runPreview()),
@@ -595,27 +714,40 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         </div>}
         {shapeMode === 'training' && <div className="shape-training-panel">
           <strong>建立形状模型</strong>
-          <p>获取图像 → 绘制模型区域 → 训练模型 → 测试搜索。取图后锁定训练图像，切换页面不会重新采集。</p>
+          <p>获取图像 → 绘制模型区域 → 可选绘制模型周围“正常时不应有边缘”的杂乱区域 → 可重复采集并加入最多 4 张同尺寸样本 → 融合稳定轮廓训练复合模型 → 测试搜索。每张图像都会锁定；后续样本先按首张模型定位，再自动变换模型区域、杂乱区域和姿态。</p>
+          {draft.clutterRoi && <Button size="small" onClick={() => changeParameter('clutterRoi', undefined)} disabled={locked}>清除杂乱区域（关闭杂乱度评分）</Button>}
           <p>训练来源：{templateSourceNodeId ? `模板输入 ← ${nodeLabels[templateSourceNodeId] ?? templateSourceNodeId}（优先使用此输入）` : String(draft.templatePath || '请填写下方模板图像路径或连接模板输入')}</p>
+          {(capturedTrainingImage || trainingSamples.length > 0) && <div className="shape-training-panel">
+            <p>样本训练：{effectiveTrainingSampleCount}/4 张。系统会保留达到出现比例的共同轮廓，过滤单张样本中的偶发特征；当前图像会自动参与训练。</p>
+            <Space wrap>
+              <Button size="small" disabled={!capturedTrainingImage || locked || effectiveTrainingSampleCount >= 4}
+                onClick={addCurrentTrainingSample}>加入当前图像为样本</Button>
+              {trainingSamples.length > 0 && <Button size="small" disabled={locked} onClick={() => setTrainingSamples([])}>清空额外样本</Button>}
+            </Space>
+          </div>}
+          {!hasLosslessTrainingImage && <Alert showIcon type="info" title="先获取训练图像" description={trainedModelData && trainedPreviewData ? '此模型只有旧版压缩预览。请重新获取原图后再训练，避免继续使用有损预览。' : '获取图像会锁定当前像素，训练和以后重新训练都会使用这份无损图像。'} />}
           {showCapturedTrainingImage && !capturedTrainingImage.trained && <p>当前图像尚未用于训练；测试搜索仍使用原有模型。点击“{trainedModelData ? '重新训练模型' : '训练模型'}”后使用当前图像。</p>}
           {legacyWorkflow
             ? <Alert showIcon type="info" title="旧模板图像兼容模式" description="本次运行使用 template 输入或模板路径；已保存的训练模型仍保留，训练后可切换到训练模型模式。" />
             : trainedModelData
-              ? <Alert showIcon type={trainingStale ? 'warning' : 'success'} title={trainingStale ? '训练参数已变化，需要重新训练' : draft.trainedModelData !== baseline.trainedModelData ? '模型已训练，待应用到工作流' : '模型已保存在此工作流'} description={trainingStale ? `已修改：${changedTrainingLabels}。重新训练后即可测试搜索。` : `模型尺寸 ${draft.trainedWidth ?? '—'} × ${draft.trainedHeight ?? '—'} px · 可直接测试搜索，满意后点击“应用”。`} />
+              ? <Alert showIcon type={trainingStale ? 'warning' : 'success'} title={trainingStale ? '训练参数已变化，需要重新训练' : draft.trainedModelData !== baseline.trainedModelData ? '模型已训练，待应用到工作流' : '模型已保存在此工作流'} description={trainingStale ? `已修改：${changedTrainingLabels}。重新训练后即可测试搜索。` : `样本 ${draft.trainedSampleCount ?? 1} 张 · 模型尺寸 ${draft.trainedWidth ?? '—'} × ${draft.trainedHeight ?? '—'} px · ${Number(draft.trainedFeaturePointCount ?? 0).toLocaleString()} 个边缘特征点 · ${draft.trainedContourCount ?? 0} 段轮廓 · 可直接测试搜索，满意后点击“应用”。`} />
               : <Alert showIcon type="info" title="尚未训练" description="先获取训练图像并设置模型区域，再训练形状模型。" />}
+          {Array.isArray(draft.trainedModelWarnings) && draft.trainedModelWarnings.length > 0 && <Alert showIcon type="warning" title="训练质量提示" description={(draft.trainedModelWarnings as string[]).join(' ')} />}
           {trainedModelData && !trainingStale && !legacyWorkflow && <Button onClick={() => void runPreview()}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}>下一步：测试搜索</Button>}
         </div>}
         {shapeMode === 'search' && <div className="shape-training-panel shape-search-panel">
           <strong>搜索与定位</strong>
-          <p>设置最低分数、目标数量和搜索区域，然后运行搜索。匹配分数为 0～1；区域留空时搜索整张场景图。</p>
+          <p>设置角度/尺度窗口、最低分数、局部形变容差、杂乱分阈值、目标数量和搜索区域，然后运行搜索。角度与尺度窗口会限制在模型训练覆盖内，调整它们无需重训；局部形变默认关闭，增大后可容忍边缘小幅移动，但会降低定位约束。匹配分数为 0～1，区域留空时搜索整张场景图。杂乱分只在训练时设置过“杂乱区域”后生效。</p>
           {matchReport?.success && typeof matchReport.summary.found === 'boolean' && <Alert showIcon
             type={matchStale ? 'info' : matchReport.summary.found ? 'success' : 'warning'}
             title={`${matchStale ? '上次搜索 · ' : ''}${matchReport.summary.found ? '已找到目标' : '未找到目标'}${matchStale ? ' · 当前参数待验证' : ''}`}
             description={matchReport.summary.found
               ? `数量 ${matchNumber('count', 'count', 0)} · 最佳分数 ${matchNumber('score', 'bestScore', 3)} · X ${matchNumber('x')} / Y ${matchNumber('y')} px · 角度 ${matchNumber('angle', 'matchedAngle')}°`
               : '请检查目标是否在搜索区域内、场景与模型是否一致，以及最小匹配分数设置。'} />}
-          {!legacyWorkflow && <p>模型覆盖：角度 ±{String(trainedSettings?.angleRangeDeg ?? draft.angleRangeDeg ?? 180)}° · 尺度 {100 - Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%～{100 + Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%
+          {!legacyWorkflow && <p>模型覆盖：角度 ±{String(trainedSettings?.trainingAngleRangeDeg ?? trainedSettings?.angleRangeDeg ?? draft.trainingAngleRangeDeg ?? 180)}° · 尺度 {Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0) > 0 || Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0) > 0
+            ? `X ${100 - Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}% · Y ${100 - Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%`
+            : `${100 - Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%～${100 + Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%`}
             <Button size="small" type="link" disabled={locked} onClick={() => changeShapeWorkspaceTab('training')}>调整模型范围</Button></p>}
           {draft.searchRoi && <Button size="small" onClick={() => changeParameter('searchRoi', undefined)} disabled={locked}>清除搜索区域（恢复全图搜索）</Button>}
           {!trainedModelData && !legacyWorkflow && <Alert showIcon type="warning" title="尚未训练模型" description="先建立模型，即可在当前窗口运行搜索；无需先应用或关闭窗口。" />}
@@ -650,7 +782,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           <Tooltip title={previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
             <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
               onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
-              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || referenceMismatch}>
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>

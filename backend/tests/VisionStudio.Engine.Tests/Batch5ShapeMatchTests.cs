@@ -157,6 +157,109 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task ShapeMatch_AnisotropicScale_RecoversIndependentHorizontalAndVerticalScale()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        const double scaleX = 1.12;
+        const double scaleY = 0.90;
+        const double angleDeg = 10;
+        const double targetX = 220;
+        const double targetY = 210;
+        var angle = angleDeg * Math.PI / 180;
+        var a = scaleX * Math.Cos(angle);
+        var b = scaleY * Math.Sin(angle);
+        var c = -scaleX * Math.Sin(angle);
+        var d = scaleY * Math.Cos(angle);
+        using (var matrix = new Mat(2, 3, MatType.CV_64FC1))
+        {
+            matrix.Set(0, 0, a); matrix.Set(0, 1, b);
+            matrix.Set(1, 0, c); matrix.Set(1, 1, d);
+            matrix.Set(0, 2, targetX - a * 60 - b * 60);
+            matrix.Set(1, 2, targetY - c * 60 - d * 60);
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+        }
+
+        var result = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"minScore":0.45,"angleRangeDeg":30,"angleStepDeg":2,"scaleToleranceXPercent":15,"scaleToleranceYPercent":15,"scaleStepPercent":2,"minArea":100}""");
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]), SummaryText(result));
+        Assert.InRange(result.Outputs["scaleX"].Require<double>("scaleX"), 1.08, 1.16);
+        Assert.InRange(result.Outputs["scaleY"].Require<double>("scaleY"), 0.86, 0.94);
+        Assert.InRange(result.Outputs["angle"].Require<double>("angle"), 8, 12);
+        using var expectedTransform = MatrixForAnisotropicPose(scaleX, scaleY, angleDeg, targetX, targetY);
+        var centroid = TemplateCentroidThrough(expectedTransform);
+        Assert.InRange(result.Outputs["x"].Require<double>("x"), centroid.X - 4, centroid.X + 4);
+        Assert.InRange(result.Outputs["y"].Require<double>("y"), centroid.Y - 4, centroid.Y + 4);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_ClutterRegion_ReturnsAndFiltersNativeClutterScore()
+    {
+        using var template = new Mat(160, 180, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(template, new Rect(20, 20, 30, 90), Scalar.All(255), -1);
+        Cv2.Rectangle(template, new Rect(20, 80, 70, 30), Scalar.All(255), -1);
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using var matrix = PasteMatrix(200, 200, 0);
+        Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.All(0));
+        Point Map(double x, double y) => new(
+            (int)Math.Round(matrix.At<double>(0, 0) * x + matrix.At<double>(0, 1) * y + matrix.At<double>(0, 2)),
+            (int)Math.Round(matrix.At<double>(1, 0) * x + matrix.At<double>(1, 1) * y + matrix.At<double>(1, 2)));
+        for (var x = 148; x <= 168; x += 5)
+            Cv2.Line(scene, Map(x, 22), Map(x, 138), Scalar.All(255), 2);
+        for (var y = 28; y <= 136; y += 8)
+            Cv2.Line(scene, Map(146, y), Map(169, y), Scalar.All(255), 2);
+
+        var parameters = JsonSerializer.Serialize(new
+        {
+            minScore = 0.4, angleRangeDeg = 15, angleStepDeg = 1, maxDeformationPx = 2,
+            clutterContrast = 5, maxClutterScore = 1,
+            clutterRoi = new { type = "Rectangle", x = 145, y = 20, width = 25, height = 120 },
+            minArea = 100
+        });
+        var result = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) }, parameters);
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]), SummaryText(result));
+        Assert.Equal(2, Convert.ToInt32(result.Summary["maxDeformationPx"]));
+        Assert.True(result.Outputs.TryGetValue("clutterScore", out var clutterValue));
+        var clutterScore = clutterValue!.Require<double>("clutterScore");
+        Assert.True(clutterScore > 0, SummaryText(result));
+        Assert.Equal(clutterScore, Convert.ToDouble(result.Summary["matchedClutterScore"]), 6);
+
+        var rejected = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            parameters.Replace("\"maxClutterScore\":1", "\"maxClutterScore\":0", StringComparison.Ordinal));
+        Assert.False(Convert.ToBoolean(rejected.Summary["found"]), SummaryText(rejected));
+    }
+
+    [Fact]
+    public async Task ShapeMatch_MaximumLocalDeformation_UsesNativeFixedAndScaledSearches()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(215, 205, 8))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        foreach (var scaleParameters in new[]
+        {
+            "",
+            ",\"scaleTolerancePercent\":10,\"scaleStepPercent\":2",
+            ",\"scaleToleranceXPercent\":10,\"scaleToleranceYPercent\":10,\"scaleStepPercent\":2"
+        })
+        {
+            var result = await Run(new ShapeMatchNode(),
+                new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+                $"{{\"minScore\":0.4,\"angleRangeDeg\":20,\"angleStepDeg\":2,\"maxDeformationPx\":2{scaleParameters},\"minArea\":100}}");
+
+            Assert.True(Convert.ToBoolean(result.Summary["found"]), SummaryText(result));
+            Assert.Equal(2, Convert.ToInt32(result.Summary["maxDeformationPx"]));
+            Assert.True(result.Outputs["score"].Require<double>("score") > 0.4);
+        }
+    }
+
+    [Fact]
     public async Task ShapeMatch_WrongShapeAndEmptyTemplate_ReturnImageOutputs()
     {
         using var template = BuildTemplate();
@@ -226,7 +329,7 @@ public sealed class Batch5ShapeMatchTests
             trainedWidth = trained.Summary["trainingWidth"], trainedHeight = trained.Summary["trainingHeight"],
             trainedOriginX = trained.Summary["trainingOriginX"], trainedOriginY = trained.Summary["trainingOriginY"],
             angleRangeDeg = 180, angleStepDeg = 2, trainingOriginMode = "centroid", trainingOriginX = 0, trainingOriginY = 0,
-            minScore = 0.5, minArea = 100
+            minScore = 0.5, minArea = 100, maxDeformationPx = 2
         });
         var serializedNode = JsonSerializer.Serialize(new NodeDefinition("n1", "match.shape", "Shape", null, Params(runtimeParameters)));
         var restoredNode = JsonSerializer.Deserialize<NodeDefinition>(serializedNode, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
@@ -236,11 +339,20 @@ public sealed class Batch5ShapeMatchTests
         var matched = await Run(new ShapeMatchNode(),
             new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, restoredParameters);
         Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));
+        Assert.Equal(2, Convert.ToInt32(matched.Summary["maxDeformationPx"]));
         Assert.Equal("workflow-asset", matched.Summary["modelSource"]);
         using var expectedTransform = PasteMatrix(165, 145, 20);
         var expectedPose = TemplateCentroidThrough(expectedTransform);
         Assert.InRange(matched.Outputs["x"].Require<double>("x"), expectedPose.X - 3, expectedPose.X + 3);
         Assert.InRange(matched.Outputs["y"].Require<double>("y"), expectedPose.Y - 3, expectedPose.Y + 3);
+
+        // A historical v2 fingerprint used angleRangeDeg and omitted pyramid depth and composite-vote settings.
+        var legacyV2Config = "shape-v2||auto|128|False|180|2|none|centroid|0|0|0|0|False|5";
+        var oldVersionParameters = restoredParameters.Replace(
+            $"\"trainedModelConfig\":\"{trained.Summary["trainingConfig"]}\"",
+            $"\"trainedModelConfig\":\"{legacyV2Config}\"", StringComparison.Ordinal);
+        var oldVersionMatch = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, oldVersionParameters);
+        Assert.True(Convert.ToBoolean(oldVersionMatch.Summary["found"]), SummaryText(oldVersionMatch));
 
         // Run-only acceptance thresholds may change without invalidating the trained model.
         var changedScore = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
@@ -256,6 +368,240 @@ public sealed class Batch5ShapeMatchTests
             await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
                 restoredParameters.Replace("\"trainingOriginX\":0", "\"trainingOriginX\":0,\"roi\":{\"type\":\"Rectangle\",\"x\":1,\"y\":1,\"width\":100,\"height\":100}", StringComparison.Ordinal)));
         Assert.Contains("Train the model again", staleRoi.Message);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_SearchAngleWindowCanNarrowWithoutRetraining()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(165, 145, 25, 1.1))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"trainingAngleRangeDeg":30,"angleStepDeg":2,"pyramidLevels":3,"scaleTolerancePercent":20,"scaleStepPercent":5,"minArea":100}""");
+        Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]));
+        Assert.Equal(3, Convert.ToInt32(trained.Summary["trainingPyramidLevels"]));
+        var modelData = Assert.IsType<string>(trained.Summary["trainingModelData"]);
+        var parameters = JsonSerializer.Serialize(new
+        {
+            modelMode = "trained", trainedModelData = modelData, trainedModelConfig = trained.Summary["trainingConfig"],
+            trainedWidth = trained.Summary["trainingWidth"], trainedHeight = trained.Summary["trainingHeight"],
+            trainedOriginX = trained.Summary["trainingOriginX"], trainedOriginY = trained.Summary["trainingOriginY"],
+            trainingAngleRangeDeg = 30, angleStepDeg = 2, pyramidLevels = 3, scaleTolerancePercent = 20, scaleStepPercent = 5,
+            trainingOriginMode = "centroid", trainingOriginX = 0, trainingOriginY = 0, minScore = 0.5, minArea = 100,
+            searchAngleStartDeg = -10, searchAngleEndDeg = 10, searchScaleMinPercent = 80, searchScaleMaxPercent = 120
+        });
+
+        var narrowSearch = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, parameters);
+        Assert.False(Convert.ToBoolean(narrowSearch.Summary["found"]), SummaryText(narrowSearch));
+        Assert.Equal(-10d, Convert.ToDouble(narrowSearch.Summary["searchAngleStartDeg"]), 5);
+        Assert.Equal(10d, Convert.ToDouble(narrowSearch.Summary["searchAngleEndDeg"]), 5);
+
+        var narrowScaleSearch = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+            parameters.Replace("\"searchAngleStartDeg\":-10", "\"searchAngleStartDeg\":-90", StringComparison.Ordinal)
+                .Replace("\"searchAngleEndDeg\":10", "\"searchAngleEndDeg\":90", StringComparison.Ordinal)
+                .Replace("\"searchScaleMinPercent\":80", "\"searchScaleMinPercent\":95", StringComparison.Ordinal)
+                .Replace("\"searchScaleMaxPercent\":120", "\"searchScaleMaxPercent\":105", StringComparison.Ordinal));
+        Assert.False(Convert.ToBoolean(narrowScaleSearch.Summary["found"]), SummaryText(narrowScaleSearch));
+
+        var wideSearch = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+            parameters.Replace("\"searchAngleStartDeg\":-10", "\"searchAngleStartDeg\":-90", StringComparison.Ordinal)
+                .Replace("\"searchAngleEndDeg\":10", "\"searchAngleEndDeg\":90", StringComparison.Ordinal));
+        Assert.True(Convert.ToBoolean(wideSearch.Summary["found"]), SummaryText(wideSearch));
+        Assert.Equal(30d, Convert.ToDouble(wideSearch.Summary["trainingAngleCoverageDeg"]), 5);
+        Assert.Equal(80d, Convert.ToDouble(wideSearch.Summary["searchScaleMinPercent"]), 5);
+        Assert.Equal(120d, Convert.ToDouble(wideSearch.Summary["searchScaleMaxPercent"]), 5);
+
+        var staleTrainingCoverage = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                parameters.Replace("\"trainingAngleRangeDeg\":30", "\"trainingAngleRangeDeg\":31", StringComparison.Ordinal)));
+        Assert.Contains("Train the model again", staleTrainingCoverage.Message);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_CombinedTrainingModelSet_MergesAndDeduplicatesCandidates()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(165, 145, 20))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"trainingAngleRangeDeg":30,"angleStepDeg":2,"minArea":100}""");
+        var modelData = Assert.IsType<string>(trained.Summary["trainingModelData"]);
+        var variant = new
+        {
+            data = modelData,
+            width = Convert.ToInt32(trained.Summary["trainingWidth"]),
+            height = Convert.ToInt32(trained.Summary["trainingHeight"]),
+            originX = Convert.ToDouble(trained.Summary["trainingOriginX"]),
+            originY = Convert.ToDouble(trained.Summary["trainingOriginY"])
+        };
+        var secondTrained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            JsonSerializer.Serialize(new { modelMode = "trained", trainingMode = true, trainingAngleRangeDeg = 30, angleStepDeg = 2, minArea = 100,
+                trainingOriginOverrideX = variant.originX, trainingOriginOverrideY = variant.originY }));
+        Assert.Equal(variant.originX, Convert.ToDouble(secondTrained.Summary["trainingOriginX"]));
+        Assert.Equal(variant.originY, Convert.ToDouble(secondTrained.Summary["trainingOriginY"]));
+        Assert.Equal(trained.Summary["trainingConfig"], secondTrained.Summary["trainingConfig"]);
+        var secondVariant = new
+        {
+            data = Assert.IsType<string>(secondTrained.Summary["trainingModelData"]), variant.width, variant.height,
+            originX = Convert.ToDouble(secondTrained.Summary["trainingOriginX"]), originY = Convert.ToDouble(secondTrained.Summary["trainingOriginY"])
+        };
+        var modelSet = "shape-model-set-v1:" + JsonSerializer.Serialize(new { version = 1, models = new[] { variant, secondVariant } });
+        var parameters = JsonSerializer.Serialize(new
+        {
+            modelMode = "trained", trainedModelData = modelSet, trainedModelConfig = trained.Summary["trainingConfig"],
+            trainedWidth = variant.width, trainedHeight = variant.height, trainedOriginX = variant.originX, trainedOriginY = variant.originY,
+            trainingAngleRangeDeg = 30, angleStepDeg = 2, trainingOriginMode = "centroid", trainingOriginX = 0, trainingOriginY = 0,
+            minScore = 0.5, minArea = 100, maxTargets = 5
+        });
+
+        var matched = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, parameters);
+
+        Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));
+        Assert.Equal(2, Convert.ToInt32(matched.Summary["modelVariantCount"]));
+        Assert.Equal("workflow-asset-set", matched.Summary["modelSource"]);
+        Assert.Equal(1, Convert.ToInt32(matched.Outputs["count"].Require<long>("count")));
+        using var expectedTransform = PasteMatrix(165, 145, 20);
+        var expectedPose = TemplateCentroidThrough(expectedTransform);
+        Assert.InRange(matched.Outputs["x"].Require<double>("x"), expectedPose.X - 3, expectedPose.X + 3);
+        Assert.InRange(matched.Outputs["y"].Require<double>("y"), expectedPose.Y - 3, expectedPose.Y + 3);
+    }
+
+    [Fact]
+    public async Task ShapeMatch_CompositeTraining_FusesFrequentContoursAndAlignsSamplePoses()
+    {
+        using var template = BuildTemplate();
+        using var trainingInput = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        var samples = new List<Mat>();
+        try
+        {
+            foreach (var (centerX, centerY, angle) in new[] { (150d, 150d, 0d), (175d, 125d, 20d), (130d, 170d, -15d) })
+            {
+                var sample = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+                using var matrix = PasteMatrix(centerX, centerY, angle);
+                Cv2.WarpAffine(template, sample, matrix, sample.Size(), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.All(0));
+                samples.Add(sample);
+            }
+            // A feature found in only one sample should be filtered by the default 75% vote threshold.
+            Cv2.Circle(samples[1], new Point(270, 260), 9, Scalar.All(255), -1);
+
+            var sampleModels = new List<object>();
+            foreach (var sample in samples)
+            {
+                Cv2.ImEncode(".png", sample, out var encoded);
+                var trained = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(trainingInput) },
+                    JsonSerializer.Serialize(new
+                    {
+                        modelMode = "trained", trainingMode = true, trainingImageData = Convert.ToBase64String(encoded),
+                        trainingAngleRangeDeg = 45, angleStepDeg = 2, trainingMinSampleFraction = .75,
+                        trainingFeatureTolerancePx = 2, trainingOriginMode = "centroid", minContrast = 5
+                    }));
+                Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]), SummaryText(trained));
+                sampleModels.Add(new
+                {
+                    data = Assert.IsType<string>(trained.Summary["trainingModelData"]),
+                    width = Convert.ToInt32(trained.Summary["trainingWidth"]), height = Convert.ToInt32(trained.Summary["trainingHeight"]),
+                    originX = Convert.ToDouble(trained.Summary["trainingOriginX"]), originY = Convert.ToDouble(trained.Summary["trainingOriginY"]),
+                    sourceOriginX = Convert.ToDouble(trained.Summary["trainingOriginImageX"]), sourceOriginY = Convert.ToDouble(trained.Summary["trainingOriginImageY"])
+                });
+            }
+
+            var modelSet = "shape-model-set-v1:" + JsonSerializer.Serialize(new { version = 1, models = sampleModels });
+            var sourceImages = samples.Select(sample =>
+            {
+                Cv2.ImEncode(".png", sample, out var encoded);
+                return Convert.ToBase64String(encoded);
+            }).ToArray();
+            var composite = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(trainingInput) },
+                JsonSerializer.Serialize(new
+                {
+                    modelMode = "trained", trainingMode = true, trainingCombineModelData = modelSet,
+                    trainingCombineSourceImages = JsonSerializer.Serialize(sourceImages),
+                    trainingAngleRangeDeg = 45, angleStepDeg = 2, trainingMinSampleFraction = .75,
+                    trainingFeatureTolerancePx = 2, trainingOriginMode = "centroid", minContrast = 5
+                }));
+
+            Assert.True(Convert.ToBoolean(composite.Summary["trainingSucceeded"]), SummaryText(composite));
+            Assert.Equal("composite-shape-model", composite.Summary["trainingSource"]);
+            Assert.Equal(3, Convert.ToInt32(composite.Summary["trainingSampleCount"]));
+            Assert.Equal(3, Convert.ToInt32(composite.Summary["trainingMinimumSampleVotes"]));
+            Assert.Equal(3, Assert.IsType<double[]>(composite.Summary["trainingSampleAlignmentScores"]).Length);
+            var compositeData = Assert.IsType<string>(composite.Summary["trainingModelData"]);
+            Assert.False(compositeData.StartsWith("shape-model-set-v1:", StringComparison.Ordinal));
+            var contours = Assert.IsType<VisionOverlayPoint[][]>(composite.Summary["trainingContours"]);
+            Assert.NotEmpty(contours);
+            Assert.DoesNotContain(contours.SelectMany(contour => contour), point => point.X > 240 && point.Y > 230);
+
+            using var runtimeScene = (Mat)samples[2].Clone();
+            var matched = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(runtimeScene) },
+                JsonSerializer.Serialize(new
+                {
+                    modelMode = "trained", trainedModelData = compositeData, trainedModelConfig = composite.Summary["trainingConfig"],
+                    trainedWidth = composite.Summary["trainingWidth"], trainedHeight = composite.Summary["trainingHeight"],
+                    trainedOriginX = composite.Summary["trainingOriginX"], trainedOriginY = composite.Summary["trainingOriginY"],
+                    trainedPoseOffsetX = composite.Summary["trainingPoseOffsetX"], trainedPoseOffsetY = composite.Summary["trainingPoseOffsetY"],
+                    trainingAngleRangeDeg = 45, angleStepDeg = 2, trainingMinSampleFraction = .75, trainingFeatureTolerancePx = 2,
+                    trainingOriginMode = "centroid", minContrast = 5, minScore = .4, minArea = 100,
+                    searchAngleStartDeg = -45, searchAngleEndDeg = 45
+                }));
+            Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));
+            Assert.Equal("workflow-asset", matched.Summary["modelSource"]);
+            using var expectedTransform = PasteMatrix(130, 170, -15);
+            var expectedPose = TemplateCentroidThrough(expectedTransform);
+            Assert.InRange(matched.Outputs["x"].Require<double>("x"), expectedPose.X - 4, expectedPose.X + 4);
+            Assert.InRange(matched.Outputs["y"].Require<double>("y"), expectedPose.Y - 4, expectedPose.Y + 4);
+        }
+        finally
+        {
+            foreach (var sample in samples) sample.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ShapeMatch_MultiSampleTraining_TransformsModelRegionWithReferencePose()
+    {
+        using var template = BuildTemplate();
+        using var firstScene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using var secondScene = new Mat(300, 300, MatType.CV_8UC1, Scalar.All(0));
+        using (var firstTransform = PasteMatrix(115, 115, 0))
+            Cv2.WarpAffine(template, firstScene, firstTransform, firstScene.Size(), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.All(0));
+        using (var secondTransform = PasteMatrix(180, 145, 25))
+            Cv2.WarpAffine(template, secondScene, secondTransform, secondScene.Size(), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.All(0));
+        Cv2.ImEncode(".png", firstScene, out var firstImageData);
+        Cv2.ImEncode(".png", secondScene, out var secondImageData);
+        var region = new { type = "Rectangle", x = 65, y = 65, width = 100, height = 110 };
+        var baseParameters = new
+        {
+            modelMode = "trained", trainingMode = true, roi = region,
+            trainingAngleRangeDeg = 45, angleStepDeg = 2, trainingOriginMode = "centroid", minContrast = 5
+        };
+        var first = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(firstScene) },
+            JsonSerializer.Serialize(new { baseParameters.modelMode, baseParameters.trainingMode, trainingImageData = Convert.ToBase64String(firstImageData),
+                baseParameters.roi, baseParameters.trainingAngleRangeDeg, baseParameters.angleStepDeg, baseParameters.trainingOriginMode, baseParameters.minContrast }));
+        Assert.True(Convert.ToBoolean(first.Summary["trainingSucceeded"]), SummaryText(first));
+
+        var second = await Run(new ShapeMatchNode(), new Dictionary<string, VisionValue> { ["image"] = Image(secondScene) },
+            JsonSerializer.Serialize(new
+            {
+                baseParameters.modelMode, baseParameters.trainingMode, trainingImageData = Convert.ToBase64String(secondImageData),
+                baseParameters.roi, baseParameters.trainingAngleRangeDeg, baseParameters.angleStepDeg, baseParameters.trainingOriginMode, baseParameters.minContrast,
+                trainingReferenceModelData = first.Summary["trainingModelData"],
+                trainingReferenceOriginImageX = first.Summary["trainingOriginImageX"],
+                trainingReferenceOriginImageY = first.Summary["trainingOriginImageY"]
+            }));
+
+        Assert.True(Convert.ToBoolean(second.Summary["trainingSucceeded"]), SummaryText(second));
+        Assert.True(Convert.ToDouble(second.Summary["trainingRegionAlignmentScore"]) > .8, SummaryText(second));
+        using var expectedTransform = PasteMatrix(180, 145, 25);
+        var expectedOrigin = TemplateCentroidThrough(expectedTransform);
+        Assert.InRange(Convert.ToDouble(second.Summary["trainingOriginImageX"]), expectedOrigin.X - 3, expectedOrigin.X + 3);
+        Assert.InRange(Convert.ToDouble(second.Summary["trainingOriginImageY"]), expectedOrigin.Y - 3, expectedOrigin.Y + 3);
     }
 
     [Fact]
@@ -312,6 +658,41 @@ public sealed class Batch5ShapeMatchTests
             Assert.NotEmpty((string)trained.Summary["trainingPreviewImage"]!);
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task ShapeMatch_TrainingKeepsGrayModelWhenOriginThresholdHasNoContour()
+    {
+        using var template = new Mat(120, 120, MatType.CV_8UC1, Scalar.All(50));
+        Cv2.Rectangle(template, new Rect(20, 20, 30, 90), Scalar.All(100), -1);
+        Cv2.Rectangle(template, new Rect(20, 80, 70, 30), Scalar.All(100), -1);
+        using var scene = new Mat(240, 240, MatType.CV_8UC1, Scalar.All(0));
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"binarize":"fixed","threshold":100,"angleStepDeg":2}""");
+
+        Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]), SummaryText(trained));
+        Assert.Equal(59.5, Convert.ToDouble(trained.Summary["trainingOriginX"]));
+        Assert.Equal(59.5, Convert.ToDouble(trained.Summary["trainingOriginY"]));
+        Assert.True(Convert.ToInt32(trained.Summary["trainingFeaturePointCount"]) > 0);
+        Assert.DoesNotContain(trained.Overlays!, overlay => overlay.Type == VisionOverlayType.Polygon && overlay.Id.StartsWith("shape-training-contour-", StringComparison.Ordinal));
+        Assert.Contains(trained.Overlays!, overlay => overlay.Type == VisionOverlayType.Polyline && overlay.Id.StartsWith("shape-training-contour-", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ShapeMatch_TrainingWarnsWhenNativeFeaturesAreRotationallyAmbiguous()
+    {
+        using var template = new Mat(80, 80, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Circle(template, new Point(40, 40), 20, Scalar.All(255), -1);
+        using var scene = new Mat(120, 120, MatType.CV_8UC1, Scalar.All(0));
+        var trained = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"modelMode":"trained","trainingMode":true,"angleStepDeg":2}""");
+
+        Assert.True(Convert.ToBoolean(trained.Summary["trainingSucceeded"]), SummaryText(trained));
+        Assert.Equal(90, Convert.ToInt32(trained.Summary["trainingSymmetryPeriodDeg"]));
+        var warnings = Assert.IsType<string[]>(trained.Summary["trainingWarnings"]);
+        Assert.Contains(warnings, warning => warning.Contains("周期性歧义", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -473,9 +854,9 @@ public sealed class Batch5ShapeMatchTests
     }
 
     /// <summary>把 120×120 模板绕其中心旋转 angleDeg 后平移到 (cx,cy)。</summary>
-    private static Mat PasteMatrix(double cx, double cy, double angleDeg)
+    private static Mat PasteMatrix(double cx, double cy, double angleDeg, double scale = 1.0)
     {
-        var matrix = Cv2.GetRotationMatrix2D(new Point2f(60, 60), angleDeg, 1.0);
+        var matrix = Cv2.GetRotationMatrix2D(new Point2f(60, 60), angleDeg, scale);
         matrix.Set(0, 2, matrix.At<double>(0, 2) + cx - 60);
         matrix.Set(1, 2, matrix.At<double>(1, 2) + cy - 60);
         return matrix;
@@ -486,6 +867,21 @@ public sealed class Batch5ShapeMatchTests
         var matrix = Cv2.GetRotationMatrix2D(new Point2f(60, 60), 0, scale);
         matrix.Set(0, 2, matrix.At<double>(0, 2) + cx - 60);
         matrix.Set(1, 2, matrix.At<double>(1, 2) + cy - 60);
+        return matrix;
+    }
+
+    private static Mat MatrixForAnisotropicPose(double scaleX, double scaleY, double angleDeg, double targetX, double targetY)
+    {
+        var angle = angleDeg * Math.PI / 180;
+        var a = scaleX * Math.Cos(angle);
+        var b = scaleY * Math.Sin(angle);
+        var c = -scaleX * Math.Sin(angle);
+        var d = scaleY * Math.Cos(angle);
+        var matrix = new Mat(2, 3, MatType.CV_64FC1);
+        matrix.Set(0, 0, a); matrix.Set(0, 1, b);
+        matrix.Set(1, 0, c); matrix.Set(1, 1, d);
+        matrix.Set(0, 2, targetX - a * 60 - b * 60);
+        matrix.Set(1, 2, targetY - c * 60 - d * 60);
         return matrix;
     }
 

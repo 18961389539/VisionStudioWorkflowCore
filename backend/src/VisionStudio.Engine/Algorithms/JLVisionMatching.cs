@@ -1,6 +1,7 @@
 using JLVisionLib;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -11,6 +12,61 @@ namespace VisionStudio.Engine.Algorithms;
 
 internal static class JLVisionMatching
 {
+    private const string ShapeModelSetPrefix = "shape-model-set-v1:";
+
+    private sealed record ShapeModelSetItem(string Data, int Width, int Height, double OriginX, double OriginY,
+        double? SourceOriginX = null, double? SourceOriginY = null);
+    private sealed record ShapeModelSetEnvelope(int Version, ShapeModelSetItem[] Models);
+    private readonly record struct ShapeFeaturePoint(double X, double Y);
+    private readonly record struct TrainingPoseAlignment(double X, double Y, double Angle, double ScaleX, double ScaleY, double Score);
+    private sealed record ConsensusContour(ShapeFeaturePoint[] Points, double Support);
+    private sealed class ShapeFeatureSpatialIndex
+    {
+        private readonly double _cellSize;
+        private readonly Dictionary<(int X, int Y), List<ShapeFeaturePoint>> _cells = [];
+
+        public ShapeFeatureSpatialIndex(IEnumerable<ShapeFeaturePoint> points, double cellSize)
+        {
+            _cellSize = cellSize;
+            foreach (var point in points)
+            {
+                var key = Cell(point.X, point.Y);
+                if (!_cells.TryGetValue(key, out var cell)) _cells[key] = cell = [];
+                cell.Add(point);
+            }
+        }
+
+        public bool TryNearest(ShapeFeaturePoint query, double maxDistance, out ShapeFeaturePoint nearest)
+        {
+            nearest = default;
+            var key = Cell(query.X, query.Y);
+            var maxDistanceSquared = maxDistance * maxDistance;
+            var bestDistanceSquared = maxDistanceSquared;
+            var found = false;
+            for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                    if (_cells.TryGetValue((key.X + dx, key.Y + dy), out var cell))
+                        foreach (var point in cell)
+                        {
+                            var deltaX = point.X - query.X;
+                            var deltaY = point.Y - query.Y;
+                            var distanceSquared = deltaX * deltaX + deltaY * deltaY;
+                            if (distanceSquared > bestDistanceSquared) continue;
+                            bestDistanceSquared = distanceSquared;
+                            nearest = point;
+                            found = true;
+                        }
+            return found;
+        }
+
+        private (int X, int Y) Cell(double x, double y) => ((int)Math.Floor(x / _cellSize), (int)Math.Floor(y / _cellSize));
+    }
+    private readonly record struct ShapeMatchCandidate(double X, double Y, double Angle, double ScaleX, double ScaleY, double Score,
+        int Width, int Height, double OriginX, double OriginY, int Index, double? ClutterScore = null)
+    {
+        public double Scale => Math.Sqrt(ScaleX * ScaleY);
+    }
+
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, bool shape, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -59,43 +115,129 @@ internal static class JLVisionMatching
             using var templateChannels = templateColor.CountChannels();
             using var template = templateChannels.I == 1 ? templateColor.CopyImage() : templateColor.Rgb1ToGray();
             var range = Math.Clamp(node.GetDouble("angleRangeDeg", shape ? 180 : 0), 0, 180) * Math.PI / 180;
+            var trainingRange = Math.Clamp(node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)), 0, 180) * Math.PI / 180;
+            var shapePyramidLevels = shape ? node.GetInt("pyramidLevels", 0) : 0;
+            if (shapePyramidLevels is < 0 or > 8) throw new InvalidOperationException("pyramidLevels must be between 0 (automatic) and 8.");
+            var searchStart = -range;
+            var searchEnd = range;
+            if (shape && savedModel.Length > 0)
+            {
+                var requestedStart = Math.Clamp(node.GetDouble("searchAngleStartDeg", -180), -180, 180) * Math.PI / 180;
+                var requestedEnd = Math.Clamp(node.GetDouble("searchAngleEndDeg", 180), -180, 180) * Math.PI / 180;
+                searchStart = Math.Max(-trainingRange, requestedStart);
+                searchEnd = Math.Min(trainingRange, requestedEnd);
+                if (requestedStart > requestedEnd || searchStart > searchEnd)
+                    throw new InvalidOperationException($"Search angle window [{requestedStart * 180 / Math.PI:0.#}°, {requestedEnd * 180 / Math.PI:0.#}°] does not overlap the model training coverage of ±{trainingRange * 180 / Math.PI:0.#}°.");
+            }
             var step = Math.Clamp(node.GetDouble("angleStepDeg", shape ? 1 : 5), .1, 30) * Math.PI / 180;
             var scaleTolerance = shape ? Math.Clamp(node.GetDouble("scaleTolerancePercent", 0), 0, 50) / 100d : 0d;
+            var scaleToleranceX = shape ? Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50) / 100d : 0d;
+            var scaleToleranceY = shape ? Math.Clamp(node.GetDouble("scaleToleranceYPercent", 0), 0, 50) / 100d : 0d;
+            var anisotropicScale = scaleToleranceX > 0 || scaleToleranceY > 0;
             var scaleMin = 1 - scaleTolerance;
             var scaleMax = 1 + scaleTolerance;
+            var trainingScaleXMin = anisotropicScale ? 1 - scaleToleranceX : scaleMin;
+            var trainingScaleXMax = anisotropicScale ? 1 + scaleToleranceX : scaleMax;
+            var trainingScaleYMin = anisotropicScale ? 1 - scaleToleranceY : scaleMin;
+            var trainingScaleYMax = anisotropicScale ? 1 + scaleToleranceY : scaleMax;
+            var searchScaleXMin = trainingScaleXMin;
+            var searchScaleXMax = trainingScaleXMax;
+            var searchScaleYMin = trainingScaleYMin;
+            var searchScaleYMax = trainingScaleYMax;
+            var searchScaleMin = Math.Min(searchScaleXMin, searchScaleYMin);
+            var searchScaleMax = Math.Max(searchScaleXMax, searchScaleYMax);
+            if (shape && savedModel.Length > 0)
+            {
+                var requestedScaleMin = Math.Clamp(node.GetDouble("searchScaleMinPercent", 50), 50, 150) / 100d;
+                var requestedScaleMax = Math.Clamp(node.GetDouble("searchScaleMaxPercent", 150), 50, 150) / 100d;
+                searchScaleXMin = Math.Max(trainingScaleXMin, requestedScaleMin);
+                searchScaleXMax = Math.Min(trainingScaleXMax, requestedScaleMax);
+                searchScaleYMin = Math.Max(trainingScaleYMin, requestedScaleMin);
+                searchScaleYMax = Math.Min(trainingScaleYMax, requestedScaleMax);
+                if (requestedScaleMin > requestedScaleMax || searchScaleXMin > searchScaleXMax || searchScaleYMin > searchScaleYMax)
+                    throw new InvalidOperationException($"Search scale window [{requestedScaleMin * 100:0.#}%, {requestedScaleMax * 100:0.#}%] does not overlap the model training X [{trainingScaleXMin * 100:0.#}%, {trainingScaleXMax * 100:0.#}%] and Y [{trainingScaleYMin * 100:0.#}%, {trainingScaleYMax * 100:0.#}%] coverage.");
+                searchScaleMin = Math.Min(searchScaleXMin, searchScaleYMin);
+                searchScaleMax = Math.Max(searchScaleXMax, searchScaleYMax);
+            }
             var scaleStep = shape ? Math.Clamp(node.GetDouble("scaleStepPercent", 1), .1, 10) / 100d : 0d;
+            var clutterRoi = shape ? node.GetRoi("clutterRoi") : null;
+            var clutterEnabled = clutterRoi is not null;
             var ignorePolarity = shape && node.GetBool("ignorePolarity", false);
             var minContrast = shape ? Math.Clamp(node.GetInt("minContrast", 5), 1, 255) : 5;
+            var clutterContrast = shape ? Math.Clamp(node.GetInt("clutterContrast", minContrast), 1, 255) : 5;
+            if (clutterEnabled && clutterContrast < minContrast)
+                throw new InvalidOperationException("Clutter Contrast must be at least the Minimum Feature Contrast used to train the model.");
             var minScore = Math.Clamp(node.GetDouble("minScore", shape ? .6 : .5), 0, 1);
             var method = node.GetString("method", "ccoeff-normed").Trim().ToLowerInvariant();
             if (!shape && method is not ("ccoeff-normed" or "sqdiff-normed")) throw new InvalidOperationException($"Unsupported template matching method '{method}'.");
             var squaredDifference = !shape && method == "sqdiff-normed";
             var maximum = shape ? Math.Clamp(node.GetInt("maxTargets", 5), 1, 100) : squaredDifference ? 100 : 1;
             var searchRoi = shape ? node.GetRoi("searchRoi") : null;
+            var maxClutterScore = Math.Clamp(node.GetDouble("maxClutterScore", .2), 0, 1);
+            var maxDeformationPx = shape ? Math.Clamp(node.GetInt("maxDeformationPx", 0), 0, 32) : 0;
             var originX = (templateBuffer.Width - 1) / 2d; var originY = (templateBuffer.Height - 1) / 2d;
             var minArea = node.GetDouble("minArea", 200);
             var templateSource = shape && savedModel.Length > 0 ? "trained-model" : fromPort ? "input-port" : "file";
             var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0) };
-            if (shape) outputs["scale"] = VisionValue.Double(1);
+            if (shape)
+            {
+                outputs["scale"] = VisionValue.Double(1);
+                outputs["scaleX"] = VisionValue.Double(1);
+                outputs["scaleY"] = VisionValue.Double(1);
+                if (clutterEnabled) outputs["clutterScore"] = VisionValue.Double(0);
+            }
             var summary = new Dictionary<string, object?> { ["found"] = false, ["bestScore"] = 0d, ["score"] = 0d, ["templateSource"] = templateSource, ["algorithmBackend"] = "JLVision", ["angleRangeDeg"] = range * 180 / Math.PI, ["angleStepDeg"] = step * 180 / Math.PI };
             if (shape)
             {
                 summary["scaleTolerancePercent"] = scaleTolerance * 100;
+                summary["scaleToleranceXPercent"] = scaleToleranceX * 100;
+                summary["scaleToleranceYPercent"] = scaleToleranceY * 100;
                 summary["ignorePolarity"] = ignorePolarity;
+                summary["clutterEnabled"] = clutterEnabled;
+                if (clutterEnabled) summary["maxClutterScore"] = maxClutterScore;
+                summary["maxDeformationPx"] = maxDeformationPx;
+                summary["searchAngleStartDeg"] = searchStart * 180 / Math.PI;
+                summary["searchAngleEndDeg"] = searchEnd * 180 / Math.PI;
+                summary["searchScaleMinPercent"] = searchScaleMin * 100;
+                summary["searchScaleMaxPercent"] = searchScaleMax * 100;
+                summary["searchScaleXMinPercent"] = searchScaleXMin * 100;
+                summary["searchScaleXMaxPercent"] = searchScaleXMax * 100;
+                summary["searchScaleYMinPercent"] = searchScaleYMin * 100;
+                summary["searchScaleYMaxPercent"] = searchScaleYMax * 100;
+                if (savedModel.Length > 0)
+                {
+                    summary["trainingAngleCoverageDeg"] = trainingRange * 180 / Math.PI;
+                    summary["trainingScaleMinPercent"] = Math.Min(trainingScaleXMin, trainingScaleYMin) * 100;
+                    summary["trainingScaleMaxPercent"] = Math.Max(trainingScaleXMax, trainingScaleYMax) * 100;
+                    summary["trainingScaleXMinPercent"] = trainingScaleXMin * 100;
+                    summary["trainingScaleXMaxPercent"] = trainingScaleXMax * 100;
+                    summary["trainingScaleYMinPercent"] = trainingScaleYMin * 100;
+                    summary["trainingScaleYMaxPercent"] = trainingScaleYMax * 100;
+                }
             }
             var overlays = new List<VisionOverlay>();
             var detections = new List<VisionDetection>();
+            var modelSet = shape ? DeserializeShapeModelSet(savedModel) : null;
+            if (clutterEnabled && modelSet is { Models.Length: > 0 })
+                throw new InvalidOperationException("Clutter scoring requires one fused native shape model; retrain this legacy model set as a composite model first.");
             var templateBox = new Rect(0, 0, templateBuffer.Width, templateBuffer.Height);
             if (shape && savedModel.Length > 0)
             {
                 templateBox = new Rect(0, 0, (int)node.GetInt("trainedWidth", 1), (int)node.GetInt("trainedHeight", 1));
                 originX = node.GetDouble("trainedOriginX", 0);
                 originY = node.GetDouble("trainedOriginY", 0);
+                if (modelSet is { Models.Length: > 0 })
+                {
+                    templateBox = new Rect(0, 0, modelSet.Models[0].Width, modelSet.Models[0].Height);
+                    originX = modelSet.Models[0].OriginX;
+                    originY = modelSet.Models[0].OriginY;
+                    summary["modelVariantCount"] = modelSet.Models.Length;
+                }
             }
             var searchOffsetX = 0;
             var searchOffsetY = 0;
             var searchMatchLimit = maximum;
-            JlTuple rows, cols, angles, scores, scales;
+            if (shape && savedModel.Length > 0) searchMatchLimit = Math.Min(1000, Math.Max(searchMatchLimit, maximum * 4));
             if (searchRoi is not null)
             {
                 var searchBounds = RoiBounds(searchRoi);
@@ -113,7 +255,7 @@ internal static class JLVisionMatching
                 // Search regions constrain candidate origins; a margin keeps the full trained contour
                 // available when a target lies near the region boundary.
             var radius = Math.Sqrt((double)templateBox.Width * templateBox.Width + (double)templateBox.Height * templateBox.Height);
-                var margin = (int)Math.Ceiling(radius * scaleMax) + 2;
+                var margin = (int)Math.Ceiling(radius * searchScaleMax) + 2;
                 var expanded = new Rect(clippedSearch.X - margin, clippedSearch.Y - margin,
                     clippedSearch.Width + margin * 2, clippedSearch.Height + margin * 2) & imageBounds;
                 using var sceneGray = JLVisionImages.ToMat(gray);
@@ -126,7 +268,71 @@ internal static class JLVisionMatching
                 summary["searchWindow"] = new { x = expanded.X, y = expanded.Y, width = expanded.Width, height = expanded.Height };
             }
             var matchingScene = searchScene ?? gray;
-            if (shape)
+            var matchedCandidates = new List<ShapeMatchCandidate>();
+            if (modelSet is { Models.Length: > 0 })
+            {
+                var cacheHits = 0;
+                for (var modelIndex = 0; modelIndex < modelSet.Models.Length; modelIndex++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var item = modelSet.Models[modelIndex];
+                    byte[] modelBytes;
+                    try { modelBytes = Convert.FromBase64String(item.Data); }
+                    catch (FormatException ex) { throw new InvalidOperationException($"Training sample {modelIndex + 1} contains invalid model data.", ex); }
+                    var modelKey = "trained:" + Convert.ToHexString(SHA256.HashData(modelBytes));
+                    using var lease = JLVisionModelCache.Acquire(modelKey, () =>
+                    {
+                        var loaded = new JlShapeModel();
+                        try { loaded.DeserializeShapeModel(modelBytes); return loaded; }
+                        catch { loaded.Dispose(); throw; }
+                    });
+                    cacheHits += lease.Hit ? 1 : 0;
+                    var model = (JlShapeModel)lease.Model;
+                    JlTuple rows, cols, angles, scores, scalesX, scalesY;
+                    if (anisotropicScale)
+                    {
+                        if (maxDeformationPx > 0)
+                            FindAnisoShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
+                                searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax, minScore, maxClutterScore,
+                                searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+                        else model.FindAnisoShapeModel(matchingScene, searchStart, searchEnd - searchStart,
+                                searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax,
+                                minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8,
+                                out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+                    }
+                    else if (scaleTolerance > 0)
+                    {
+                        if (maxDeformationPx > 0)
+                            FindScaledShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
+                                searchScaleMin, searchScaleMax, minScore, maxClutterScore, searchMatchLimit,
+                                shapePyramidLevels, maxDeformationPx, clutterEnabled, out rows, out cols,
+                                out angles, out scalesX, out scores);
+                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+                        scalesY = new JlTuple(scalesX);
+                    }
+                    else
+                    {
+                        if (maxDeformationPx > 0)
+                            FindShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart, minScore,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                out rows, out cols, out angles, out scores);
+                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scores);
+                        scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                        scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                    }
+                    using (rows) using (cols) using (angles) using (scores) using (scalesX) using (scalesY)
+                    {
+                        for (var index = 0; index < scores.Length; index++)
+                            matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scalesX[index].D, scalesY[index].D, scores[index].D,
+                                item.Width, item.Height, item.OriginX, item.OriginY, modelIndex * searchMatchLimit + index));
+                    }
+                }
+                summary["modelCacheHit"] = cacheHits == modelSet.Models.Length;
+                summary["modelCacheHits"] = cacheHits;
+                summary["modelSource"] = "workflow-asset-set";
+            }
+            else if (shape)
             {
                 JLVisionModelCache.Lease? shapeLease = null;
                 JlShapeModel model;
@@ -157,37 +363,84 @@ internal static class JLVisionMatching
                     var moments = JLVisionOperators.Moments(bestContour);
                     originX = moments.M10 / moments.M00; originY = moments.M01 / moments.M00;
                     templateBox = JLVisionOperators.BoundingRect(bestContour);
-                    shapeLease = JLVisionModelCache.Acquire(Key(templateBuffer, true, range, step, originX, originY, 0, scaleMin, scaleMax, scaleStep, ignorePolarity, minContrast), () =>
+                    shapeLease = JLVisionModelCache.Acquire(Key(templateBuffer, true, range, step, originX, originY, shapePyramidLevels, scaleMin, scaleMax, scaleStep, ignorePolarity, minContrast,
+                        trainingScaleXMin, trainingScaleXMax, trainingScaleYMin, trainingScaleYMax,
+                        clutterEnabled ? $"{RoiFingerprint(clutterRoi)}:{clutterContrast}" : string.Empty), () =>
                     {
                         var created = new JlShapeModel();
                         try
                         {
-                            using var levels = new JlTuple("auto"); using var delta = new JlTuple(step); using var optimize = new JlTuple("auto"); using var contrast = new JlTuple("auto"); using var minimum = new JlTuple(minContrast);
+                            using var levels = new JlTuple(shapePyramidLevels);
+                            using var delta = new JlTuple(step); using var optimize = new JlTuple("auto"); using var contrast = new JlTuple("auto"); using var minimum = new JlTuple(minContrast);
                             var metric = ignorePolarity ? "ignore_global_polarity" : "use_polarity";
-                            if (scaleTolerance > 0)
+                            if (anisotropicScale)
+                            {
+                                using var scaleDelta = new JlTuple(scaleStep);
+                                created.CreateAnisoShapeModel(template, levels, -range, 2 * range, delta,
+                                    trainingScaleYMin, trainingScaleYMax, scaleDelta,
+                                    trainingScaleXMin, trainingScaleXMax, scaleDelta, optimize, metric, contrast, minimum);
+                            }
+                            else if (scaleTolerance > 0)
                             {
                                 using var scaleDelta = new JlTuple(scaleStep);
                                 created.CreateScaledShapeModel(template, levels, -range, 2 * range, delta, scaleMin, scaleMax, scaleDelta, optimize, metric, contrast, minimum);
                             }
                             else created.CreateShapeModel(template, levels, -range, 2 * range, delta, optimize, metric, contrast, minimum);
                             created.SetShapeModelOrigin(originY - (templateBuffer.Height - 1) / 2d, originX - (templateBuffer.Width - 1) / 2d);
+                            if (clutterEnabled)
+                                ApplyShapeModelClutter(created, template, templateBuffer.Width, templateBuffer.Height,
+                                    clutterRoi!, 0, 0, clutterContrast, minContrast);
                             return created;
                         }
                         catch { created.Dispose(); throw; }
                     });
                     model = (JlShapeModel)shapeLease.Model; summary["modelCacheHit"] = shapeLease.Hit;
                 }
+                JlTuple rows, cols, angles, scores, scalesX, scalesY;
                 try
                 {
-                    if (scaleTolerance > 0)
-                        model.FindScaledShapeModel(matchingScene, -range, 2 * range, scaleMin, scaleMax, minScore, searchMatchLimit, .5, "least_squares", 0, .8, out rows, out cols, out angles, out scales, out scores);
+                    if (anisotropicScale)
+                    {
+                        if (clutterEnabled || maxDeformationPx > 0)
+                            FindAnisoShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
+                                searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax, minScore,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+                        else model.FindAnisoShapeModel(matchingScene, searchStart, searchEnd - searchStart,
+                            searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax,
+                            minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8,
+                            out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+                    }
+                    else if (scaleTolerance > 0)
+                    {
+                        if (clutterEnabled || maxDeformationPx > 0)
+                            FindScaledShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
+                                searchScaleMin, searchScaleMax, minScore, maxClutterScore, searchMatchLimit,
+                                shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                out rows, out cols, out angles, out scalesX, out scores);
+                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+                        scalesY = new JlTuple(Enumerable.Range(0, scalesX.Length).Select(index => scalesX[index].D).ToArray());
+                    }
                     else
                     {
-                        matchingScene.FindShapeModel(model, -range, 2 * range, minScore, searchMatchLimit, .5, "least_squares", 0, .8, out rows, out cols, out angles, out scores);
-                        scales = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                        if (clutterEnabled || maxDeformationPx > 0)
+                            FindShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart, minScore,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                out rows, out cols, out angles, out scores);
+                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scores);
+                        scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                        scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
                     }
                 }
                 finally { shapeLease?.Dispose(); }
+                using (rows) using (cols) using (angles) using (scores) using (scalesX) using (scalesY)
+                {
+                    var matchCount = clutterEnabled ? scores.Length / 2 : scores.Length;
+                    for (var index = 0; index < matchCount; index++)
+                        matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scalesX[index].D, scalesY[index].D, scores[index].D,
+                            templateBox.Width, templateBox.Height, originX, originY, index,
+                            clutterEnabled ? scores[matchCount + index].D : null));
+                }
             }
             else
             {
@@ -202,43 +455,79 @@ internal static class JLVisionMatching
                     catch { created.Dispose(); throw; }
                 });
                 var model = (JlNCCModel)lease.Model; summary["modelCacheHit"] = lease.Hit; summary["method"] = method;
+                JlTuple rows, cols, angles, scores, scales;
                 gray.FindNccModel(model, -range, 2 * range, squaredDifference ? .001 : minScore, maximum, .5, "true", 0, out rows, out cols, out angles, out scores);
                 scales = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
-            }
-            using (rows) using (cols) using (angles) using (scores) using (scales)
-            {
-                var candidates = Enumerable.Range(0, scores.Length).Select(i => (Index: i, Score: squaredDifference ? Ssd(gray, template, cols[i].D, rows[i].D, angles[i].D, originX, originY) : scores[i].D)).OrderByDescending(x => x.Score).ToArray();
-                foreach (var candidate in candidates)
+                using (rows) using (cols) using (angles) using (scores) using (scales)
                 {
-                    token.ThrowIfCancellationRequested();
-                    var i = candidate.Index; var x = cols[i].D + searchOffsetX; var y = rows[i].D + searchOffsetY; var radians = angles[i].D; var scale = scales[i].D; var score = candidate.Score;
-                    if (score < minScore || !shape && detections.Count > 0) continue;
-                    if (shape && searchRoi is not null && !Contains(searchRoi, x, y)) continue;
-                    var cos = Math.Cos(radians); var sin = Math.Sin(radians);
-                    var corners = new[] { (templateBox.Left, templateBox.Top), (templateBox.Right - 1, templateBox.Top), (templateBox.Right - 1, templateBox.Bottom - 1), (templateBox.Left, templateBox.Bottom - 1) }
-                        .Select(p => new VisionPoint2D(x + scale * (cos * (p.Item1 - originX) + sin * (p.Item2 - originY)), y + scale * (-sin * (p.Item1 - originX) + cos * (p.Item2 - originY)))).ToArray();
-                    var left = corners.Min(p => p.X); var top = corners.Min(p => p.Y); var width = corners.Max(p => p.X) - left + 1; var height = corners.Max(p => p.Y) - top + 1;
-                    if (shape && templateBox.Width * templateBox.Height < minArea) continue;
-                    var distance = Math.Max(0, node.GetDouble("minCenterDistance", 20));
-                    if (shape && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
-                    if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > .3)) continue;
-                    var degrees = VisionTransform2D.NormalizeAngleDeg(radians * 180 / Math.PI);
-                    if (shape && detections.Count >= maximum) continue;
-                    if (!outputs["found"].Require<bool>("found"))
+                    for (var index = 0; index < scores.Length; index++)
                     {
-                        outputs["found"] = VisionValue.Boolean(true); outputs["score"] = VisionValue.Double(score);
-                        if (shape) outputs["scale"] = VisionValue.Double(scale);
-                        outputs["x"] = VisionValue.Double(shape ? x : left); outputs["y"] = VisionValue.Double(shape ? y : top);
-                        outputs["angle"] = VisionValue.Double(degrees); outputs["center"] = VisionValue.Point(shape ? new(x, y) : new(left + width / 2, top + height / 2));
-                        outputs["rectangle"] = VisionValue.Rectangle(new(shape ? x : left, shape ? y : top, width, height, shape ? -degrees : degrees));
-                        if (shape) outputs["pose"] = VisionValue.Pose(new(x, y, degrees));
-                        summary["found"] = true; summary["bestScore"] = score; summary["score"] = score; summary["matchedAngle"] = degrees; summary["angle"] = degrees;
-                        if (shape) summary["matchedScale"] = scale;
+                        var score = squaredDifference ? Ssd(gray, template, cols[index].D, rows[index].D, angles[index].D, originX, originY) : scores[index].D;
+                        matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scales[index].D, scales[index].D, score,
+                            templateBox.Width, templateBox.Height, originX, originY, index));
                     }
-                    var box = new VisionRectangle2D(left, top, width, height);
-                    detections.Add(new(detections.Count, left, top, width, height, templateBox.Width * templateBox.Height * scale * scale, 2 * (width + height), 0, new(x, y, Math.Sqrt(width * width + height * height) / 2), box, score));
-                    overlays.Add(new($"match-{i}", VisionOverlayType.Polygon, Points: corners.Select(p => new VisionOverlayPoint(p.X, p.Y)).ToArray(), Label: shape ? $"s={score:0.###} a={degrees:0.#} ×{scale:0.###}" : $"s={score:0.###} a={degrees:0.#}", Stroke: "#52c41a", StrokeWidth: 2));
                 }
+            }
+            foreach (var candidate in matchedCandidates.OrderByDescending(candidate => candidate.Score))
+            {
+                token.ThrowIfCancellationRequested();
+                var x = candidate.X + searchOffsetX; var y = candidate.Y + searchOffsetY;
+                var radians = candidate.Angle; var scale = candidate.Scale; var score = candidate.Score;
+                var poseOffsetX = shape && savedModel.Length > 0 ? node.GetDouble("trainedPoseOffsetX", 0) : 0;
+                var poseOffsetY = shape && savedModel.Length > 0 ? node.GetDouble("trainedPoseOffsetY", 0) : 0;
+                if (poseOffsetX != 0 || poseOffsetY != 0)
+                {
+                    var correctionCos = Math.Cos(radians); var correctionSin = Math.Sin(radians);
+                    x -= correctionCos * candidate.ScaleX * poseOffsetX + correctionSin * candidate.ScaleY * poseOffsetY;
+                    y -= -correctionSin * candidate.ScaleX * poseOffsetX + correctionCos * candidate.ScaleY * poseOffsetY;
+                }
+                var candidateBox = new Rect(0, 0, candidate.Width, candidate.Height);
+                // Some native builds return poses outside the requested angular window. Keep the
+                // runtime contract exact even when the matcher supplies such a candidate.
+                if (shape && savedModel.Length > 0 && (radians < searchStart - 1e-9 || radians > searchEnd + 1e-9)) continue;
+                if (shape && savedModel.Length > 0 && (candidate.ScaleX < searchScaleXMin - 1e-9 || candidate.ScaleX > searchScaleXMax + 1e-9
+                    || candidate.ScaleY < searchScaleYMin - 1e-9 || candidate.ScaleY > searchScaleYMax + 1e-9)) continue;
+                if (score < minScore || !shape && detections.Count > 0) continue;
+                if (shape && searchRoi is not null && !Contains(searchRoi, x, y)) continue;
+                var cos = Math.Cos(radians); var sin = Math.Sin(radians);
+                var corners = new[] { (candidateBox.Left, candidateBox.Top), (candidateBox.Right - 1, candidateBox.Top), (candidateBox.Right - 1, candidateBox.Bottom - 1), (candidateBox.Left, candidateBox.Bottom - 1) }
+                    .Select(p => new VisionPoint2D(x + cos * candidate.ScaleX * (p.Item1 - candidate.OriginX) + sin * candidate.ScaleY * (p.Item2 - candidate.OriginY),
+                        y - sin * candidate.ScaleX * (p.Item1 - candidate.OriginX) + cos * candidate.ScaleY * (p.Item2 - candidate.OriginY))).ToArray();
+                var left = corners.Min(p => p.X); var top = corners.Min(p => p.Y); var width = corners.Max(p => p.X) - left + 1; var height = corners.Max(p => p.Y) - top + 1;
+                if (shape && candidateBox.Width * candidateBox.Height * candidate.ScaleX * candidate.ScaleY < minArea) continue;
+                var distance = Math.Max(0, node.GetDouble("minCenterDistance", 20));
+                if (shape && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
+                if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > .3)) continue;
+                var degrees = VisionTransform2D.NormalizeAngleDeg(radians * 180 / Math.PI);
+                if (shape && detections.Count >= maximum) continue;
+                if (!outputs["found"].Require<bool>("found"))
+                {
+                    outputs["found"] = VisionValue.Boolean(true); outputs["score"] = VisionValue.Double(score);
+                    if (shape)
+                    {
+                        outputs["scale"] = VisionValue.Double(scale);
+                        outputs["scaleX"] = VisionValue.Double(candidate.ScaleX);
+                        outputs["scaleY"] = VisionValue.Double(candidate.ScaleY);
+                        if (clutterEnabled) outputs["clutterScore"] = VisionValue.Double(candidate.ClutterScore ?? 0);
+                    }
+                    outputs["x"] = VisionValue.Double(shape ? x : left); outputs["y"] = VisionValue.Double(shape ? y : top);
+                    outputs["angle"] = VisionValue.Double(degrees); outputs["center"] = VisionValue.Point(shape ? new(x, y) : new(left + width / 2, top + height / 2));
+                    outputs["rectangle"] = VisionValue.Rectangle(new(shape ? x : left, shape ? y : top, width, height, shape ? -degrees : degrees));
+                    if (shape) outputs["pose"] = VisionValue.Pose(new(x, y, degrees));
+                    summary["found"] = true; summary["bestScore"] = score; summary["score"] = score; summary["matchedAngle"] = degrees; summary["angle"] = degrees;
+                    if (shape)
+                    {
+                        summary["matchedScale"] = scale;
+                        summary["matchedScaleX"] = candidate.ScaleX;
+                        summary["matchedScaleY"] = candidate.ScaleY;
+                        if (clutterEnabled) summary["matchedClutterScore"] = candidate.ClutterScore;
+                    }
+                }
+                var box = new VisionRectangle2D(left, top, width, height);
+                detections.Add(new(detections.Count, left, top, width, height, candidateBox.Width * candidateBox.Height * candidate.ScaleX * candidate.ScaleY, 2 * (width + height), 0, new(x, y, Math.Sqrt(width * width + height * height) / 2), box, score));
+                var scaleLabel = anisotropicScale ? $" ×{candidate.ScaleX:0.###}/{candidate.ScaleY:0.###}" : $" ×{scale:0.###}";
+                var clutterLabel = clutterEnabled ? $" c={candidate.ClutterScore ?? 0:0.###}" : string.Empty;
+                overlays.Add(new($"match-{candidate.Index}", VisionOverlayType.Polygon, Points: corners.Select(p => new VisionOverlayPoint(p.X, p.Y)).ToArray(), Label: shape ? $"s={score:0.###} a={degrees:0.#}{scaleLabel}{clutterLabel}" : $"s={score:0.###} a={degrees:0.#}", Stroke: "#52c41a", StrokeWidth: 2));
             }
             token.ThrowIfCancellationRequested();
             if (shape) { outputs["image"] = VisionValue.Image(source.CloneOwned()); outputs["count"] = VisionValue.Integer(detections.Count); outputs["detections"] = VisionValue.Detections(detections); }
@@ -252,6 +541,100 @@ internal static class JLVisionMatching
     {
         var intersection = Math.Max(0, Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X)) * Math.Max(0, Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y));
         return intersection / Math.Max(1e-9, a.Width * a.Height + b.Width * b.Height - intersection);
+    }
+
+    private static JlTuple CreateShapeSearchSubPixel(int maxDeformationPx, bool clutterEnabled) =>
+        maxDeformationPx > 0
+            ? new JlTuple(new[] { "least_squares", $"max_deformation {maxDeformationPx}" })
+            : new JlTuple(clutterEnabled ? "interpolation" : "least_squares");
+
+    private static JlTuple CreateShapeSearchMinScore(double minScore, double maxClutterScore, bool clutterEnabled) =>
+        new(clutterEnabled ? new[] { minScore, maxClutterScore } : new[] { minScore });
+
+    private static void FindShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
+        double minScore, double maxClutterScore, int numMatches, int numLevels, int maxDeformationPx, bool clutterEnabled,
+        out JlTuple rows, out JlTuple columns, out JlTuple angles, out JlTuple scores)
+    {
+        using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
+        using var subPixel = CreateShapeSearchSubPixel(maxDeformationPx, clutterEnabled);
+        using var levels = new JlTuple(numLevels);
+        using var modelId = new JlTuple(model);
+        using var start = new JlTuple(angleStart);
+        using var extent = new JlTuple(angleExtent);
+        using var matches = new JlTuple(numMatches);
+        using var overlap = new JlTuple(.5);
+        using var greediness = new JlTuple(.8);
+        JlOperatorSet.FindShapeModel(image, modelId, start, extent, minimumScores, matches, overlap, subPixel,
+            levels, greediness, out rows, out columns, out angles, out scores);
+    }
+
+    private static void FindScaledShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
+        double scaleMin, double scaleMax, double minScore, double maxClutterScore, int numMatches, int numLevels,
+        int maxDeformationPx, bool clutterEnabled, out JlTuple rows, out JlTuple columns, out JlTuple angles,
+        out JlTuple scales, out JlTuple scores)
+    {
+        using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
+        using var subPixel = CreateShapeSearchSubPixel(maxDeformationPx, clutterEnabled);
+        using var levels = new JlTuple(numLevels);
+        using var modelId = new JlTuple(model);
+        using var start = new JlTuple(angleStart);
+        using var extent = new JlTuple(angleExtent);
+        using var minimumScale = new JlTuple(scaleMin);
+        using var maximumScale = new JlTuple(scaleMax);
+        using var matches = new JlTuple(numMatches);
+        using var overlap = new JlTuple(.5);
+        using var greediness = new JlTuple(.8);
+        JlOperatorSet.FindScaledShapeModel(image, modelId, start, extent, minimumScale, maximumScale, minimumScores,
+            matches, overlap, subPixel, levels, greediness, out rows, out columns, out angles, out scales, out scores);
+    }
+
+    private static void FindAnisoShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
+        double scaleYMin, double scaleYMax, double scaleXMin, double scaleXMax, double minScore, double maxClutterScore,
+        int numMatches, int numLevels, int maxDeformationPx, bool clutterEnabled, out JlTuple rows,
+        out JlTuple columns, out JlTuple angles, out JlTuple scaleY, out JlTuple scaleX, out JlTuple scores)
+    {
+        using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
+        using var subPixel = CreateShapeSearchSubPixel(maxDeformationPx, clutterEnabled);
+        using var levels = new JlTuple(numLevels);
+        using var modelId = new JlTuple(model);
+        using var start = new JlTuple(angleStart);
+        using var extent = new JlTuple(angleExtent);
+        using var yMin = new JlTuple(scaleYMin);
+        using var yMax = new JlTuple(scaleYMax);
+        using var xMin = new JlTuple(scaleXMin);
+        using var xMax = new JlTuple(scaleXMax);
+        using var matches = new JlTuple(numMatches);
+        using var overlap = new JlTuple(.5);
+        using var greediness = new JlTuple(.8);
+        JlOperatorSet.FindAnisoShapeModel(image, modelId, start, extent, yMin, yMax, xMin, xMax, minimumScores,
+            matches, overlap, subPixel, levels, greediness, out rows, out columns, out angles, out scaleY, out scaleX, out scores);
+    }
+
+    private static ShapeModelSetEnvelope? DeserializeShapeModelSet(string savedModel)
+    {
+        if (!savedModel.StartsWith(ShapeModelSetPrefix, StringComparison.Ordinal)) return null;
+        ShapeModelSetEnvelope? envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<ShapeModelSetEnvelope>(savedModel[ShapeModelSetPrefix.Length..], new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException ex) { throw new InvalidOperationException("The saved shape model set is invalid.", ex); }
+        if (envelope is null || envelope.Version != 1 || envelope.Models is not { Length: >= 2 and <= 4 })
+            throw new InvalidOperationException("A shape model set must contain 2–4 compatible trained samples.");
+        if (envelope.Models.Any(item => item.Width != envelope.Models[0].Width || item.Height != envelope.Models[0].Height))
+            throw new InvalidOperationException("Every sample in a shape model set must use the same trained region size.");
+        long totalBytes = 0;
+        foreach (var item in envelope.Models)
+        {
+            if (string.IsNullOrWhiteSpace(item.Data) || item.Width < 8 || item.Height < 8 || item.Width > 100_000 || item.Height > 100_000
+                || !double.IsFinite(item.OriginX) || !double.IsFinite(item.OriginY)
+                || item.OriginX < 0 || item.OriginY < 0 || item.OriginX >= item.Width || item.OriginY >= item.Height)
+                throw new InvalidOperationException("A shape model set contains invalid training geometry.");
+            try { totalBytes += Convert.FromBase64String(item.Data).Length; }
+            catch (FormatException ex) { throw new InvalidOperationException("A shape model set contains invalid model data.", ex); }
+            if (totalBytes > 16 * 1024 * 1024) throw new InvalidOperationException("The saved shape model set exceeds the 16 MB combined limit.");
+        }
+        return envelope;
     }
 
     private static Rect RoiBounds(VisionRoi roi)
@@ -354,6 +737,37 @@ internal static class JLVisionMatching
         }
     }
 
+    private static void ApplyShapeModelClutter(JlShapeModel model, JlImage trainingModelImage, int imageWidth, int imageHeight,
+        VisionRoi clutterRoi, double cropOffsetX, double cropOffsetY, int clutterContrast, int minContrast)
+    {
+        model.FindShapeModel(trainingModelImage, 0, 0, .3, 1, .5, "least_squares", 0, .8,
+            out var rows, out var cols, out var angles, out _);
+        using (rows) using (cols) using (angles)
+        {
+            if (rows.Length == 0) throw new InvalidOperationException("Clutter ROI could not be aligned to the trained model in its source image.");
+            var transform = new JlHomMat2D();
+            transform.VectorAngleToRigid(0, 0, 0, rows[0].D + cropOffsetY, cols[0].D + cropOffsetX, angles[0].D);
+            ApplyShapeModelClutter(model, imageWidth, imageHeight, clutterRoi, transform, clutterContrast, minContrast);
+        }
+    }
+
+    private static void ApplyShapeModelClutter(JlShapeModel model, int imageWidth, int imageHeight, VisionRoi clutterRoi,
+        JlHomMat2D modelToImage, int clutterContrast, int minContrast)
+    {
+        if (clutterContrast < minContrast)
+            throw new InvalidOperationException("Clutter Contrast must be at least the Minimum Feature Contrast used to train the model.");
+        using var mask = clutterRoi.BuildMask(new Size(imageWidth, imageHeight));
+        if (Cv2.CountNonZero(mask) == 0)
+            throw new InvalidOperationException("Clutter ROI must overlap the training image and contain at least one pixel.");
+        using var clutterImage = JLVisionImages.FromMat(mask);
+        using var clutterRegion = clutterImage.Threshold(1d, 255d);
+        using var names = new JlTuple();
+        using var values = new JlTuple();
+        try { model.SetShapeModelClutter(clutterRegion, modelToImage, clutterContrast, names, values); }
+        catch (JlOperatorException ex) when (ex.Message.Contains("8515", StringComparison.Ordinal))
+        { throw new InvalidOperationException("Clutter ROI is too close to the trained model contours. Move it farther from the part edges.", ex); }
+    }
+
     private static bool Contains(VisionRoi roi, double x, double y)
     {
         if (!double.IsFinite(x) || !double.IsFinite(y)) return false;
@@ -412,6 +826,8 @@ internal static class JLVisionMatching
     private static NodeExecutorResult TrainShape(NodeExecutionContext context, NodeDefinition node, VisionImage scene, bool fromPort, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        var combineModelData = node.GetString("trainingCombineModelData", string.Empty);
+        if (combineModelData.Length > 0) return CombineShapeModels(node, scene, combineModelData, token);
         Mat? fileTemplate = null;
         try
         {
@@ -446,6 +862,20 @@ internal static class JLVisionMatching
                 new Dictionary<string, object?> { ["trainingPreviewReady"] = true, ["trainingImageData"] = Convert.ToBase64String(capturedBytes), ["trainingSource"] = fromPort ? "template-input" : "template-path", ["trainingSourceWidth"] = trainingMat.Width, ["trainingSourceHeight"] = trainingMat.Height });
         }
         var roi = node.GetRoi();
+        var clutterRoi = node.GetRoi("clutterRoi");
+        TrainingPoseAlignment? trainingRegionAlignment = null;
+        var referenceModelData = node.GetString("trainingReferenceModelData", string.Empty);
+        if (referenceModelData.Length > 0 && (roi is not null || clutterRoi is not null
+            || node.GetString("trainingOriginMode", "centroid").Equals("manual", StringComparison.OrdinalIgnoreCase)))
+        {
+            var referenceOriginX = node.GetDouble("trainingReferenceOriginImageX", double.NaN);
+            var referenceOriginY = node.GetDouble("trainingReferenceOriginImageY", double.NaN);
+            if (!double.IsFinite(referenceOriginX) || !double.IsFinite(referenceOriginY))
+                throw new InvalidOperationException("Automatic sample ROI alignment requires the first sample's training origin.");
+            trainingRegionAlignment = FindTrainingPoseAlignment(trainingMat, referenceModelData, node, token);
+            if (roi is not null) roi = TransformTrainingRoi(roi, referenceOriginX, referenceOriginY, trainingRegionAlignment.Value);
+            if (clutterRoi is not null) clutterRoi = TransformTrainingRoi(clutterRoi, referenceOriginX, referenceOriginY, trainingRegionAlignment.Value);
+        }
         var cropRect = new Rect(0, 0, trainingMat.Width, trainingMat.Height);
         if (roi is not null)
         {
@@ -460,38 +890,75 @@ internal static class JLVisionMatching
         else throw new InvalidOperationException("Training image must have 1, 3, or 4 channels.");
         using var roiMask = new Mat(crop.Size(), MatType.CV_8UC1, Scalar.All(0));
         FillRoiMask(roiMask, roi, cropRect);
-        if (Cv2.CountNonZero(roiMask) < 64) throw new InvalidOperationException("Training region must contain at least 64 pixels.");
-        using var binary = ContourNodesHelper.Binarize(crop, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
-        Cv2.BitwiseAnd(binary, roiMask, binary);
-        Cv2.FindContours(binary, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-        var contour = contours.OrderByDescending(c => Cv2.ContourArea(c)).FirstOrDefault();
-        if (contour is null || Cv2.ContourArea(contour) <= 0) throw new InvalidOperationException("The selected training region has no usable contour. Adjust binarization or ROI.");
+        var trainingRegionMoments = Cv2.Moments(roiMask, binaryImage: true);
+        if (trainingRegionMoments.M00 < 64) throw new InvalidOperationException("Training region must contain at least 64 pixels.");
         token.ThrowIfCancellationRequested();
-        var moments = Cv2.Moments(contour);
+        using var originBinary = ContourNodesHelper.Binarize(crop, node.GetString("binarize", "auto"), node.GetDouble("threshold", 128), node.GetBool("invert", false), out _, out _);
+        Cv2.BitwiseAnd(originBinary, roiMask, originBinary);
+        Cv2.FindContours(originBinary, out Point[][] originContours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+        var originContour = originContours.OrderByDescending(candidate => Cv2.ContourArea(candidate)).FirstOrDefault(candidate => Cv2.ContourArea(candidate) > 0);
+        var originMoments = originContour is null ? trainingRegionMoments : Cv2.Moments(originContour);
         var originMode = node.GetString("trainingOriginMode", "centroid");
+        var manualOriginImageX = node.GetDouble("trainingOriginX", cropRect.X + crop.Width / 2d);
+        var manualOriginImageY = node.GetDouble("trainingOriginY", cropRect.Y + crop.Height / 2d);
+        if (trainingRegionAlignment is { } alignment)
+        {
+            (manualOriginImageX, manualOriginImageY) = TransformTrainingPoint(manualOriginImageX, manualOriginImageY,
+                node.GetDouble("trainingReferenceOriginImageX", 0), node.GetDouble("trainingReferenceOriginImageY", 0), alignment);
+        }
         var originX = originMode.Equals("manual", StringComparison.OrdinalIgnoreCase)
-            ? node.GetDouble("trainingOriginX", cropRect.X + crop.Width / 2d) - cropRect.X : moments.M10 / moments.M00;
+            ? manualOriginImageX - cropRect.X
+            : originMoments.M10 / originMoments.M00;
         var originY = originMode.Equals("manual", StringComparison.OrdinalIgnoreCase)
-            ? node.GetDouble("trainingOriginY", cropRect.Y + crop.Height / 2d) - cropRect.Y : moments.M01 / moments.M00;
+            ? manualOriginImageY - cropRect.Y
+            : originMoments.M01 / originMoments.M00;
+        var overrideOriginX = node.GetDouble("trainingOriginOverrideX", double.NaN);
+        var overrideOriginY = node.GetDouble("trainingOriginOverrideY", double.NaN);
+        if (double.IsFinite(overrideOriginX) || double.IsFinite(overrideOriginY))
+        {
+            if (!double.IsFinite(overrideOriginX) || !double.IsFinite(overrideOriginY))
+                throw new InvalidOperationException("A shared training origin requires both finite X and Y coordinates.");
+            originX = overrideOriginX;
+            originY = overrideOriginY;
+        }
         if (originX < 0 || originY < 0 || originX >= crop.Width || originY >= crop.Height)
             throw new InvalidOperationException("Manual training origin must lie inside the selected training ROI.");
-        var range = Math.Clamp(node.GetDouble("angleRangeDeg", 180), 0, 180) * Math.PI / 180;
+        var range = Math.Clamp(node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)), 0, 180) * Math.PI / 180;
+        var pyramidLevels = node.GetInt("pyramidLevels", 0);
+        if (pyramidLevels is < 0 or > 8) throw new InvalidOperationException("pyramidLevels must be between 0 (automatic) and 8.");
         var step = Math.Clamp(node.GetDouble("angleStepDeg", 1), .1, 30) * Math.PI / 180;
         var scaleTolerance = Math.Clamp(node.GetDouble("scaleTolerancePercent", 0), 0, 50) / 100d;
+        var scaleToleranceX = Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50) / 100d;
+        var scaleToleranceY = Math.Clamp(node.GetDouble("scaleToleranceYPercent", 0), 0, 50) / 100d;
+        var anisotropicScale = scaleToleranceX > 0 || scaleToleranceY > 0;
         var scaleMin = 1 - scaleTolerance;
         var scaleMax = 1 + scaleTolerance;
+        var scaleXMin = anisotropicScale ? 1 - scaleToleranceX : scaleMin;
+        var scaleXMax = anisotropicScale ? 1 + scaleToleranceX : scaleMax;
+        var scaleYMin = anisotropicScale ? 1 - scaleToleranceY : scaleMin;
+        var scaleYMax = anisotropicScale ? 1 + scaleToleranceY : scaleMax;
         var scaleStep = Math.Clamp(node.GetDouble("scaleStepPercent", 1), .1, 10) / 100d;
         var ignorePolarity = node.GetBool("ignorePolarity", false);
         var minContrast = Math.Clamp(node.GetInt("minContrast", 5), 1, 255);
+        var clutterContrast = Math.Clamp(node.GetInt("clutterContrast", minContrast), 1, 255);
+        if (clutterRoi is not null && clutterContrast < minContrast)
+            throw new InvalidOperationException("Clutter Contrast must be at least the Minimum Feature Contrast used to train the model.");
         using var sourceImage = JLVisionImages.FromMat(crop);
         using var maskImage = JLVisionImages.FromMat(roiMask);
         using var trainingRegion = maskImage.Threshold(1d, 255d);
         using var image = sourceImage.ReduceDomain(trainingRegion);
         using var model = new JlShapeModel();
-        using (var levels = new JlTuple("auto")) using (var delta = new JlTuple(step)) using (var optimize = new JlTuple("auto")) using (var contrast = new JlTuple("auto")) using (var minimum = new JlTuple(minContrast))
+        using (var levels = pyramidLevels == 0 ? new JlTuple("auto") : new JlTuple(pyramidLevels)) using (var delta = new JlTuple(step)) using (var optimize = new JlTuple("auto")) using (var contrast = new JlTuple("auto")) using (var minimum = new JlTuple(minContrast))
         {
             var metric = ignorePolarity ? "ignore_global_polarity" : "use_polarity";
-            if (scaleTolerance > 0)
+            if (anisotropicScale)
+            {
+                using var scaleDelta = new JlTuple(scaleStep);
+                model.CreateAnisoShapeModel(image, levels, -range, 2 * range, delta,
+                    scaleYMin, scaleYMax, scaleDelta, scaleXMin, scaleXMax, scaleDelta,
+                    optimize, metric, contrast, minimum);
+            }
+            else if (scaleTolerance > 0)
             {
                 using var scaleDelta = new JlTuple(scaleStep);
                 model.CreateScaledShapeModel(image, levels, -range, 2 * range, delta, scaleMin, scaleMax, scaleDelta, optimize, metric, contrast, minimum);
@@ -499,6 +966,9 @@ internal static class JLVisionMatching
             else model.CreateShapeModel(image, levels, -range, 2 * range, delta, optimize, metric, contrast, minimum);
         }
         model.SetShapeModelOrigin(originY - (crop.Height - 1) / 2d, originX - (crop.Width - 1) / 2d);
+        if (clutterRoi is not null)
+            ApplyShapeModelClutter(model, image, trainingMat.Width, trainingMat.Height, clutterRoi,
+                cropRect.X, cropRect.Y, clutterContrast, minContrast);
         var data = model.SerializeShapeModel();
         if (data.Length > 16 * 1024 * 1024) throw new InvalidOperationException("Trained model exceeds the 16 MB embedded workflow asset limit.");
         Cv2.ImEncode(".jpg", trainingMat, out var previewBytes, [new ImageEncodingParam(ImwriteFlags.JpegQuality, 82)]);
@@ -506,18 +976,25 @@ internal static class JLVisionMatching
         var config = ShapeTrainingConfig(node);
         using var modelContours = model.GetShapeModelContours(1);
         var previewContours = new List<VisionOverlayPoint[]>();
+        var featurePoints = new List<(double X, double Y)>();
         for (var contourIndex = 1; contourIndex <= modelContours.CountObj(); contourIndex++)
         {
             using var selectedModelContour = modelContours.SelectObj(contourIndex);
             selectedModelContour.GetContourXld(out var modelRows, out var modelCols);
             using (modelRows) using (modelCols)
             {
+                for (var pointIndex = 0; pointIndex < modelRows.Length; pointIndex++)
+                    featurePoints.Add((modelCols[pointIndex].D, modelRows[pointIndex].D));
                 var stride = Math.Max(1, (int)Math.Ceiling(modelRows.Length / 500d));
                 var points = Enumerable.Range(0, modelRows.Length).Where(index => index % stride == 0)
                     .Select(index => new VisionOverlayPoint(modelCols[index].D + originX + cropRect.X, modelRows[index].D + originY + cropRect.Y)).ToArray();
                 if (points.Length > 0) previewContours.Add(points);
             }
         }
+        var (symmetryPeriodDeg, trainingWarnings) = AnalyzeTrainingQuality(featurePoints);
+        var warnings = trainingWarnings.ToList();
+        if (trainingRegionAlignment is { Score: < .55 } lowScoreAlignment)
+            warnings.Add($"Training region auto-aligned to sample with a low score ({lowScoreAlignment.Score:0.###}); verify that the ROI follows the intended part.");
         var contourPoints = previewContours.FirstOrDefault() ?? [];
         var previewImage = VisionImage.Own(trainingMat.Clone());
         var result = new NodeExecutorResult(
@@ -531,13 +1008,25 @@ internal static class JLVisionMatching
                 ["trainingSourceWidth"] = trainingMat.Width, ["trainingSourceHeight"] = trainingMat.Height,
                 ["trainingOriginX"] = originX, ["trainingOriginY"] = originY,
                 ["trainingOriginImageX"] = originX + cropRect.X, ["trainingOriginImageY"] = originY + cropRect.Y,
-                ["trainingContourArea"] = Cv2.ContourArea(contour), ["trainingSource"] = fromPort ? "template-input" : "template-path",
+                ["trainingRegionArea"] = trainingRegionMoments.M00, ["trainingSource"] = fromPort ? "template-input" : "template-path",
+                ["trainingContourCount"] = modelContours.CountObj(), ["trainingFeaturePointCount"] = featurePoints.Count,
+                ["trainingSymmetryPeriodDeg"] = symmetryPeriodDeg, ["trainingWarnings"] = warnings.ToArray(),
+                ["trainingRegionAlignmentScore"] = trainingRegionAlignment?.Score,
+                ["trainingRegionAlignmentAngleDeg"] = trainingRegionAlignment is { } alignedPose ? alignedPose.Angle * 180 / Math.PI : null,
+                ["trainingRegionAlignmentScaleX"] = trainingRegionAlignment?.ScaleX,
+                ["trainingRegionAlignmentScaleY"] = trainingRegionAlignment?.ScaleY,
+                ["trainingPyramidLevels"] = pyramidLevels,
                 ["trainingOriginMode"] = originMode, ["trainingContour"] = contourPoints, ["trainingContours"] = previewContours.ToArray(),
-                ["trainingRegionType"] = roi?.Type.ToString() ?? "FullImage", ["trainingScaleMin"] = scaleMin, ["trainingScaleMax"] = scaleMax,
-                ["trainingIgnorePolarity"] = ignorePolarity, ["trainingMinContrast"] = minContrast
+                ["trainingRegionType"] = roi?.Type.ToString() ?? "FullImage",
+                ["trainingScaleMin"] = Math.Min(scaleXMin, scaleYMin), ["trainingScaleMax"] = Math.Max(scaleXMax, scaleYMax),
+                ["trainingScaleXMin"] = scaleXMin, ["trainingScaleXMax"] = scaleXMax,
+                ["trainingScaleYMin"] = scaleYMin, ["trainingScaleYMax"] = scaleYMax,
+                ["trainingScaleToleranceXPercent"] = scaleToleranceX * 100, ["trainingScaleToleranceYPercent"] = scaleToleranceY * 100,
+                ["trainingIgnorePolarity"] = ignorePolarity, ["trainingMinContrast"] = minContrast,
+                ["trainingClutterEnabled"] = clutterRoi is not null, ["trainingClutterContrast"] = clutterRoi is not null ? clutterContrast : null
             },
             [
-                .. previewContours.Select((points, index) => new VisionOverlay($"shape-training-contour-{index}", VisionOverlayType.Polygon, Points: points, Label: "模型轮廓片段", Stroke: "#13c2c2", StrokeWidth: 2)),
+                .. previewContours.Select((points, index) => new VisionOverlay($"shape-training-contour-{index}", VisionOverlayType.Polyline, Points: points, Label: "模型轮廓片段", Stroke: "#13c2c2", StrokeWidth: 2)),
                 new VisionOverlay("shape-training-origin", VisionOverlayType.Point, X: originX + cropRect.X, Y: originY + cropRect.Y, Label: "原点", Stroke: "#fa541c", StrokeWidth: 3)
             ]);
         return result;
@@ -545,7 +1034,574 @@ internal static class JLVisionMatching
         finally { fileTemplate?.Dispose(); }
     }
 
+    private static TrainingPoseAlignment FindTrainingPoseAlignment(Mat trainingImage, string serializedModel,
+        NodeDefinition node, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (serializedModel.Length > 24 * 1024 * 1024)
+            throw new InvalidOperationException("First sample model is too large for automatic training-region alignment.");
+        byte[] modelBytes;
+        try { modelBytes = Convert.FromBase64String(serializedModel); }
+        catch (FormatException ex) { throw new InvalidOperationException("First sample model is invalid; retrain the first sample.", ex); }
+        using var model = new JlShapeModel();
+        model.DeserializeShapeModel(modelBytes);
+        using (var parameterName = new JlTuple("use_clutter"))
+        using (var parameterValue = new JlTuple("false"))
+            model.SetShapeModelParam(parameterName, parameterValue);
+        using var gray = new Mat();
+        if (trainingImage.Channels() == 1) trainingImage.CopyTo(gray);
+        else if (trainingImage.Channels() == 3) Cv2.CvtColor(trainingImage, gray, ColorConversionCodes.BGR2GRAY);
+        else if (trainingImage.Channels() == 4) Cv2.CvtColor(trainingImage, gray, ColorConversionCodes.BGRA2GRAY);
+        else throw new InvalidOperationException("Training image must have 1, 3, or 4 channels.");
+        using var search = JLVisionImages.FromMat(gray);
+        var trainingRange = Math.Clamp(node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)), 0, 180) * Math.PI / 180;
+        var pyramidLevels = node.GetInt("pyramidLevels", 0);
+        var scaleTolerance = Math.Clamp(node.GetDouble("scaleTolerancePercent", 0), 0, 50) / 100d;
+        var scaleToleranceX = Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50) / 100d;
+        var scaleToleranceY = Math.Clamp(node.GetDouble("scaleToleranceYPercent", 0), 0, 50) / 100d;
+        var anisotropicScale = scaleToleranceX > 0 || scaleToleranceY > 0;
+        JlTuple rows, cols, angles, scalesX, scalesY, scores;
+        if (anisotropicScale)
+        {
+            model.FindAnisoShapeModel(search, -trainingRange, 2 * trainingRange,
+                1 - scaleToleranceY, 1 + scaleToleranceY, 1 - scaleToleranceX, 1 + scaleToleranceX,
+                .3, 1, .5, "least_squares", pyramidLevels, .8,
+                out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+        }
+        else if (scaleTolerance > 0)
+        {
+            model.FindScaledShapeModel(search, -trainingRange, 2 * trainingRange, 1 - scaleTolerance, 1 + scaleTolerance,
+                .3, 1, .5, "least_squares", pyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+            scalesY = new JlTuple(Enumerable.Range(0, scalesX.Length).Select(index => scalesX[index].D).ToArray());
+        }
+        else
+        {
+            search.FindShapeModel(model, -trainingRange, 2 * trainingRange, .3, 1, .5,
+                "least_squares", pyramidLevels, .8, out rows, out cols, out angles, out scores);
+            scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+            scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+        }
+        using (rows) using (cols) using (angles) using (scalesX) using (scalesY) using (scores)
+        {
+            if (scores.Length == 0)
+                throw new InvalidOperationException("Could not find the first sample in this training image, so its model region could not be aligned.");
+            var bestIndex = Enumerable.Range(0, scores.Length).MaxBy(index => scores[index].D);
+            var bestScore = scores[bestIndex].D;
+            if (bestScore < .3)
+                throw new InvalidOperationException($"The first sample aligned to this image with a low score ({bestScore:0.###}); check that the same part is visible before training.");
+            return new(cols[bestIndex].D, rows[bestIndex].D, angles[bestIndex].D,
+                scalesX[bestIndex].D, scalesY[bestIndex].D, bestScore);
+        }
+    }
+
+    private static VisionRoi TransformTrainingRoi(VisionRoi roi, double sourceOriginX, double sourceOriginY,
+        TrainingPoseAlignment pose)
+    {
+        VisionRoiPoint Transform(VisionRoiPoint point)
+        {
+            var (x, y) = TransformTrainingPoint(point.X, point.Y, sourceOriginX, sourceOriginY, pose);
+            return new(x, y);
+        }
+
+        return roi.Type switch
+        {
+            VisionRoiType.Rectangle => new VisionRoi(VisionRoiType.Polygon, Points:
+            [
+                Transform(new(roi.X ?? 0, roi.Y ?? 0)),
+                Transform(new((roi.X ?? 0) + (roi.Width ?? 0), roi.Y ?? 0)),
+                Transform(new((roi.X ?? 0) + (roi.Width ?? 0), (roi.Y ?? 0) + (roi.Height ?? 0))),
+                Transform(new(roi.X ?? 0, (roi.Y ?? 0) + (roi.Height ?? 0)))
+            ]),
+            VisionRoiType.Circle => TransformCircle(),
+            VisionRoiType.Polygon => new VisionRoi(VisionRoiType.Polygon, Points: (roi.Points ?? []).Select(Transform).ToArray()),
+            VisionRoiType.Brush => new VisionRoi(VisionRoiType.Brush, Strokes: (roi.Strokes ?? []).Select(stroke =>
+                new VisionRoiBrushStroke(stroke.Mode, stroke.Width * Math.Sqrt(pose.ScaleX * pose.ScaleY), stroke.Points.Select(Transform).ToArray())).ToArray()),
+            _ => throw new InvalidOperationException("Unsupported training region type for automatic alignment.")
+        };
+
+        VisionRoi TransformCircle()
+        {
+            var centerX = roi.X ?? 0;
+            var centerY = roi.Y ?? 0;
+            var radius = roi.Radius ?? 0;
+            if (Math.Abs(pose.ScaleX - pose.ScaleY) < 1e-9)
+            {
+                var center = Transform(new(centerX, centerY));
+                return new VisionRoi(VisionRoiType.Circle, center.X, center.Y, Radius: radius * pose.ScaleX);
+            }
+            var ellipse = Enumerable.Range(0, 64).Select(index =>
+            {
+                var angle = index * Math.PI / 32;
+                return Transform(new(centerX + radius * Math.Cos(angle), centerY + radius * Math.Sin(angle)));
+            }).ToArray();
+            return new VisionRoi(VisionRoiType.Polygon, Points: ellipse);
+        }
+    }
+
+    private static (double X, double Y) TransformTrainingPoint(double x, double y, double sourceOriginX,
+        double sourceOriginY, TrainingPoseAlignment pose)
+    {
+        var dx = x - sourceOriginX;
+        var dy = y - sourceOriginY;
+        var cos = Math.Cos(pose.Angle);
+        var sin = Math.Sin(pose.Angle);
+        return (pose.X + cos * pose.ScaleX * dx + sin * pose.ScaleY * dy,
+            pose.Y - sin * pose.ScaleX * dx + cos * pose.ScaleY * dy);
+    }
+
+    private static NodeExecutorResult CombineShapeModels(NodeDefinition node, VisionImage scene, string serializedModelSet, CancellationToken token)
+    {
+        var modelSet = DeserializeShapeModelSet(serializedModelSet)
+            ?? throw new InvalidOperationException("Composite training requires a multi-sample shape model set.");
+        var sourceData = node.GetString("trainingCombineSourceImages", string.Empty);
+        if (sourceData.Length == 0 || sourceData.Length > 48 * 1024 * 1024)
+            throw new InvalidOperationException("Composite training source images are missing or exceed the combined size limit.");
+        string[] sourceImages;
+        try { sourceImages = JsonSerializer.Deserialize<string[]>(sourceData) ?? []; }
+        catch (JsonException ex) { throw new InvalidOperationException("Composite training source images are invalid.", ex); }
+        if (sourceImages.Length != modelSet.Models.Length || sourceImages.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidOperationException("Composite training needs one original image for every trained sample.");
+        if (sourceImages.Sum(data => (long)data.Length) > 32L * 1024 * 1024)
+            throw new InvalidOperationException("Composite training source images exceed the 32 MB combined limit.");
+        if (modelSet.Models.Any(item => item.SourceOriginX is null || item.SourceOriginY is null
+            || !double.IsFinite(item.SourceOriginX.Value) || !double.IsFinite(item.SourceOriginY.Value)))
+            throw new InvalidOperationException("Composite training samples need a valid image-space origin. Retrain the samples and try again.");
+
+        var imageWidth = modelSet.Models[0].Width;
+        var imageHeight = modelSet.Models[0].Height;
+        var fraction = Math.Clamp(node.GetDouble("trainingMinSampleFraction", .75), .5, 1d);
+        var featureTolerance = Math.Clamp(node.GetDouble("trainingFeatureTolerancePx", 2), .5, 10d);
+        var minimumVotes = Math.Max(1, (int)Math.Ceiling(fraction * modelSet.Models.Length - 1e-9));
+        var trainingRange = Math.Clamp(node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)), 0, 180) * Math.PI / 180;
+        var pyramidLevels = node.GetInt("pyramidLevels", 0);
+        if (pyramidLevels is < 0 or > 8) throw new InvalidOperationException("pyramidLevels must be between 0 (automatic) and 8.");
+        var scaleTolerance = Math.Clamp(node.GetDouble("scaleTolerancePercent", 0), 0, 50) / 100d;
+        var scaleToleranceX = Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50) / 100d;
+        var scaleToleranceY = Math.Clamp(node.GetDouble("scaleToleranceYPercent", 0), 0, 50) / 100d;
+        var anisotropicScale = scaleToleranceX > 0 || scaleToleranceY > 0;
+        var scaleMin = 1 - scaleTolerance;
+        var scaleMax = 1 + scaleTolerance;
+        var scaleXMin = anisotropicScale ? 1 - scaleToleranceX : scaleMin;
+        var scaleXMax = anisotropicScale ? 1 + scaleToleranceX : scaleMax;
+        var scaleYMin = anisotropicScale ? 1 - scaleToleranceY : scaleMin;
+        var scaleYMax = anisotropicScale ? 1 + scaleToleranceY : scaleMax;
+        var step = Math.Clamp(node.GetDouble("angleStepDeg", 1), .1, 30) * Math.PI / 180;
+        var scaleStep = Math.Clamp(node.GetDouble("scaleStepPercent", 1), .1, 10) / 100d;
+        var ignorePolarity = node.GetBool("ignorePolarity", false);
+        var minContrast = Math.Clamp(node.GetInt("minContrast", 5), 1, 255);
+        var clutterRoi = node.GetRoi("clutterRoi");
+        var clutterContrast = Math.Clamp(node.GetInt("clutterContrast", minContrast), 1, 255);
+        if (clutterRoi is not null && clutterContrast < minContrast)
+            throw new InvalidOperationException("Clutter Contrast must be at least the Minimum Feature Contrast used to train the model.");
+        var sampleContours = new List<ShapeFeaturePoint[]>[modelSet.Models.Length];
+        var sampleFeaturePoints = new List<ShapeFeaturePoint>[modelSet.Models.Length];
+        var alignmentScores = new double[modelSet.Models.Length];
+        var anchorBytes = Convert.FromBase64String(modelSet.Models[0].Data);
+        using var anchorModel = new JlShapeModel();
+        anchorModel.DeserializeShapeModel(anchorBytes);
+        using (var parameterName = new JlTuple("use_clutter"))
+        using (var parameterValue = new JlTuple("false"))
+            anchorModel.SetShapeModelParam(parameterName, parameterValue);
+
+        for (var sampleIndex = 0; sampleIndex < modelSet.Models.Length; sampleIndex++)
+            {
+                token.ThrowIfCancellationRequested();
+                var item = modelSet.Models[sampleIndex];
+                var modelBytes = Convert.FromBase64String(item.Data);
+                using var model = new JlShapeModel();
+                model.DeserializeShapeModel(modelBytes);
+                using var contours = model.GetShapeModelContours(1);
+                sampleContours[sampleIndex] = ExtractShapeContours(contours);
+                if (sampleContours[sampleIndex].Count == 0)
+                    throw new InvalidOperationException($"Sample {sampleIndex + 1} has no usable geometric features.");
+
+                var matchX = item.SourceOriginX!.Value;
+                var matchY = item.SourceOriginY!.Value;
+                var angle = 0d;
+                var scaleX = 1d;
+                var scaleY = 1d;
+                var score = 1d;
+                if (sampleIndex > 0)
+                {
+                    byte[] encoded;
+                    try { encoded = Convert.FromBase64String(sourceImages[sampleIndex]); }
+                    catch (FormatException ex) { throw new InvalidOperationException($"Sample {sampleIndex + 1} original image is invalid.", ex); }
+                    using var sampleImage = Cv2.ImDecode(encoded, ImreadModes.Unchanged);
+                    if (sampleImage.Empty()) throw new InvalidOperationException($"Sample {sampleIndex + 1} original image could not be decoded.");
+                    using var gray = new Mat();
+                    if (sampleImage.Channels() == 1) sampleImage.CopyTo(gray);
+                    else if (sampleImage.Channels() == 3) Cv2.CvtColor(sampleImage, gray, ColorConversionCodes.BGR2GRAY);
+                    else if (sampleImage.Channels() == 4) Cv2.CvtColor(sampleImage, gray, ColorConversionCodes.BGRA2GRAY);
+                    else throw new InvalidOperationException("Composite training images must have 1, 3, or 4 channels.");
+                    using var search = JLVisionImages.FromMat(gray);
+                    JlTuple rows, cols, angles, scalesX, scalesY, scores;
+                    if (anisotropicScale)
+                    {
+                        anchorModel.FindAnisoShapeModel(search, -trainingRange, 2 * trainingRange,
+                            scaleYMin, scaleYMax, scaleXMin, scaleXMax,
+                            .3, 1, .5, "least_squares", pyramidLevels, .8,
+                            out rows, out cols, out angles, out scalesY, out scalesX, out scores);
+                    }
+                    else if (scaleTolerance > 0)
+                    {
+                        anchorModel.FindScaledShapeModel(search, -trainingRange, 2 * trainingRange, scaleMin, scaleMax,
+                            .3, 1, .5, "least_squares", pyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+                        scalesY = new JlTuple(Enumerable.Range(0, scalesX.Length).Select(index => scalesX[index].D).ToArray());
+                    }
+                    else
+                    {
+                        search.FindShapeModel(anchorModel, -trainingRange, 2 * trainingRange, .3, 1, .5,
+                            "least_squares", pyramidLevels, .8, out rows, out cols, out angles, out scores);
+                        scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                        scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
+                    }
+                    using (rows) using (cols) using (angles) using (scalesX) using (scalesY) using (scores)
+                    {
+                        if (scores.Length == 0 || scores[0].D < .3)
+                            throw new InvalidOperationException($"Could not align sample {sampleIndex + 1} to the first sample. Keep the same part in the ROI and expand the trained angle/scale coverage if needed.");
+                        matchX = cols[0].D;
+                        matchY = rows[0].D;
+                        angle = angles[0].D;
+                        scaleX = scalesX[0].D;
+                        scaleY = scalesY[0].D;
+                        score = scores[0].D;
+                    }
+                }
+                alignmentScores[sampleIndex] = score;
+                var cos = Math.Cos(angle);
+                var sin = Math.Sin(angle);
+                var sourceOriginX = item.SourceOriginX.Value;
+                var sourceOriginY = item.SourceOriginY!.Value;
+                sampleFeaturePoints[sampleIndex] = [];
+                foreach (var contour in sampleContours[sampleIndex])
+                {
+                    for (var pointIndex = 0; pointIndex < contour.Length; pointIndex++)
+                    {
+                        var point = contour[pointIndex];
+                        var dx = point.X + sourceOriginX - matchX;
+                        var dy = point.Y + sourceOriginY - matchY;
+                        contour[pointIndex] = new((cos * dx - sin * dy) / scaleX, (sin * dx + cos * dy) / scaleY);
+                        sampleFeaturePoints[sampleIndex].Add(contour[pointIndex]);
+                    }
+                }
+            }
+
+            var indexes = sampleFeaturePoints.Select(points => new ShapeFeatureSpatialIndex(points, featureTolerance)).ToArray();
+            var consensus = BuildConsensusContours(sampleContours, indexes, minimumVotes, featureTolerance);
+            if (consensus.Count == 0)
+                throw new InvalidOperationException($"No stable contours met the {minimumVotes}/{modelSet.Models.Length} sample threshold. Lower the sample fraction, increase feature alignment tolerance, or check that each ROI contains the same part.");
+
+            var centerX = (imageWidth - 1) / 2d;
+            var centerY = (imageHeight - 1) / 2d;
+            var modelPyramidLevels = pyramidLevels == 0
+                ? Math.Clamp((int)Math.Floor(Math.Log2(Math.Max(1d, Math.Min(imageWidth, imageHeight) / 6d))) + 1, 1, 8)
+                : pyramidLevels;
+            byte[] firstImageBytes;
+            try { firstImageBytes = Convert.FromBase64String(sourceImages[0]); }
+            catch (FormatException ex) { throw new InvalidOperationException("First original training image is invalid.", ex); }
+            using var firstImage = Cv2.ImDecode(firstImageBytes, ImreadModes.Unchanged);
+            if (firstImage.Empty()) throw new InvalidOperationException("First original training image could not be decoded.");
+            using var firstGray = new Mat();
+            if (firstImage.Channels() == 1) firstImage.CopyTo(firstGray);
+            else if (firstImage.Channels() == 3) Cv2.CvtColor(firstImage, firstGray, ColorConversionCodes.BGR2GRAY);
+            else if (firstImage.Channels() == 4) Cv2.CvtColor(firstImage, firstGray, ColorConversionCodes.BGRA2GRAY);
+            else throw new InvalidOperationException("Composite training images must have 1, 3, or 4 channels.");
+            using var firstImageVision = JLVisionImages.FromMat(firstGray);
+            var allContourPoints = consensus.SelectMany(segment => segment.Points).ToArray();
+            var minX = allContourPoints.Min(point => point.X + centerX);
+            var minY = allContourPoints.Min(point => point.Y + centerY);
+            var maxX = allContourPoints.Max(point => point.X + centerX);
+            var maxY = allContourPoints.Max(point => point.Y + centerY);
+            JlXLDCont? combinedContours = null;
+            try
+            {
+                foreach (var segment in consensus)
+                {
+                    token.ThrowIfCancellationRequested();
+                    using var contour = new JlXLDCont();
+                    using var rows = new JlTuple(segment.Points.Select(point => point.Y + centerY).ToArray());
+                    using var cols = new JlTuple(segment.Points.Select(point => point.X + centerX).ToArray());
+                    contour.GenContourPolygonXld(rows, cols);
+                    if (combinedContours is null) combinedContours = new JlXLDCont(contour);
+                    else
+                    {
+                        var next = combinedContours.ConcatObj(contour);
+                        combinedContours.Dispose();
+                        combinedContours = next;
+                    }
+                }
+
+                using var model = new JlShapeModel();
+                if (anisotropicScale)
+                {
+                    model.CreateAnisoShapeModelXld(combinedContours!, modelPyramidLevels, -trainingRange, 2 * trainingRange, step,
+                        scaleYMin, scaleYMax, scaleStep, scaleXMin, scaleXMax, scaleStep,
+                        "auto", "ignore_local_polarity", minContrast);
+                }
+                else if (scaleTolerance > 0)
+                {
+                    model.CreateScaledShapeModelXld(combinedContours!, modelPyramidLevels, -trainingRange, 2 * trainingRange, step,
+                        scaleMin, scaleMax, scaleStep, "auto", "ignore_local_polarity", minContrast);
+                }
+                else model.CreateShapeModelXld(combinedContours!, modelPyramidLevels, -trainingRange, 2 * trainingRange, step, "auto", "ignore_local_polarity", minContrast);
+                var modelBoundsCenterX = (minX + maxX) / 2d;
+                var modelBoundsCenterY = (minY + maxY) / 2d;
+                // XLD models use the contour bounding-box center as their native pose origin.
+                // Keep the configured training origin by recording that offset for runtime pose correction.
+                var poseOffsetX = modelBoundsCenterX - centerX;
+                var poseOffsetY = modelBoundsCenterY - centerY;
+                using var modelToTrainingImageValues = new JlTuple(new[] { 1d, 0d,
+                    modelSet.Models[0].SourceOriginY!.Value + modelBoundsCenterY - centerY,
+                    0d, 1d, modelSet.Models[0].SourceOriginX!.Value + modelBoundsCenterX - centerX });
+                var modelToTrainingImage = new JlHomMat2D(modelToTrainingImageValues);
+                model.SetShapeModelMetric(firstImageVision, modelToTrainingImage,
+                    ignorePolarity ? "ignore_global_polarity" : "use_polarity");
+                if (clutterRoi is not null)
+                    ApplyShapeModelClutter(model, firstImage.Width, firstImage.Height, clutterRoi,
+                        modelToTrainingImage, clutterContrast, minContrast);
+                var modelBytes = model.SerializeShapeModel();
+                if (modelBytes.Length > 16 * 1024 * 1024)
+                    throw new InvalidOperationException("Composite shape model exceeds the 16 MB embedded workflow asset limit.");
+                var modelData = Convert.ToBase64String(modelBytes);
+                if (modelData.Length > 24 * 1024 * 1024)
+                    throw new InvalidOperationException("Composite shape model exceeds the workflow asset size limit.");
+
+                using var finalModelContours = model.GetShapeModelContours(1);
+                var finalContours = ExtractShapeContours(finalModelContours);
+                var featurePoints = finalContours.SelectMany(contour => contour).ToArray();
+                var modelContoursForPreview = finalContours.Select(contour => contour
+                    .Select(point => new VisionOverlayPoint(point.X + poseOffsetX + modelSet.Models[0].SourceOriginX!.Value,
+                        point.Y + poseOffsetY + modelSet.Models[0].SourceOriginY!.Value)).ToArray())
+                    .Where(points => points.Length > 0).ToArray();
+                var (symmetryPeriodDeg, qualityWarnings) = AnalyzeTrainingQuality(featurePoints.Select(point => (point.X + poseOffsetX, point.Y + poseOffsetY)).ToArray());
+                var previewOriginX = modelSet.Models[0].SourceOriginX!.Value;
+                var previewOriginY = modelSet.Models[0].SourceOriginY!.Value;
+                var combinedWarning = $"Composite model keeps features present in at least {minimumVotes} of {modelSet.Models.Length} aligned samples; {Math.Max(0, sampleFeaturePoints.Sum(points => points.Count) - featurePoints.Length)} input feature points were filtered or merged.";
+                var warnings = new List<string> { combinedWarning };
+                for (var index = 1; index < alignmentScores.Length; index++)
+                    if (alignmentScores[index] < .55) warnings.Add($"Sample {index + 1} aligned with a low score ({alignmentScores[index]:0.###}); verify it depicts the same part.");
+                warnings.AddRange(qualityWarnings);
+
+                Cv2.ImEncode(".jpg", firstImage, out var previewBytes, [new ImageEncodingParam(ImwriteFlags.JpegQuality, 82)]);
+                if (previewBytes.Length > 4 * 1024 * 1024)
+                    throw new InvalidOperationException("Composite training preview exceeds the 4 MB embedded asset limit.");
+                var config = ShapeTrainingConfig(node);
+                var (trainingRegionArea, trainingRegionType) = CompositeTrainingRegion(node, firstImage.Width, firstImage.Height);
+                var outputImage = VisionImage.Own(firstImage.Clone());
+                var summary = new Dictionary<string, object?>
+                {
+                    ["trainingSucceeded"] = true, ["trainingModelData"] = modelData,
+                    ["trainingModelHash"] = Convert.ToHexString(SHA256.HashData(modelBytes)), ["trainingPreviewImage"] = Convert.ToBase64String(previewBytes),
+                    ["trainingConfig"] = config, ["trainingWidth"] = imageWidth, ["trainingHeight"] = imageHeight,
+                    ["trainingSourceWidth"] = firstImage.Width, ["trainingSourceHeight"] = firstImage.Height,
+                    ["trainingOriginX"] = centerX, ["trainingOriginY"] = centerY,
+                    ["trainingOriginImageX"] = previewOriginX, ["trainingOriginImageY"] = previewOriginY,
+                    ["trainingPoseOffsetX"] = poseOffsetX, ["trainingPoseOffsetY"] = poseOffsetY,
+                    ["trainingRegionArea"] = trainingRegionArea, ["trainingSource"] = "composite-shape-model",
+                    ["trainingContourCount"] = finalContours.Count, ["trainingFeaturePointCount"] = featurePoints.Length,
+                    ["trainingSymmetryPeriodDeg"] = symmetryPeriodDeg, ["trainingWarnings"] = warnings.ToArray(),
+                    ["trainingPyramidLevels"] = pyramidLevels, ["trainingOriginMode"] = node.GetString("trainingOriginMode", "centroid"),
+                    ["trainingContour"] = modelContoursForPreview.FirstOrDefault() ?? [], ["trainingContours"] = modelContoursForPreview,
+                    ["trainingRegionType"] = trainingRegionType,
+                    ["trainingScaleMin"] = Math.Min(scaleXMin, scaleYMin), ["trainingScaleMax"] = Math.Max(scaleXMax, scaleYMax),
+                    ["trainingScaleXMin"] = scaleXMin, ["trainingScaleXMax"] = scaleXMax,
+                    ["trainingScaleYMin"] = scaleYMin, ["trainingScaleYMax"] = scaleYMax,
+                    ["trainingScaleToleranceXPercent"] = scaleToleranceX * 100, ["trainingScaleToleranceYPercent"] = scaleToleranceY * 100,
+                    ["trainingIgnorePolarity"] = ignorePolarity, ["trainingMinContrast"] = minContrast,
+                    ["trainingClutterEnabled"] = clutterRoi is not null, ["trainingClutterContrast"] = clutterRoi is not null ? clutterContrast : null,
+                    ["trainingSampleCount"] = modelSet.Models.Length, ["trainingMinSampleFraction"] = fraction,
+                    ["trainingMinimumSampleVotes"] = minimumVotes, ["trainingFeatureTolerancePx"] = featureTolerance,
+                    ["trainingConsensusContourCount"] = consensus.Count,
+                    ["trainingConsensusFeaturePointCount"] = consensus.Sum(segment => segment.Points.Length),
+                    ["trainingSampleAlignmentScores"] = alignmentScores
+                };
+                var overlays = new List<VisionOverlay>(modelContoursForPreview.Select((points, index) =>
+                    new VisionOverlay($"shape-training-contour-{index}", VisionOverlayType.Polyline, Points: points, Label: "复合模型稳定轮廓", Stroke: "#13c2c2", StrokeWidth: 2)))
+                {
+                    new("shape-training-origin", VisionOverlayType.Point, X: previewOriginX, Y: previewOriginY,
+                        Label: "位姿原点", Stroke: "#fa541c", StrokeWidth: 3)
+                };
+                return new NodeExecutorResult(
+                    new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(outputImage), ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["count"] = VisionValue.Integer(0) },
+                    summary, overlays);
+            }
+            finally { combinedContours?.Dispose(); }
+    }
+
+    private static List<ShapeFeaturePoint[]> ExtractShapeContours(JlXLDCont contours)
+    {
+        var extracted = new List<ShapeFeaturePoint[]>();
+        for (var index = 1; index <= contours.CountObj(); index++)
+        {
+            using var selected = contours.SelectObj(index);
+            selected.GetContourXld(out var rows, out var cols);
+            using (rows) using (cols)
+            {
+                if (rows.Length < 2 || rows.Length != cols.Length) continue;
+                var points = new ShapeFeaturePoint[rows.Length];
+                for (var pointIndex = 0; pointIndex < rows.Length; pointIndex++)
+                    points[pointIndex] = new(cols[pointIndex].D, rows[pointIndex].D);
+                extracted.Add(points);
+            }
+        }
+        return extracted;
+    }
+
+    private static List<ConsensusContour> BuildConsensusContours(IReadOnlyList<List<ShapeFeaturePoint[]>> sampleContours,
+        IReadOnlyList<ShapeFeatureSpatialIndex> sampleIndexes, int minimumVotes, double tolerance)
+    {
+        var proposed = new List<ConsensusContour>();
+        for (var sampleIndex = 0; sampleIndex < sampleContours.Count; sampleIndex++)
+        foreach (var contour in sampleContours[sampleIndex])
+        {
+            var segment = new List<ShapeFeaturePoint>();
+            var supports = new List<double>();
+            var previousCandidate = default(ShapeFeaturePoint);
+            var hasPreviousCandidate = false;
+            void Flush()
+            {
+                if (segment.Count >= 4 && PolylineLength(segment) >= tolerance * 2)
+                    proposed.Add(new(segment.ToArray(), supports.Average()));
+                segment.Clear(); supports.Clear(); hasPreviousCandidate = false;
+            }
+
+            foreach (var candidate in contour)
+            {
+                var matched = new List<ShapeFeaturePoint>(sampleIndexes.Count);
+                foreach (var sampleIndexForVote in Enumerable.Range(0, sampleIndexes.Count))
+                    if (sampleIndexes[sampleIndexForVote].TryNearest(candidate, tolerance, out var nearest)) matched.Add(nearest);
+                if (matched.Count < minimumVotes)
+                {
+                    Flush();
+                    continue;
+                }
+                var averaged = new ShapeFeaturePoint(matched.Average(point => point.X), matched.Average(point => point.Y));
+                if (hasPreviousCandidate && Distance(previousCandidate, candidate) > tolerance * 2.5) Flush();
+                segment.Add(averaged);
+                supports.Add(matched.Count / (double)sampleIndexes.Count);
+                previousCandidate = candidate;
+                hasPreviousCandidate = true;
+            }
+            Flush();
+        }
+
+        var accepted = new List<ConsensusContour>();
+        foreach (var candidate in proposed.OrderByDescending(segment => segment.Support).ThenByDescending(segment => segment.Points.Length))
+        {
+            if (accepted.Any(existing => SimilarConsensusContour(existing.Points, candidate.Points, tolerance))) continue;
+            accepted.Add(candidate);
+        }
+        return accepted;
+    }
+
+    private static bool SimilarConsensusContour(IReadOnlyList<ShapeFeaturePoint> first, IReadOnlyList<ShapeFeaturePoint> second, double tolerance)
+    {
+        if (first.Count < 4 || second.Count < 4) return false;
+        var firstLength = PolylineLength(first);
+        var secondLength = PolylineLength(second);
+        if (firstLength <= 0 || secondLength <= 0 || Math.Min(firstLength, secondLength) / Math.Max(firstLength, secondLength) < .6) return false;
+        var firstSample = ResamplePolyline(first, 96);
+        var secondSample = ResamplePolyline(second, 96);
+        static double DirectedMean(IReadOnlyList<ShapeFeaturePoint> source, IReadOnlyList<ShapeFeaturePoint> target) =>
+            source.Average(point => target.Min(other => Distance(point, other)));
+        return (DirectedMean(firstSample, secondSample) + DirectedMean(secondSample, firstSample)) / 2 <= Math.Max(.5, tolerance * .65);
+    }
+
+    private static ShapeFeaturePoint[] ResamplePolyline(IReadOnlyList<ShapeFeaturePoint> points, int maximumCount)
+    {
+        if (points.Count <= maximumCount) return points.ToArray();
+        var stride = (points.Count - 1d) / (maximumCount - 1);
+        return Enumerable.Range(0, maximumCount).Select(index => points[(int)Math.Round(index * stride)]).ToArray();
+    }
+
+    private static double PolylineLength(IReadOnlyList<ShapeFeaturePoint> points)
+    {
+        var length = 0d;
+        for (var index = 1; index < points.Count; index++) length += Distance(points[index - 1], points[index]);
+        return length;
+    }
+
+    private static double Distance(ShapeFeaturePoint first, ShapeFeaturePoint second)
+    {
+        var dx = first.X - second.X;
+        var dy = first.Y - second.Y;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    private static (double Area, string Type) CompositeTrainingRegion(NodeDefinition node, int width, int height)
+    {
+        var roi = node.GetRoi();
+        if (roi is null) return ((double)width * height, "FullImage");
+        var bounds = RoiBounds(roi) & new Rect(0, 0, width, height);
+        using var mask = new Mat(bounds.Height, bounds.Width, MatType.CV_8UC1, Scalar.All(0));
+        FillRoiMask(mask, roi, bounds);
+        return (Cv2.CountNonZero(mask), roi.Type.ToString());
+    }
+
+    private static (int? SymmetryPeriodDeg, string[] Warnings) AnalyzeTrainingQuality(IReadOnlyList<(double X, double Y)> featurePoints)
+    {
+        var warnings = new List<string>();
+        if (featurePoints.Count < 32)
+            warnings.Add("模型边缘特征较少，建议检查模型区域、图像对比度和最低特征对比度。");
+
+        int? symmetryPeriod = null;
+        foreach (var degrees in new[] { 90, 180 })
+        {
+            if (RotationalFeatureOverlap(featurePoints, degrees) < 0.9) continue;
+            symmetryPeriod = degrees;
+            warnings.Add($"模型边缘在约 {degrees}° 旋转后仍高度重合，方向可能存在周期性歧义；请用非对称定位特征确认角度。");
+            break;
+        }
+        return (symmetryPeriod, warnings.ToArray());
+    }
+
+    private static double RotationalFeatureOverlap(IReadOnlyList<(double X, double Y)> points, int degrees)
+    {
+        if (points.Count < 16) return 0;
+        const int maximumSamples = 1200;
+        var stride = Math.Max(1, (int)Math.Ceiling(points.Count / (double)maximumSamples));
+        var samples = Enumerable.Range(0, points.Count).Where(index => index % stride == 0).Select(index => points[index]).ToArray();
+        var radians = degrees * Math.PI / 180d;
+        var cos = Math.Cos(radians);
+        var sin = Math.Sin(radians);
+        const double toleranceSquared = 1.5 * 1.5;
+        var overlapping = 0;
+        foreach (var (x, y) in samples)
+        {
+            var rotatedX = cos * x - sin * y;
+            var rotatedY = sin * x + cos * y;
+            var nearest = samples.Min(point => (point.X - rotatedX) * (point.X - rotatedX) + (point.Y - rotatedY) * (point.Y - rotatedY));
+            if (nearest <= toleranceSquared) overlapping++;
+        }
+        return overlapping / (double)samples.Length;
+    }
+
     private static string ShapeTrainingConfig(NodeDefinition node)
+    {
+        var clutterRoi = node.GetRoi("clutterRoi");
+        var clutterSettings = clutterRoi is null ? "none"
+            : FormattableString.Invariant($"{RoiFingerprint(clutterRoi)}:{Math.Clamp(node.GetInt("clutterContrast", node.GetInt("minContrast", 5)), 1, 255)}");
+        return FormattableString.Invariant($"shape-v6|{ShapeTrainingConfigV5(node)[9..]}|{clutterSettings}");
+    }
+
+    private static string ShapeTrainingConfigV5(NodeDefinition node)
+    {
+        return FormattableString.Invariant($"shape-v5|{ShapeTrainingConfigV4(node)[9..]}|{Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50):R}|{Math.Clamp(node.GetDouble("scaleToleranceYPercent", 0), 0, 50):R}");
+    }
+
+    private static string ShapeTrainingConfigV4(NodeDefinition node)
+    {
+        return FormattableString.Invariant($"shape-v4|{ShapeTrainingConfigV3(node)[9..]}|{Math.Clamp(node.GetDouble("trainingMinSampleFraction", .75), .5, 1):R}|{Math.Clamp(node.GetDouble("trainingFeatureTolerancePx", 2), .5, 10):R}");
+    }
+
+    private static string ShapeTrainingConfigV3(NodeDefinition node)
+    {
+        var roi = node.GetRoi();
+        var roiText = RoiFingerprint(roi);
+        return FormattableString.Invariant($"shape-v3|{node.GetString("templatePath", string.Empty)}|{node.GetString("binarize", "auto")}|{node.GetDouble("threshold", 128):R}|{node.GetBool("invert", false)}|{node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)):R}|{node.GetDouble("angleStepDeg", 1):R}|{node.GetInt("pyramidLevels", 0)}|{roiText}|{node.GetString("trainingOriginMode", "centroid")}|{node.GetDouble("trainingOriginX", 0):R}|{node.GetDouble("trainingOriginY", 0):R}|{node.GetDouble("scaleTolerancePercent", 0):R}|{(node.GetDouble("scaleTolerancePercent", 0) > 0 ? node.GetDouble("scaleStepPercent", 1) : 0):R}|{node.GetBool("ignorePolarity", false)}|{node.GetInt("minContrast", 5)}");
+    }
+
+    private static string ShapeTrainingConfigV2(NodeDefinition node)
     {
         var roi = node.GetRoi();
         var roiText = RoiFingerprint(roi);
@@ -560,11 +1616,43 @@ internal static class JLVisionMatching
         return FormattableString.Invariant($"shape-v1|{node.GetString("templatePath", string.Empty)}|{node.GetString("binarize", "auto")}|{node.GetDouble("threshold", 128):R}|{node.GetBool("invert", false)}|{node.GetDouble("angleRangeDeg", 180):R}|{node.GetDouble("angleStepDeg", 1):R}|{roiText}|{node.GetString("trainingOriginMode", "centroid")}|{node.GetDouble("trainingOriginX", 0):R}|{node.GetDouble("trainingOriginY", 0):R}");
     }
 
-    private static bool IsCompatibleLegacyShapeConfig(NodeDefinition node, string savedConfig) =>
-        string.Equals(savedConfig, ShapeTrainingConfigV1(node), StringComparison.Ordinal)
-        && node.GetDouble("scaleTolerancePercent", 0) == 0
-        && !node.GetBool("ignorePolarity", false)
-        && node.GetInt("minContrast", 5) == 5;
+    private static bool IsCompatibleLegacyShapeConfig(NodeDefinition node, string savedConfig)
+    {
+        if (savedConfig.StartsWith("shape-v5|", StringComparison.Ordinal)
+            && node.GetRoi("clutterRoi") is null)
+            return string.Equals(savedConfig, ShapeTrainingConfigV5(node), StringComparison.Ordinal);
+        if (savedConfig.StartsWith("shape-v4|", StringComparison.Ordinal)
+            && node.GetRoi("clutterRoi") is null
+            && Math.Abs(node.GetDouble("scaleToleranceXPercent", 0)) < 1e-9
+            && Math.Abs(node.GetDouble("scaleToleranceYPercent", 0)) < 1e-9)
+            return string.Equals(savedConfig, ShapeTrainingConfigV4(node), StringComparison.Ordinal);
+        if (savedConfig.StartsWith("shape-v3|", StringComparison.Ordinal)
+            && node.GetRoi("clutterRoi") is null
+            && Math.Abs(node.GetDouble("trainingMinSampleFraction", .75) - .75) < 1e-9
+            && Math.Abs(node.GetDouble("trainingFeatureTolerancePx", 2) - 2) < 1e-9
+            && Math.Abs(node.GetDouble("scaleToleranceXPercent", 0)) < 1e-9
+            && Math.Abs(node.GetDouble("scaleToleranceYPercent", 0)) < 1e-9)
+            return string.Equals(savedConfig, ShapeTrainingConfigV3(node), StringComparison.Ordinal);
+        if (savedConfig.StartsWith("shape-v2|", StringComparison.Ordinal)
+            && node.GetRoi("clutterRoi") is null
+            && node.GetInt("pyramidLevels", 0) == 0
+            && Math.Abs(node.GetDouble("scaleToleranceXPercent", 0)) < 1e-9
+            && Math.Abs(node.GetDouble("scaleToleranceYPercent", 0)) < 1e-9
+            && Math.Abs(node.GetDouble("trainingAngleRangeDeg", node.GetDouble("angleRangeDeg", 180)) - node.GetDouble("angleRangeDeg", 180)) < 1e-9)
+            return string.Equals(savedConfig, ShapeTrainingConfigV2(node), StringComparison.Ordinal);
+        var saved = savedConfig.Split('|');
+        var current = ShapeTrainingConfigV1(node).Split('|');
+        if (saved.Length != current.Length || saved[0] != "shape-v1"
+            || node.GetDouble("scaleTolerancePercent", 0) != 0
+            || node.GetDouble("scaleToleranceXPercent", 0) != 0
+            || node.GetDouble("scaleToleranceYPercent", 0) != 0
+            || node.GetRoi("clutterRoi") is not null
+            || node.GetInt("pyramidLevels", 0) != 0
+            || node.GetBool("ignorePolarity", false)
+            || node.GetInt("minContrast", 5) != 5)
+            return false;
+        return string.Equals(savedConfig, ShapeTrainingConfigV1(node), StringComparison.Ordinal);
+    }
 
     private static string RoiFingerprint(VisionRoi? roi)
     {
@@ -584,11 +1672,12 @@ internal static class JLVisionMatching
     }
 
     private static string Key(Mat template, bool shape, double range, double step, double x, double y, int levels = 0,
-        double scaleMin = 1, double scaleMax = 1, double scaleStep = 0, bool ignorePolarity = false, int minContrast = 5)
+        double scaleMin = 1, double scaleMax = 1, double scaleStep = 0, bool ignorePolarity = false, int minContrast = 5,
+        double scaleXMin = 1, double scaleXMax = 1, double scaleYMin = 1, double scaleYMax = 1, string clutterConfig = "")
     {
         using var packed = template.IsContinuous() ? null : template.Clone(); var buffer = packed ?? template;
         var bytes = new byte[checked((int)(buffer.Total() * buffer.ElemSize()))]; Marshal.Copy(buffer.Data, bytes, 0, bytes.Length);
-        return FormattableString.Invariant($"{shape}:{buffer.Width}:{buffer.Height}:{buffer.Type()}:{range:R}:{step:R}:{x:R}:{y:R}:{levels}:{scaleMin:R}:{scaleMax:R}:{scaleStep:R}:{ignorePolarity}:{minContrast}:{Convert.ToHexString(SHA256.HashData(bytes))}");
+        return FormattableString.Invariant($"{shape}:{buffer.Width}:{buffer.Height}:{buffer.Type()}:{range:R}:{step:R}:{x:R}:{y:R}:{levels}:{scaleMin:R}:{scaleMax:R}:{scaleStep:R}:{scaleXMin:R}:{scaleXMax:R}:{scaleYMin:R}:{scaleYMax:R}:{ignorePolarity}:{minContrast}:{clutterConfig}:{Convert.ToHexString(SHA256.HashData(bytes))}");
     }
 
     private static double Ssd(JlImage scene, JlImage template, double x, double y, double angle, double originX, double originY)

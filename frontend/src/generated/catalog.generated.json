@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "3a2d366ca85c9428a4a5ab699b1f50b39bda8f84e57368bbdcac0ebf65f98708",
+  "hash": "5deef05804511d391c2c5ac943c43a5bfea4c896200decf80fe3e25da0dda585",
   "items": [
     {
       "type": "image.acquire",
@@ -5378,6 +5378,21 @@
           "required": false
         },
         {
+          "name": "scaleX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "scaleY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "clutterScore",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "center",
           "dataType": "Point2D",
           "required": false
@@ -5436,7 +5451,7 @@
         },
         {
           "name": "binarize",
-          "label": "Binarize",
+          "label": "Origin Estimation",
           "type": "select",
           "defaultValue": "auto",
           "options": [
@@ -5453,25 +5468,27 @@
               "value": "direct"
             }
           ],
-          "group": "Binarize"
+          "group": "Origin Estimation",
+          "description": "Estimates the default origin only. Model features are trained from the original gray image."
         },
         {
           "name": "threshold",
-          "label": "Threshold",
+          "label": "Origin Threshold",
           "type": "number",
           "defaultValue": 128,
           "min": 0,
           "max": 255,
           "step": 1,
-          "group": "Binarize",
-          "description": "Used when Binarize = fixed threshold."
+          "group": "Origin Estimation",
+          "description": "Used when origin estimation uses a fixed threshold; this does not binarize the shape model."
         },
         {
           "name": "invert",
-          "label": "Dark Objects",
+          "label": "Dark Foreground",
           "type": "boolean",
           "defaultValue": false,
-          "group": "Binarize"
+          "group": "Origin Estimation",
+          "description": "Invert only the automatic foreground used to estimate the origin."
         },
         {
           "name": "minArea",
@@ -5486,7 +5503,19 @@
         },
         {
           "name": "angleRangeDeg",
-          "label": "Angle Range",
+          "label": "Legacy Angle Range",
+          "type": "number",
+          "defaultValue": 180,
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "unit": "deg",
+          "group": "Search",
+          "description": "Compatibility setting for older shape workflows that use an image template directly."
+        },
+        {
+          "name": "trainingAngleRangeDeg",
+          "label": "Training Angle Coverage",
           "type": "number",
           "defaultValue": 180,
           "min": 0,
@@ -5494,7 +5523,55 @@
           "step": 1,
           "unit": "deg",
           "group": "Training",
-          "description": "Model training angle range; matching searches within this trained range."
+          "description": "Maximum symmetric angle range represented by the trained model. Changing this requires retraining."
+        },
+        {
+          "name": "searchAngleStartDeg",
+          "label": "Search Start Angle",
+          "type": "number",
+          "defaultValue": -180,
+          "min": -180,
+          "max": 180,
+          "step": 1,
+          "unit": "deg",
+          "group": "Search",
+          "description": "Lower angle bound for this search run. It is clipped to the trained model coverage and does not require retraining."
+        },
+        {
+          "name": "searchAngleEndDeg",
+          "label": "Search End Angle",
+          "type": "number",
+          "defaultValue": 180,
+          "min": -180,
+          "max": 180,
+          "step": 1,
+          "unit": "deg",
+          "group": "Search",
+          "description": "Upper angle bound for this search run. It is clipped to the trained model coverage and does not require retraining."
+        },
+        {
+          "name": "searchScaleMinPercent",
+          "label": "Search Minimum Scale",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 50,
+          "max": 150,
+          "step": 1,
+          "unit": "%",
+          "group": "Search",
+          "description": "Minimum scale for this search run, as a percentage of the trained object size. It is clipped to the trained model coverage."
+        },
+        {
+          "name": "searchScaleMaxPercent",
+          "label": "Search Maximum Scale",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 50,
+          "max": 150,
+          "step": 1,
+          "unit": "%",
+          "group": "Search",
+          "description": "Maximum scale for this search run, as a percentage of the trained object size. It is clipped to the trained model coverage."
         },
         {
           "name": "angleStepDeg",
@@ -5509,6 +5586,17 @@
           "description": "Model training angle step. Smaller steps improve angular coverage at additional model size."
         },
         {
+          "name": "pyramidLevels",
+          "label": "Pyramid Levels",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 8,
+          "step": 1,
+          "group": "Training",
+          "description": "0 selects automatic pyramid depth; 1–8 fixes the coarse-to-fine levels used for training and search. More levels can speed up large-image search but may miss small features."
+        },
+        {
           "name": "scaleTolerancePercent",
           "label": "Scale Tolerance",
           "type": "number",
@@ -5521,6 +5609,30 @@
           "description": "Train and search a symmetric scale range around 100%. Zero keeps fixed-scale matching."
         },
         {
+          "name": "scaleToleranceXPercent",
+          "label": "X Scale Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 50,
+          "step": 1,
+          "unit": "%",
+          "group": "Training",
+          "description": "Independent horizontal scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance."
+        },
+        {
+          "name": "scaleToleranceYPercent",
+          "label": "Y Scale Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 50,
+          "step": 1,
+          "unit": "%",
+          "group": "Training",
+          "description": "Independent vertical scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance."
+        },
+        {
           "name": "scaleStepPercent",
           "label": "Scale Step",
           "type": "number",
@@ -5531,6 +5643,29 @@
           "unit": "%",
           "group": "Training",
           "description": "Scale sampling step used when scale tolerance is enabled."
+        },
+        {
+          "name": "trainingMinSampleFraction",
+          "label": "Minimum Sample Fraction",
+          "type": "number",
+          "defaultValue": 0.75,
+          "min": 0.5,
+          "max": 1,
+          "step": 0.05,
+          "group": "Training",
+          "description": "Minimum fraction of aligned samples that must contain a contour feature for it to enter the composite model."
+        },
+        {
+          "name": "trainingFeatureTolerancePx",
+          "label": "Feature Alignment Tolerance",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.5,
+          "max": 10,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Training",
+          "description": "Maximum point distance used to treat contour features from different samples as the same feature."
         },
         {
           "name": "ignorePolarity",
@@ -5552,13 +5687,24 @@
           "description": "Reject weak boundaries while training the shape model."
         },
         {
+          "name": "clutterContrast",
+          "label": "Clutter Contrast",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Training",
+          "description": "Minimum edge contrast counted inside the optional Clutter ROI; must be at least Minimum Feature Contrast."
+        },
+        {
           "name": "trainingOriginMode",
           "label": "Training Origin",
           "type": "select",
           "defaultValue": "centroid",
           "options": [
             {
-              "label": "Contour centroid",
+              "label": "Automatic object centroid",
               "value": "centroid"
             },
             {
@@ -5566,7 +5712,8 @@
               "value": "manual"
             }
           ],
-          "group": "Training"
+          "group": "Training",
+          "description": "Use the dominant thresholded component centroid when available; fall back to the selected model region centroid. Model features still use the original grayscale image."
         },
         {
           "name": "trainingOriginX",
@@ -5603,6 +5750,29 @@
           "group": "Matching"
         },
         {
+          "name": "maxDeformationPx",
+          "label": "Maximum Local Deformation",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32,
+          "step": 1,
+          "unit": "px",
+          "group": "Matching",
+          "description": "Allow each model point to move locally by up to this many pixels during pose refinement. Uses least-squares adjustment and does not require retraining; 0 disables deformation tolerance."
+        },
+        {
+          "name": "maxClutterScore",
+          "label": "Maximum Clutter Score",
+          "type": "number",
+          "defaultValue": 0.2,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Matching",
+          "description": "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value."
+        },
+        {
           "name": "maxTargets",
           "label": "Max Targets",
           "type": "number",
@@ -5624,7 +5794,7 @@
           "group": "Multi-target"
         }
       ],
-      "description": "Feature-based shape model matching with explicit model/search regions, subpixel pose, optional scale tolerance, polarity control and bounded multi-target suppression. angle rotates the trained template CCW to align with the scene; scale is relative to the trained size.",
+      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
