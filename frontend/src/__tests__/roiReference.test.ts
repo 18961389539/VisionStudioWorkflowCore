@@ -55,6 +55,17 @@ describe('ROI reference capture', () => {
     expect(imageFrameFingerprint('frame-image', [selectedCameraB, sync('line-a')], [edge])).not.toBe(frameSetA);
   });
 
+  it('invalidates a saved reference when synthetic image geometry or placement settings change', () => {
+    const synthetic = (parameters: Record<string, unknown>): Node => ({ id: 'synthetic', position: { x: 0, y: 0 }, data: {
+      typeKey: 'image.synthetic', parameters
+    } });
+    const base = { width: 640, height: 480, centerX: 320, centerY: 240, radius: 80, placementMode: 'fixed' };
+    const baseline = imageFrameFingerprint('synthetic', [synthetic(base)], []);
+    expect(imageFrameFingerprint('synthetic', [synthetic({ ...base, centerX: 321 })], [])).not.toBe(baseline);
+    expect(imageFrameFingerprint('synthetic', [synthetic({ ...base, placementMode: 'sequence', sampleIndex: 2 })], [])).not.toBe(baseline);
+    expect(imageFrameFingerprint('synthetic', [synthetic(base)], [])).toBe(baseline);
+  });
+
   it('moves connected measurement parameters atomically when the reference changes', () => {
     const nodes = [
       { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', parameters: { baseX: 100, baseY: 50 } } },

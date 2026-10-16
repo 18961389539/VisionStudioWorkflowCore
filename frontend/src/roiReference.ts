@@ -7,6 +7,8 @@ const coordinateParameters: Record<string, string[]> = {
   'image.acquire': ['cameraId'],
   'camera.syncCapture': ['groupId'],
   'frameset.image': ['cameraId'],
+  'image.synthetic': ['width', 'height', 'centerX', 'centerY', 'radius', 'placementMode', 'sampleIndex',
+    'offsetStepX', 'offsetStepY', 'angleStepDeg', 'randomSeed', 'maxOffsetX', 'maxOffsetY', 'maxAngleDeg'],
   'image.crop': ['roi', 'x', 'y', 'width', 'height'],
   'image.resize': ['width', 'height'],
   'image.rotate': ['angleDeg', 'expand'],
