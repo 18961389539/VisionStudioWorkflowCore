@@ -426,11 +426,14 @@ public static class BuiltInNodeCatalog
             "measure.caliper",
             "Caliper Edge",
             "Measurement",
-            [ExecIn, new("image", VisionDataType.Image), new("searchLine", VisionDataType.Line2D, Required: false), new("transform", VisionDataType.Transform2D, Required: false)],
+            [ExecIn, new("image", VisionDataType.Image), new("searchLine", VisionDataType.Line2D, Required: false), new("transform", VisionDataType.Transform2D, Required: false), new("roi", VisionDataType.Roi, Required: false)],
             [
                 new("image", VisionDataType.Image),
-                new("point", VisionDataType.Point2D),
-                new("strength", VisionDataType.Double),
+                new("found", VisionDataType.Boolean),
+                new("point", VisionDataType.Point2D, Required: false),
+                new("strength", VisionDataType.Double, Required: false),
+                new("fitError", VisionDataType.Double, Required: false),
+                new("sampleCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
                 Next
             ],
@@ -439,16 +442,27 @@ public static class BuiltInNodeCatalog
                 new("startY", "Start Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("endX", "End X", "number", 520, 0, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("endY", "End Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
+                new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("edgeThreshold", "Edge Threshold", "number", 12, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
                     new("Any", "Any"),
                     new("Rising", "Rising"),
                     new("Falling", "Falling")
+                ], Group: "Sampling"),
+                new("direction", "Direction", "select", "strongest", Options:
+                [
+                    new("Strongest", "strongest"),
+                    new("First from start", "firstfromstart"),
+                    new("First from end", "firstfromend")
+                ], Group: "Sampling"),
+                new("refine", "Refine", "select", "parabolic", Options:
+                [
+                    new("Parabolic (subpixel)", "parabolic"),
+                    new("None (integer)", "none")
                 ], Group: "Sampling")
             ],
-            "1D grayscale caliper along a configurable search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction to the current image. Returns the strongest edge point.",
+            "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(

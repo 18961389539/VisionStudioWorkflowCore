@@ -60,6 +60,11 @@ public sealed class Batch2ImageNodeTests
         Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["x"]));
         Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["y"]));
         Assert.Equal(Cv2.CountNonZero(expectedMask), Convert.ToInt32(result.Summary["selectedPixels"]));
+        var cropOrigin = result.Outputs["cropOrigin"].Require<VisionPoint2D>("cropOrigin");
+        Assert.Equal(bounds.X, cropOrigin.X);
+        Assert.Equal(bounds.Y, cropOrigin.Y);
+        var cropTransform = result.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.Equal(new VisionPoint2D(3, 4), cropTransform.Apply(new VisionPoint2D(bounds.X + 3, bounds.Y + 4)));
         Assert.Equal(0d, Cv2.Norm(expected, actual.Mat, NormTypes.INF));
         Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
     }

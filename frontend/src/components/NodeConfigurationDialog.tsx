@@ -757,7 +757,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         </div>}
         {isImageCrop && <div className="shape-training-panel crop-settings-panel">
           <strong>选择裁剪区域</strong>
-          <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；笔刷支持添加和擦除，输出图像按选区紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。</p>
+          <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；笔刷支持添加和擦除，输出图像按选区紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。裁剪后原点移到新图左上角，可将“变换”端口连接到下游测量节点以换算原图坐标。</p>
           {draft.roi && <Button size="small" disabled={locked} onClick={() => changeCropRoi(undefined)}>清除选区（使用整图）</Button>}
           <Button type="primary" size="small" onClick={() => void runPreview()} loading={previewBusy}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}

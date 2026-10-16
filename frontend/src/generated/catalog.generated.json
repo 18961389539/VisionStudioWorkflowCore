@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "f6e2dbf36c56cbc02cd29a080d3b2dd143898d76cbc51df700ffde6a1aa3609c",
+  "hash": "09eb7d2cc0a3db561392fb1c263a7aabe997f83f11b3a2046afff36324a6823d",
   "items": [
     {
       "type": "image.acquire",
@@ -3566,14 +3566,15 @@
         },
         {
           "name": "sampleWidth",
-          "label": "Sample Width",
+          "label": "Projection Length",
           "type": "number",
           "defaultValue": 5,
           "min": 1,
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."
         },
         {
           "name": "minContrast",
@@ -6068,6 +6069,11 @@
           "required": false
         },
         {
+          "name": "ignoredCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -6130,26 +6136,68 @@
           "group": "Arc"
         },
         {
+          "name": "samplingMode",
+          "label": "Sampling Mode",
+          "type": "select",
+          "defaultValue": "count",
+          "options": [
+            {
+              "label": "Caliper Count",
+              "value": "count"
+            },
+            {
+              "label": "Angle Step (Legacy)",
+              "value": "step"
+            }
+          ],
+          "group": "Arc"
+        },
+        {
+          "name": "caliperCount",
+          "label": "Caliper Count",
+          "type": "number",
+          "defaultValue": 72,
+          "min": 3,
+          "max": 361,
+          "step": 1,
+          "unit": "",
+          "group": "Arc",
+          "description": "Number of radial calipers. Full circles distribute them without duplicating the end angle; partial arcs include both ends.",
+          "visibleWhen": {
+            "parameter": "samplingMode",
+            "values": [
+              "count"
+            ]
+          }
+        },
+        {
           "name": "angleStepDeg",
-          "label": "Angle Step",
+          "label": "Angle Step (Legacy)",
           "type": "number",
           "defaultValue": 5,
           "min": 0.5,
           "max": 45,
           "step": 0.5,
           "unit": "deg",
-          "group": "Arc"
+          "group": "Arc",
+          "visibleWhen": {
+            "parameter": "samplingMode",
+            "values": [
+              "step"
+            ]
+          }
         },
         {
           "name": "radialBand",
-          "label": "Radial Band",
+          "label": "Radial Search Half-Width",
           "type": "number",
           "defaultValue": 8,
           "min": 1,
           "max": 500,
           "step": 1,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "Searches from nominal radius minus this value to nominal radius plus this value."
         },
         {
           "name": "minContrast",
@@ -6184,8 +6232,29 @@
           "group": "Sampling"
         },
         {
+          "name": "searchDirection",
+          "label": "Search Direction",
+          "type": "select",
+          "defaultValue": "strongest",
+          "options": [
+            {
+              "label": "Strongest Edge",
+              "value": "strongest"
+            },
+            {
+              "label": "First from Start",
+              "value": "firstfromstart"
+            },
+            {
+              "label": "First from End",
+              "value": "firstfromend"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
           "name": "sampleWidth",
-          "label": "Sample Width",
+          "label": "Projection Length",
           "type": "number",
           "defaultValue": 3,
           "min": 1,
@@ -6204,10 +6273,45 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Reject spokes whose found edge deviates more than this from the nominal radius."
+          "description": "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."
+        },
+        {
+          "name": "maxFitOutliers",
+          "label": "Max Fit Outliers",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 16,
+          "step": 1,
+          "group": "Fit",
+          "description": "After an initial fit, discard up to this many points whose radial residual exceeds the threshold."
+        },
+        {
+          "name": "fitOutlierThreshold",
+          "label": "Fit Outlier Threshold",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 100,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Fit",
+          "description": "Maximum allowed point-to-circle residual before a point can be excluded from the refit."
+        },
+        {
+          "name": "fitRadiusTolerance",
+          "label": "Fit Radius Tolerance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 5000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Fit",
+          "description": "Reject the fitted circle when its radius differs from the nominal radius by more than this amount."
         }
       ],
-      "description": "Caliper circle measurement with least-squares fit and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+      "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6244,6 +6348,11 @@
           "name": "transform",
           "dataType": "Transform2D",
           "required": false
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
         }
       ],
       "outputs": [
@@ -6253,14 +6362,29 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "point",
           "dataType": "Point2D",
-          "required": true
+          "required": false
         },
         {
           "name": "strength",
           "dataType": "Double",
-          "required": true
+          "required": false
+        },
+        {
+          "name": "fitError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": false
         },
         {
           "name": "searchLine",
@@ -6320,7 +6444,7 @@
         },
         {
           "name": "sampleWidth",
-          "label": "Sample Width",
+          "label": "Projection Length",
           "type": "number",
           "defaultValue": 5,
           "min": 1,
@@ -6360,9 +6484,47 @@
             }
           ],
           "group": "Sampling"
+        },
+        {
+          "name": "direction",
+          "label": "Direction",
+          "type": "select",
+          "defaultValue": "strongest",
+          "options": [
+            {
+              "label": "Strongest",
+              "value": "strongest"
+            },
+            {
+              "label": "First from start",
+              "value": "firstfromstart"
+            },
+            {
+              "label": "First from end",
+              "value": "firstfromend"
+            }
+          ],
+          "group": "Sampling"
+        },
+        {
+          "name": "refine",
+          "label": "Refine",
+          "type": "select",
+          "defaultValue": "parabolic",
+          "options": [
+            {
+              "label": "Parabolic (subpixel)",
+              "value": "parabolic"
+            },
+            {
+              "label": "None (integer)",
+              "value": "none"
+            }
+          ],
+          "group": "Sampling"
         }
       ],
-      "description": "1D grayscale caliper along a configurable search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction to the current image. Returns the strongest edge point.",
+      "description": "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6439,6 +6601,11 @@
         },
         {
           "name": "sampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "ignoredCount",
           "dataType": "Integer",
           "required": false
         },
@@ -6589,7 +6756,7 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Spread of parallel profiles perpendicular to the search line; zero uses the search line length."
+          "description": "Spread of parallel profiles along the expected edge; zero uses the search-line length."
         },
         {
           "name": "caliperCount",
@@ -6598,12 +6765,35 @@
           "defaultValue": 9,
           "min": 3,
           "max": 101,
-          "step": 2,
+          "step": 1,
           "group": "Sampling",
-          "description": "Number of parallel search profiles along the edge span; at least 3 valid edge points are required for a line fit."
+          "description": "Number of parallel search profiles along the edge span; at least 3 valid edge points must remain after fitting."
+        },
+        {
+          "name": "maxFitOutliers",
+          "label": "Max Fit Outliers",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 16,
+          "step": 1,
+          "group": "Fit",
+          "description": "Ignore up to this many edge points when their orthogonal residual exceeds the threshold."
+        },
+        {
+          "name": "fitOutlierThreshold",
+          "label": "Fit Outlier Threshold",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 100,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Fit",
+          "description": "A point can be excluded when its distance from the fitted line exceeds this value."
         }
       ],
-      "description": "Caliper line measurement with orthogonal RMS fit error. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points are required.",
+      "description": "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9351,13 +9541,23 @@
           "required": true
         },
         {
+          "name": "cropOrigin",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. Brush supports add and erase strokes; roiMask outputs the binary selection. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop a rectangle, circle, polygon, or brush ROI to its tight bounding box. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

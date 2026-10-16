@@ -81,6 +81,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             }
             roi = parameterRoi;
         }
+        ValidateTransformRoi(roi);
 
         var anglePeriodDeg = node.GetDouble("anglePeriodDeg", 360);
         if (!double.IsFinite(anglePeriodDeg) || anglePeriodDeg <= 0 || anglePeriodDeg > 360)
@@ -303,6 +304,64 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     new VisionOverlay($"{idPrefix}-label", VisionOverlayType.Text, Label: label, X: x, Y: y - 8, Stroke: stroke)
                 ];
             }
+        }
+    }
+
+    private static void ValidateTransformRoi(VisionRoi roi)
+    {
+        static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+            {
+                var x = roi.X ?? 0;
+                var y = roi.Y ?? 0;
+                var width = roi.Width ?? 0;
+                var height = roi.Height ?? 0;
+                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || width <= 0 || height <= 0
+                    || !double.IsFinite(x + width) || !double.IsFinite(y + height))
+                    throw new InvalidOperationException("The rectangle ROI needs finite coordinates and positive width and height.");
+                break;
+            }
+            case VisionRoiType.Circle:
+                if (!Finite(roi.X, roi.Y, roi.Radius) || roi.Radius <= 0)
+                    throw new InvalidOperationException("The circle ROI needs a finite center and a positive radius.");
+                break;
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+                    throw new InvalidOperationException("The polygon ROI needs at least three finite points.");
+                var area2 = points.Select((point, index) =>
+                {
+                    var next = points[(index + 1) % points.Count];
+                    return point.X * next.Y - next.X * point.Y;
+                }).Sum();
+                if (!double.IsFinite(area2) || Math.Abs(area2) < 1e-6)
+                    throw new InvalidOperationException("The polygon ROI must enclose a finite non-zero area.");
+                break;
+            }
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                var totalPoints = 0;
+                if (strokes.Count is < 1 or > 10_000 || !strokes.Any(stroke => stroke.Mode == VisionRoiStrokeMode.Add))
+                    throw new InvalidOperationException("The brush ROI needs 1..10000 strokes and at least one add stroke.");
+                foreach (var stroke in strokes)
+                {
+                    if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
+                        || stroke.Points is null || stroke.Points.Count == 0
+                        || stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+                        throw new InvalidOperationException("Brush ROI strokes need a valid mode, finite points and a width between 0 and 1024 px.");
+                    totalPoints = checked(totalPoints + stroke.Points.Count);
+                    if (totalPoints > 500_000)
+                        throw new InvalidOperationException("The brush ROI may contain at most 500000 points.");
+                }
+                break;
+            }
+            default:
+                throw new InvalidOperationException($"Unsupported ROI type '{roi.Type}'.");
         }
     }
 

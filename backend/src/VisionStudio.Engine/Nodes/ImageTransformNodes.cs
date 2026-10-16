@@ -44,11 +44,18 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(VisionImage.Own(croppedImage)),
-                    ["roiMask"] = VisionValue.Image(VisionImage.Own(maskImage))
+                    ["roiMask"] = VisionValue.Image(VisionImage.Own(maskImage)),
+                    ["cropOrigin"] = VisionValue.Point(new VisionPoint2D(bounds.X, bounds.Y)),
+                    ["transform"] = VisionValue.Transform(new VisionTransform2D(
+                        "InputImage", "CropImage", "px",
+                        1, 0, -bounds.X,
+                        0, 1, -bounds.Y,
+                        0, 0, 1))
                 },
                 new Dictionary<string, object?>
                 {
                     ["x"] = bounds.X, ["y"] = bounds.Y, ["width"] = bounds.Width, ["height"] = bounds.Height,
+                    ["cropOriginX"] = bounds.X, ["cropOriginY"] = bounds.Y,
                     ["roiType"] = roi.Type.ToString(), ["selectedPixels"] = selectedPixels
                 }));
         }

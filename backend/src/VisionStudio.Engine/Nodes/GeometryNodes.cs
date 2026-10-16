@@ -179,95 +179,80 @@ public sealed class CaliperNode : IVisionNodeExecutor
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var sourceImage = context.RequireImage("image");
+        if (sourceImage.Mat.Empty())
+            throw new InvalidOperationException("Caliper measurement requires a non-empty image.");
+
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var start = search.Start;
-        var end = search.End;
-        var width = Math.Max(1, node.GetInt("sampleWidth", 5));
-        var threshold = Math.Max(0, node.GetDouble("edgeThreshold", 12));
-        var polarity = node.GetString("polarity", "Any");
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
+        var minContrast = Math.Max(0, node.GetDouble("edgeThreshold", 12));
+        var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
+        var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
+        if (direction is not ("strongest" or "firstfromstart" or "firstfromend")) direction = "strongest";
+        var refine = node.GetString("refine", "none").Trim().ToLowerInvariant();
+        if (refine is not ("none" or "parabolic")) refine = "none";
+        var roi = ContourNodesHelper.ResolveRoi(context, node);
 
-        using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
-        var dx = end.X - start.X;
-        var dy = end.Y - start.Y;
-        var length = Math.Sqrt(dx * dx + dy * dy);
-        if (length < 2)
-            throw new InvalidOperationException("Caliper search line is too short.");
-
-        var nx = -dy / length;
-        var ny = dx / length;
-        var steps = Math.Max(2, (int)Math.Ceiling(length));
-        var samples = new double[steps + 1];
-        var points = new VisionPoint2D[steps + 1];
-
-        for (var i = 0; i <= steps; i++)
+        Mat? mask = null;
+        try
         {
-            var t = i / (double)steps;
-            var x = start.X + dx * t;
-            var y = start.Y + dy * t;
-            points[i] = new VisionPoint2D(x, y);
-
-            double sum = 0;
-            var count = 0;
-            for (var w = -width / 2; w <= width / 2; w++)
+            if (roi is not null) mask = roi.BuildMask(sourceImage.Mat.Size());
+            var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
+            try
             {
-                var px = Math.Clamp((int)Math.Round(x + nx * w), 0, gray.Cols - 1);
-                var py = Math.Clamp((int)Math.Round(y + ny * w), 0, gray.Rows - 1);
-                sum += gray.At<byte>(py, px);
-                count++;
+                var (start, end, clamped) = SubpixelEdgeCore.ClampLine(search.Start, search.End, gray.Cols, gray.Rows);
+                var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
+                var edge = SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
+                var searchLine = new VisionLine2D(start, end);
+                var outputs = new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
+                    ["found"] = VisionValue.Boolean(edge.Found),
+                    ["searchLine"] = VisionValue.Line(searchLine)
+                };
+                var overlays = new List<VisionOverlay>
+                {
+                    VisionGeometryHelpers.OverlayLine("caliper-search", searchLine, "#597ef7", 1.5)
+                };
+                VisionPoint2D? edgePoint = null;
+                if (edge.Found)
+                {
+                    edgePoint = SubpixelEdgeCore.Locate(start, end, edge.Position);
+                    outputs["point"] = VisionValue.Point(edgePoint.Value);
+                    outputs["strength"] = VisionValue.Double(edge.Strength);
+                    outputs["fitError"] = VisionValue.Double(edge.FitError);
+                    outputs["sampleCount"] = VisionValue.Integer(edge.SampleCount);
+                    overlays.Add(new VisionOverlay("caliper-edge", VisionOverlayType.Point,
+                        X: edgePoint.Value.X, Y: edgePoint.Value.Y, Stroke: "#f5222d", StrokeWidth: 3));
+                    overlays.Add(new VisionOverlay("caliper-label", VisionOverlayType.Text,
+                        Label: $"G={edge.Strength:0.0}", X: edgePoint.Value.X + 7, Y: edgePoint.Value.Y - 7,
+                        Stroke: "#ff7875", StrokeWidth: 1));
+                }
+
+                return ValueTask.FromResult(new NodeExecutorResult(outputs,
+                    new Dictionary<string, object?>
+                    {
+                        ["found"] = edge.Found,
+                        ["reason"] = edge.Reason,
+                        ["x"] = edge.Found ? Math.Round(edgePoint!.Value.X, 4) : null,
+                        ["y"] = edge.Found ? Math.Round(edgePoint!.Value.Y, 4) : null,
+                        ["strength"] = edge.Found ? Math.Round(edge.Strength, 3) : null,
+                        ["fitError"] = edge.Found && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
+                        ["sampleCount"] = edge.Found ? edge.SampleCount : null,
+                        ["polarity"] = polarity,
+                        ["direction"] = direction,
+                        ["refine"] = refine,
+                        ["edgeThreshold"] = minContrast,
+                        ["sampleWidth"] = sampleWidth,
+                        ["lineClampedToImage"] = clamped,
+                        ["autoGray"] = autoGray,
+                        ["roi"] = roi?.Type.ToString() ?? "FullImage"
+                    }, overlays));
             }
-            samples[i] = sum / Math.Max(1, count);
+            finally { owned?.Dispose(); }
         }
-
-        var bestIndex = -1;
-        var bestScore = double.NegativeInfinity;
-        var bestSigned = 0d;
-        for (var i = 1; i < samples.Length; i++)
-        {
-            var gradient = samples[i] - samples[i - 1];
-            var score = polarity.ToLowerInvariant() switch
-            {
-                "rising" => gradient,
-                "falling" => -gradient,
-                _ => Math.Abs(gradient)
-            };
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestSigned = gradient;
-                bestIndex = i;
-            }
-        }
-
-        if (bestIndex < 0 || bestScore < threshold)
-            throw new InvalidOperationException($"No caliper edge exceeded threshold {threshold:0.##}. Best={Math.Max(0, bestScore):0.##}.");
-
-        var edgePoint = points[bestIndex];
-        var searchLine = new VisionLine2D(start, end);
-        var overlays = new[]
-        {
-            VisionGeometryHelpers.OverlayLine("caliper-search", searchLine, "#597ef7", 1.5),
-            new VisionOverlay("caliper-edge", VisionOverlayType.Point, X: edgePoint.X, Y: edgePoint.Y, Stroke: "#f5222d", StrokeWidth: 3),
-            new VisionOverlay("caliper-label", VisionOverlayType.Text, Label: $"G={bestSigned:0.0}", X: edgePoint.X + 7, Y: edgePoint.Y - 7, Stroke: "#ff7875", StrokeWidth: 1)
-        };
-
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["image"] = VisionValue.Image(sourceImage),
-                ["point"] = VisionValue.Point(edgePoint),
-                ["strength"] = VisionValue.Double(Math.Abs(bestSigned)),
-                ["searchLine"] = VisionValue.Line(searchLine)
-            },
-            new Dictionary<string, object?>
-            {
-                ["x"] = Math.Round(edgePoint.X, 2),
-                ["y"] = Math.Round(edgePoint.Y, 2),
-                ["strength"] = Math.Round(Math.Abs(bestSigned), 2),
-                ["polarity"] = polarity,
-                ["sampleWidth"] = width
-            },
-            overlays));
+        finally { mask?.Dispose(); }
     }
 }
 

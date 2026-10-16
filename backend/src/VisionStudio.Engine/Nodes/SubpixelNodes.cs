@@ -17,6 +17,7 @@ internal static class SubpixelEdgeCore
     /// <summary>沿搜索线采样 1D 灰度剖面（垂直条带平均）。ROI 掩膜外采样点跳过；整点无效时为 NaN。</summary>
     public static double[] SampleProfile(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end, int sampleWidth, out VisionPoint2D[] points, out double spacing)
     {
+        sampleWidth = NormalizeSampleWidth(sampleWidth);
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
         var length = Math.Sqrt(dx * dx + dy * dy);
@@ -29,7 +30,7 @@ internal static class SubpixelEdgeCore
         spacing = length / steps;
         var profile = new double[steps + 1];
         points = new VisionPoint2D[steps + 1];
-        var half = Math.Max(1, sampleWidth) / 2d;
+        var half = sampleWidth / 2;
 
         for (var i = 0; i <= steps; i++)
         {
@@ -40,9 +41,7 @@ internal static class SubpixelEdgeCore
 
             double sum = 0;
             var count = 0;
-            var from = (int)Math.Ceiling(-half);
-            var to = (int)Math.Floor(half);
-            for (var w = from; w <= to; w++)
+            for (var w = -half; w <= half; w++)
             {
                 var px = (int)Math.Round(x + nx * w);
                 var py = (int)Math.Round(y + ny * w);
@@ -55,6 +54,12 @@ internal static class SubpixelEdgeCore
         }
 
         return profile;
+    }
+
+    public static int NormalizeSampleWidth(int sampleWidth)
+    {
+        var normalized = Math.Clamp(sampleWidth, 1, 99);
+        return normalized % 2 == 0 ? Math.Min(99, normalized + 1) : normalized;
     }
 
     /// <summary>
@@ -131,7 +136,7 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
             throw new InvalidOperationException("Subpixel edge detection requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = Math.Clamp(node.GetInt("sampleWidth", 5), 1, 99);
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
         var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
@@ -223,12 +228,14 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
             throw new InvalidOperationException("Caliper line measurement requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = Math.Clamp(node.GetInt("sampleWidth", 5), 1, 99);
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
         var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
         var refine = node.GetString("refine", "parabolic").Trim().ToLowerInvariant();
         var edgeLength = Math.Clamp(node.GetDouble("edgeLength", 0), 0, 10000);
+        var maxFitOutliers = Math.Clamp(node.GetInt("maxFitOutliers", 0), 0, 16);
+        var fitOutlierThreshold = Math.Max(0, node.GetDouble("fitOutlierThreshold", 2));
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -263,7 +270,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     points.Add(SubpixelEdgeCore.Locate(profileStart, profileEnd, edge.Position));
                     strengths.Add(edge.Strength);
                 }
-                var fit = FitCaliperLine(points);
+                var fit = FitCaliperLine(points, maxFitOutliers, fitOutlierThreshold);
                 var found = fit is not null;
 
                 var outputs = new Dictionary<string, VisionValue>
@@ -277,34 +284,49 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     new("caliper-line-search", VisionOverlayType.Line, X: start.X, Y: start.Y, X2: end.X, Y2: end.Y, Stroke: "#597ef7", StrokeWidth: 1.5)
                 };
 
-                if (found)
+                if (fit is not null)
                 {
-                    var (point, line, fitError) = fit!.Value;
-                    outputs["point"] = VisionValue.Point(point);
-                    outputs["line"] = VisionValue.Line(line);
-                    outputs["strength"] = VisionValue.Double(strengths.Average());
-                    outputs["fitError"] = VisionValue.Double(fitError);
-                    outputs["sampleCount"] = VisionValue.Integer(points.Count);
+                    var usedPoints = fit.UsedIndices.Select(index => points[index]).ToArray();
+                    var usedStrengths = fit.UsedIndices.Select(index => strengths[index]).ToArray();
+                    outputs["sampleCount"] = VisionValue.Integer(usedPoints.Length);
+                    outputs["ignoredCount"] = VisionValue.Integer(fit.IgnoredIndices.Length);
+                    if (found)
+                    {
+                        outputs["point"] = VisionValue.Point(fit.Point);
+                        outputs["line"] = VisionValue.Line(fit.Line);
+                        outputs["strength"] = VisionValue.Double(usedStrengths.Average());
+                        outputs["fitError"] = VisionValue.Double(fit.Error);
+                    }
+                    overlays.AddRange(usedPoints.Select((point, index) => new VisionOverlay(
+                        $"caliper-line-fit-point-{index}", VisionOverlayType.Point, X: point.X, Y: point.Y, Stroke: "#52c41a", StrokeWidth: 2.5)));
+                    overlays.AddRange(fit.IgnoredIndices.Select((index, ignoredIndex) => new VisionOverlay(
+                        $"caliper-line-ignored-point-{ignoredIndex}", VisionOverlayType.Point, X: points[index].X, Y: points[index].Y, Stroke: "#fa541c", StrokeWidth: 3)));
                     overlays.Add(new VisionOverlay("caliper-line-edge", VisionOverlayType.Line,
-                        Label: $"N={points.Count} RMS={fitError:0.###}",
-                        X: line.Start.X, Y: line.Start.Y, X2: line.End.X, Y2: line.End.Y,
+                        Label: $"N={usedPoints.Length} RMS={fit.Error:0.###}",
+                        X: fit.Line.Start.X, Y: fit.Line.Start.Y, X2: fit.Line.End.X, Y2: fit.Line.End.Y,
                         Stroke: "#f5222d", StrokeWidth: 2.5));
-                    overlays.Add(new VisionOverlay("caliper-line-point", VisionOverlayType.Point, X: point.X, Y: point.Y, Stroke: "#f5222d", StrokeWidth: 3));
+                    overlays.Add(new VisionOverlay("caliper-line-point", VisionOverlayType.Point, X: fit.Point.X, Y: fit.Point.Y, Stroke: "#f5222d", StrokeWidth: 3));
                 }
+                else outputs["ignoredCount"] = VisionValue.Integer(0);
 
                 return ValueTask.FromResult(new NodeExecutorResult(
                     outputs,
                     new Dictionary<string, object?>
                     {
                         ["found"] = found,
-                        ["reason"] = found ? "ok" : points.Count == 0 ? "no-edge-above-threshold" : points.Count < 3 ? "too-few-edge-points" : "degenerate-line-fit",
-                        ["edgeX"] = found ? Math.Round(fit!.Value.Point.X, 3) : null,
-                        ["edgeY"] = found ? Math.Round(fit!.Value.Point.Y, 3) : null,
-                        ["strength"] = found ? Math.Round(strengths.Average(), 3) : null,
-                        ["fitError"] = found ? Math.Round(fit!.Value.Error, 4) : null,
-                        ["sampleCount"] = points.Count,
+                        ["reason"] = found ? "ok" : points.Count == 0 ? "no-edge-above-threshold" : points.Count < 3 ? "too-few-edge-points" : fit is not null ? "fit-rejected" : "degenerate-line-fit",
+                        ["edgeX"] = fit is not null ? Math.Round(fit.Point.X, 3) : null,
+                        ["edgeY"] = fit is not null ? Math.Round(fit.Point.Y, 3) : null,
+                        ["strength"] = fit is not null ? Math.Round(fit.UsedIndices.Select(index => strengths[index]).Average(), 3) : null,
+                        ["fitError"] = fit is not null ? Math.Round(fit.Error, 4) : null,
+                        ["sampleCount"] = fit?.UsedIndices.Length ?? points.Count,
+                        ["fitPoints"] = fit?.UsedIndices.Length ?? 0,
+                        ["ignoredByFit"] = fit?.IgnoredIndices.Length ?? 0,
                         ["caliperCount"] = caliperCount,
                         ["rejectedCalipers"] = failures,
+                        ["maxFitOutliers"] = maxFitOutliers,
+                        ["fitOutlierThreshold"] = fitOutlierThreshold,
+                        ["sampleWidth"] = sampleWidth,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
                         ["lineClampedToImage"] = clamped,
@@ -324,14 +346,38 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         }
     }
 
-    private static (VisionPoint2D Point, VisionLine2D Line, double Error)? FitCaliperLine(IReadOnlyList<VisionPoint2D> points)
+    private sealed record CaliperLineFitResult(VisionPoint2D Point, VisionLine2D Line, double Error, int[] UsedIndices, int[] IgnoredIndices);
+
+    private static CaliperLineFitResult? FitCaliperLine(IReadOnlyList<VisionPoint2D> points, int maxOutliers, double threshold)
+    {
+        var used = Enumerable.Range(0, points.Count).ToList();
+        var ignored = new List<int>();
+        var fit = FitCaliperLineCore(used.Select(index => points[index]).ToArray());
+        if (fit is null) return null;
+        var residuals = LineResiduals(used, points, fit.Value.Line);
+        for (var i = 0; i < maxOutliers && used.Count > 3; i++)
+        {
+            var worst = Array.IndexOf(residuals, residuals.Max());
+            if (residuals[worst] <= threshold) break;
+            var removedIndex = used[worst];
+            var candidateUsed = used.Where((_, index) => index != worst).ToList();
+            var candidateFit = FitCaliperLineCore(candidateUsed.Select(index => points[index]).ToArray());
+            if (candidateFit is null) break;
+            used = candidateUsed;
+            ignored.Add(removedIndex);
+            fit = candidateFit;
+            residuals = LineResiduals(used, points, fit.Value.Line);
+        }
+        return new(fit.Value.Point, fit.Value.Line, fit.Value.Error, used.ToArray(), ignored.ToArray());
+    }
+
+    private static (VisionPoint2D Point, VisionLine2D Line, double Error)? FitCaliperLineCore(IReadOnlyList<VisionPoint2D> points)
     {
         if (points.Count < 3) return null;
         var cx = points.Average(p => p.X);
         var cy = points.Average(p => p.Y);
         var xx = points.Sum(p => (p.X - cx) * (p.X - cx));
         var yy = points.Sum(p => (p.Y - cy) * (p.Y - cy));
-        var xy = points.Sum(p => (p.X - cx) * (p.Y - cy));
         if (xx + yy < 1e-8) return null;
         var fitted = JLVisionPointFitting.Line(points.ToArray());
         var ux = (fitted.End.X - fitted.Start.X) / fitted.Length;
@@ -343,6 +389,15 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         var half = (points.Max(p => (p.X - cx) * ux + (p.Y - cy) * uy) - points.Min(p => (p.X - cx) * ux + (p.Y - cy) * uy)) / 2;
         if (!double.IsFinite(error) || half < 1e-4) return null;
         return (new VisionPoint2D(cx, cy), new VisionLine2D(new(cx - ux * half, cy - uy * half), new(cx + ux * half, cy + uy * half)), error);
+    }
+
+    private static double[] LineResiduals(IReadOnlyList<int> indices, IReadOnlyList<VisionPoint2D> points, VisionLine2D line)
+    {
+        var length = line.Length;
+        if (length < 1e-9) return Enumerable.Repeat(double.PositiveInfinity, indices.Count).ToArray();
+        var nx = -(line.End.Y - line.Start.Y) / length;
+        var ny = (line.End.X - line.Start.X) / length;
+        return indices.Select(index => Math.Abs((points[index].X - line.Start.X) * nx + (points[index].Y - line.Start.Y) * ny)).ToArray();
     }
 }
 
@@ -388,12 +443,24 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             angleStart += rotation;
             angleEnd += rotation;
         }
+        var requestedMode = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
+        // Old workflows only have angleStepDeg. Keep their sampling layout intact until the user
+        // explicitly switches to count mode; new nodes use a direct caliper count.
+        var samplingMode = requestedMode is "count" or "step"
+            ? requestedMode
+            : node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count";
         var angleStep = Math.Clamp(node.GetDouble("angleStepDeg", 5), 0.5, 45);
+        var caliperCount = Math.Clamp(node.GetInt("caliperCount", 72), 3, 361);
         var band = Math.Clamp(node.GetDouble("radialBand", 8), 1, 500);
         var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
-        var sampleWidth = Math.Clamp(node.GetInt("sampleWidth", 3), 1, 99);
+        var searchDirection = node.GetString("searchDirection", "strongest").Trim().ToLowerInvariant();
+        if (searchDirection is not ("strongest" or "firstfromstart" or "firstfromend")) searchDirection = "strongest";
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 3));
         var maxDeviation = Math.Max(0, node.GetDouble("maxRadiusDeviation", 0));
+        var maxFitOutliers = Math.Clamp(node.GetInt("maxFitOutliers", 0), 0, 16);
+        var fitOutlierThreshold = Math.Max(0, node.GetDouble("fitOutlierThreshold", 2));
+        var fitRadiusTolerance = Math.Max(0, node.GetDouble("fitRadiusTolerance", 0));
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -403,9 +470,10 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
-                var angles = BuildAngles(angleStart, angleEnd, angleStep, out var effectiveStep);
+                var angles = samplingMode == "count"
+                    ? BuildAnglesByCount(angleStart, angleEnd, caliperCount, out var effectiveStep)
+                    : BuildAnglesByStep(angleStart, angleEnd, angleStep, out effectiveStep);
                 var edgePoints = new List<VisionPoint2D>();
-                var spokeRadii = new List<double>();
                 var rejected = 0;
                 var rejectedByDeviation = 0;
                 foreach (var angleDeg in angles)
@@ -419,7 +487,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     var end = new VisionPoint2D(center.X + dirX * (nominalRadius + band), center.Y + dirY * (nominalRadius + band));
                     if (!InsideImage(start, gray) && !InsideImage(end, gray)) { rejected++; continue; }
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spokeSpacing);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, "strongest", "parabolic");
+                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic");
                     if (!edge.Found) { rejected++; continue; }
                     var edgeRadius = nominalRadius - band + edge.Position;
                     if (maxDeviation > 0 && Math.Abs(edgeRadius - nominalRadius) > maxDeviation)
@@ -429,10 +497,13 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         continue;
                     }
                     edgePoints.Add(new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius));
-                    spokeRadii.Add(edgeRadius);
                 }
 
-                var found = edgePoints.Count >= 3;
+                var hasEnoughPoints = edgePoints.Count >= 3;
+                var fit = hasEnoughPoints ? FitCircleWithOutlierRejection(edgePoints, maxFitOutliers, fitOutlierThreshold) : null;
+                var radiusOutsideTolerance = fit is not null && fitRadiusTolerance > 0
+                    && Math.Abs(fit.Circle.Radius - nominalRadius) > fitRadiusTolerance;
+                var found = fit is not null && !radiusOutsideTolerance;
                 var outputs = new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(sourceImage.CloneOwned()), ["found"] = VisionValue.Boolean(found) };
                 var overlays = new List<VisionOverlay>
                 {
@@ -442,6 +513,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 {
                     ["found"] = found,
                     ["reason"] = found ? "ok"
+                        : radiusOutsideTolerance ? "fitted-radius-outside-tolerance"
                         : rejectedByDeviation > 0 && edgePoints.Count == 0 ? "all-spokes-exceed-max-radius-deviation"
                         : edgePoints.Count == 0 ? "no-edge-above-threshold"
                         : "too-few-edge-points",
@@ -450,33 +522,52 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["rejectedSpokes"] = rejected,
                     ["rejectedByDeviation"] = rejectedByDeviation,
                     ["nominalRadius"] = Math.Round(nominalRadius, 3),
+                    ["samplingMode"] = samplingMode,
+                    ["caliperCount"] = angles.Length,
                     ["angleStepDeg"] = effectiveStep,
                     ["radialBand"] = band,
+                    ["fitRadiusTolerance"] = fitRadiusTolerance,
                     ["polarity"] = polarity,
+                    ["searchDirection"] = searchDirection,
                     ["autoGray"] = autoGray,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage"
                 };
 
-                if (found)
+                if (fit is not null)
                 {
-                    var circle = MultiPointFit.Circle(edgePoints.ToArray());
-                    var residuals = edgePoints.Select(p => Math.Abs(MeasurementMath.Hypot(p.X - circle.X, p.Y - circle.Y) - circle.Radius)).ToArray();
-                    var rmse = Math.Sqrt(residuals.Sum(x => x * x) / residuals.Length);
-                    outputs["circle"] = VisionValue.Circle(circle);
-                    outputs["center"] = VisionValue.Point(new VisionPoint2D(circle.X, circle.Y));
-                    outputs["radius"] = VisionValue.Double(circle.Radius);
-                    outputs["radiusMin"] = VisionValue.Double(spokeRadii.Min());
-                    outputs["radiusMax"] = VisionValue.Double(spokeRadii.Max());
-                    outputs["fitError"] = VisionValue.Double(rmse);
-                    outputs["sampleCount"] = VisionValue.Integer(edgePoints.Count);
+                    var usedIndices = fit.UsedIndices;
+                    var usedPoints = usedIndices.Select(i => edgePoints[i]).ToArray();
+                    var circle = fit.Circle;
+                    // Roundness/radius extrema must be measured around the fitted center;
+                    // using the nominal center would turn a small center offset into false runout.
+                    var usedRadii = usedPoints.Select(point => MeasurementMath.Hypot(point.X - circle.X, point.Y - circle.Y)).ToArray();
+                    var rmse = fit.Rmse;
+                    outputs["sampleCount"] = VisionValue.Integer(usedPoints.Length);
+                    outputs["ignoredCount"] = VisionValue.Integer(fit.IgnoredIndices.Length);
                     summary["fittedRadius"] = Math.Round(circle.Radius, 3);
                     summary["radiusDelta"] = Math.Round(circle.Radius - nominalRadius, 3);
-                    summary["radiusSpread"] = Math.Round(spokeRadii.Max() - spokeRadii.Min(), 3);
+                    summary["radiusSpread"] = Math.Round(usedRadii.Max() - usedRadii.Min(), 3);
                     summary["fitError"] = Math.Round(rmse, 4);
+                    summary["fitPoints"] = usedPoints.Length;
+                    summary["ignoredByFit"] = fit.IgnoredIndices.Length;
+                    if (found)
+                    {
+                        outputs["circle"] = VisionValue.Circle(circle);
+                        outputs["center"] = VisionValue.Point(new VisionPoint2D(circle.X, circle.Y));
+                        outputs["radius"] = VisionValue.Double(circle.Radius);
+                        outputs["radiusMin"] = VisionValue.Double(usedRadii.Min());
+                        outputs["radiusMax"] = VisionValue.Double(usedRadii.Max());
+                        outputs["fitError"] = VisionValue.Double(rmse);
+                    }
                     overlays.Add(new VisionOverlay("caliper-circle-fit", VisionOverlayType.Circle,
                         Label: $"R={circle.Radius:0.###}",
-                        X: circle.X, Y: circle.Y, Radius: circle.Radius, Stroke: "#52c41a", StrokeWidth: 2));
+                        X: circle.X, Y: circle.Y, Radius: circle.Radius, Stroke: found ? "#52c41a" : "#fa541c", StrokeWidth: 2));
+                    overlays.AddRange(usedPoints.Select((point, i) => new VisionOverlay(
+                        $"caliper-circle-point-{i}", VisionOverlayType.Point, X: point.X, Y: point.Y, Stroke: "#52c41a", StrokeWidth: 2.5)));
+                    overlays.AddRange(fit.IgnoredIndices.Select((index, i) => new VisionOverlay(
+                        $"caliper-circle-ignored-{i}", VisionOverlayType.Point, X: edgePoints[index].X, Y: edgePoints[index].Y, Stroke: "#fa541c", StrokeWidth: 3)));
                 }
+                else outputs["ignoredCount"] = VisionValue.Integer(0);
 
                 return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, overlays));
             }
@@ -494,14 +585,68 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
     private static bool InsideImage(VisionPoint2D p, Mat gray) =>
         p.X >= 0 && p.Y >= 0 && p.X < gray.Cols && p.Y < gray.Rows;
 
-    private static double[] BuildAngles(double start, double end, double step, out double effectiveStep)
+    private sealed record CircleFitResult(VisionCircle Circle, int[] UsedIndices, int[] IgnoredIndices, double Rmse);
+
+    private static CircleFitResult FitCircleWithOutlierRejection(IReadOnlyList<VisionPoint2D> points, int maxOutliers, double threshold)
     {
+        var used = Enumerable.Range(0, points.Count).ToList();
+        var ignored = new List<int>();
+        var circle = MultiPointFit.Circle(used.Select(i => points[i]).ToArray());
+        var residuals = Residuals(used, points, circle);
+        for (var i = 0; i < maxOutliers && used.Count > 3; i++)
+        {
+            var worst = Array.IndexOf(residuals, residuals.Max());
+            if (residuals[worst] <= threshold) break;
+            var removedIndex = used[worst];
+            var candidateUsed = used.Where((_, index) => index != worst).ToList();
+            VisionCircle candidateCircle;
+            try { candidateCircle = MultiPointFit.Circle(candidateUsed.Select(index => points[index]).ToArray()); }
+            catch (InvalidOperationException) { break; }
+            used = candidateUsed;
+            ignored.Add(removedIndex);
+            circle = candidateCircle;
+            residuals = Residuals(used, points, circle);
+        }
+        return new(circle, used.ToArray(), ignored.ToArray(), Math.Sqrt(residuals.Sum(x => x * x) / residuals.Length));
+    }
+
+    private static double[] Residuals(IReadOnlyList<int> indices, IReadOnlyList<VisionPoint2D> points, VisionCircle circle) =>
+        indices.Select(i => Math.Abs(MeasurementMath.Hypot(points[i].X - circle.X, points[i].Y - circle.Y) - circle.Radius)).ToArray();
+
+    private static (double Span, bool FullCircle) ArcSpan(double start, double end)
+    {
+        var raw = end - start;
+        if (Math.Abs(raw) < 1e-9) return (0, false);
+        var span = raw % 360;
+        if (Math.Abs(span) < 1e-9) return (360, true);
+        if (span < 0) span += 360;
+        return (span, false);
+    }
+
+    private static double[] BuildAnglesByCount(double start, double end, int count, out double effectiveStep)
+    {
+        var (span, fullCircle) = ArcSpan(start, end);
+        if (span == 0)
+        {
+            effectiveStep = 0;
+            return [start];
+        }
+        count = Math.Clamp(count, 3, 361);
+        effectiveStep = fullCircle ? span / count : span / (count - 1);
+        var angles = new double[count];
+        for (var i = 0; i < count; i++) angles[i] = start + i * effectiveStep;
+        return angles;
+    }
+
+    private static double[] BuildAnglesByStep(double start, double end, double step, out double effectiveStep)
+    {
+        var (span, _) = ArcSpan(start, end);
         effectiveStep = step;
-        if (end <= start) return [start];
-        var count = (int)Math.Floor((end - start) / effectiveStep) + 1;
+        if (span == 0) return [start];
+        var count = (int)Math.Floor(span / effectiveStep) + 1;
         if (count > 361)
         {
-            effectiveStep = (end - start) / 360d;
+            effectiveStep = span / 360d;
             count = 361;
         }
         var angles = new double[count];

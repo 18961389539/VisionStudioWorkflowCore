@@ -14,6 +14,16 @@ describe('node configuration snapshots', () => {
     expect(makeDefaultParameters(shape).modelMode).toBe('trained');
   });
 
+  it('preserves legacy caliper-circle angle-step sampling while new nodes use a direct count', () => {
+    const caliper = fallbackCatalogRaw.find((item) => item.type === 'measure.caliperCircle')!;
+    const defaults = makeDefaultParameters(caliper);
+    expect(defaults.samplingMode).toBe('count');
+    expect(defaults.maxFitOutliers).toBe(2);
+    expect(hydrateNodeParameters({ angleStepDeg: 2.5 }, caliper, defaults).samplingMode).toBe('step');
+    expect(hydrateNodeParameters({ angleStepDeg: 2.5, samplingMode: 'count' }, caliper, defaults).samplingMode).toBe('count');
+    expect(hydrateNodeParameters({ angleStepDeg: 2.5 }, caliper, defaults).maxFitOutliers).toBe(0);
+  });
+
   it('compares nested ROI values without depending on object key order', () => {
     expect(parameterFingerprint({ roi: { x: 1, y: 2 }, threshold: 128 })).toBe(parameterFingerprint({ threshold: 128, roi: { y: 2, x: 1 } }));
     expect(parameterFingerprint({ roi: { x: 1 } })).not.toBe(parameterFingerprint({ roi: { x: 2 } }));

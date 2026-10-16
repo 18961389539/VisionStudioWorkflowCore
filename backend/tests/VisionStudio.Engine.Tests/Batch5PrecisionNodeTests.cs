@@ -276,6 +276,24 @@ public sealed class Batch5PrecisionNodeTests
     }
 
     [Fact]
+    public async Task CaliperLine_RejectsIsolatedWrongEdgeAndReportsIgnoredPoint()
+    {
+        using var image = BuildStepEdge(out var trueEdgeX);
+        // One caliper crosses a small dark patch and, searching from the end, finds its edge.
+        Cv2.Rectangle(image, new Rect(120, 126, 20, 5), Scalar.All(30), -1);
+        var result = await Run(new CaliperLineNode(), Image(image),
+            """{"startX":60,"startY":128,"endX":140,"endY":128,"sampleWidth":5,"edgeLength":40,"caliperCount":9,"direction":"firstfromend","maxFitOutliers":2,"fitOutlierThreshold":2,"minContrast":15}""");
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]));
+        Assert.True(Convert.ToInt32(result.Summary["ignoredByFit"]) >= 1);
+        Assert.Equal(Convert.ToInt32(result.Summary["ignoredByFit"]), Convert.ToInt32(result.Outputs["ignoredCount"].Require<long>("ignoredCount")));
+        var line = result.Outputs["line"].Require<VisionLine2D>("line");
+        Assert.InRange(line.Start.X, trueEdgeX - 0.5, trueEdgeX + 0.5);
+        Assert.InRange(Convert.ToDouble(result.Summary["fitError"]), 0, 0.5);
+        Assert.Contains(result.Overlays, overlay => overlay.Id.StartsWith("caliper-line-ignored-point", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CaliperCircle_ConcentricCircle_RecoversRadiusAndRoundness()
     {
         using var image = BuildCircleImage(axes: null, out var truth);
@@ -301,6 +319,57 @@ public sealed class Batch5PrecisionNodeTests
             """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"angleStepDeg":5,"angleStartDeg":-45,"angleEndDeg":45,"minContrast":15}""");
         Assert.True(Convert.ToBoolean(arc.Summary["found"]));
         Assert.InRange(arc.Outputs["radius"].Require<double>("radius"), truth.r - 1.5, truth.r + 1.5);
+    }
+
+    [Fact]
+    public async Task CaliperCircle_CountModeWrapsArcsAndRejectsFitOutliers()
+    {
+        using var image = BuildCircleImage(axes: null, out var truth);
+
+        var counted = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"samplingMode":"count","caliperCount":36,"minContrast":15}""");
+        Assert.True(Convert.ToBoolean(counted.Summary["found"]));
+        Assert.Equal(36, Convert.ToInt32(counted.Summary["spokes"]));
+        Assert.Equal(36, Convert.ToInt32(counted.Outputs["sampleCount"].Require<long>("sampleCount")));
+        Assert.Equal(10, Convert.ToDouble(counted.Summary["angleStepDeg"]), 6);
+
+        using var offsetCircle = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(30));
+        Cv2.Ellipse(offsetCircle, new Point(203, 202), new Size(100, 100), 0, 0, 360, Scalar.All(220), -1, LineTypes.AntiAlias);
+        Cv2.GaussianBlur(offsetCircle, offsetCircle, new Size(0, 0), 1.5);
+        var offset = await Run(new CaliperCircleNode(), Image(offsetCircle),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"samplingMode":"count","caliperCount":72,"minContrast":15}""");
+        var offsetFit = offset.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.InRange(offsetFit.X, 202, 204);
+        Assert.InRange(offsetFit.Y, 201, 203);
+        var offsetSpread = offset.Outputs["radiusMax"].Require<double>("radiusMax") - offset.Outputs["radiusMin"].Require<double>("radiusMin");
+        Assert.InRange(offsetSpread, 0, 2.5);
+
+        // End before start means a clockwise arc crossing 0 degrees.
+        var wrapped = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"samplingMode":"count","caliperCount":25,"angleStartDeg":135,"angleEndDeg":-135,"minContrast":15}""");
+        Assert.True(Convert.ToBoolean(wrapped.Summary["found"]));
+        Assert.Equal(25, Convert.ToInt32(wrapped.Summary["spokes"]));
+        Assert.InRange(wrapped.Outputs["radius"].Require<double>("radius"), truth.r - 2, truth.r + 2);
+
+        // A small bright patch creates a competing outer edge on one spoke. First-from-end
+        // deliberately selects it; bounded fit rejection should keep the main circle stable.
+        Cv2.Rectangle(image, new Rect(305, 198, 7, 5), Scalar.All(220), -1);
+        var robust = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":15,"samplingMode":"count","caliperCount":72,"searchDirection":"firstfromend","maxFitOutliers":2,"fitOutlierThreshold":2,"minContrast":15}""");
+        Assert.True(Convert.ToBoolean(robust.Summary["found"]));
+        Assert.True(Convert.ToInt32(robust.Outputs["ignoredCount"].Require<long>("ignoredCount")) >= 1);
+        Assert.InRange(robust.Outputs["radius"].Require<double>("radius"), truth.r - 1, truth.r + 1);
+        Assert.True(Convert.ToDouble(robust.Outputs["fitError"].Require<double>("fitError")) < 1);
+
+        using var oversized = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(30));
+        Cv2.Ellipse(oversized, new Point(200, 200), new Size(104, 104), 0, 0, 360, Scalar.All(220), -1, LineTypes.AntiAlias);
+        Cv2.GaussianBlur(oversized, oversized, new Size(0, 0), 1.5);
+        var constrained = await Run(new CaliperCircleNode(), Image(oversized),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":10,"samplingMode":"count","caliperCount":72,"fitRadiusTolerance":2,"minContrast":15}""");
+        Assert.False(Convert.ToBoolean(constrained.Summary["found"]));
+        Assert.Equal("fitted-radius-outside-tolerance", constrained.Summary["reason"]);
+        Assert.False(constrained.Outputs.ContainsKey("circle"));
+        Assert.InRange(Convert.ToDouble(constrained.Summary["fittedRadius"]), 103, 105);
     }
 
     [Fact]

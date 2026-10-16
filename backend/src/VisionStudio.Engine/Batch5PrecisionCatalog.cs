@@ -139,7 +139,8 @@ public static class Batch5PrecisionCatalog
                 new("startY", "Start Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("endX", "End X", "number", 520, 0, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("endY", "End Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
+                new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
+                    Description: "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
@@ -181,6 +182,7 @@ public static class Batch5PrecisionCatalog
                 new("strength", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
+                new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
                 new("next", VisionDataType.Control)
             ],
@@ -208,10 +210,14 @@ public static class Batch5PrecisionCatalog
                     new("Parabolic (subpixel)", "parabolic"),
                     new("None (integer)", "none")
                 ], Group: "Sampling"),
-                new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles perpendicular to the search line; zero uses the search line length."),
-                new("caliperCount", "Caliper Count", "number", 9, 3, 101, 2, Group: "Sampling", Description: "Number of parallel search profiles along the edge span; at least 3 valid edge points are required for a line fit.")
+                new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles along the expected edge; zero uses the search-line length."),
+                new("caliperCount", "Caliper Count", "number", 9, 3, 101, 1, Group: "Sampling", Description: "Number of parallel search profiles along the edge span; at least 3 valid edge points must remain after fitting."),
+                new("maxFitOutliers", "Max Fit Outliers", "number", 1, 0, 16, 1, Group: "Fit",
+                    Description: "Ignore up to this many edge points when their orthogonal residual exceeds the threshold."),
+                new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
+                    Description: "A point can be excluded when its distance from the fitted line exceeds this value.")
             ],
-            "Caliper line measurement with orthogonal RMS fit error. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points are required.",
+            "Caliper line measurement with orthogonal RMS fit error and bounded outlier rejection. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. At least three valid points must remain.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -235,6 +241,7 @@ public static class Batch5PrecisionCatalog
                 new("radiusMax", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
+                new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("next", VisionDataType.Control)
             ],
             [
@@ -243,8 +250,18 @@ public static class Batch5PrecisionCatalog
                 new("radius", "Nominal Radius", "number", 100, 1, 5000, 1, Unit: "px", Group: "Nominal Circle"),
                 new("angleStartDeg", "Angle Start", "number", -180, -360, 360, 1, Unit: "deg", Group: "Arc"),
                 new("angleEndDeg", "Angle End", "number", 180, -360, 360, 1, Unit: "deg", Group: "Arc"),
-                new("angleStepDeg", "Angle Step", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Arc"),
-                new("radialBand", "Radial Band", "number", 8, 1, 500, 1, Unit: "px", Group: "Sampling"),
+                new("samplingMode", "Sampling Mode", "select", "count", Options:
+                [
+                    new("Caliper Count", "count"),
+                    new("Angle Step (Legacy)", "step")
+                ], Group: "Arc"),
+                new("caliperCount", "Caliper Count", "number", 72, 3, 361, 1, Unit: "", Group: "Arc",
+                    Description: "Number of radial calipers. Full circles distribute them without duplicating the end angle; partial arcs include both ends.",
+                    VisibleWhen: new("samplingMode", ["count"])),
+                new("angleStepDeg", "Angle Step (Legacy)", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Arc",
+                    VisibleWhen: new("samplingMode", ["step"])),
+                new("radialBand", "Radial Search Half-Width", "number", 8, 1, 500, 1, Unit: "px", Group: "Sampling",
+                    Description: "Searches from nominal radius minus this value to nominal radius plus this value."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
@@ -252,11 +269,23 @@ public static class Batch5PrecisionCatalog
                     new("Rising", "Rising"),
                     new("Falling", "Falling")
                 ], Group: "Sampling"),
-                new("sampleWidth", "Sample Width", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling"),
+                new("searchDirection", "Search Direction", "select", "strongest", Options:
+                [
+                    new("Strongest Edge", "strongest"),
+                    new("First from Start", "firstfromstart"),
+                    new("First from End", "firstfromend")
+                ], Group: "Sampling"),
+                new("sampleWidth", "Projection Length", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("maxRadiusDeviation", "Max Radius Deviation (0=off)", "number", 0, 0, 5000, 1, Unit: "px", Group: "Sampling",
-                    Description: "Reject spokes whose found edge deviates more than this from the nominal radius.")
+                    Description: "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."),
+                new("maxFitOutliers", "Max Fit Outliers", "number", 2, 0, 16, 1, Group: "Fit",
+                    Description: "After an initial fit, discard up to this many points whose radial residual exceeds the threshold."),
+                new("fitOutlierThreshold", "Fit Outlier Threshold", "number", 2, 0, 100, 0.1, Unit: "px", Group: "Fit",
+                    Description: "Maximum allowed point-to-circle residual before a point can be excluded from the refit."),
+                new("fitRadiusTolerance", "Fit Radius Tolerance (0=off)", "number", 0, 0, 5000, 0.1, Unit: "px", Group: "Fit",
+                    Description: "Reject the fitted circle when its radius differs from the nominal radius by more than this amount.")
             ],
-            "Caliper circle measurement with least-squares fit and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
+            "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and fit error. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(

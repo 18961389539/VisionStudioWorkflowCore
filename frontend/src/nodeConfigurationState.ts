@@ -23,6 +23,11 @@ export function configurationParameters(parameters: NodeParameters, catalog: Nod
   if (catalog.type === 'match.shape' && parameters.trainingAngleRangeDeg === undefined
     && typeof parameters.trainedModelConfig === 'string' && /^shape-v[12]\|/.test(parameters.trainedModelConfig))
     merged.trainingAngleRangeDeg = typeof parameters.angleRangeDeg === 'number' ? parameters.angleRangeDeg : 180;
+  if (catalog.type === 'measure.caliperCircle' && parameters.samplingMode === undefined
+    && parameters.angleStepDeg !== undefined) merged.samplingMode = 'step';
+  if (catalog.type === 'measure.caliperCircle' && parameters.maxFitOutliers === undefined) merged.maxFitOutliers = 0;
+  if (catalog.type === 'measure.caliperLine' && parameters.maxFitOutliers === undefined) merged.maxFitOutliers = 0;
+  if (catalog.type === 'measure.caliper' && parameters.refine === undefined && parameters.edgeThreshold !== undefined) merged.refine = 'none';
   return merged;
 }
 
@@ -36,6 +41,13 @@ export function hydrateNodeParameters(parameters: NodeParameters, catalog: NodeC
   if (catalog.type === 'match.shape' && parameters.trainingAngleRangeDeg === undefined
     && typeof parameters.trainedModelConfig === 'string' && /^shape-v[12]\|/.test(parameters.trainedModelConfig))
     merged.trainingAngleRangeDeg = typeof parameters.angleRangeDeg === 'number' ? parameters.angleRangeDeg : 180;
+  // Existing circle-caliper workflows used angleStepDeg as their only sampling control.
+  // Keep that behavior when new sampling-mode defaults are hydrated into old nodes.
+  if (catalog.type === 'measure.caliperCircle' && parameters.samplingMode === undefined
+    && parameters.angleStepDeg !== undefined) merged.samplingMode = 'step';
+  if (catalog.type === 'measure.caliperCircle' && parameters.maxFitOutliers === undefined) merged.maxFitOutliers = 0;
+  if (catalog.type === 'measure.caliperLine' && parameters.maxFitOutliers === undefined) merged.maxFitOutliers = 0;
+  if (catalog.type === 'measure.caliper' && parameters.refine === undefined && parameters.edgeThreshold !== undefined) merged.refine = 'none';
   return merged;
 }
 
