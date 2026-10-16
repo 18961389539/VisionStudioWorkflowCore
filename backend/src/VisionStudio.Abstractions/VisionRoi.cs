@@ -38,8 +38,19 @@ public static class VisionRoiParameterExtensions
 {
     public static VisionRoi? GetRoi(this NodeDefinition node, string parameterName = "roi")
     {
-        if (node.Parameters is null || !node.Parameters.TryGetValue(parameterName, out var value) || value.ValueKind != JsonValueKind.Object)
+        if (node.Parameters is null || !node.Parameters.TryGetValue(parameterName, out var value) || value.ValueKind == JsonValueKind.Null)
             return null;
+
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException($"ROI parameter '{parameterName}' must be an object or null.");
+
+        var typeValue = value.EnumerateObject()
+            .FirstOrDefault(property => property.Name.Equals(nameof(VisionRoi.Type), StringComparison.OrdinalIgnoreCase)).Value;
+        var knownType = typeValue.ValueKind == JsonValueKind.String
+            ? Enum.GetNames<VisionRoiType>().FirstOrDefault(name => name.Equals(typeValue.GetString(), StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (knownType is null)
+            throw new InvalidOperationException($"ROI parameter '{parameterName}' must declare a known string type: Rectangle, Circle, Polygon, or Brush.");
 
         try
         {
@@ -47,11 +58,11 @@ public static class VisionRoiParameterExtensions
             {
                 PropertyNameCaseInsensitive = true,
                 Converters = { new JsonStringEnumConverter() }
-            });
+            }) ?? throw new InvalidOperationException($"ROI parameter '{parameterName}' could not be read as a ROI object.");
         }
-        catch
+        catch (JsonException exception)
         {
-            return null;
+            throw new InvalidOperationException($"ROI parameter '{parameterName}' is malformed: {exception.Message}", exception);
         }
     }
 }

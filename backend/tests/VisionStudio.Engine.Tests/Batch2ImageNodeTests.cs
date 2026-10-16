@@ -39,6 +39,36 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Theory]
+    [InlineData("""{"roi":"Rectangle"}""", "must be an object or null")]
+    [InlineData("""{"roi":[]}""", "must be an object or null")]
+    [InlineData("""{"roi":{"type":"Ellipse","x":1,"y":1,"radius":2}}""", "known string type")]
+    [InlineData("""{"roi":{"type":3,"x":1,"y":1,"radius":2}}""", "known string type")]
+    [InlineData("""{"roi":{"type":"Rectangle","x":"bad","y":0,"width":4,"height":4}}""", "is malformed")]
+    public async Task CropRejectsMalformedRoiInsteadOfSilentlyUsingTheFullImage(string json, string message)
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RunImage(new ImageCropNode(), Image(source), json));
+
+        Assert.Contains("ROI parameter 'roi'", error.Message);
+        Assert.Contains(message, error.Message);
+    }
+
+    [Fact]
+    public async Task CropKeepsExplicitNullRoiAsTheLegacyUnsetValue()
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var result = await RunImage(new ImageCropNode(), Image(source), """{"roi":null,"x":2,"y":3,"width":4,"height":3}""");
+
+        using var actual = ImageFrom(result);
+        Assert.Equal((4, 3), (actual.Width, actual.Height));
+        Assert.Equal(2, Convert.ToInt32(result.Summary["cropOriginX"]));
+        Assert.Equal(3, Convert.ToInt32(result.Summary["cropOriginY"]));
+    }
+
     [Fact]
     public async Task CropReportsAnEmptyInputImageClearly()
     {
