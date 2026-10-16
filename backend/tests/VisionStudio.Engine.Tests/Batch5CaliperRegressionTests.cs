@@ -234,6 +234,30 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLine_ReportsRoiFragmentedProfilesSeparatelyFromEmptyProfiles()
+    {
+        using var image = MakeEdgeImage(0);
+        using var input = VisionImage.Own(image.Clone());
+        var strokes = new List<VisionRoiBrushStroke>();
+        foreach (var y in new[] { 62d, 64d, 66d })
+        foreach (var x in new[] { 20d, 40d, 70d })
+            strokes.Add(new(VisionRoiStrokeMode.Add, 1, [new VisionRoiPoint(x, y)]));
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Brush, Strokes: strokes))
+        }), Node("measure.caliperLine", """{"startX":10,"startY":64,"endX":118,"endY":64,"edgeLength":4,"caliperCount":3,"sampleWidth":1,"minContrast":20}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("profile-has-insufficient-contiguous-samples", result.Summary["reason"]);
+        Assert.Equal(3, Convert.ToInt32(result.Summary["profilesWithInsufficientContiguousSamples"]));
+        Assert.Equal(0, Convert.ToInt32(result.Summary["profilesWithoutFiniteSamples"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperCircle_ExplainsOutsideAndRoiMaskedSpokes()
     {
         using var flat = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80));
@@ -259,6 +283,30 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Equal("profile-has-no-finite-samples", masked.Summary["reason"]);
         Assert.Equal(12, Convert.ToInt32(masked.Summary["spokesWithoutFiniteSamples"]));
         (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperCircle_ReportsRoiFragmentedSpokesSeparatelyFromEmptySpokes()
+    {
+        using var image = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80));
+        using var input = VisionImage.Own(image.Clone());
+        var strokes = new List<VisionRoiBrushStroke>();
+        foreach (var radius in new[] { 13d, 20d, 27d })
+        foreach (var (x, y) in new[] { (64 + radius, 64d), (64d, 64 + radius), (64 - radius, 64d) })
+            strokes.Add(new(VisionRoiStrokeMode.Add, 1, [new VisionRoiPoint(x, y)]));
+
+        var result = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Brush, Strokes: strokes))
+        }), Node("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":20,"radialBand":8,"samplingMode":"count","caliperCount":3,"angleStartDeg":0,"angleEndDeg":180,"sampleWidth":1}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("profile-has-insufficient-contiguous-samples", result.Summary["reason"]);
+        Assert.Equal(3, Convert.ToInt32(result.Summary["spokesWithInsufficientContiguousSamples"]));
+        Assert.Equal(0, Convert.ToInt32(result.Summary["spokesWithoutFiniteSamples"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 
     [Fact]
@@ -422,7 +470,9 @@ public sealed class Batch5CaliperRegressionTests
             CancellationToken.None);
 
         Assert.False(Convert.ToBoolean(result.Summary["found"]));
-        Assert.Equal("profile-has-no-finite-samples", result.Summary["reason"]);
+        Assert.Equal("profile-has-insufficient-contiguous-samples", result.Summary["reason"]);
+        Assert.Equal(3, Convert.ToInt32(result.Summary["sampleCount"]));
+        Assert.Equal(3L, result.Outputs["sampleCount"].Require<long>("sampleCount"));
         (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 

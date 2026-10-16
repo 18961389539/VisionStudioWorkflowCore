@@ -30,6 +30,11 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
     'profile-has-no-finite-samples': type === 'measure.caliperCircle'
       ? '有效径向采样点不足，ROI 可能屏蔽了搜索弧。请检查 ROI、标称圆和径向搜索带。'
       : '有效采样点不足，ROI 可能屏蔽了搜索线，或线段落在图像边缘之外。请检查 ROI 和搜索线。',
+    'profile-has-insufficient-contiguous-samples': type === 'measure.caliperCircle'
+      ? '径向剖面有采样点，但 ROI 将其切成了过短片段，无法可靠定位边缘。请放宽 ROI 或调整标称圆和径向搜索带。'
+      : type === 'measure.caliperLine'
+        ? '卡尺剖面有采样点，但 ROI 将其切成了过短片段，无法可靠定位边缘。请放宽 ROI，或调整搜索线和沿边缘跨度。'
+        : '搜索剖面有采样点，但 ROI 将其切成了过短片段，无法可靠定位边缘。请放宽 ROI 或调整搜索线。',
     'too-few-edge-points': type === 'measure.caliperCircle'
       ? '找到的边缘点不足 3 个，无法拟合圆。请增加卡尺数量、扩大搜索弧角范围，或改善边缘对比度。'
       : '找到的边缘点不足 3 个，无法拟合。请增加卡尺数量、扩大沿边缘跨度，或改善边缘对比度。',
@@ -194,8 +199,15 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const reportSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
     ? pickSummaryKeys(report.summary, catalog.type,
       ['measure.caliperLine', 'measure.caliperCircle', 'measure.caliper'].includes(catalog.type) ? 5 : 4) : [];
-  const prominentSummaryKeys = catalog.type === 'measure.caliper' && report?.summary.found === false
-    ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength', 'sampleCount', 'reason'].includes(key))].slice(0, 4)
+  const insufficientSamplesKey = report?.summary.reason === 'profile-has-insufficient-contiguous-samples'
+    ? catalog.type === 'measure.caliperLine' ? 'profilesWithInsufficientContiguousSamples'
+      : catalog.type === 'measure.caliperCircle' ? 'spokesWithInsufficientContiguousSamples'
+        : undefined
+    : undefined;
+  const prominentSummaryKeys = insufficientSamplesKey
+    ? ['found', insufficientSamplesKey, ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'edgeX', 'edgeY', 'strength', insufficientSamplesKey, 'reason'].includes(key))].slice(0, 5)
+    : catalog.type === 'measure.caliper' && report?.summary.found === false
+    ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength', 'reason'].includes(key))].slice(0, 4)
     : reportSummaryKeys;
   return <section className="node-execution-result" aria-label="本节点运行结果">
     <button type="button" className="node-result-heading" aria-label="本节点运行结果" aria-expanded={expanded}

@@ -57,6 +57,18 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toBe('找到目标 否');
   });
 
+  it('shows finite sample count when a single-caliper ROI fragments the profile', () => {
+    const caliperResult = result(false, 'profile-has-insufficient-contiguous-samples');
+    caliperResult.nodeReports[0].nodeType = 'measure.caliper';
+    caliperResult.nodeReports[0].summary = {
+      found: false, reason: 'profile-has-insufficient-contiguous-samples', sampleCount: 3
+    };
+    mount('measure.caliper', caliperResult);
+
+    expect(screen.getByText(/ROI 将其切成了过短片段/)).toBeTruthy();
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('有效采样数 3');
+  });
+
   it('localizes and prioritizes the fitted radius and roundness metrics', () => {
     const circleResult = result(true, 'ok');
     circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
@@ -85,6 +97,26 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toContain('拟合误差 0.2');
   });
 
+  it('prioritizes the fragmented-profile counter for caliper line and circle failures', () => {
+    const lineResult = result(false, 'profile-has-insufficient-contiguous-samples');
+    lineResult.nodeReports[0].summary = {
+      found: false, reason: 'profile-has-insufficient-contiguous-samples',
+      profilesWithInsufficientContiguousSamples: 3, sampleCount: 0
+    };
+    mount('measure.caliperLine', lineResult);
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('连续采样不足剖面数 3');
+
+    cleanup();
+    const circleResult = result(false, 'profile-has-insufficient-contiguous-samples');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = {
+      found: false, reason: 'profile-has-insufficient-contiguous-samples',
+      spokesWithInsufficientContiguousSamples: 12, sampleCount: 0
+    };
+    mount('measure.caliperCircle', circleResult);
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('连续采样不足卡尺数 12');
+  });
+
   it('explains when the search geometry is clipped or excluded by the ROI', () => {
     mount(catalog.type, result(false, 'search-region-clipped-too-short'));
     expect(screen.getByText(/平行搜索剖面与图像相交的部分不足 2 px/)).toBeTruthy();
@@ -92,6 +124,14 @@ describe('NodeExecutionResult measurement status', () => {
     cleanup();
     mount(catalog.type, result(false, 'profile-has-no-finite-samples'));
     expect(screen.getByText(/ROI 可能屏蔽了搜索线/)).toBeTruthy();
+
+    cleanup();
+    mount(catalog.type, result(false, 'profile-has-insufficient-contiguous-samples'));
+    expect(screen.getByText(/ROI 将其切成了过短片段/)).toBeTruthy();
+
+    cleanup();
+    mount('measure.caliperCircle', result(false, 'profile-has-insufficient-contiguous-samples'));
+    expect(screen.getByText(/径向剖面有采样点，但 ROI 将其切成了过短片段/)).toBeTruthy();
   });
 
   it('tailors no-edge guidance to the caliper geometry', () => {

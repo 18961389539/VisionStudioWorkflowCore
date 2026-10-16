@@ -218,7 +218,8 @@ public sealed class CaliperNode : IVisionNodeExecutor
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(edge.Found),
-                    ["searchLine"] = VisionValue.Line(searchLine)
+                    ["searchLine"] = VisionValue.Line(searchLine),
+                    ["sampleCount"] = VisionValue.Integer(edge.SampleCount)
                 };
                 var overlays = new List<VisionOverlay>();
                 if (intersects) overlays.Add(VisionGeometryHelpers.OverlayLine("caliper-search", searchLine, "#597ef7", 1.5));
@@ -229,7 +230,6 @@ public sealed class CaliperNode : IVisionNodeExecutor
                     outputs["point"] = VisionValue.Point(edgePoint.Value);
                     outputs["strength"] = VisionValue.Double(edge.Strength);
                     outputs["fitError"] = VisionValue.Double(edge.FitError);
-                    outputs["sampleCount"] = VisionValue.Integer(edge.SampleCount);
                     overlays.Add(new VisionOverlay("caliper-edge", VisionOverlayType.Point,
                         X: edgePoint.Value.X, Y: edgePoint.Value.Y, Stroke: "#f5222d", StrokeWidth: 3));
                     overlays.Add(new VisionOverlay("caliper-label", VisionOverlayType.Text,
@@ -246,7 +246,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
                         ["y"] = edge.Found ? Math.Round(edgePoint!.Value.Y, 4) : null,
                         ["strength"] = edge.Found ? Math.Round(edge.Strength, 3) : null,
                         ["fitError"] = edge.Found && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
-                        ["sampleCount"] = edge.Found ? edge.SampleCount : null,
+                        ["sampleCount"] = edge.SampleCount,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
                         ["refine"] = refine,

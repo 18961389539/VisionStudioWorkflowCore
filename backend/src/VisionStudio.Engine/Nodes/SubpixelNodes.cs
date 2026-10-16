@@ -230,7 +230,8 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                     ["found"] = VisionValue.Boolean(edge.Found),
-                    ["searchLine"] = VisionValue.Line(searchLine)
+                    ["searchLine"] = VisionValue.Line(searchLine),
+                    ["sampleCount"] = VisionValue.Integer(edge.SampleCount)
                 };
                 if (edge.Found)
                 {
@@ -238,7 +239,6 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                     outputs["point"] = VisionValue.Point(point);
                     outputs["strength"] = VisionValue.Double(edge.Strength);
                     outputs["fitError"] = VisionValue.Double(edge.FitError);
-                    outputs["sampleCount"] = VisionValue.Integer(edge.SampleCount);
                 }
 
                 var overlays = new List<VisionOverlay>();
@@ -260,7 +260,7 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                         ["position"] = edge.Found ? Math.Round(edge.Position, 4) : null,
                         ["strength"] = edge.Found ? Math.Round(edge.Strength, 3) : null,
                         ["fitError"] = edge.Found && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
-                        ["sampleCount"] = edge.Found ? edge.SampleCount : null,
+                        ["sampleCount"] = edge.SampleCount,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
                         ["refine"] = refine,
@@ -342,6 +342,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 var outsideImage = 0;
                 var shortAfterClip = 0;
                 var profilesWithoutFiniteSamples = 0;
+                var profilesWithInsufficientContiguousSamples = 0;
                 var profilesClipped = 0;
                 var anyProfileClipped = false;
                 var overlays = new List<VisionOverlay>();
@@ -372,6 +373,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     {
                         failures++;
                         if (edge.Reason == "profile-has-no-finite-samples") profilesWithoutFiniteSamples++;
+                        if (edge.Reason == "profile-has-insufficient-contiguous-samples") profilesWithInsufficientContiguousSamples++;
                         continue;
                     }
                     points.Add(SubpixelEdgeCore.Locate(profileStart, profileEnd, edge.Position));
@@ -425,6 +427,8 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     : outsideImage + shortAfterClip == caliperCount && shortAfterClip > 0 ? "search-region-clipped-too-short"
                     : profilesWithoutFiniteSamples == caliperCount - outsideImage - shortAfterClip && profilesWithoutFiniteSamples > 0
                         ? "profile-has-no-finite-samples"
+                    : profilesWithoutFiniteSamples + profilesWithInsufficientContiguousSamples == caliperCount - outsideImage - shortAfterClip
+                        && profilesWithInsufficientContiguousSamples > 0 ? "profile-has-insufficient-contiguous-samples"
                     : "no-edge-above-threshold";
 
                 return ValueTask.FromResult(new NodeExecutorResult(
@@ -453,6 +457,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         ["profilesClippedToImage"] = profilesClipped,
                         ["profilesTooShortAfterClip"] = shortAfterClip,
                         ["profilesWithoutFiniteSamples"] = profilesWithoutFiniteSamples,
+                        ["profilesWithInsufficientContiguousSamples"] = profilesWithInsufficientContiguousSamples,
                         ["autoGray"] = autoGray,
                         ["roi"] = roi?.Type.ToString() ?? "FullImage"
                     },
@@ -615,6 +620,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var spokesOutsideImage = 0;
                 var spokesTooShortAfterClip = 0;
                 var spokesWithoutFiniteSamples = 0;
+                var spokesWithInsufficientContiguousSamples = 0;
                 var spokesWithEdgeCandidate = 0;
                 var spokesClipped = 0;
                 var spokeOverlays = new List<VisionOverlay>(angles.Length);
@@ -646,6 +652,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                             Stroke: "#bfbfbf", StrokeWidth: 0.7));
                         rejected++;
                         if (edge.Reason == "profile-has-no-finite-samples") spokesWithoutFiniteSamples++;
+                        if (edge.Reason == "profile-has-insufficient-contiguous-samples") spokesWithInsufficientContiguousSamples++;
                         continue;
                     }
                     spokesWithEdgeCandidate++;
@@ -696,6 +703,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         ? "search-region-clipped-too-short"
                     : edgePoints.Count == 0 && spokesWithoutFiniteSamples == angles.Length - spokesOutsideImage - spokesTooShortAfterClip
                         && spokesWithoutFiniteSamples > 0 ? "profile-has-no-finite-samples"
+                    : edgePoints.Count == 0 && spokesWithoutFiniteSamples + spokesWithInsufficientContiguousSamples == angles.Length - spokesOutsideImage - spokesTooShortAfterClip
+                        && spokesWithInsufficientContiguousSamples > 0 ? "profile-has-insufficient-contiguous-samples"
                     : edgePoints.Count == 0 ? "no-edge-above-threshold"
                     : edgePoints.Count < 3 ? "too-few-edge-points"
                     : "degenerate-circle-fit";
@@ -711,6 +720,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["spokesOutsideImage"] = spokesOutsideImage,
                     ["spokesTooShortAfterClip"] = spokesTooShortAfterClip,
                     ["spokesWithoutFiniteSamples"] = spokesWithoutFiniteSamples,
+                    ["spokesWithInsufficientContiguousSamples"] = spokesWithInsufficientContiguousSamples,
                     ["spokesClippedToImage"] = spokesClipped,
                     ["nominalRadius"] = Math.Round(nominalRadius, 3),
                     ["samplingMode"] = samplingMode,

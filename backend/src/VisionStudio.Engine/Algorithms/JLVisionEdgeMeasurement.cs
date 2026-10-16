@@ -11,7 +11,8 @@ internal static class JLVisionEdgeMeasurement
     {
         var candidates = new List<(double Position, double Amplitude)>();
         var valid = profile.Count(double.IsFinite);
-        if (valid < 3) return new(false, 0, 0, 0, valid, "profile-has-no-finite-samples");
+        if (valid == 0) return new(false, 0, 0, 0, valid, "profile-has-no-finite-samples");
+        if (valid < 3) return new(false, 0, 0, 0, valid, "profile-has-insufficient-contiguous-samples");
         var hasMeasurableSegment = false;
         for (var start = 0; start < profile.Length;)
         {
@@ -34,7 +35,7 @@ internal static class JLVisionEdgeMeasurement
             start = end + 1;
         }
         if (candidates.Count == 0)
-            return new(false, 0, 0, 0, valid, hasMeasurableSegment ? "no-edge-above-threshold" : "profile-has-no-finite-samples");
+            return new(false, 0, 0, 0, valid, hasMeasurableSegment ? "no-edge-above-threshold" : "profile-has-insufficient-contiguous-samples");
         var edge = direction.ToLowerInvariant() switch
         { "firstfromstart" => candidates.MinBy(x => x.Position), "firstfromend" => candidates.MaxBy(x => x.Position), _ => candidates.MaxBy(x => x.Amplitude) };
         var position = refine == "none" ? Math.Round(edge.Position - .5) + .5 : edge.Position;
