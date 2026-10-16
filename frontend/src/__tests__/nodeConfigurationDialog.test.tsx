@@ -445,6 +445,52 @@ describe('caliper geometry input guidance', () => {
     expect(geometry.getAttribute('data-editable')).toBe('false');
   });
 
+  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'] as const)(
+    'warns %s when a cropped image has no matching croppedRoi mask', async type => {
+      const measurementCatalog = fallbackCatalog.find(item => item.type === type)!;
+      const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+        typeKey: type, label: measurementCatalog.displayName, inputs: measurementCatalog.inputs, parameters: {}
+      } };
+      const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+      const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+        typeKey: cropCatalog.type, label: '预处理裁剪', inputs: cropCatalog.inputs,
+        parameters: { roi: { type: 'Polygon', points: [{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 30, y: 50 }] } }
+      } };
+      const edges = [
+        { id: 'crop-image', source: cropNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' }
+      ];
+      const { dialog, unmount } = mount({ node: measurementNode, catalogItem: measurementCatalog, nodes: [measurementNode, cropNode], edges });
+
+      expect(dialog.getByText('测量图像来自裁剪节点')).toBeTruthy();
+      expect(dialog.getByText(/可能形成伪边缘/)).toBeTruthy();
+      unmount();
+      cleanup();
+
+      const maskedEdges = [...edges, {
+        id: 'crop-roi', source: cropNode.id, sourceHandle: 'croppedRoi', target: measurementNode.id, targetHandle: 'roi'
+      }];
+      const masked = mount({ node: measurementNode, catalogItem: measurementCatalog, nodes: [measurementNode, cropNode], edges: maskedEdges });
+      expect(masked.dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+    }
+  );
+
+  it('does not warn about synthetic ROI edges for a rectangular crop', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+      typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+    } };
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '矩形裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Rectangle', x: 10, y: 10, width: 50, height: 40 } }
+    } };
+    const edges = [{ id: 'crop-image', source: cropNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, cropNode], edges });
+
+    expect(dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+  });
+
   it('writes an interactively adjusted search line back into the staged parameters', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,

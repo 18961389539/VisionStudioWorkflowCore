@@ -154,6 +154,23 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
   const roiInputEdge = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'roi');
+  const measurementNodeTypes = ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'];
+  const measurementImageInputEdge = measurementNodeTypes.includes(catalogItem.type)
+    ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')
+    : undefined;
+  const measurementImageSource = nodes.find((item) => item.id === measurementImageInputEdge?.source);
+  const cropRoiInputEdge = measurementImageSource?.data.typeKey === 'image.crop'
+    ? edges.find((edge) => edge.target === measurementImageSource.id && edge.targetHandle === 'roi')
+    : undefined;
+  const cropRoiSource = nodes.find((item) => item.id === cropRoiInputEdge?.source);
+  const configuredCropRoi = (measurementImageSource?.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+  const upstreamCropRoi = (cropRoiSource?.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+  const cropRoiType = configuredCropRoi?.type ?? upstreamCropRoi?.type;
+  const cropMayZeroOutsideSelection = cropRoiType ? cropRoiType !== 'Rectangle' : Boolean(cropRoiInputEdge);
+  const croppedRoiConnected = Boolean(measurementImageSource?.data.typeKey === 'image.crop'
+    && roiInputEdge?.source === measurementImageInputEdge?.source && roiInputEdge?.sourceHandle === 'croppedRoi');
+  const croppedImageNeedsRoiWarning = Boolean(measurementNodeTypes.includes(catalogItem.type)
+    && measurementImageSource?.data.typeKey === 'image.crop' && cropMayZeroOutsideSelection && !croppedRoiConnected);
   const connectedInputPorts = catalogItem.inputs.filter((input) => edges.some((edge) =>
     edge.target === node.id && edge.targetHandle === input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
@@ -866,6 +883,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           </Space>} />}
         {roiMaskInputConnected && <Alert showIcon type="info" title={`ROI 掩膜来自上游：${nodeLabels[roiInputEdge!.source] ?? roiInputEdge!.source}`}
           description="此节点的 roi 输入优先于本地选区，且按当前图像坐标解释。请在上游编辑区域；当前节点不会再次移动 ROI。" />}
+        {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="测量图像来自裁剪节点"
+          description={<span>如果裁剪使用圆形、多边形或笔刷 ROI，选区外像素会清零，可能形成伪边缘。请将“{nodeLabels[measurementImageSource!.id] ?? measurementImageSource!.id}”的 croppedRoi 输出接到本节点 roi 输入，以屏蔽选区外区域；矩形裁剪通常无需此处理。</span>} />}
         {searchLineInputEdge && <Alert showIcon type="info"
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge
