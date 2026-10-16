@@ -167,7 +167,7 @@ public sealed class Batch2ImageNodeTests
         using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(90));
         using var expectedRaster = Node("image.crop", json).GetRoi()!.BuildMask(source.Size());
         using var expectedBinary = new Mat();
-        Cv2.Threshold(expectedRaster, expectedBinary, 1, 255, ThresholdTypes.Binary);
+        Cv2.Threshold(expectedRaster, expectedBinary, 0, 255, ThresholdTypes.Binary);
         using var selectedPixels = new Mat();
         Cv2.FindNonZero(expectedBinary, selectedPixels);
         var bounds = Cv2.BoundingRect(selectedPixels);
@@ -228,6 +228,88 @@ public sealed class Batch2ImageNodeTests
         Assert.Equal(0d, Cv2.Norm(expected, actual.Mat, NormTypes.INF));
         Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
         Assert.Equal(0d, Cv2.Norm(actualMask.Mat, translatedBinary, NormTypes.INF));
+    }
+
+    [Fact]
+    public async Task CropLocalRasterMatchesFullCanvasForDeterministicMixedRois()
+    {
+        const int width = 120;
+        const int height = 96;
+        using var source = new Mat(height, width, MatType.CV_8UC1);
+        Cv2.Randu(source, Scalar.All(0), Scalar.All(256));
+        var random = new Random(0x5C0F);
+        var node = new ImageCropNode();
+
+        double HalfPixel(int min, int max) => random.Next(min, max) + (random.Next(2) == 0 ? 0 : 0.5);
+        for (var sample = 0; sample < 32; sample++)
+        {
+            var x = HalfPixel(-8, 100);
+            var y = HalfPixel(-8, 76);
+            var roi = (sample % 4) switch
+            {
+                0 => new VisionRoi(VisionRoiType.Rectangle, X: x, Y: y,
+                    Width: random.Next(5, 36), Height: random.Next(5, 30)),
+                1 => new VisionRoi(VisionRoiType.Circle, X: x, Y: y, Radius: random.Next(5, 24) + .5),
+                2 => new VisionRoi(VisionRoiType.Polygon, Points:
+                [
+                    new(x, y), new(x + random.Next(12, 35) + .5, y + 2.5),
+                    new(x + random.Next(16, 42) + .5, y + random.Next(12, 28) + .5),
+                    new(x + 1.5, y + random.Next(10, 26) + .5)
+                ]),
+                _ => new VisionRoi(VisionRoiType.Brush, Strokes:
+                [
+                    new(VisionRoiStrokeMode.Add, random.Next(1, 18),
+                    [
+                        new(HalfPixel(8, 110), HalfPixel(8, 86)),
+                        new(HalfPixel(8, 110), HalfPixel(8, 86)),
+                        new(HalfPixel(8, 110), HalfPixel(8, 86))
+                    ]),
+                    new(VisionRoiStrokeMode.Erase, random.Next(1, 10),
+                    [new(HalfPixel(8, 110), HalfPixel(8, 86)), new(HalfPixel(8, 110), HalfPixel(8, 86))])
+                ])
+            };
+
+            using var fullMask = roi.BuildMask(source.Size());
+            using var fullBinary = new Mat();
+            Cv2.Threshold(fullMask, fullBinary, 0, 255, ThresholdTypes.Binary);
+            using var selected = new Mat();
+            Cv2.FindNonZero(fullBinary, selected);
+            var expectedBounds = Cv2.BoundingRect(selected);
+            Assert.True(expectedBounds.Width > 0 && expectedBounds.Height > 0, $"Generated ROI {sample} unexpectedly selected no pixels.");
+            using var expectedMask = new Mat(fullBinary, expectedBounds);
+            using var expectedImage = new Mat(source, expectedBounds).Clone();
+            using var outsideMask = new Mat();
+            Cv2.BitwiseNot(expectedMask, outsideMask);
+            expectedImage.SetTo(Scalar.All(0), outsideMask);
+
+            using var input = VisionImage.Own(source.Clone());
+            var result = await node.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(input),
+                ["roi"] = VisionValue.Roi(roi)
+            }), Node("image.crop", "{}"), CancellationToken.None);
+            using var actualImage = ImageFrom(result);
+            using var actualMask = (VisionImage)result.Outputs["roiMask"].Require<IVisionImage>("roiMask");
+
+            Assert.Equal(expectedBounds.X, Convert.ToInt32(result.Summary["x"]));
+            Assert.Equal(expectedBounds.Y, Convert.ToInt32(result.Summary["y"]));
+            Assert.Equal((expectedBounds.Width, expectedBounds.Height), (actualImage.Width, actualImage.Height));
+            var maskNorm = Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF);
+            var differences = new List<string>();
+            if (maskNorm != 0)
+            {
+                var rows = expectedMask.Rows;
+                var columns = expectedMask.Cols;
+                for (var row = 0; row < rows; row++)
+                    for (var column = 0; column < columns; column++)
+                        if (expectedMask.At<byte>(row, column) != actualMask.Mat.At<byte>(row, column) && differences.Count < 16)
+                            differences.Add($"({column},{row}) {expectedMask.At<byte>(row, column)}→{actualMask.Mat.At<byte>(row, column)}");
+            }
+            Assert.True(maskNorm == 0,
+                $"Mask differs for sample {sample} ({roi.Type}), bounds={expectedBounds}, differences={string.Join(',', differences)}, roi={JsonSerializer.Serialize(roi)}.");
+            Assert.True(Cv2.Norm(expectedImage, actualImage.Mat, NormTypes.INF) == 0,
+                $"Image differs for sample {sample} ({roi.Type}).");
+        }
     }
 
     [Fact]

@@ -140,9 +140,10 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 foreach (var stroke in strokes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (stroke.Mode != VisionRoiStrokeMode.Add) continue;
                     var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);
                     padding = Math.Max(padding, thickness / 2 + 2);
+                    // Erasers do not add selected pixels, but rasterizing them at the local
+                    // canvas edge changes anti-alias blending. Include their full extent too.
                     foreach (var point in stroke.Points)
                     {
                         if ((pointIndex++ & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
