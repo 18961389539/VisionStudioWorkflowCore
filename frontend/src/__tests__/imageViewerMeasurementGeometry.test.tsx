@@ -199,6 +199,25 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('lets users move a caliper circle back into view by dragging its visible circumference', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: -10, y: 50 }, radius: 30, angleStartDeg: 30, angleEndDeg: 120 }, onChange);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 93.8, clientY: 68.64 }); // visible circle edge near image (5, 24)
+    fireEvent.mouseMove(stage, { clientX: 188.2, clientY: 68.64 }); // drag the circle right
+    fireEvent.mouseUp(document.body, { clientX: 188.2, clientY: 68.64 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') {
+      expect(result.center.x).toBeCloseTo(30);
+      expect(result.center.y).toBeCloseTo(50);
+      expect(result.radius).toBe(30);
+    }
+  });
+
   it('drags a partial-circle endpoint across zero without reversing the sweep', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 6,

@@ -10,7 +10,7 @@ type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiMoveBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
-type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
+type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
@@ -700,7 +700,12 @@ export default function ImageViewer({
     const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
       screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)
     ) })).sort((a, b) => a.distance - b.distance)[0];
-    return closest?.distance <= HANDLE_HIT ? closest.mode : undefined;
+    if (closest?.distance <= HANDLE_HIT) return closest.mode;
+    const cursor = imagePoint(screen);
+    if (target.centerEditable !== false
+      && Math.abs(Math.hypot(cursor.x - target.center.x, cursor.y - target.center.y) - target.radius) * view.scale <= HANDLE_HIT)
+      return 'moveCircle';
+    return undefined;
   };
 
   const onWheel = (event: any) => {
@@ -834,10 +839,14 @@ export default function ImageViewer({
           const dy = clamp(current.y - start.y, -maxY, actualHeight - minY);
           setMeasurementDraft({ type: 'line', start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
         }
-      } else if (mode === 'center') {
+      } else if (mode === 'center' || mode === 'moveCircle') {
+        const center = mode === 'center' ? current : {
+          x: origin.center.x + current.x - start.x,
+          y: origin.center.y + current.y - start.y
+        };
         setMeasurementDraft({ ...origin, center: {
-          x: clampCircleCenter(current.x, origin.radius, actualWidth),
-          y: clampCircleCenter(current.y, origin.radius, actualHeight)
+          x: clampCircleCenter(center.x, origin.radius, actualWidth),
+          y: clampCircleCenter(center.y, origin.radius, actualHeight)
         } });
       } else if (mode === 'radius') {
         setMeasurementDraft({ ...origin, radius: clamp(Math.hypot(current.x - origin.center.x, current.y - origin.center.y), Math.min(2, maxCircleRadius(origin.center, actualWidth, actualHeight)), maxCircleRadius(origin.center, actualWidth, actualHeight)) });
