@@ -236,6 +236,63 @@ public sealed class ParameterValidationTests
     }
 
     [Fact]
+    public void AffineWarpPropagatesRegistrationTargetFrameToDownstreamMeasurement()
+    {
+        var workflow = new WorkflowDefinition("registered-warp-measurement", "Registered warp measurement",
+        [
+            new NodeDefinition("current", "image.synthetic", null, null, null),
+            new NodeDefinition("reference", "image.acquire", null, null, null),
+            new NodeDefinition("registration", "image.register", null, null, null),
+            new NodeDefinition("warp", "image.warpAffine", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("current-reference-control", "current", "next", "reference", "exec", "control"),
+            new EdgeDefinition("reference-registration-control", "reference", "next", "registration", "exec", "control"),
+            new EdgeDefinition("registration-warp-control", "registration", "next", "warp", "exec", "control"),
+            new EdgeDefinition("warp-measure-control", "warp", "next", "measure", "exec", "control"),
+            new EdgeDefinition("current-registration-image", "current", "image", "registration", "image", "data"),
+            new EdgeDefinition("reference-registration-image", "reference", "image", "registration", "reference", "data"),
+            new EdgeDefinition("current-warp-image", "current", "image", "warp", "image", "data"),
+            new EdgeDefinition("registration-warp-transform", "registration", "transform", "warp", "transform", "data"),
+            new EdgeDefinition("warp-measure-image", "warp", "image", "measure", "image", "data"),
+            new EdgeDefinition("registration-measure-transform", "registration", "transform", "measure", "transform", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Fact]
+    public void AffineWarpRejectsImageFromDifferentSourceFrame()
+    {
+        var workflow = new WorkflowDefinition("wrong-warp-source", "Wrong affine warp source",
+        [
+            new NodeDefinition("current", "image.synthetic", null, null, null),
+            new NodeDefinition("other", "image.acquire", null, null, null),
+            new NodeDefinition("reference", "image.acquire", null, null, null),
+            new NodeDefinition("registration", "image.register", null, null, null),
+            new NodeDefinition("warp", "image.warpAffine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("current-other-control", "current", "next", "other", "exec", "control"),
+            new EdgeDefinition("other-reference-control", "other", "next", "reference", "exec", "control"),
+            new EdgeDefinition("reference-registration-control", "reference", "next", "registration", "exec", "control"),
+            new EdgeDefinition("registration-warp-control", "registration", "next", "warp", "exec", "control"),
+            new EdgeDefinition("current-registration-image", "current", "image", "registration", "image", "data"),
+            new EdgeDefinition("reference-registration-image", "reference", "image", "registration", "reference", "data"),
+            new EdgeDefinition("other-warp-image", "other", "image", "warp", "image", "data"),
+            new EdgeDefinition("registration-warp-transform", "registration", "transform", "warp", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("warps image frame 'other.image'", error.Message);
+        Assert.Contains("transform expects source frame 'current.image'", error.Message);
+    }
+
+    [Fact]
     public void PoseTransformMustTargetTheSameImageFrameTheCaliperSamples()
     {
         WorkflowDefinition BuildWorkflow(string measurementImageSource) => new(

@@ -29,8 +29,14 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
         var type = node.Type;
         var imageInputPort = type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase) ? "debugImage" : "image";
         var inputFrame = TryGetImageFrame(inputs, imageInputPort);
+        var warpTargetFrame = type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)
+            && inputs.TryGetValue("transform", out var warpTransformValue)
+            ? warpTransformValue.Require<VisionTransform2D>("transform").TargetFrame
+            : null;
         var outputFrame = type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
             ? $"image:{node.Id}:crop"
+            : type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)
+                ? warpTargetFrame ?? $"image:{node.Id}:spatial"
             : type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
                 || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
                 || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase)
@@ -57,6 +63,12 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
                 framedTransform = transform with { SourceFrame = inputFrame ?? "CurrentImage", TargetFrame = outputFrame };
             else if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
                 framedTransform = transform with { SourceFrame = $"roi:{node.Id}:reference", TargetFrame = inputFrame ?? "CurrentImage" };
+            else if (type.Equals("image.register", StringComparison.OrdinalIgnoreCase))
+                framedTransform = transform with
+                {
+                    SourceFrame = inputFrame ?? "CurrentImage",
+                    TargetFrame = TryGetImageFrame(inputs, "reference") ?? "ReferenceImage"
+                };
 
             if (framedTransform is not null)
             {

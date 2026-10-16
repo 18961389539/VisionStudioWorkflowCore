@@ -17,6 +17,37 @@ public sealed class Batch5ImagePortTests
     }
 
     [Fact]
+    public async Task AffineWarpRuntimeTagsOutputWithTransformTargetFrame()
+    {
+        using var input = VisionImage.Own(new Mat(16, 16, MatType.CV_8UC1, Scalar.All(7)));
+        using var registry = new VisionNodeRegistry();
+        var warpNode = new NodeDefinition("warp", "image.warpAffine", null, null, null);
+        var cropNode = new NodeDefinition("crop", "image.crop", null, null, null);
+        registry.Register(BuiltInNodeCatalog.Require(warpNode.Type), new ImageWarpAffineNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require(cropNode.Type), new ImageCropNode(), "builtin");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        var transform = new VisionTransform2D("CurrentImage", "reference-frame", "px",
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1);
+
+        var warpedResult = await dispatcher.ExecuteAsync(warpNode, new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input),
+            ["transform"] = VisionValue.Transform(transform)
+        }, null, default);
+        using var warpedImage = Assert.IsType<VisionImage>(warpedResult.Outputs["image"].Value);
+        var croppedResult = await dispatcher.ExecuteAsync(cropNode, new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(warpedImage)
+        }, null, default);
+        using var croppedImage = Assert.IsType<VisionImage>(croppedResult.Outputs["image"].Value);
+
+        var cropTransform = Assert.IsType<VisionTransform2D>(croppedResult.Outputs["transform"].Value);
+        Assert.Equal("reference-frame", cropTransform.SourceFrame);
+    }
+
+    [Fact]
     public async Task RoiAndContourProperties_RemainStructuredInExecutionReports()
     {
         var roi = new NodeDefinition("roi", "roi.transform", null, null,

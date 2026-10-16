@@ -162,6 +162,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     $"Node '{circleNode.Id}' receives an already corrected circle and its transform from ROI transform '{sourceNode.Id}'. Remove that transform input; applying both would shift the circle twice.");
         }
 
+        ValidateImageWarpFrames(workflow, byId);
         ValidateMeasurementImageFrames(workflow, byId);
         ValidateMeasurementGeometryFrames(workflow, byId);
 
@@ -244,6 +245,28 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         }
     }
 
+    private void ValidateImageWarpFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
+    {
+        foreach (var node in workflow.Nodes.Where(item => item.Type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)))
+        {
+            var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
+            var imageEdge = FindInputEdge(workflow.Edges, node.Id, "image");
+            if (transformEdge is null || imageEdge is null) continue;
+
+            var transform = ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            var imageFrame = ResolveImageFrame(imageEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            var sourceFrame = transform?.Source;
+            if (sourceFrame is null || imageFrame is null
+                || !sourceFrame.IsTraceable || !imageFrame.IsTraceable
+                || string.Equals(sourceFrame.Key, imageFrame.Key, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' warps image frame '{imageFrame.Label}', but its transform expects source frame '{sourceFrame.Label}'. " +
+                "Connect the image from the transform's source frame, or use a transform computed for the input image.");
+        }
+    }
+
     private TransformFrames? ResolveTransformFrames(
         string nodeId,
         WorkflowDefinition workflow,
@@ -252,6 +275,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
+        if (type.Equals("image.register", StringComparison.OrdinalIgnoreCase))
+        {
+            var imageInput = FindInputEdge(workflow.Edges, nodeId, "image");
+            var referenceInput = FindInputEdge(workflow.Edges, nodeId, "reference");
+            var source = imageInput is null ? null : ResolveImageFrame(imageInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            var target = referenceInput is null ? null : ResolveImageFrame(referenceInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            return new TransformFrames(source, target, target is null ? [] : [target]);
+        }
         if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
         {
             var input = FindInputEdge(workflow.Edges, nodeId, "image");
@@ -450,6 +481,13 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         var type = node.Type;
         if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
             return new CoordinateFrame($"image:{nodeId}:crop", $"{nodeId}.image (crop frame)");
+        if (type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase))
+        {
+            var transformInput = FindInputEdge(workflow.Edges, nodeId, "transform");
+            var targetFrame = transformInput is null ? null
+                : ResolveTransformFrames(transformInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
+            return targetFrame ?? new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (affine-warped frame)");
+        }
         if (type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
