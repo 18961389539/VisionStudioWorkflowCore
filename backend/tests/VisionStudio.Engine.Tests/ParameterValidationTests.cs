@@ -247,6 +247,109 @@ public sealed class ParameterValidationTests
         Assert.Contains("measure", compiled.OrderedNodeIds);
     }
 
+    [Theory]
+    [InlineData("measure.blob", "circle")]
+    [InlineData("measure.blobs", "circle")]
+    public void MeasurementRejectsBlobCircleFromAnotherImageFrame(string circleSourceType, string circlePort)
+    {
+        var workflow = new WorkflowDefinition("blob-circle-frame-mismatch", "Blob circle from another image",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("blob", circleSourceType, null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("measure", "measure.caliperCircle", null, null, null)
+        ],
+        [
+            new EdgeDefinition("blob-control", "scene", "next", "blob", "exec", "control"),
+            new EdgeDefinition("undistort-control", "blob", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("measure-control", "undistort", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-blob", "scene", "image", "blob", "image", "data"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("undistorted-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("blob-circle", "blob", circlePort, "measure", "circle", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'measure' input 'circle' geometry is in frame 'scene.image'", error.Message);
+        Assert.Contains("measurement image is in frame 'undistort.image (undistorted frame)'", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementRejectsCircleExtractedFromDetectionsInAnotherImageFrame()
+    {
+        var workflow = new WorkflowDefinition("detection-circle-frame-mismatch", "Detection circle from another image",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("blobs", "measure.blobs", null, null, null),
+            new NodeDefinition("filter", "collection.detections.filter", null, null, null),
+            new NodeDefinition("sort", "collection.detections.sort", null, null, null),
+            new NodeDefinition("detection", "collection.detections.at", null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("measure", "measure.caliperCircle", null, null, null)
+        ],
+        [
+            new EdgeDefinition("blobs-control", "scene", "next", "blobs", "exec", "control"),
+            new EdgeDefinition("filter-control", "blobs", "next", "filter", "exec", "control"),
+            new EdgeDefinition("sort-control", "filter", "next", "sort", "exec", "control"),
+            new EdgeDefinition("detection-control", "sort", "next", "detection", "exec", "control"),
+            new EdgeDefinition("undistort-control", "detection", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("measure-control", "undistort", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-blobs", "scene", "image", "blobs", "image", "data"),
+            new EdgeDefinition("blobs-filter", "blobs", "detections", "filter", "detections", "data"),
+            new EdgeDefinition("filter-sort", "filter", "detections", "sort", "detections", "data"),
+            new EdgeDefinition("sort-detection", "sort", "detections", "detection", "detections", "data"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("undistorted-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("detection-circle", "detection", "circle", "measure", "circle", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'measure' input 'circle' geometry is in frame 'scene.image'", error.Message);
+        Assert.Contains("measurement image is in frame 'undistort.image (undistorted frame)'", error.Message);
+    }
+
+    [Fact]
+    public void RegionBooleanRejectsRegionsFromDifferentImageFramesBeforeCaliperUse()
+    {
+        var workflow = new WorkflowDefinition("region-boolean-frame-mismatch", "Region boolean across image frames",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("undistort", "image.undistort", null, null, null),
+            new NodeDefinition("raw-region", "region.fromThreshold", null, null, null),
+            new NodeDefinition("corrected-region", "region.fromThreshold", null, null, null),
+            new NodeDefinition("combine", "region.boolean", null, null, null),
+            new NodeDefinition("detections", "region.toDetections", null, null, null),
+            new NodeDefinition("detection", "collection.detections.at", null, null, null),
+            new NodeDefinition("measure", "measure.caliperCircle", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-undistort-control", "scene", "next", "undistort", "exec", "control"),
+            new EdgeDefinition("undistort-raw-region-control", "undistort", "next", "raw-region", "exec", "control"),
+            new EdgeDefinition("raw-corrected-region-control", "raw-region", "next", "corrected-region", "exec", "control"),
+            new EdgeDefinition("corrected-combine-control", "corrected-region", "next", "combine", "exec", "control"),
+            new EdgeDefinition("combine-detections-control", "combine", "next", "detections", "exec", "control"),
+            new EdgeDefinition("detections-at-control", "detections", "next", "detection", "exec", "control"),
+            new EdgeDefinition("detection-measure-control", "detection", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-undistort", "scene", "image", "undistort", "image", "data"),
+            new EdgeDefinition("raw-region-image", "scene", "image", "raw-region", "image", "data"),
+            new EdgeDefinition("corrected-region-image", "undistort", "image", "corrected-region", "image", "data"),
+            new EdgeDefinition("raw-region-input", "raw-region", "region", "combine", "a", "data"),
+            new EdgeDefinition("corrected-region-input", "corrected-region", "region", "combine", "b", "data"),
+            new EdgeDefinition("combine-detections", "combine", "region", "detections", "region", "data"),
+            new EdgeDefinition("detections-index", "detections", "detections", "detection", "detections", "data"),
+            new EdgeDefinition("measurement-image", "undistort", "image", "measure", "image", "data"),
+            new EdgeDefinition("detection-circle", "detection", "circle", "measure", "circle", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'combine' cannot combine regions from different image frames", error.Message);
+        Assert.Contains("scene.image", error.Message);
+        Assert.Contains("undistort.image (undistorted frame)", error.Message);
+    }
+
     [Fact]
     public void MeasurementRejectsRoiAuthoredBeforeImageUndistortion()
     {

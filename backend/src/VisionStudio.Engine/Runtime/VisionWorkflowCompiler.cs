@@ -472,8 +472,11 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
-        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
+        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
+            return outputPort.Equals("cropOrigin", StringComparison.OrdinalIgnoreCase)
+                ? ResolveImageInputFrame(nodeId, "image", workflow, byId)
+                : null;
+        if (type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
             || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -504,9 +507,115 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             && IsOneOf(outputPort, "circle", "center"))
             return ResolveImageInputFrame(nodeId, "image", workflow, byId);
 
+        if (type.Equals("collection.detections.at", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "center", "circle", "rectangle"))
+            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
+        if (type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase)
+            && IsOneOf(outputPort, "center", "circle", "rectangle"))
+            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
+
         if (type.Equals("measure.fitLine", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "line")
             || type.Equals("measure.fitCircle", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "circle", "center"))
             return ResolveFittedPointFrame(nodeId, workflow, byId, visited);
+
+        var catalog = registry.Require(type).Catalog;
+        var output = catalog.Outputs.FirstOrDefault(port => port.Name.Equals(outputPort, StringComparison.OrdinalIgnoreCase));
+        // Image-producing measurement nodes emit geometry in the same frame as their image
+        // output. Resolve that output path so detections and blob circles are checked too.
+        var isImageGeometry = output?.DataType is VisionDataType.Line2D or VisionDataType.Circle
+            or VisionDataType.Point2D or VisionDataType.Rectangle2D or VisionDataType.Pose2D;
+        if (isImageGeometry && catalog.Outputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Image))
+            return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+
+        return null;
+    }
+
+    private CoordinateFrame? ResolveDetectionInputFrame(
+        string nodeId,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        var edge = FindInputEdge(workflow.Edges, nodeId, "detections");
+        return edge is null ? null : ResolveDetectionFrame(edge.SourceNodeId, workflow, byId, visited);
+    }
+
+    private CoordinateFrame? ResolveDetectionFrame(
+        string nodeId,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
+        var type = node.Type;
+        if (type.Equals("measure.blobs", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        if (type.Equals("collection.detections.filter", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("collection.detections.sort", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase))
+            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
+        if (type.Equals("region.toDetections", StringComparison.OrdinalIgnoreCase))
+        {
+            var region = FindInputEdge(workflow.Edges, nodeId, "region");
+            return region is null ? null : ResolveRegionFrame(region.SourceNodeId, region.SourcePort, workflow, byId, visited);
+        }
+        return null;
+    }
+
+    private CoordinateFrame? ResolveRegionFrame(
+        string nodeId,
+        string outputPort,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId,
+        HashSet<string> visited)
+    {
+        if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
+        var type = node.Type;
+        var catalog = registry.Require(type).Catalog;
+        if (!catalog.Outputs.Any(port => port.Name.Equals(outputPort, StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Region))
+            return null;
+
+        if (type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase))
+            return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+        if (type.Equals("region.transform", StringComparison.OrdinalIgnoreCase))
+        {
+            var transformEdge = FindInputEdge(workflow.Edges, nodeId, "transform");
+            return transformEdge is null ? null
+                : ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
+        }
+
+        var regionInputs = workflow.Edges.Where(edge => edge.TargetNodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)
+                && !WorkflowGraph.IsControlEdge(edge)
+                && catalog.Inputs.Any(port => port.Name.Equals(edge.TargetPort, StringComparison.OrdinalIgnoreCase)
+                    && port.DataType == VisionDataType.Region))
+            .ToArray();
+        if (regionInputs.Length > 0)
+        {
+            var frames = regionInputs.Select(edge => ResolveRegionFrame(edge.SourceNodeId, edge.SourcePort,
+                workflow, byId, new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase))).ToArray();
+            if (frames.Any(frame => frame is not { IsTraceable: true })) return null;
+            var distinctFrames = frames.Cast<CoordinateFrame>()
+                .GroupBy(frame => frame.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            if (distinctFrames.Length > 1)
+                throw new InvalidOperationException(
+                    $"Node '{nodeId}' cannot combine regions from different image frames ('{distinctFrames[0].Label}' and '{distinctFrames[1].Label}'). " +
+                    "Connect regions from the same image frame.");
+            return distinctFrames[0];
+        }
+
+        if (type.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+
+        if (catalog.Outputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Image)
+            && catalog.Inputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Image))
+            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
 
         return null;
     }
