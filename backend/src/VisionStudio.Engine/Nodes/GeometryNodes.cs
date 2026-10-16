@@ -187,11 +187,9 @@ public sealed class CaliperNode : IVisionNodeExecutor
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
         var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
         var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "edgeThreshold", 12));
-        var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
-        var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
-        if (direction is not ("strongest" or "firstfromstart" or "firstfromend")) direction = "strongest";
-        var refine = node.GetString("refine", "none").Trim().ToLowerInvariant();
-        if (refine is not ("none" or "parabolic")) refine = "none";
+        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
+        var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
+        var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "none", "none", "parabolic");
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;

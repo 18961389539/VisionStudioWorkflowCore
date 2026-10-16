@@ -11,6 +11,33 @@ namespace VisionStudio.Engine.Tests;
 public sealed class Batch5CaliperRegressionTests
 {
     [Theory]
+    [InlineData("measure.caliper", """{"polarity":"sideways"}""", "polarity")]
+    [InlineData("measure.caliper", """{"direction":"middle"}""", "direction")]
+    [InlineData("measure.caliper", """{"refine":"cubic"}""", "refine")]
+    [InlineData("measure.caliperLine", """{"polarity":"sideways"}""", "polarity")]
+    [InlineData("measure.caliperLine", """{"direction":"middle"}""", "direction")]
+    [InlineData("measure.caliperLine", """{"refine":"cubic"}""", "refine")]
+    [InlineData("measure.caliperCircle", """{"polarity":"sideways"}""", "polarity")]
+    [InlineData("measure.caliperCircle", """{"searchDirection":"middle"}""", "searchDirection")]
+    [InlineData("measure.caliperCircle", """{"samplingMode":"adaptive"}""", "samplingMode")]
+    public async Task CaliperNodesRejectUnknownChoicesInsteadOfSilentlyFallingBack(string type, string parameters, string parameter)
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(0)));
+        IVisionNodeExecutor executor = type switch
+        {
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(
+            new NodeExecutionContext(Inputs(image)), Node(type, parameters), CancellationToken.None).AsTask());
+
+        Assert.Contains($"Parameter '{parameter}'", error.Message);
+        Assert.Contains("must be one of", error.Message);
+    }
+
+    [Theory]
     [InlineData(1.0)]
     [InlineData(0.5)]
     [InlineData(-0.7)]

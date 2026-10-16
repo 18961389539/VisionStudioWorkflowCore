@@ -62,6 +62,14 @@ internal static class SubpixelEdgeCore
         return normalized % 2 == 0 ? Math.Min(99, normalized + 1) : normalized;
     }
 
+    public static string ChoiceParameter(NodeDefinition node, string name, string fallback, params string[] allowed)
+    {
+        var value = node.GetString(name, fallback).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(value)) value = fallback.Trim().ToLowerInvariant();
+        if (allowed.Contains(value, StringComparer.Ordinal)) return value;
+        throw new InvalidOperationException($"Parameter '{name}' must be one of [{string.Join(", ", allowed)}].");
+    }
+
     /// <summary>
     /// 边缘搜索结果。Position 为沿搜索线距起点的亚像素距离（px，已按采样间距换算）；
     /// FitError 为五个梯度采样点对最小二乘抛物线的 RMS 残差（灰度级，-1 表示不可可靠拟合）；
@@ -188,9 +196,9 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
         var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
         var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
-        var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
-        var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
-        var refine = node.GetString("refine", "parabolic").Trim().ToLowerInvariant();
+        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
+        var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
+        var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "parabolic", "parabolic", "none");
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -295,9 +303,9 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
         var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
         var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
-        var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
-        var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
-        var refine = node.GetString("refine", "parabolic").Trim().ToLowerInvariant();
+        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
+        var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
+        var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "parabolic", "parabolic", "none");
         var edgeLength = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0), 0, 10000);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 3, 101);
         var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
@@ -551,16 +559,18 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         var requestedMode = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
         // Old workflows only have angleStepDeg. Keep their fixed-step spacing until the user
         // explicitly switches to count mode; new nodes use a direct caliper count.
-        var samplingMode = requestedMode is "count" or "step"
-            ? requestedMode
-            : node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count";
+        var samplingMode = requestedMode switch
+        {
+            "count" or "step" => requestedMode,
+            "" => node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count",
+            _ => throw new InvalidOperationException("Parameter 'samplingMode' must be one of [count, step].")
+        };
         var angleStep = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "angleStepDeg", 5), 0.5, 45);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 72, 3, 361);
         var band = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "radialBand", 8), 1, 500);
         var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
-        var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
-        var searchDirection = node.GetString("searchDirection", "strongest").Trim().ToLowerInvariant();
-        if (searchDirection is not ("strongest" or "firstfromstart" or "firstfromend")) searchDirection = "strongest";
+        var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
+        var searchDirection = SubpixelEdgeCore.ChoiceParameter(node, "searchDirection", "strongest", "strongest", "firstfromstart", "firstfromend");
         var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 3, 1, 99));
         var maxDeviation = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxRadiusDeviation", 0));
         var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);

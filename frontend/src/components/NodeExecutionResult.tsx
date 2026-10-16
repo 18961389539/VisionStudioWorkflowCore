@@ -59,6 +59,15 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
     const label = catalog.parameters.find(parameter => parameter.name === name)?.label ?? name;
     return `参数“${label}”必须是有限数值。请检查并修正后重试。`;
   }
+  const invalidChoice = error.match(/^Parameter '([^']+)' must be one of \[([^\]]+)\]\.$/);
+  if (invalidChoice && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+    const [, name, rawChoices] = invalidChoice;
+    const parameter = catalog.parameters.find(item => item.name === name);
+    const label = parameter?.label ?? name;
+    const choices = rawChoices.split(',').map(value => value.trim()).filter(Boolean).map(value =>
+      parameter?.options?.find(option => option.value.toLowerCase() === value.toLowerCase())?.label ?? value);
+    return `参数“${label}”的选项值无效。可选项：${choices.join('、')}。`;
+  }
 
   const messages: Record<string, Record<string, string>> = {
     'image.crop': {

@@ -206,6 +206,18 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText("Parameter 'minContrast' must be a finite number.")).toBeTruthy();
   });
 
+  it('localizes invalid caliper choice parameters and lists their allowed choices', () => {
+    mount('measure.caliperLine', failedResult("Parameter 'polarity' must be one of [any, rising, falling]."), [
+      { name: 'polarity', label: '边缘极性', type: 'select', options: [
+        { label: '任意', value: 'Any' }, { label: '由暗到亮', value: 'Rising' }, { label: '由亮到暗', value: 'Falling' }
+      ] }
+    ]);
+
+    expect(screen.getByText(/参数“边缘极性”的选项值无效/)).toBeTruthy();
+    expect(screen.getByText(/任意、由暗到亮、由亮到暗/)).toBeTruthy();
+    expect(screen.getByText("Parameter 'polarity' must be one of [any, rising, falling].")).toBeTruthy();
+  });
+
   it('keeps unknown native errors intact for diagnosis', () => {
     const nativeError = 'HALCON error #3022: Wrong size of filter for Gauss in operator measure_pos';
     mount('measure.caliper', failedResult(nativeError));
