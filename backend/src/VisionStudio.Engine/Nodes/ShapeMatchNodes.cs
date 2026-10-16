@@ -108,6 +108,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
 
         VisionRoi transformed;
         List<VisionPoint2D> region;
+        double regionPadding = 0;
         switch (roi.Type)
         {
             case VisionRoiType.Brush:
@@ -129,16 +130,8 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     }).ToArray()
                 }).ToArray();
                 transformed = roi with { Strokes = movedStrokes };
-                var radius = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).Max(stroke => stroke.Width / 2);
-                var minX = points.Min(point => point.X) - radius;
-                var minY = points.Min(point => point.Y) - radius;
-                var maxX = points.Max(point => point.X) + radius;
-                var maxY = points.Max(point => point.Y) + radius;
-                region = new[]
-                {
-                    new VisionPoint2D(minX, minY), new VisionPoint2D(maxX, minY),
-                    new VisionPoint2D(maxX, maxY), new VisionPoint2D(minX, maxY)
-                }.Select(Apply).ToList();
+                region = points.Select(point => Apply(new VisionPoint2D(point.X, point.Y))).Distinct().ToList();
+                regionPadding = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).Max(stroke => stroke.Width / 2);
                 break;
             }
             case VisionRoiType.Circle:
@@ -147,7 +140,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 if (radius < 0) throw new InvalidOperationException("The circle ROI radius must be non-negative.");
                 var translatedCenter = Apply(new VisionPoint2D(roi.X ?? 0, roi.Y ?? 0));
                 transformed = roi with { X = translatedCenter.X, Y = translatedCenter.Y };
-                region = CircleRegion(translatedCenter, radius);
+                region = [];
                 break;
             }
             case VisionRoiType.Polygon:
@@ -191,14 +184,38 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
 
         // Reject invalid coordinates here, before they reach image-mask rasterizers or measurement nodes.
         ValidateTransformRoi(transformed);
-        var pointsF = region.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray();
-        var rect = JLVisionOperators.MinAreaRect(pointsF);
-        var rectangle = new VisionRectangle2D(
-            rect.Center.X, rect.Center.Y,
-            Math.Max(rect.Size.Width, rect.Size.Height), Math.Min(rect.Size.Width, rect.Size.Height),
-            rect.Size.Width < rect.Size.Height ? VisionTransform2D.NormalizeAngleDeg(rect.Angle + 90) : rect.Angle);
-        var center = new VisionPoint2D(rect.Center.X, rect.Center.Y);
-        var circle = new VisionCircle(center.X, center.Y, region.Max(p => MeasurementMath.Hypot(p.X - center.X, p.Y - center.Y)));
+        VisionRectangle2D rectangle;
+        VisionPoint2D center;
+        VisionCircle circle;
+        if (transformed.Type == VisionRoiType.Circle)
+        {
+            center = new VisionPoint2D(transformed.X ?? 0, transformed.Y ?? 0);
+            var radius = transformed.Radius ?? 0;
+            // Preserve the exact circle bounds instead of measuring an inscribed polygon approximation.
+            rectangle = new VisionRectangle2D(center.X, center.Y, radius * 2, radius * 2);
+            circle = new VisionCircle(center.X, center.Y, radius);
+        }
+        else
+        {
+            if (region.Count == 1)
+            {
+                center = region[0];
+                rectangle = new VisionRectangle2D(center.X, center.Y, regionPadding * 2, regionPadding * 2);
+            }
+            else
+            {
+                var pointsF = region.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray();
+                var rect = JLVisionOperators.MinAreaRect(pointsF);
+                center = new VisionPoint2D(rect.Center.X, rect.Center.Y);
+                rectangle = new VisionRectangle2D(
+                    center.X, center.Y,
+                    Math.Max(rect.Size.Width, rect.Size.Height) + regionPadding * 2,
+                    Math.Min(rect.Size.Width, rect.Size.Height) + regionPadding * 2,
+                    rect.Size.Width < rect.Size.Height ? VisionTransform2D.NormalizeAngleDeg(rect.Angle + 90) : rect.Angle);
+            }
+            var boundingRadius = region.Max(p => MeasurementMath.Hypot(p.X - center.X, p.Y - center.Y)) + regionPadding;
+            circle = new VisionCircle(center.X, center.Y, boundingRadius);
+        }
 
         var transform = new VisionTransform2D(
             "BasePose", "CurrentPose", "px",
@@ -385,14 +402,4 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             .ToArray();
     }
 
-    private static List<VisionPoint2D> CircleRegion(VisionPoint2D center, double radius)
-    {
-        var points = new List<VisionPoint2D>(16);
-        for (var i = 0; i < 16; i++)
-        {
-            var angle = i / 16.0 * 2 * Math.PI;
-            points.Add(new VisionPoint2D(center.X + Math.Cos(angle) * radius, center.Y + Math.Sin(angle) * radius));
-        }
-        return points;
-    }
 }

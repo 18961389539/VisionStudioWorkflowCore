@@ -824,6 +824,14 @@ public sealed class Batch5ShapeMatchTests
         Assert.Equal(60, roi.X);
         Assert.Equal(80, roi.Y);
         Assert.Equal(20, roi.Radius);
+        var rectangle = result.Outputs["rectangle"].Require<VisionRectangle2D>("rectangle");
+        Assert.Equal(60, rectangle.X);
+        Assert.Equal(80, rectangle.Y);
+        Assert.Equal(40, rectangle.Width);
+        Assert.Equal(40, rectangle.Height);
+        Assert.Equal(0, rectangle.AngleDeg);
+        var boundsCircle = result.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.Equal(new VisionCircle(60, 80, 20), boundsCircle);
 
         // 端口优先：端口传圆 ROI，参数里放一个不相干的矩形 ⇒ 输出以端口为准。
         var portResult = await Run(new RoiTransformNode(),
@@ -837,6 +845,38 @@ public sealed class Batch5ShapeMatchTests
         Assert.Equal(105, portRoi.X);
         Assert.Equal(105, portRoi.Y);
         Assert.Equal(30, portRoi.Radius);
+    }
+
+    [Fact]
+    public async Task RoiTransform_BrushBoundsFollowTheTransformedStrokeInsteadOfItsOldAxisAlignedBox()
+    {
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":10,"points":[{"x":20,"y":20},{"x":80,"y":80}]}]},"baseX":50,"baseY":50,"currentX":100,"currentY":100,"currentThetaDeg":45}""");
+
+        var roi = result.Outputs["roi"].Require<VisionRoi>("roi");
+        Assert.Equal(VisionRoiType.Brush, roi.Type);
+        var rectangle = result.Outputs["rectangle"].Require<VisionRectangle2D>("rectangle");
+        Assert.InRange(rectangle.Width, 94, 96);
+        Assert.InRange(rectangle.Height, 9, 11);
+        Assert.InRange(Math.Abs(rectangle.AngleDeg), 0, 0.1);
+        var boundsCircle = result.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.Equal(100, boundsCircle.X, 3);
+        Assert.Equal(100, boundsCircle.Y, 3);
+        Assert.InRange(boundsCircle.Radius, 47.3, 47.6);
+    }
+
+    [Fact]
+    public async Task RoiTransform_SinglePointBrushReportsItsBrushDiameter()
+    {
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":8,"points":[{"x":20,"y":30},{"x":20,"y":30}]}]}}""");
+
+        var rectangle = result.Outputs["rectangle"].Require<VisionRectangle2D>("rectangle");
+        Assert.Equal(20, rectangle.X);
+        Assert.Equal(30, rectangle.Y);
+        Assert.Equal(8, rectangle.Width);
+        Assert.Equal(8, rectangle.Height);
+        Assert.Equal(new VisionCircle(20, 30, 4), result.Outputs["circle"].Require<VisionCircle>("circle"));
     }
 
     [Fact]
