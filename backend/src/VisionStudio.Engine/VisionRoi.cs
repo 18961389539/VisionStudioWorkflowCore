@@ -47,6 +47,8 @@ public static class VisionRoiOpenCvExtensions
                 case VisionRoiType.Brush:
                     DrawBrushStrokes(mask, roi.Strokes);
                     break;
+                default:
+                    throw new InvalidOperationException($"ROI type '{roi.Type}' is not supported.");
             }
             return mask;
         }

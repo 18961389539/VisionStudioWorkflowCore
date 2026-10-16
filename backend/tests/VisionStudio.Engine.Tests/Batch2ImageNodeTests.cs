@@ -39,6 +39,16 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Fact]
+    public void RoiMaskRejectsUnsupportedRuntimeTypesInsteadOfReturningAnEmptyMask()
+    {
+        var roi = new VisionRoi((VisionRoiType)999);
+
+        var error = Assert.Throws<InvalidOperationException>(() => roi.BuildMask(new Size(8, 8)));
+
+        Assert.Contains("is not supported", error.Message);
+    }
+
     [Theory]
     [InlineData("""{"roi":"Rectangle"}""", "must be an object or null")]
     [InlineData("""{"roi":[]}""", "must be an object or null")]
