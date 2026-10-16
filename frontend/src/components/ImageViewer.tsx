@@ -160,7 +160,17 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
       : point) };
   }
   if (mode === 'move') {
-    return { type: 'Polygon', points: origin.points.map((p) => ({ x: clamp(p.x + dx, 0, maxW), y: clamp(p.y + dy, 0, maxH) })) };
+    const clampTranslation = (coordinates: number[], delta: number, limit: number) => {
+      const min = Math.min(...coordinates), max = Math.max(...coordinates);
+      const minDelta = -min, maxDelta = limit - max;
+      if (minDelta <= maxDelta) return clamp(delta, minDelta, maxDelta);
+      // An oversized polygon cannot fit fully inside the image; keep its center in-frame without distorting it.
+      const center = (min + max) / 2;
+      return clamp(delta, -center, limit - center);
+    };
+    const moveX = clampTranslation(origin.points.map(point => point.x), dx, maxW);
+    const moveY = clampTranslation(origin.points.map(point => point.y), dy, maxH);
+    return { type: 'Polygon', points: origin.points.map(point => ({ x: point.x + moveX, y: point.y + moveY })) };
   }
   return undefined;
 }

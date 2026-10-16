@@ -135,4 +135,24 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.start.y).toBeCloseTo(30, 4);
     expect(result.end).toEqual({ x: 50, y: 10 });
   });
+
+  it('moves a polygon ROI rigidly when the drag reaches an image boundary', () => {
+    const onRoiChange = vi.fn();
+    const roi = { type: 'Polygon' as const, points: [
+      { x: 10, y: 10 }, { x: 30, y: 10 }, { x: 30, y: 30 }, { x: 10, y: 30 }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    // The image view uses a 2.36x scale with a screen offset of (82, 12).
+    fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 59.2 }); // image (20, 20), inside polygon
+    fireEvent.mouseMove(stage, { clientX: 93.8, clientY: 59.2 }); // request image x=5; polygon should stop at x=0
+    fireEvent.mouseUp(stage, { clientX: 93.8, clientY: 59.2 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    expect(onRoiChange).toHaveBeenCalledWith({ type: 'Polygon', points: [
+      { x: 0, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 30 }, { x: 0, y: 30 }
+    ] });
+  });
 });
