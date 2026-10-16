@@ -276,7 +276,7 @@ export const portNames: Record<string, string> = {
   boundingRadius: '区域包围半径', debugImageConnected: '已连接调试图像', debugImagePreviewReady: '调试图像预览就绪',
   referenceCaptured: '已获取基准', referenceImage: '基准图像数据', referenceWidth: '基准图像宽度',
   referenceHeight: '基准图像高度', referenceX: '基准 X', referenceY: '基准 Y', referenceThetaDeg: '基准角度',
-  cropOriginX: '裁剪原点 X', cropOriginY: '裁剪原点 Y', selectedPixels: '选中像素',
+  cropOriginX: '裁剪原点 X', cropOriginY: '裁剪原点 Y', croppedRoi: '裁剪坐标系 ROI', selectedPixels: '选中像素',
   classId: '类别 ID',
   classIndex: '类别索引', label: '类别名称', confidence: '置信度', mask: '类别掩膜', roiMask: 'ROI 蒙版', cropOrigin: '裁剪原点', ignoredCount: '拟合剔除数', isAnomaly: '异常',
   results: '识别结果', text: '识别文字', format: '码格式', repeat: '下一轮', done: '完成',
@@ -303,7 +303,7 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
-  'image.crop': '在输入图像上绘制矩形、圆形、多边形或笔刷 ROI，并裁剪为选区与图像交集的紧包围框。ROI 越出图像边缘的部分会自动裁切；完全没有覆盖图像像素时会明确报错。连接 roi 输入时，上游区域优先并覆盖本地选区；笔刷支持添加和擦除；选区外的图像像素清零；roiMask 输出与裁剪图像同尺寸的二值蒙版。裁剪后坐标原点移动到包围框左上角；cropOrigin 给出该点在输入图像中的位置，transform 将输入图像几何映射到裁剪坐标。保留旧版 x/y/width/height 工作流兼容。',
+  'image.crop': '在输入图像上绘制矩形、圆形、多边形或笔刷 ROI，并裁剪为选区与图像交集的紧包围框。ROI 越出图像边缘的部分会自动裁切；完全没有覆盖图像像素时会明确报错。连接 roi 输入时，上游区域优先并覆盖本地选区；笔刷支持添加和擦除；选区外的图像像素清零；roiMask 输出与裁剪图像同尺寸的二值蒙版，croppedRoi 输出平移到裁剪坐标系的 ROI，可直接接到下游卡尺节点以避免把清零边界误测为真实边缘。裁剪后坐标原点移动到包围框左上角；cropOrigin 给出该点在输入图像中的位置，transform 将输入图像几何映射到裁剪坐标。保留旧版 x/y/width/height 工作流兼容。',
   'image.topHat': '灰度图减去矩形灰度开运算，提取比结构元素小的亮特征。输入须为 8 位，彩色自动转灰度；宽高为 1–255 奇数。处理整幅图像，边界使用原生规则；结构元素应大于目标特征。',
   'image.bottomHat': '矩形灰度闭运算减去灰度图，提取比结构元素小的暗特征。输入须为 8 位，彩色自动转灰度；宽高为 1–255 奇数。处理整幅图像，边界使用原生规则；结构元素应大于目标特征。',
   'image.morphGradient': '矩形灰度膨胀减去腐蚀，得到局部灰度极差。输出独立 8 位灰度图，彩色输入先转灰度；宽高须为 1–255 奇数。梯度带宽取决于结构元素，不是亚像素边缘位置。',

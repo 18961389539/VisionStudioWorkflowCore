@@ -477,6 +477,36 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CroppedRoi_CanMaskArtificialCropBoundaryEdgesDuringCaliperMeasurement()
+    {
+        using var source = MakeEdgeImage(0);
+        using var input = VisionImage.Own(source.Clone());
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("measure.caliper"), new CaliperNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        var crop = await dispatcher.ExecuteAsync(Node("image.crop", """{"roi":{"type":"Circle","x":64,"y":64,"radius":20}}"""),
+            Inputs(input), null, CancellationToken.None);
+        using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
+        var node = Node("measure.caliper", """{"startX":0,"startY":5,"endX":40,"endY":5,"sampleWidth":1,"edgeThreshold":20,"direction":"strongest"}""");
+
+        var unmasked = await dispatcher.ExecuteAsync(node, Inputs(croppedImage), null, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(unmasked.Summary["found"]));
+        var unmaskedPoint = unmasked.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.True(Math.Abs(unmaskedPoint.X - 20) > 5, $"Expected the zeroed crop boundary to dominate, got x={unmaskedPoint.X}.");
+        (unmasked.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var maskedInputs = Inputs(croppedImage);
+        maskedInputs["roi"] = crop.Outputs["croppedRoi"];
+        var masked = await dispatcher.ExecuteAsync(node, maskedInputs, null, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(masked.Summary["found"]));
+        var measuredPoint = masked.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.InRange(measuredPoint.X, 19, 21);
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CropTransform_MapsReferenceCaliperLineIntoCropCoordinates()
     {
         using var mat = MakeEdgeImage(0.5);

@@ -179,11 +179,15 @@ public sealed class Batch2ImageNodeTests
         var result = await RunImage(new ImageCropNode(), Image(source), json);
         using var actual = ImageFrom(result);
         using var actualMask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        using var translatedMask = result.Outputs["croppedRoi"].Require<VisionRoi>("croppedRoi").BuildMask(actual.Mat.Size());
+        using var translatedBinary = new Mat();
+        Cv2.InRange(translatedMask, Scalar.All(1), Scalar.All(255), translatedBinary);
         Assert.Equal((bounds.Width, bounds.Height), (actual.Width, actual.Height));
         Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["cropOriginX"]));
         Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["cropOriginY"]));
         Assert.Equal(Cv2.CountNonZero(expectedBinary), Convert.ToInt32(result.Summary["selectedPixels"]));
         Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
+        Assert.Equal(0d, Cv2.Norm(actualMask.Mat, translatedBinary, NormTypes.INF));
         Assert.Equal(0d, Cv2.Norm(expectedImage, actual.Mat, NormTypes.INF));
     }
 

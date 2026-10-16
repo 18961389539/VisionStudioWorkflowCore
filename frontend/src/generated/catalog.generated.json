@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "528e8df629bc049f548fa105810174bdd1e0af6976cb0cd818c84688b81f5601",
+  "hash": "7d577b0dc0a21dcfdb99eb440bbebdd9b2fb2b0139136ff161908f6be6b5ed8a",
   "items": [
     {
       "type": "image.acquire",
@@ -9547,6 +9547,11 @@
           "required": true
         },
         {
+          "name": "croppedRoi",
+          "dataType": "Roi",
+          "required": true
+        },
+        {
           "name": "cropOrigin",
           "dataType": "Point2D",
           "required": true
@@ -9563,7 +9568,7 @@
         }
       ],
       "parameters": [],
-      "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
+      "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection, while croppedRoi outputs the same selection translated to crop coordinates and can connect to downstream measurement nodes to prevent masked crop boundaries from being detected as edges. cropOrigin is the crop top-left in input-image coordinates, and transform maps input-image geometry to crop-image coordinates. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
