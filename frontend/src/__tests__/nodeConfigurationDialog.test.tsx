@@ -385,6 +385,42 @@ describe('caliper geometry input guidance', () => {
     });
   });
 
+  it('allows preview when a connected searchLine replaces malformed local endpoints', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 'inactive', startY: 20, endX: 80, endY: null } } };
+    const lineSource: Node = { id: 'line-source', position: { x: 0, y: 0 }, data: { typeKey: 'feature.line', label: '上游搜索线' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'line-override', source: lineSource.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' }
+    ];
+    const onPreview = vi.fn(async () => report);
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, lineSource, imageNode], edges, result: report, onPreview });
+
+    expect(dialog.queryByText(/请修正参数后再运行或应用/)).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+  });
+
+  it('allows preview when a connected circle replaces malformed local center and radius', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 'inactive', centerY: 30, radius: 0 } } };
+    const circleSource: Node = { id: 'circle-source', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '上游标称圆' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-override', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' }
+    ];
+    const onPreview = vi.fn(async () => report);
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, circleSource, imageNode], edges, result: report, onPreview });
+
+    expect(dialog.queryByText(/请修正参数后再运行或应用/)).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+  });
+
   it('makes caliper geometry read-only when the dialog becomes disabled', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,

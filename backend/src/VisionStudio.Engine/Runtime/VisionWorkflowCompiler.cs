@@ -159,11 +159,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         foreach (var node in workflow.Nodes)
         {
             var catalog = registry.Require(node.Type).Catalog;
+            var connectedInputPorts = workflow.Edges
+                .Where(edge => !WorkflowGraph.IsControlEdge(edge)
+                    && edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase))
+                .Select(edge => edge.TargetPort)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var required in catalog.Inputs.Where(p => p.Required && p.DataType != VisionDataType.Control))
             {
-                if (!workflow.Edges.Any(e => !WorkflowGraph.IsControlEdge(e) &&
-                    e.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase) &&
-                    e.TargetPort.Equals(required.Name, StringComparison.OrdinalIgnoreCase)))
+                if (!connectedInputPorts.Contains(required.Name))
                     throw new InvalidOperationException($"Required input '{node.Id}.{required.Name}' ({required.DataType}) is not connected.");
             }
 
@@ -174,9 +177,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             var roiInputConnected = catalog.Inputs.Any(input =>
                 input.Name.Equals("roi", StringComparison.OrdinalIgnoreCase)
                 && input.DataType == VisionDataType.Roi)
-                && workflow.Edges.Any(edge =>
-                    edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)
-                    && edge.TargetPort.Equals("roi", StringComparison.OrdinalIgnoreCase));
+                && connectedInputPorts.Contains("roi");
             foreach (var roiParameter in roiParameterNames)
             {
                 if (node.Parameters?.ContainsKey(roiParameter) != true) continue;
@@ -195,7 +196,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 }
             }
 
-            ValidateNodeParameters(node, catalog);
+            ValidateNodeParameters(node, catalog, connectedInputPorts);
         }
     }
 
@@ -205,13 +206,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     /// node use their declared defaults; undeclared keys (for example the ROI payload consumed by
     /// VisionRoiParameterExtensions) are intentionally ignored.
     /// </summary>
-    private static void ValidateNodeParameters(NodeDefinition node, NodeCatalogItem catalog)
+    private static void ValidateNodeParameters(NodeDefinition node, NodeCatalogItem catalog, IReadOnlySet<string> connectedInputPorts)
     {
         if (node.Parameters is null || node.Parameters.Count == 0) return;
 
         foreach (var descriptor in catalog.Parameters)
         {
             if (!IsParameterVisible(node, catalog, descriptor)) continue;
+            if (IsParameterOverriddenByConnectedInput(catalog, descriptor.Name, connectedInputPorts)) continue;
             if (!node.Parameters.TryGetValue(descriptor.Name, out var value)) continue;
 
             var prefix = $"Node '{node.Id}' parameter '{descriptor.Name}'";
@@ -255,6 +257,29 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     break;
             }
         }
+    }
+
+    private static bool IsParameterOverriddenByConnectedInput(
+        NodeCatalogItem catalog,
+        string parameterName,
+        IReadOnlySet<string> connectedInputPorts)
+    {
+        var hasConnectedSearchLine = connectedInputPorts.Contains("searchLine")
+            && catalog.Inputs.Any(input => input.Name.Equals("searchLine", StringComparison.OrdinalIgnoreCase)
+                && input.DataType == VisionDataType.Line2D);
+        if (hasConnectedSearchLine
+            && (catalog.Type.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
+                || catalog.Type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+                || catalog.Type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase))
+            && parameterName is "startX" or "startY" or "endX" or "endY")
+            return true;
+
+        var hasConnectedCircle = connectedInputPorts.Contains("circle")
+            && catalog.Inputs.Any(input => input.Name.Equals("circle", StringComparison.OrdinalIgnoreCase)
+                && input.DataType == VisionDataType.Circle);
+        return hasConnectedCircle
+            && catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
+            && parameterName is "centerX" or "centerY" or "radius";
     }
 
     private static bool IsParameterVisible(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)

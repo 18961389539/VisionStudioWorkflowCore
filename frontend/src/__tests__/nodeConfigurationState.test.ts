@@ -86,9 +86,23 @@ describe('node configuration snapshots', () => {
     const invalidRoi = { type: 'Rectangle', x: 0, y: 0, width: 0, height: 10 };
 
     expect(configurationIssues(crop, { roi: invalidRoi })).toHaveLength(1);
-    expect(configurationIssues(crop, { roi: invalidRoi }, { connectedRoiInput: true })).toEqual([]);
+    expect(configurationIssues(crop, { roi: invalidRoi }, { connectedInputPorts: ['roi'] })).toEqual([]);
 
     const shape = fallbackCatalogRaw.find(item => item.type === 'match.shape')!;
-    expect(configurationIssues(shape, { roi: invalidRoi }, { connectedRoiInput: true }).join(' ')).toContain('矩形须为正尺寸');
+    expect(configurationIssues(shape, { roi: invalidRoi }, { connectedInputPorts: ['roi'] }).join(' ')).toContain('矩形须为正尺寸');
+  });
+
+  it('does not validate measurement geometry parameters overridden by connected inputs', () => {
+    const line = fallbackCatalogRaw.find(item => item.type === 'measure.caliperLine')!;
+    const lineParameters = { ...makeDefaultParameters(line), startX: 'inactive', endY: null };
+    expect(configurationIssues(line, lineParameters).length).toBeGreaterThan(0);
+    expect(configurationIssues(line, lineParameters, { connectedInputPorts: ['searchLine'] })).toEqual([]);
+
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    const circleParameters = { ...makeDefaultParameters(circle), centerX: 'inactive', radius: 0 };
+    expect(configurationIssues(circle, circleParameters).length).toBeGreaterThan(0);
+    expect(configurationIssues(circle, circleParameters, { connectedInputPorts: ['circle'] })).toEqual([]);
+
+    expect(configurationIssues(circle, { ...circleParameters, fitOutlierThreshold: -1 }, { connectedInputPorts: ['circle'] }).length).toBeGreaterThan(0);
   });
 });

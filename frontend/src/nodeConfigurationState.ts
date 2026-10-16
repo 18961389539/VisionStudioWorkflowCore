@@ -131,11 +131,20 @@ function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: num
 export function configurationIssues(
   catalog: NodeCatalogItem,
   parameters: NodeParameters,
-  options: { connectedRoiInput?: boolean } = {}
+  options: { connectedInputPorts?: readonly string[] } = {}
 ): string[] {
-  const issues = validateParameterValues(catalog.parameters, parameters).map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
-  const roiInputOverridesParameter = options.connectedRoiInput === true && catalog.inputs.some((input) =>
-    input.name.toLowerCase() === 'roi' && input.dataType.toLowerCase() === 'roi');
+  const connectedPorts = new Set((options.connectedInputPorts ?? []).map((port) => port.toLowerCase()));
+  const hasConnectedInput = (name: string, dataType: string) => connectedPorts.has(name.toLowerCase())
+    && catalog.inputs.some((input) => input.name.toLowerCase() === name.toLowerCase()
+      && input.dataType.toLowerCase() === dataType.toLowerCase());
+  const overriddenParameters = new Set<string>();
+  if (hasConnectedInput('searchLine', 'Line2D'))
+    ['startX', 'startY', 'endX', 'endY'].forEach((name) => overriddenParameters.add(name));
+  if (hasConnectedInput('circle', 'Circle'))
+    ['centerX', 'centerY', 'radius'].forEach((name) => overriddenParameters.add(name));
+  const issues = validateParameterValues(catalog.parameters.filter((parameter) => !overriddenParameters.has(parameter.name)), parameters)
+    .map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
+  const roiInputOverridesParameter = hasConnectedInput('roi', 'Roi');
   for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
     if (key === 'roi' && roiInputOverridesParameter) continue;
     const value = parameters[key];

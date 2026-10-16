@@ -127,9 +127,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
   const roiInputEdge = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'roi');
-  const connectedRoiInput = Boolean(roiInputEdge && catalogItem.inputs.some((input) =>
-    input.name.toLowerCase() === 'roi' && input.dataType.toLowerCase() === 'roi'));
-  const issues = configurationIssues(catalogItem, draft, { connectedRoiInput });
+  const connectedInputPorts = catalogItem.inputs.filter((input) => edges.some((edge) =>
+    edge.target === node.id && edge.targetHandle === input.name)).map((input) => input.name);
+  const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
+  const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   const isShapeMatch = catalogItem.type === 'match.shape';
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';

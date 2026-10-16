@@ -172,6 +172,56 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.edgeSubpixel")]
+    [InlineData("measure.caliper")]
+    [InlineData("measure.caliperLine")]
+    public void MalformedLocalSearchLineIsIgnoredWhenConnectedSearchLineOverridesIt(string targetType)
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var line = new NodeDefinition("line", "feature.line", null, null, null);
+        var target = new NodeDefinition("target", targetType, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"startX":"inactive","startY":20,"endX":40,"endY":null}"""));
+        var workflow = new WorkflowDefinition("search-line-input-overrides-local", "Search line input override",
+            [source, line, target],
+            [
+                new EdgeDefinition("start-line", "source", "next", "line", "exec", "control"),
+                new EdgeDefinition("next-target", "line", "next", "target", "exec", "control"),
+                new EdgeDefinition("line-image", "source", "image", "line", "image", "data"),
+                new EdgeDefinition("target-image", "source", "image", "target", "image", "data"),
+                new EdgeDefinition("target-search-line", "line", "line", "target", "searchLine", "data")
+            ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.NotEmpty(compiled.DslJson);
+    }
+
+    [Fact]
+    public void MalformedLocalCircleIsIgnoredWhenConnectedCircleOverridesIt()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var roi = new NodeDefinition("roi", "roi.transform", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"roi":{"type":"Circle","x":32,"y":24,"radius":12}}"""));
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"centerX":"inactive","centerY":24,"radius":0}"""));
+        var workflow = new WorkflowDefinition("circle-input-overrides-local", "Circle input override",
+            [source, roi, target],
+            [
+                new EdgeDefinition("start-roi", "source", "next", "roi", "exec", "control"),
+                new EdgeDefinition("next-target", "roi", "next", "target", "exec", "control"),
+                new EdgeDefinition("target-image", "source", "image", "target", "image", "data"),
+                new EdgeDefinition("target-circle", "roi", "circle", "target", "circle", "data")
+            ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.NotEmpty(compiled.DslJson);
+    }
+
+    [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"open","kernelWidth":"inactive"}""")]
