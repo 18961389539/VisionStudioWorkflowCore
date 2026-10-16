@@ -33,16 +33,24 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
   return messages[reason] ?? `没有找到有效测量结果${reason ? `（${reason}）` : ''}。请检查搜索几何、ROI 和边缘阈值。`;
 }
 
-function executionErrorMessage(type: string, error: string): string | undefined {
+function executionErrorMessage(catalog: NodeCatalogItem, error: string): string | undefined {
+  const type = catalog.type;
   const common: Record<string, string> = {
     'The search line is too short (minimum 2 px).': '搜索线长度不足 2 px。请把搜索线拉长后重试。',
     'Search line coordinates must be finite and within +/-10000000 pixels.': '搜索线坐标必须是有限数值，且绝对值不超过 10000000 px。请检查上游几何或坐标变换。',
     'Search line parameters must be finite numbers.': '搜索线参数必须是有效数值。请检查起点和终点坐标。',
     'The connected search line has non-finite endpoints.': '上游搜索线包含无效坐标。请检查提供搜索线的节点输出。',
+    'Cannot clip a search line to an empty image.': '无法将搜索线裁剪到空图像。请检查输入图像尺寸和上游输出。',
     'Measurement transform must be a finite, orientation-preserving rigid px-to-px transform (translation and rotation only).': '测量变换必须是有效的像素坐标刚性变换，只能包含平移和旋转。请检查 transform 输入。'
   };
   if (common[error] && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
     return common[error];
+  const invalidParameter = error.match(/^Parameter '([^']+)' must be a finite number\.$/);
+  if (invalidParameter && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'roi.transform'].includes(type)) {
+    const name = invalidParameter[1];
+    const label = catalog.parameters.find(parameter => parameter.name === name)?.label ?? name;
+    return `参数“${label}”必须是有限数值。请检查并修正后重试。`;
+  }
 
   const messages: Record<string, Record<string, string>> = {
     'image.crop': {
@@ -133,7 +141,7 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const report = reports[reports.length - 1];
   const notFound = Boolean(report?.success && report.summary.found === false && measurementNodeTypes.has(catalog.type));
   const notFoundMessage = measurementNotFoundMessage(catalog.type, report?.summary);
-  const reportErrorMessage = report?.error ? executionErrorMessage(catalog.type, report.error) : undefined;
+  const reportErrorMessage = report?.error ? executionErrorMessage(catalog, report.error) : undefined;
   const prominentSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
     ? pickSummaryKeys(report.summary, catalog.type, 4) : [];
   return <section className="node-execution-result" aria-label="本节点运行结果">

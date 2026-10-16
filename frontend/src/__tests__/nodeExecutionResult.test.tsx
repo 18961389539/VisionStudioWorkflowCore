@@ -23,8 +23,8 @@ function failedResult(error: string): RunResult {
   return run;
 }
 
-function mount(type = catalog.type, runResult = result(false, 'too-few-edge-points')) {
-  const selectedCatalog = { ...catalog, type };
+function mount(type = catalog.type, runResult = result(false, 'too-few-edge-points'), parameters = catalog.parameters) {
+  const selectedCatalog = { ...catalog, type, parameters };
   return render(<NodeExecutionResult nodeId="caliper" catalog={selectedCatalog} result={runResult} stale={false}
     expanded onExpandedChange={() => {}} />);
 }
@@ -118,6 +118,14 @@ describe('NodeExecutionResult measurement status', () => {
     cleanup();
     mount('measure.caliperCircle', failedResult('The connected circle input must have a finite center and positive radius.'));
     expect(screen.getByText(/上游圆心或半径无效/)).toBeTruthy();
+  });
+
+  it('uses localized parameter labels for invalid numeric execution errors', () => {
+    mount('measure.caliperLine', failedResult("Parameter 'minContrast' must be a finite number."), [
+      { name: 'minContrast', label: '最小对比度', type: 'number' }
+    ]);
+    expect(screen.getByText(/参数“最小对比度”必须是有限数值/)).toBeTruthy();
+    expect(screen.getByText("Parameter 'minContrast' must be a finite number.")).toBeTruthy();
   });
 
   it('keeps unknown native errors intact for diagnosis', () => {
