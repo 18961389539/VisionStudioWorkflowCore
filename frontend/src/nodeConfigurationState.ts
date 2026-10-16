@@ -96,10 +96,12 @@ function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: num
       const next = points[(index + 1) % points.length] as Record<string, number>;
       return sum + point.x * next.y - next.x * point.y;
     }, 0);
-    const xs = points.map((point: Record<string, number>) => point.x);
-    const ys = points.map((point: Record<string, number>) => point.y);
+    const bounds = points.reduce((current, point: Record<string, number>) => ({
+      minX: Math.min(current.minX, point.x), minY: Math.min(current.minY, point.y),
+      maxX: Math.max(current.maxX, point.x), maxY: Math.max(current.maxY, point.y)
+    }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
     if (!Number.isFinite(twiceArea) || Math.abs(twiceArea) < 1e-6
-      || Math.max(...xs) <= Math.min(...xs) || Math.max(...ys) <= Math.min(...ys))
+      || bounds.maxX <= bounds.minX || bounds.maxY <= bounds.minY)
       return `${label}多边形顶点须围成非零面积。`;
     return undefined;
   }
@@ -126,6 +128,71 @@ function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: num
     return undefined;
   }
   return `${label}类型无效。`;
+}
+
+/** Preflight a local crop ROI when the current input image dimensions are known.
+ * For curved and rasterized regions this intentionally detects only definite misses,
+ * leaving borderline anti-aliased pixels to the backend rasterizer. */
+export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: number): string | undefined {
+  if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth < 1 || imageHeight < 1
+    || !value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const roi = value as Record<string, unknown>;
+  const isFiniteNumber = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item);
+  const finite = (...items: unknown[]) => items.every(isFiniteNumber);
+  let minX: number; let minY: number; let maxX: number; let maxY: number;
+
+  if (roi.type === 'Rectangle' && finite(roi.x, roi.y, roi.width, roi.height)
+    && (roi.width as number) > 0 && (roi.height as number) > 0) {
+    const x = roi.x as number; const y = roi.y as number;
+    const width = roi.width as number; const height = roi.height as number;
+    const left = Math.max(0, Math.min(imageWidth, Math.ceil(x)));
+    const top = Math.max(0, Math.min(imageHeight, Math.ceil(y)));
+    const right = Math.max(0, Math.min(imageWidth, Math.ceil(x + width)));
+    const bottom = Math.max(0, Math.min(imageHeight, Math.ceil(y + height)));
+    if (right > left && bottom > top) return undefined;
+    return `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+  }
+  if (roi.type === 'Circle' && finite(roi.x, roi.y, roi.radius) && (roi.radius as number) > 0) {
+    const x = roi.x as number; const y = roi.y as number; const radius = roi.radius as number;
+    minX = x - radius; minY = y - radius;
+    maxX = x + radius; maxY = y + radius;
+  } else if (roi.type === 'Polygon' && Array.isArray(roi.points) && roi.points.length >= 3) {
+    minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+    for (const point of roi.points) {
+      if (!point || typeof point !== 'object') return undefined;
+      const coordinates = point as Record<string, unknown>;
+      if (!finite(coordinates.x, coordinates.y)) return undefined;
+      minX = Math.min(minX, coordinates.x as number); minY = Math.min(minY, coordinates.y as number);
+      maxX = Math.max(maxX, coordinates.x as number); maxY = Math.max(maxY, coordinates.y as number);
+    }
+  } else if (roi.type === 'Brush' && Array.isArray(roi.strokes)) {
+    minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+    let hasAddPoint = false;
+    for (const stroke of roi.strokes) {
+      if (!stroke || typeof stroke !== 'object') return undefined;
+      const item = stroke as Record<string, unknown>;
+      if (item.mode !== 'Add') continue;
+      if (!Array.isArray(item.points) || !finite(item.width) || (item.width as number) <= 0) return undefined;
+      const radius = (item.width as number) / 2 + 2;
+      for (const point of item.points) {
+        if (!point || typeof point !== 'object') return undefined;
+        const coordinates = point as Record<string, unknown>;
+        if (!finite(coordinates.x, coordinates.y)) return undefined;
+        const x = coordinates.x as number; const y = coordinates.y as number;
+        minX = Math.min(minX, x - radius); minY = Math.min(minY, y - radius);
+        maxX = Math.max(maxX, x + radius); maxY = Math.max(maxY, y + radius);
+        hasAddPoint = true;
+      }
+    }
+    if (!hasAddPoint) return undefined;
+  } else return undefined;
+
+  // Circle and polygon rasterization rounds coordinates and antialiases edges. Keep a
+  // two-pixel margin so this preflight never rejects a region that could touch a pixel.
+  const margin = roi.type === 'Brush' ? 0 : 2;
+  if (maxX < -margin || maxY < -margin || minX > imageWidth - 1 + margin || minY > imageHeight - 1 + margin)
+    return `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+  return undefined;
 }
 
 export function configurationIssues(

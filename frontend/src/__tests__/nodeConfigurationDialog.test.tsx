@@ -295,6 +295,21 @@ describe('crop workspace with a connected ROI', () => {
     await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
   });
 
+  it('blocks a local crop ROI that misses the known input image before execution', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const outsideCropNode: Node = { ...cropNode, data: { ...cropNode.data,
+      parameters: { roi: { type: 'Rectangle', x: 120, y: 12, width: 20, height: 30 } } } };
+    const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
+    const onPreview = vi.fn(async () => result);
+    const { dialog } = mount({ node: outsideCropNode, catalogItem: cropCatalog, nodes: [outsideCropNode, imageNode], edges, result, onPreview });
+
+    expect(await dialog.findByText(/裁剪区域与当前输入图像（100×100）没有像素交集/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onPreview).not.toHaveBeenCalled();
+  });
+
   it('does not project an upstream ROI overlay onto a different image coordinate frame', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'processed', portName: 'image', width: 80, height: 80 }

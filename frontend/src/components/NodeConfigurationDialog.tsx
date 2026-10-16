@@ -8,7 +8,7 @@ import ImageViewer, { type MeasurementGeometry } from './ImageViewer';
 import NodeExecutionResult from './NodeExecutionResult';
 import SplitHandle from './SplitHandle';
 import { useRunImages } from '../useRunImages';
-import { cloneParameters, configurationIssues, configurationParameters, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
 
@@ -157,7 +157,6 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const connectedInputPorts = catalogItem.inputs.filter((input) => edges.some((edge) =>
     edge.target === node.id && edge.targetHandle === input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
-  const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   const isShapeMatch = catalogItem.type === 'match.shape';
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';
@@ -276,6 +275,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
     imageCatalogLoading, imageCatalogError, retryImageCatalog } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
+  const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
+  if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
+    && previewNodeId === node.id && selectedInputAvailable) {
+    const imageExtentIssue = cropRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
+    if (imageExtentIssue) issues.push(imageExtentIssue);
+  }
   const measurementGeometryType = isCaliperCircle ? 'circle'
     : ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type) ? 'line' : undefined;
   const measurementGeometryFrameKind = !transformInputEdge ? 'current'

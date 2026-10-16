@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
-import { cloneParameters, configurationIssues, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, cropRoiOutsideImageIssue, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
 import type { NodeCatalogItem, WorkflowPayload } from '../types';
 
 describe('node configuration snapshots', () => {
@@ -57,6 +57,25 @@ describe('node configuration snapshots', () => {
     expect(configurationIssues(catalog, { threshold: 100, roi: { type: 'Rectangle', x: 0, y: 0, width: 0, height: 10 } })).toHaveLength(1);
     expect(configurationIssues(catalog, { threshold: 300 })).toHaveLength(1);
     expect(configurationIssues(catalog, { threshold: 100, roi: { type: 'Circle', x: 5, y: 6, radius: 2 } })).toEqual([]);
+  });
+
+  it('preflights crop ROIs that cannot cover an input pixel without rejecting clipped or uncertain regions', () => {
+    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 100, y: 10, width: 8, height: 12 }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: -3, y: 10, width: 8, height: 12 }, 100, 80)).toBeUndefined();
+    expect(cropRoiOutsideImageIssue({ type: 'Circle', x: 120, y: 20, radius: 8 }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Polygon', points: [{ x: 110, y: 10 }, { x: 120, y: 10 }, { x: 115, y: 20 }] }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Brush', strokes: [{ mode: 'Add', width: 8, points: [{ x: 120, y: 20 }] }] }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Circle', x: 99, y: 20, radius: 8 }, 100, 80)).toBeUndefined();
+    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 120, y: 10, width: 8, height: 12 }, 0, 80)).toBeUndefined();
+
+    const largePolygonPoints = Array.from({ length: 150_000 }, (_, index) => [
+      { x: 10, y: 10 }, { x: 80, y: 10 }, { x: 80, y: 70 }, { x: 10, y: 70 }
+    ][index % 4]);
+    const largePolygon = { type: 'Polygon', points: largePolygonPoints };
+    const crop = fallbackCatalogRaw.find(item => item.type === 'image.crop')!;
+    expect(configurationIssues(crop, { roi: largePolygon })).toEqual([]);
+    expect(cropRoiOutsideImageIssue(largePolygon, 100, 80)).toBeUndefined();
   });
 
   it('preflights polygon, coordinate, clutter, and node-specific brush limits before preview', () => {
