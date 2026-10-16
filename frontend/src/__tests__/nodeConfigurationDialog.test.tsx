@@ -2,12 +2,21 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import NodeConfigurationDialog from '../components/NodeConfigurationDialog';
-import type { NodeCatalogItem, RunResult, VisionRoi } from '../types';
+import type { NodeCatalogItem, RunResult, VisionOverlay, VisionRoi } from '../types';
 import { fallbackCatalog } from '../catalog';
 
 vi.mock('../components/ImageViewer', () => ({
-  default: ({ previewUrl, showRoiTools, roiEnabled, onRoiChange }: { previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void }) =>
+  default: ({ previewUrl, showRoiTools, roiEnabled, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
+    previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
+    measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number } }
+      | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number };
+    measurementGeometryEditable?: boolean;
+    onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
+  }) =>
     <div><span data-testid="image-url">{previewUrl}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
+      <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
+      {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
+      {measurementGeometryEditable && measurementGeometry?.type === 'circle' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'circle', center: { x: 42, y: 51 }, radius: 17 })}>模拟调整标称圆</button>}
       {showRoiTools && roiEnabled && <button onClick={() => onRoiChange(undefined)}>清除测试 ROI</button>}</div>
 }));
 
@@ -95,6 +104,168 @@ describe('ROI reference workspace', () => {
     expect(view.dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
     expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('crop workspace with a connected ROI', () => {
+  const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+  const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: 'image.crop', label: '动态裁剪',
+    inputs: cropCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 1, y: 2, width: 3, height: 4 } } } };
+  const roiCatalog = fallbackCatalog.find(item => item.type === 'roi.transform')!;
+  const roiNode: Node = { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI', inputs: roiCatalog.inputs, parameters: {} } };
+  const imageNode: Node = { id: 'source', position: { x: 0, y: 0 }, data: { typeKey: 'image.synthetic', label: '场景图像' } };
+  const overlays: VisionOverlay[] = [{ id: 'roi-transform-corrected-shape', nodeId: 'roi', type: 'Polygon', points: [{ x: 10, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 20 }] }];
+  const result: RunResult = { ...report, runId: 'crop-run', overlays };
+
+  it('shows the upstream ROI owner, disables local editing, and displays its overlay in the shared image frame', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const edges = [
+      { id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, imageNode], edges, result });
+
+    expect(await dialog.findByText('裁剪区域来自上游：定位修正 ROI')).toBeTruthy();
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    expect(dialog.getByText('纯图像预览')).toBeTruthy();
+    expect(dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    expect(dialog.queryByRole('button', { name: '清除选区（使用整图）' })).toBeNull();
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
+
+  it('does not project an upstream ROI overlay onto a different image coordinate frame', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'processed', portName: 'image', width: 80, height: 80 }
+    ] }) })));
+    const processedNode: Node = { id: 'processed', position: { x: 0, y: 0 }, data: { typeKey: 'image.resize', label: '缩放图像' } };
+    const edges = [
+      { id: 'crop-image', source: 'processed', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, imageNode, processedNode], edges, result });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/processed/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).not.toContain('roi-transform-corrected-shape');
+  });
+});
+
+describe('caliper geometry input guidance', () => {
+  it('edits transformed search geometry over the saved ROI reference image', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const roiNode: Node = { id: 'pose-correction', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'reference-image', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'pose-transform', source: roiNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, roiNode, imageNode], edges, result: report });
+
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
+    expect(dialog.getByText(/当前显示的已保存基准图像可直接拖动或重绘/)).toBeTruthy();
+    fireEvent.click(await dialog.findByRole('button', { name: '模拟拖动搜索线' }));
+    await waitFor(() => expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'startX')!.label }) as HTMLInputElement).value).toBe('23'));
+  });
+
+  it('writes an interactively adjusted search line back into the staged parameters', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: report });
+
+    fireEvent.click(await dialog.findByRole('button', { name: '模拟拖动搜索线' }));
+    await waitFor(() => {
+      expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'startX')!.label }) as HTMLInputElement).value).toBe('23');
+      expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'endY')!.label }) as HTMLInputElement).value).toBe('47');
+    });
+  });
+
+  it('writes an interactively adjusted nominal circle back into staged center and radius', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 20, centerY: 30, radius: 10 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, imageNode], edges, result: report });
+
+    fireEvent.click(await dialog.findByRole('button', { name: '模拟调整标称圆' }));
+    await waitFor(() => {
+      expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'centerX')!.label }) as HTMLInputElement).value).toBe('42');
+      expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radius')!.label }) as HTMLInputElement).value).toBe('17');
+    });
+  });
+
+  it('locks a local ROI when the caliper receives an upstream current-image mask', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺测量',
+      inputs: caliperCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 2, y: 3, width: 20, height: 15 } } } };
+    const roiNode: Node = { id: 'corrected-mask', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI' } };
+    const imageNode: Node = { id: 'caliper-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' },
+      { id: 'caliper-roi-input', source: roiNode.id, sourceHandle: 'roi', target: caliperNode.id, targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: imageNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' }
+    ];
+    const run = { ...report, runId: 'caliper-roi-run', overlays: [
+      { id: 'roi-transform-corrected-shape', nodeId: roiNode.id, type: 'Circle' as const, x: 32, y: 30, radius: 10 }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, roiNode, imageNode], edges, result: run });
+
+    expect(dialog.getByText('ROI 掩膜来自上游：定位修正 ROI')).toBeTruthy();
+    expect(dialog.getByText(/按当前图像坐标解释/)).toBeTruthy();
+    expect(dialog.queryByRole('button', { name: '清除测试 ROI' })).toBeNull();
+    fireEvent.click(await dialog.findByRole('radio', { name: '输入' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper-image/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
+
+  it('hides local search-line coordinates when a searchLine input is connected', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',
+      inputs: lineCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const geometryNode: Node = { id: 'fitted-line', position: { x: 0, y: 0 }, data: { typeKey: 'measure.fitLine', label: '上游拟合线' } };
+    const imageNode: Node = { id: 'line-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'line-image-input', source: 'line-image', sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'line-geometry-input', source: geometryNode.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' }
+    ];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, geometryNode, imageNode], edges });
+
+    expect(dialog.getByText('搜索线来自上游：上游拟合线')).toBeTruthy();
+    for (const name of ['startX', 'startY', 'endX', 'endY'])
+      expect(dialog.queryByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
+    expect(dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
+  });
+
+  it('warns against applying a pose transform twice to an already corrected circle', () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 20, centerY: 30, radius: 10 } } };
+    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI' } };
+    const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-geometry-input', source: roiNode.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' },
+      { id: 'circle-transform-input', source: roiNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges });
+
+    expect(dialog.getByText('标称圆来自上游：定位修正 ROI')).toBeTruthy();
+    expect(dialog.getByText(/断开 transform，避免圆心被重复移动/)).toBeTruthy();
+    for (const name of ['centerX', 'centerY', 'radius'])
+      expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
+    expect(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
   });
 });
 

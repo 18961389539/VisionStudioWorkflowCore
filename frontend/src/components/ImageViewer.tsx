@@ -8,6 +8,12 @@ type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
+type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius';
+
+export type MeasurementGeometry =
+  | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
+  | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
+      caliperCount?: number; samplingMode?: string; angleStepDeg?: number };
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -185,6 +191,77 @@ function RoiHandles({ roi, scale }: { roi: VisionRoi; scale: number }) {
   </Group>;
 }
 
+function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: MeasurementGeometry; scale: number; editable: boolean }) {
+  const handleRadius = 5 / scale;
+  if (geometry.type === 'line') {
+    const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
+    const length = Math.hypot(dx, dy);
+    const count = geometry.profileCount === undefined ? 0 : Math.round(clamp(geometry.profileCount, 3, 101));
+    const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
+    const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
+    return <Group listening={false}>
+      {count > 0 && Array.from({ length: count }, (_, index) => {
+        const offset = count === 1 ? 0 : (index / (count - 1) - 0.5) * span;
+        const x = tangent.x * offset, y = tangent.y * offset;
+        return <Line key={index} points={[geometry.start.x + x, geometry.start.y + y, geometry.end.x + x, geometry.end.y + y]}
+          stroke="#91d5ff" opacity={0.6} strokeWidth={0.8 / scale} />;
+      })}
+      <Line points={[geometry.start.x, geometry.start.y, geometry.end.x, geometry.end.y]} stroke="#fa8c16" strokeWidth={2.5 / scale} />
+      {editable && <>
+        <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+      </>}
+    </Group>;
+  }
+
+  const band = Math.max(0, geometry.band ?? 0);
+  const inner = Math.max(0, geometry.radius - band);
+  const outer = geometry.radius + band;
+  const start = geometry.angleStartDeg ?? -180;
+  const end = geometry.angleEndDeg ?? 180;
+  const rawSpan = end - start;
+  const span = Math.abs(rawSpan) >= 359.999 ? 360 : ((rawSpan % 360) + 360) % 360;
+  const fullCircle = Math.abs(rawSpan) >= 359.999 || Math.abs(rawSpan) < 1e-9;
+  const angleSpan = fullCircle ? 360 : span;
+  const stepMode = geometry.samplingMode === 'step';
+  const legacyStep = clamp(geometry.angleStepDeg ?? 5, 0.5, 45);
+  const requestedStepCount = Math.floor(angleSpan / legacyStep) + 1;
+  const count = angleSpan === 0 ? 1 : stepMode
+    ? Math.min(361, requestedStepCount)
+    : Math.round(clamp(geometry.caliperCount ?? 72, 3, 361));
+  const effectiveStep = stepMode ? requestedStepCount > 361 ? angleSpan / 360 : legacyStep
+    : fullCircle ? angleSpan / count : count <= 1 ? 0 : angleSpan / (count - 1);
+  const boundary = (angleDeg: number) => {
+    const radians = angleDeg * Math.PI / 180;
+    return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
+      geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
+  };
+  return <Group listening={false}>
+    {band > 0 && <>
+      <Circle x={geometry.center.x} y={geometry.center.y} radius={inner} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
+      <Circle x={geometry.center.x} y={geometry.center.y} radius={outer} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
+    </>}
+    <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16" strokeWidth={2.5 / scale} />
+    {count > 1 && Array.from({ length: count }, (_, index) => {
+      const radians = (start + index * effectiveStep) * Math.PI / 180;
+      return <Line key={`spoke-${index}`} points={[
+        geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
+        geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)
+      ]} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
+    })}
+    {span < 359.999 && <>
+      <Line points={boundary(start)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+      <Line points={boundary(start + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+    </>}
+    <Line points={[geometry.center.x - handleRadius * 1.7, geometry.center.y, geometry.center.x + handleRadius * 1.7, geometry.center.y]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+    <Line points={[geometry.center.x, geometry.center.y - handleRadius * 1.7, geometry.center.x, geometry.center.y + handleRadius * 1.7]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+    {editable && <>
+      <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+      <Circle x={geometry.center.x + geometry.radius} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />
+    </>}
+  </Group>;
+}
+
 export default function ImageViewer({
   previewUrl,
   imageWidth,
@@ -196,6 +273,9 @@ export default function ImageViewer({
   roiTargetLabel,
   loading,
   onRoiChange,
+  measurementGeometry,
+  measurementGeometryEditable = false,
+  onMeasurementGeometryChange,
   nodeLabels,
   focusTick,
   emptyHint = '运行工作流以显示图像和矢量覆盖层',
@@ -212,6 +292,10 @@ export default function ImageViewer({
   roiTargetLabel?: string;
   loading?: boolean;
   onRoiChange: (roi?: VisionRoi) => void;
+  /** Search geometry authored in the displayed image coordinate frame. */
+  measurementGeometry?: MeasurementGeometry;
+  measurementGeometryEditable?: boolean;
+  onMeasurementGeometryChange?: (geometry: MeasurementGeometry) => void;
   /** 覆盖层按节点筛选时的显示名映射 */
   nodeLabels?: Record<string, string>;
   /** 递增信号：来自属性面板“定位选区”，把视图适配到当前 ROI 区域 */
@@ -230,11 +314,15 @@ export default function ImageViewer({
   const [showOverlay, setShowOverlay] = useState(true);
   const [overlayFilter, setOverlayFilter] = useState<string[]>([]);
   const [brushWidth, setBrushWidth] = useState(20);
+  const [measurementDraft, setMeasurementDraft] = useState<MeasurementGeometry>();
+  const [geometryDrawMode, setGeometryDrawMode] = useState(false);
   // 像素化（最近邻）默认开：放大即真实像素方块；开关可切回平滑插值
   const [pixelated, setPixelated] = useState(readPixelated);
   useEffect(() => { persistPixelated(pixelated); }, [pixelated]);
   const [draft, setDraft] = useState<VisionRoi>();
   const gestureStart = useRef<Point | undefined>(undefined);
+  const geometryGestureStart = useRef<Point | undefined>(undefined);
+  const geometryDrag = useRef<{ mode: MeasurementDragMode; origin: MeasurementGeometry; start: Point } | undefined>(undefined);
   const panStart = useRef<{ pointer: Point; view: ViewState } | undefined>(undefined);
   const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point } | undefined>(undefined);
   const polygonPoints = useRef<OverlayPoint[]>([]);
@@ -273,9 +361,20 @@ export default function ImageViewer({
     setOverlayFilter([]);
     setCursor(undefined);
     setDraft(undefined);
+    setMeasurementDraft(undefined);
+    setGeometryDrawMode(false);
+    geometryGestureStart.current = undefined;
+    geometryDrag.current = undefined;
     polygonPoints.current = [];
     brushStroke.current = undefined;
   }, [previewUrl]);
+  useEffect(() => {
+    if (measurementGeometryEditable) return;
+    setGeometryDrawMode(false);
+    setMeasurementDraft(undefined);
+    geometryGestureStart.current = undefined;
+    geometryDrag.current = undefined;
+  }, [measurementGeometryEditable]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -372,6 +471,24 @@ export default function ImageViewer({
     return undefined;
   };
 
+  const hitMeasurementHandle = (target: MeasurementGeometry, screen: Point): MeasurementDragMode | undefined => {
+    const near = (point: Point) => Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)) <= HANDLE_HIT;
+    if (target.type === 'line') {
+      if (near(target.start)) return 'start';
+      if (near(target.end)) return 'end';
+      const dx = target.end.x - target.start.x, dy = target.end.y - target.start.y;
+      const lengthSquared = dx * dx + dy * dy;
+      const cursor = imagePoint(screen);
+      const t = lengthSquared > 0 ? clamp(((cursor.x - target.start.x) * dx + (cursor.y - target.start.y) * dy) / lengthSquared, 0, 1) : 0;
+      const closest = { x: target.start.x + t * dx, y: target.start.y + t * dy };
+      if (near(closest)) return 'moveLine';
+      return undefined;
+    }
+    if (near(target.center)) return 'center';
+    if (near({ x: target.center.x + target.radius, y: target.center.y })) return 'radius';
+    return undefined;
+  };
+
   const onWheel = (event: any) => {
     event.evt.preventDefault();
     const p = pointer();
@@ -424,6 +541,22 @@ export default function ImageViewer({
     const p = pointer();
     if (!p) return;
     setCursor(p);
+    const ip = imagePoint(p);
+    if (geometryDrawMode && measurementGeometryEditable && measurementGeometry) {
+      if (!inside(ip)) return;
+      geometryGestureStart.current = ip;
+      setMeasurementDraft(measurementGeometry.type === 'line'
+        ? { type: 'line', start: ip, end: ip }
+        : { ...measurementGeometry, center: ip, radius: 0 });
+      return;
+    }
+    if (measurementGeometryEditable && measurementGeometry) {
+      const handle = hitMeasurementHandle(measurementGeometry, p);
+      if (handle) {
+        geometryDrag.current = { mode: handle, origin: measurementGeometry, start: ip };
+        return;
+      }
+    }
     // 已有选区时优先响应拖动：控制点缩放 > 选区内部平移 > 平移画布 / 新建选区
     if (roi && roiEnabled && roi.type !== 'Brush' && tool !== 'brush' && tool !== 'eraser') {
       const handle = hitRoiHandle(roi, p);
@@ -441,7 +574,6 @@ export default function ImageViewer({
       return;
     }
     if (!roiEnabled || tool === 'polygon') return;
-    const ip = imagePoint(p);
     if (!inside(ip)) return;
     if (tool === 'brush') {
       beginBrushStroke(ip, 'Add');
@@ -462,6 +594,37 @@ export default function ImageViewer({
     if (!p) return;
     const ip = imagePoint(p);
     setCursor(p);
+    if (geometryGestureStart.current && measurementGeometry) {
+      const start = geometryGestureStart.current;
+      const end = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
+      setMeasurementDraft(measurementGeometry.type === 'line'
+        ? { type: 'line', start, end }
+        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxCircleRadius(start, actualWidth, actualHeight)) });
+      return;
+    }
+    if (geometryDrag.current) {
+      const { mode, origin, start } = geometryDrag.current;
+      const current = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
+      if (origin.type === 'line') {
+        if (mode === 'start' || mode === 'end') {
+          setMeasurementDraft({ ...origin, [mode]: current });
+        } else {
+          const minX = Math.min(origin.start.x, origin.end.x), maxX = Math.max(origin.start.x, origin.end.x);
+          const minY = Math.min(origin.start.y, origin.end.y), maxY = Math.max(origin.start.y, origin.end.y);
+          const dx = clamp(current.x - start.x, -minX, actualWidth - maxX);
+          const dy = clamp(current.y - start.y, -minY, actualHeight - maxY);
+          setMeasurementDraft({ type: 'line', start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
+        }
+      } else if (mode === 'center') {
+        setMeasurementDraft({ ...origin, center: {
+          x: clamp(current.x, origin.radius, Math.max(origin.radius, actualWidth - origin.radius)),
+          y: clamp(current.y, origin.radius, Math.max(origin.radius, actualHeight - origin.radius))
+        } });
+      } else if (mode === 'radius') {
+        setMeasurementDraft({ ...origin, radius: clamp(Math.hypot(current.x - origin.center.x, current.y - origin.center.y), Math.min(2, maxCircleRadius(origin.center, actualWidth, actualHeight)), maxCircleRadius(origin.center, actualWidth, actualHeight)) });
+      }
+      return;
+    }
     if (brushStroke.current) {
       extendBrushStroke({ x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) });
       return;
@@ -489,6 +652,25 @@ export default function ImageViewer({
 
   const onPointerUp = () => {
     panStart.current = undefined;
+    if (geometryGestureStart.current) {
+      geometryGestureStart.current = undefined;
+      const next = measurementDraft;
+      if (next && onMeasurementGeometryChange && (next.type === 'line'
+        ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
+        : next.radius >= 2)) onMeasurementGeometryChange(next);
+      setMeasurementDraft(undefined);
+      setGeometryDrawMode(false);
+      return;
+    }
+    if (geometryDrag.current) {
+      geometryDrag.current = undefined;
+      const next = measurementDraft;
+      if (next && onMeasurementGeometryChange && (next.type === 'line'
+        ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
+        : next.radius >= 2)) onMeasurementGeometryChange(next);
+      setMeasurementDraft(undefined);
+      return;
+    }
     if (brushStroke.current) {
       finishBrushStroke();
       return;
@@ -537,10 +719,14 @@ export default function ImageViewer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         gestureStart.current = undefined;
+        geometryGestureStart.current = undefined;
+        geometryDrag.current = undefined;
         roiDrag.current = undefined;
         polygonPoints.current = [];
         brushStroke.current = undefined;
         setDraft(undefined);
+        setMeasurementDraft(undefined);
+        setGeometryDrawMode(false);
         setTool('pan');
       }
     };
@@ -549,9 +735,10 @@ export default function ImageViewer({
   }, []);
 
   const cursorStyle = useMemo(() => {
+    if (geometryDrawMode) return 'crosshair';
     if (tool === 'pan') return panStart.current ? 'grabbing' : 'grab';
     return 'crosshair';
-  }, [tool, view]); // view forces cursor refresh during pan
+  }, [geometryDrawMode, tool, view]); // view forces cursor refresh during pan
 
   // 覆盖层按节点筛选：不选=显示全部；选了=只显示所选节点的覆盖层
   const overlayNodeIds = useMemo(() => {
@@ -572,7 +759,9 @@ export default function ImageViewer({
           {showRoiTools && <Segmented
             size="small"
             value={tool}
-            onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; gestureStart.current = undefined; setDraft(undefined); setTool(value as ToolMode); }}
+            onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; gestureStart.current = undefined;
+              geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
+              setDraft(undefined); setTool(value as ToolMode); }}
             options={[
               { value: 'pan', label: <Tooltip title="平移">平移</Tooltip> },
               { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="矩形选区">矩形</Tooltip> },
@@ -590,6 +779,14 @@ export default function ImageViewer({
             <span>px</span>
           </span>}
           {showRoiTools && roi?.type === 'Brush' && <Button size="small" disabled={!roiEnabled} onClick={undoBrushStroke}>撤销笔迹</Button>}
+          {measurementGeometry && measurementGeometryEditable && <>
+            <span className="viewer-toolbar-divider" />
+            <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
+              onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
+              title={geometryDrawMode ? '退出绘制模式' : '在图像上拖动以重新绘制；也可拖动橙色控制点微调'}>
+              {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
+            </Button>
+          </>}
           <Button size="small" onClick={fit}>适应窗口</Button>
           <Button size="small" onClick={oneToOne}>原始比例</Button>
           {showRoiTools && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}
@@ -646,6 +843,11 @@ export default function ImageViewer({
                 {showOverlay && visibleOverlays.map((o) => <OverlayShape key={`${o.nodeId ?? ''}-${o.id}`} overlay={o} scale={view.scale} />)}
               </Group>
             </Layer>
+            {measurementGeometry && <Layer>
+              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
+                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable} />
+              </Group>
+            </Layer>}
             <Layer>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
                 {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
