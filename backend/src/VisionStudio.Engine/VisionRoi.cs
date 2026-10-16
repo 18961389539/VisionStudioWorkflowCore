@@ -7,12 +7,13 @@ public static class VisionRoiOpenCvExtensions
     private const double MaxCoordinate = 10_000_000;
     internal const int MaxPolygonPoints = 500_000;
 
-    public static Mat BuildMask(this VisionRoi roi, Size size)
+    public static Mat BuildMask(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(roi);
+        cancellationToken.ThrowIfCancellationRequested();
         if (size.Width <= 0 || size.Height <= 0)
             throw new InvalidOperationException("ROI mask dimensions must be positive.");
-        ValidatePolygonRasterInput(roi);
+        ValidatePolygonRasterInput(roi, cancellationToken);
 
         var mask = new Mat(size.Height, size.Width, MatType.CV_8UC1, Scalar.All(0));
         try
@@ -47,13 +48,21 @@ public static class VisionRoiOpenCvExtensions
                 }
                 case VisionRoiType.Polygon:
                 {
-                    var points = (roi.Points ?? []).Select(p => new Point(RasterCoordinate(p.X), RasterCoordinate(p.Y))).ToArray();
+                    var roiPoints = roi.Points ?? [];
+                    var points = new Point[roiPoints.Count];
+                    for (var index = 0; index < points.Length; index++)
+                    {
+                        if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var point = roiPoints[index];
+                        points[index] = new Point(RasterCoordinate(point.X), RasterCoordinate(point.Y));
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (points.Length >= 3)
                         Cv2.FillPoly(mask, new[] { points }, Scalar.All(255), LineTypes.AntiAlias);
                     break;
                 }
                 case VisionRoiType.Brush:
-                    DrawBrushStrokes(mask, roi.Strokes);
+                    DrawBrushStrokes(mask, roi.Strokes, cancellationToken: cancellationToken);
                     break;
                 default:
                     throw new InvalidOperationException($"ROI type '{roi.Type}' is not supported.");
@@ -64,15 +73,16 @@ public static class VisionRoiOpenCvExtensions
     }
 
     /// <summary>Reject malformed or empty regions when an image measurement expects a usable ROI.</summary>
-    public static void ValidateForMeasurement(this VisionRoi roi)
+    public static void ValidateForMeasurement(this VisionRoi roi, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(roi);
-        ValidateMaskGeometry(roi);
+        ValidateMaskGeometry(roi, cancellationToken);
     }
 
-    private static void ValidateMaskGeometry(VisionRoi roi)
+    private static void ValidateMaskGeometry(VisionRoi roi, CancellationToken cancellationToken)
     {
         static bool IsBounded(double value) => double.IsFinite(value) && Math.Abs(value) <= MaxCoordinate;
+        cancellationToken.ThrowIfCancellationRequested();
 
         switch (roi.Type)
         {
@@ -94,14 +104,20 @@ public static class VisionRoiOpenCvExtensions
                 var points = roi.Points ?? [];
                 if (points.Count > MaxPolygonPoints)
                     throw new InvalidOperationException($"Polygon ROI exceeds the {MaxPolygonPoints}-point limit.");
-                if (points.Count < 3
-                    || points.Any(point => point is null || !IsBounded(point.X) || !IsBounded(point.Y)))
+                if (points.Count < 3)
                     throw new InvalidOperationException($"Polygon ROI requires 3..{MaxPolygonPoints} finite vertices within ±10000000 px.");
-                var doubledArea = points.Select((point, index) =>
+                var doubledArea = 0d;
+                for (var index = 0; index < points.Count; index++)
                 {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = points[index];
+                    if (point is null || !IsBounded(point.X) || !IsBounded(point.Y))
+                        throw new InvalidOperationException($"Polygon ROI requires 3..{MaxPolygonPoints} finite vertices within ±10000000 px.");
                     var next = points[(index + 1) % points.Count];
-                    return point.X * next.Y - next.X * point.Y;
-                }).Sum();
+                    if (next is null)
+                        throw new InvalidOperationException($"Polygon ROI requires 3..{MaxPolygonPoints} finite vertices within ±10000000 px.");
+                    doubledArea += point.X * next.Y - next.X * point.Y;
+                }
                 if (!double.IsFinite(doubledArea) || Math.Abs(doubledArea) < 1e-6)
                     throw new InvalidOperationException("Polygon ROI vertices must enclose a finite non-zero area.");
                 break;
@@ -110,21 +126,34 @@ public static class VisionRoiOpenCvExtensions
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null)
-                    || !strokes.Any(stroke => stroke is not null && stroke.Mode == VisionRoiStrokeMode.Add))
+                if (strokes.Count is < 1 or > 10_000)
                     throw new InvalidOperationException("Brush ROI requires 1..10000 strokes and at least one add stroke.");
                 var totalPoints = 0;
-                foreach (var stroke in strokes)
+                var hasAddStroke = false;
+                for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
                 {
+                    if ((strokeIndex & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var stroke = strokes[strokeIndex];
+                    if (stroke is null)
+                        throw new InvalidOperationException("Brush ROI requires 1..10000 strokes and at least one add stroke.");
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
-                        || stroke.Points is null || stroke.Points.Count == 0
-                        || stroke.Points.Any(point => point is null || !IsBounded(point.X) || !IsBounded(point.Y)))
+                        || stroke.Points is null || stroke.Points.Count == 0)
                         throw new InvalidOperationException("Brush ROI strokes require a valid mode, finite points within ±10000000 px, and a width between 0 and 1024 px.");
+                    hasAddStroke |= stroke.Mode == VisionRoiStrokeMode.Add;
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("Brush ROI may contain at most 500000 points.");
+                    for (var pointIndex = 0; pointIndex < stroke.Points.Count; pointIndex++)
+                    {
+                        if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var point = stroke.Points[pointIndex];
+                        if (point is null || !IsBounded(point.X) || !IsBounded(point.Y))
+                            throw new InvalidOperationException("Brush ROI strokes require a valid mode, finite points within ±10000000 px, and a width between 0 and 1024 px.");
+                    }
                 }
+                if (!hasAddStroke)
+                    throw new InvalidOperationException("Brush ROI requires 1..10000 strokes and at least one add stroke.");
                 break;
             }
 
@@ -133,18 +162,24 @@ public static class VisionRoiOpenCvExtensions
         }
     }
 
-    private static void ValidatePolygonRasterInput(VisionRoi roi)
+    private static void ValidatePolygonRasterInput(VisionRoi roi, CancellationToken cancellationToken)
     {
         if (roi.Type != VisionRoiType.Polygon) return;
         var points = roi.Points ?? [];
         if (points.Count > MaxPolygonPoints)
             throw new InvalidOperationException($"Polygon ROI exceeds the {MaxPolygonPoints}-point limit.");
-        if (points.Any(point => point is null))
-            throw new InvalidOperationException("Polygon ROI points must be finite.");
+        for (var index = 0; index < points.Count; index++)
+        {
+            if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if (points[index] is null)
+                throw new InvalidOperationException("Polygon ROI points must be finite.");
+        }
     }
 
-    internal static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0)
+    internal static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (target.Empty()) return;
         if (!double.IsFinite(offsetX) || !double.IsFinite(offsetY))
             throw new InvalidOperationException("Brush ROI offsets must be finite.");
@@ -152,8 +187,10 @@ public static class VisionRoiOpenCvExtensions
         if (strokes.Count > 10_000) throw new InvalidOperationException("Brush ROI exceeds the 10000-stroke limit.");
 
         var totalPoints = 0;
-        foreach (var stroke in strokes)
+        for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
         {
+            if ((strokeIndex & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var stroke = strokes[strokeIndex];
             if (stroke is null || stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase))
                 throw new InvalidOperationException("Brush ROI stroke mode must be Add or Erase.");
             if (!double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024)
@@ -163,21 +200,30 @@ public static class VisionRoiOpenCvExtensions
             totalPoints = checked(totalPoints + stroke.Points.Count);
             if (totalPoints > 500_000) throw new InvalidOperationException("Brush ROI exceeds the 500000-point limit.");
 
-            var points = stroke.Points.Select(point =>
+            var points = new Point[stroke.Points.Count];
+            for (var pointIndex = 0; pointIndex < points.Length; pointIndex++)
             {
+                if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                var point = stroke.Points[pointIndex];
                 if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y))
                     throw new InvalidOperationException("Brush ROI points must be finite.");
                 // OpenCV clips drawing primitives; preserve off-canvas endpoints so strokes
                 // and erasers cannot be displaced onto the image border.
-                return new Point(RasterCoordinate(point.X - offsetX), RasterCoordinate(point.Y - offsetY));
-            }).ToArray();
+                points[pointIndex] = new Point(RasterCoordinate(point.X - offsetX), RasterCoordinate(point.Y - offsetY));
+            }
             var color = stroke.Mode == VisionRoiStrokeMode.Add ? Scalar.All(255) : Scalar.All(0);
             var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);
             var radius = Math.Max(0, thickness / 2);
             foreach (var point in points)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 Cv2.Circle(target, point, radius, color, -1, LineTypes.AntiAlias);
+            }
             for (var index = 1; index < points.Length; index++)
+            {
+                if ((index & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
                 Cv2.Line(target, points[index - 1], points[index], color, thickness, LineTypes.AntiAlias);
+            }
         }
     }
 

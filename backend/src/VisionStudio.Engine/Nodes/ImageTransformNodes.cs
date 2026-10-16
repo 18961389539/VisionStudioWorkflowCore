@@ -25,8 +25,8 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 Height: node.GetDouble("height", source.Height));
         ValidateCropRoi(roi);
 
-        using var rasterMask = roi.BuildMask(source.Size());
-        using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var bounds, out var selectedPixels);
+        using var rasterMask = roi.BuildMask(source.Size(), cancellationToken);
+        using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var bounds, out var selectedPixels, cancellationToken);
         if (selectedPixels == 0)
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
         using var sourceCrop = new Mat(source, bounds);

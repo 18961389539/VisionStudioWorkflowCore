@@ -410,7 +410,7 @@ internal static class JLVisionMatching
                             created.SetShapeModelOrigin(originY - (templateBuffer.Height - 1) / 2d, originX - (templateBuffer.Width - 1) / 2d);
                             if (clutterEnabled)
                                 ApplyShapeModelClutter(created, template, templateBuffer.Width, templateBuffer.Height,
-                                    clutterRoi!, 0, 0, clutterContrast, minContrast);
+                                    clutterRoi!, 0, 0, clutterContrast, minContrast, token);
                             return created;
                         }
                         catch { created.Dispose(); throw; }
@@ -843,8 +843,9 @@ internal static class JLVisionMatching
         return new Rect(x, y, Math.Max(0, endX - x), Math.Max(0, endY - y));
     }
 
-    private static void FillRoiMask(Mat mask, VisionRoi? roi, Rect cropRect)
+    private static void FillRoiMask(Mat mask, VisionRoi? roi, Rect cropRect, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (roi is null) { mask.SetTo(Scalar.All(255)); return; }
         switch (roi.Type)
         {
@@ -864,19 +865,28 @@ internal static class JLVisionMatching
             }
             case VisionRoiType.Polygon:
             {
-                var points = (roi.Points ?? []).Select(point => new Point((int)Math.Round(point.X - cropRect.X), (int)Math.Round(point.Y - cropRect.Y))).ToArray();
+                var roiPoints = roi.Points ?? [];
+                var points = new Point[roiPoints.Count];
+                for (var index = 0; index < points.Length; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = roiPoints[index];
+                    points[index] = new Point((int)Math.Round(point.X - cropRect.X), (int)Math.Round(point.Y - cropRect.Y));
+                }
+                cancellationToken.ThrowIfCancellationRequested();
                 Cv2.FillPoly(mask, [points], Scalar.All(255));
                 break;
             }
             case VisionRoiType.Brush:
-                VisionRoiOpenCvExtensions.DrawBrushStrokes(mask, roi.Strokes, cropRect.X, cropRect.Y);
+                VisionRoiOpenCvExtensions.DrawBrushStrokes(mask, roi.Strokes, cropRect.X, cropRect.Y, cancellationToken);
                 break;
         }
     }
 
     private static void ApplyShapeModelClutter(JlShapeModel model, JlImage trainingModelImage, int imageWidth, int imageHeight,
-        VisionRoi clutterRoi, double cropOffsetX, double cropOffsetY, int clutterContrast, int minContrast)
+        VisionRoi clutterRoi, double cropOffsetX, double cropOffsetY, int clutterContrast, int minContrast, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         model.FindShapeModel(trainingModelImage, 0, 0, .3, 1, .5, "least_squares", 0, .8,
             out var rows, out var cols, out var angles, out _);
         using (rows) using (cols) using (angles)
@@ -884,22 +894,25 @@ internal static class JLVisionMatching
             if (rows.Length == 0) throw new InvalidOperationException("Clutter ROI could not be aligned to the trained model in its source image.");
             var transform = new JlHomMat2D();
             transform.VectorAngleToRigid(0, 0, 0, rows[0].D + cropOffsetY, cols[0].D + cropOffsetX, angles[0].D);
-            ApplyShapeModelClutter(model, imageWidth, imageHeight, clutterRoi, transform, clutterContrast, minContrast);
+            cancellationToken.ThrowIfCancellationRequested();
+            ApplyShapeModelClutter(model, imageWidth, imageHeight, clutterRoi, transform, clutterContrast, minContrast, cancellationToken);
         }
     }
 
     private static void ApplyShapeModelClutter(JlShapeModel model, int imageWidth, int imageHeight, VisionRoi clutterRoi,
-        JlHomMat2D modelToImage, int clutterContrast, int minContrast)
+        JlHomMat2D modelToImage, int clutterContrast, int minContrast, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (clutterContrast < minContrast)
             throw new InvalidOperationException("Clutter Contrast must be at least the Minimum Feature Contrast used to train the model.");
-        using var mask = clutterRoi.BuildMask(new Size(imageWidth, imageHeight));
+        using var mask = clutterRoi.BuildMask(new Size(imageWidth, imageHeight), cancellationToken);
         if (Cv2.CountNonZero(mask) == 0)
             throw new InvalidOperationException("Clutter ROI must overlap the training image and contain at least one pixel.");
         using var clutterImage = JLVisionImages.FromMat(mask);
         using var clutterRegion = clutterImage.Threshold(1d, 255d);
         using var names = new JlTuple();
         using var values = new JlTuple();
+        cancellationToken.ThrowIfCancellationRequested();
         try { model.SetShapeModelClutter(clutterRegion, modelToImage, clutterContrast, names, values); }
         catch (JlOperatorException ex) when (ex.Message.Contains("8515", StringComparison.Ordinal))
         { throw new InvalidOperationException("Clutter ROI is too close to the trained model contours. Move it farther from the part edges.", ex); }
@@ -1026,7 +1039,7 @@ internal static class JLVisionMatching
         else if (rawCrop.Channels() == 4) Cv2.CvtColor(rawCrop, crop, ColorConversionCodes.BGRA2GRAY);
         else throw new InvalidOperationException("Training image must have 1, 3, or 4 channels.");
         using var roiMask = new Mat(crop.Size(), MatType.CV_8UC1, Scalar.All(0));
-        FillRoiMask(roiMask, roi, cropRect);
+        FillRoiMask(roiMask, roi, cropRect, token);
         var trainingRegionMoments = Cv2.Moments(roiMask, binaryImage: true);
         if (trainingRegionMoments.M00 < 64) throw new InvalidOperationException("Training region must contain at least 64 pixels.");
         token.ThrowIfCancellationRequested();
@@ -1105,7 +1118,7 @@ internal static class JLVisionMatching
         model.SetShapeModelOrigin(originY - (crop.Height - 1) / 2d, originX - (crop.Width - 1) / 2d);
         if (clutterRoi is not null)
             ApplyShapeModelClutter(model, image, trainingMat.Width, trainingMat.Height, clutterRoi,
-                cropRect.X, cropRect.Y, clutterContrast, minContrast);
+                cropRect.X, cropRect.Y, clutterContrast, minContrast, token);
         var data = model.SerializeShapeModel();
         if (data.Length > 16 * 1024 * 1024) throw new InvalidOperationException("Trained model exceeds the 16 MB embedded workflow asset limit.");
         Cv2.ImEncode(".jpg", trainingMat, out var previewBytes, [new ImageEncodingParam(ImwriteFlags.JpegQuality, 82)]);
@@ -1495,7 +1508,7 @@ internal static class JLVisionMatching
                     ignorePolarity ? "ignore_global_polarity" : "use_polarity");
                 if (clutterRoi is not null)
                     ApplyShapeModelClutter(model, firstImage.Width, firstImage.Height, clutterRoi,
-                        modelToTrainingImage, clutterContrast, minContrast);
+                        modelToTrainingImage, clutterContrast, minContrast, token);
                 var modelBytes = model.SerializeShapeModel();
                 if (modelBytes.Length > 16 * 1024 * 1024)
                     throw new InvalidOperationException("Composite shape model exceeds the 16 MB embedded workflow asset limit.");
@@ -1523,7 +1536,7 @@ internal static class JLVisionMatching
                 if (previewBytes.Length > 4 * 1024 * 1024)
                     throw new InvalidOperationException("Composite training preview exceeds the 4 MB embedded asset limit.");
                 var config = ShapeTrainingConfig(node);
-                var (trainingRegionArea, trainingRegionType) = CompositeTrainingRegion(node, firstImage.Width, firstImage.Height);
+                var (trainingRegionArea, trainingRegionType) = CompositeTrainingRegion(node, firstImage.Width, firstImage.Height, token);
                 var outputImage = VisionImage.Own(firstImage.Clone());
                 var summary = new Dictionary<string, object?>
                 {
@@ -1665,13 +1678,14 @@ internal static class JLVisionMatching
         return Math.Sqrt(dx * dx + dy * dy);
     }
 
-    private static (double Area, string Type) CompositeTrainingRegion(NodeDefinition node, int width, int height)
+    private static (double Area, string Type) CompositeTrainingRegion(NodeDefinition node, int width, int height, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var roi = node.GetRoi();
         if (roi is null) return ((double)width * height, "FullImage");
         var bounds = RoiBounds(roi) & new Rect(0, 0, width, height);
         using var mask = new Mat(bounds.Height, bounds.Width, MatType.CV_8UC1, Scalar.All(0));
-        FillRoiMask(mask, roi, bounds);
+        FillRoiMask(mask, roi, bounds, cancellationToken);
         return (Cv2.CountNonZero(mask), roi.Type.ToString());
     }
 

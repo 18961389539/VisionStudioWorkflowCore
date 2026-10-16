@@ -85,7 +85,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             }
             roi = parameterRoi;
         }
-        ValidateTransformRoi(roi);
+        ValidateTransformRoi(roi, cancellationToken);
 
         var anglePeriodDeg = node.GetDouble("anglePeriodDeg", 360);
         if (!double.IsFinite(anglePeriodDeg) || anglePeriodDeg <= 0 || anglePeriodDeg > 360)
@@ -116,23 +116,33 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 var strokes = roi.Strokes ?? [];
                 if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null))
                     throw new InvalidOperationException("The brush ROI needs 1..10000 valid strokes.");
-                var points = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).SelectMany(stroke => stroke.Points ?? []).ToArray();
-                if (points.Length == 0 || strokes.SelectMany(stroke => stroke.Points ?? []).Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
-                    throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
-                if (strokes.Any(stroke => stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
-                    || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024 || stroke.Points is null || stroke.Points.Count == 0
-                    || stroke.Points.Any(point => point is null)))
-                    throw new InvalidOperationException("Brush ROI strokes need a valid mode, positive width and points.");
-                var movedStrokes = strokes.Select(stroke => stroke with
+                var movedStrokes = new VisionRoiBrushStroke[strokes.Count];
+                var regionPoints = new List<VisionPoint2D>();
+                for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
                 {
-                    Points = stroke.Points.Select(point =>
+                    if ((strokeIndex & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var stroke = strokes[strokeIndex];
+                    if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
+                        || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
+                        || stroke.Points is null || stroke.Points.Count == 0)
+                        throw new InvalidOperationException("Brush ROI strokes need a valid mode, positive width and points.");
+                    var movedPoints = new VisionRoiPoint[stroke.Points.Count];
+                    for (var pointIndex = 0; pointIndex < movedPoints.Length; pointIndex++)
                     {
+                        if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var point = stroke.Points[pointIndex];
+                        if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y))
+                            throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
                         var moved = Apply(new VisionPoint2D(point.X, point.Y));
-                        return new VisionRoiPoint(moved.X, moved.Y);
-                    }).ToArray()
-                }).ToArray();
+                        movedPoints[pointIndex] = new VisionRoiPoint(moved.X, moved.Y);
+                        if (stroke.Mode == VisionRoiStrokeMode.Add) regionPoints.Add(moved);
+                    }
+                    movedStrokes[strokeIndex] = stroke with { Points = movedPoints };
+                }
+                if (regionPoints.Count == 0)
+                    throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
                 transformed = roi with { Strokes = movedStrokes };
-                region = points.Select(point => Apply(new VisionPoint2D(point.X, point.Y))).Distinct().ToList();
+                region = regionPoints.Distinct().ToList();
                 regionPadding = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).Max(stroke => stroke.Width / 2);
                 break;
             }
@@ -149,7 +159,13 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             {
                 var points = roi.Points ?? [];
                 if (points.Count < 3) throw new InvalidOperationException("The polygon ROI needs at least 3 points.");
-                var moved = points.Select(p => Apply(new VisionPoint2D(p.X, p.Y))).ToArray();
+                var moved = new VisionPoint2D[points.Count];
+                for (var index = 0; index < moved.Length; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = points[index];
+                    moved[index] = Apply(new VisionPoint2D(point.X, point.Y));
+                }
                 transformed = roi with { Points = moved.Select(p => new VisionRoiPoint(p.X, p.Y)).ToArray() };
                 region = moved.ToList();
                 break;
@@ -185,7 +201,8 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         }
 
         // Reject invalid coordinates here, before they reach image-mask rasterizers or measurement nodes.
-        ValidateTransformRoi(transformed);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateTransformRoi(transformed, cancellationToken);
         VisionRectangle2D rectangle;
         VisionPoint2D center;
         VisionCircle circle;
@@ -333,10 +350,11 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         }
     }
 
-    private static void ValidateTransformRoi(VisionRoi roi)
+    private static void ValidateTransformRoi(VisionRoi roi, CancellationToken cancellationToken)
     {
         static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
         static bool Bounded(params double?[] values) => values.All(value => value.HasValue && Math.Abs(value.Value) <= MaxRoiCoordinate);
+        cancellationToken.ThrowIfCancellationRequested();
         switch (roi.Type)
         {
             case VisionRoiType.Rectangle:
@@ -360,14 +378,21 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 var points = roi.Points ?? [];
                 if (points.Count > VisionRoiOpenCvExtensions.MaxPolygonPoints)
                     throw new InvalidOperationException($"Polygon ROI exceeds the {VisionRoiOpenCvExtensions.MaxPolygonPoints}-point limit.");
-                if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
-                    || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
+                if (points.Count < 3)
                     throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");
-                var area2 = points.Select((point, index) =>
+                var area2 = 0d;
+                for (var index = 0; index < points.Count; index++)
                 {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = points[index];
+                    if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                        || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate)
+                        throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");
                     var next = points[(index + 1) % points.Count];
-                    return point.X * next.Y - next.X * point.Y;
-                }).Sum();
+                    if (next is null)
+                        throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");
+                    area2 += point.X * next.Y - next.X * point.Y;
+                }
                 if (!double.IsFinite(area2) || Math.Abs(area2) < 1e-6)
                     throw new InvalidOperationException("The polygon ROI must enclose a finite non-zero area.");
                 break;
@@ -375,22 +400,35 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                var totalPoints = 0;
-                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null)
-                    || !strokes.Any(stroke => stroke is not null && stroke.Mode == VisionRoiStrokeMode.Add))
+                if (strokes.Count is < 1 or > 10_000)
                     throw new InvalidOperationException("The brush ROI needs 1..10000 strokes and at least one add stroke.");
-                foreach (var stroke in strokes)
+                var totalPoints = 0;
+                var hasAddStroke = false;
+                for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
                 {
+                    if ((strokeIndex & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var stroke = strokes[strokeIndex];
+                    if (stroke is null)
+                        throw new InvalidOperationException("The brush ROI needs 1..10000 strokes and at least one add stroke.");
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
-                        || stroke.Points is null || stroke.Points.Count == 0
-                        || stroke.Points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
-                            || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
+                        || stroke.Points is null || stroke.Points.Count == 0)
                         throw new InvalidOperationException($"Brush ROI strokes need a valid mode, finite points within ±{MaxRoiCoordinate:0} px and a width between 0 and 1024 px.");
+                    hasAddStroke |= stroke.Mode == VisionRoiStrokeMode.Add;
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("The brush ROI may contain at most 500000 points.");
+                    for (var pointIndex = 0; pointIndex < stroke.Points.Count; pointIndex++)
+                    {
+                        if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var point = stroke.Points[pointIndex];
+                        if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                            || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate)
+                            throw new InvalidOperationException($"Brush ROI strokes need a valid mode, finite points within ±{MaxRoiCoordinate:0} px and a width between 0 and 1024 px.");
+                    }
                 }
+                if (!hasAddStroke)
+                    throw new InvalidOperationException("The brush ROI needs 1..10000 strokes and at least one add stroke.");
                 break;
             }
             default:
