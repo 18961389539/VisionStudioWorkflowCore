@@ -58,4 +58,26 @@ describe('node configuration snapshots', () => {
     expect(configurationIssues(catalog, { threshold: 300 })).toHaveLength(1);
     expect(configurationIssues(catalog, { threshold: 100, roi: { type: 'Circle', x: 5, y: 6, radius: 2 } })).toEqual([]);
   });
+
+  it('preflights polygon, coordinate, clutter, and node-specific brush limits before preview', () => {
+    const crop = fallbackCatalogRaw.find(item => item.type === 'image.crop')!;
+    const polygonIssue = configurationIssues(crop, { roi: { type: 'Polygon', points: [
+      { x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }
+    ] } });
+    expect(polygonIssue.join(' ')).toContain('围成非零面积');
+
+    const coordinateIssue = configurationIssues(crop, { roi: { type: 'Rectangle', x: 10_000_001, y: 0, width: 10, height: 10 } });
+    expect(coordinateIssue.join(' ')).toContain('坐标在 ±10000000 px 范围内');
+
+    const shape = fallbackCatalogRaw.find(item => item.type === 'match.shape')!;
+    const clutterIssue = configurationIssues(shape, { ...makeDefaultParameters(shape), clutterRoi: {
+      type: 'Rectangle', x: 0, y: 0, width: 0, height: 10
+    } });
+    expect(clutterIssue.join(' ')).toContain('杂乱区域矩形');
+
+    const brush = { type: 'Brush', strokes: [{ mode: 'Add', width: 600, points: [{ x: 1, y: 1 }] }] };
+    expect(configurationIssues(crop, { roi: brush }).join(' ')).toContain('笔宽须在 0..512 px');
+    const transform = fallbackCatalogRaw.find(item => item.type === 'roi.transform')!;
+    expect(configurationIssues(transform, { ...makeDefaultParameters(transform), roi: brush })).toEqual([]);
+  });
 });

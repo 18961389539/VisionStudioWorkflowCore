@@ -1,4 +1,4 @@
-import type { NodeCatalogItem, VisionRoi, WorkflowPayload } from './types';
+import type { NodeCatalogItem, WorkflowPayload } from './types';
 import { validateParameterValues } from './validation';
 
 export type NodeParameters = Record<string, unknown>;
@@ -65,26 +65,77 @@ export function withParameter(parameters: NodeParameters, key: string, value: un
   return next;
 }
 
+const roiCoordinateLimit = 10_000_000;
+
+function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: number): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return `${label}结构无效。`;
+  const roi = value as Record<string, unknown>;
+  const finite = (...values: unknown[]) => values.every(item => typeof item === 'number' && Number.isFinite(item));
+  const bounded = (...values: unknown[]) => finite(...values)
+    && values.every(item => Math.abs(item as number) <= roiCoordinateLimit);
+  if (roi.type === 'Rectangle') {
+    const { x, y, width, height } = roi;
+    if (!bounded(x, y, width, height) || (width as number) <= 0 || (height as number) <= 0
+      || Math.abs((x as number) + (width as number)) > roiCoordinateLimit
+      || Math.abs((y as number) + (height as number)) > roiCoordinateLimit)
+      return `${label}矩形须为正尺寸，且坐标在 ±${roiCoordinateLimit} px 范围内。`;
+    return undefined;
+  }
+  if (roi.type === 'Circle') {
+    const { x, y, radius } = roi;
+    if (!bounded(x, y, radius) || (radius as number) <= 0)
+      return `${label}圆形须有正半径，且坐标在 ±${roiCoordinateLimit} px 范围内。`;
+    return undefined;
+  }
+  if (roi.type === 'Polygon') {
+    const points = roi.points;
+    if (!Array.isArray(points) || points.length < 3 || points.some(point => !point || typeof point !== 'object'
+      || !bounded((point as Record<string, unknown>).x, (point as Record<string, unknown>).y)))
+      return `${label}多边形需要至少三个有效顶点，坐标须在 ±${roiCoordinateLimit} px 范围内。`;
+    const twiceArea = points.reduce((sum: number, point: Record<string, number>, index: number) => {
+      const next = points[(index + 1) % points.length] as Record<string, number>;
+      return sum + point.x * next.y - next.x * point.y;
+    }, 0);
+    const xs = points.map((point: Record<string, number>) => point.x);
+    const ys = points.map((point: Record<string, number>) => point.y);
+    if (!Number.isFinite(twiceArea) || Math.abs(twiceArea) < 1e-6
+      || Math.max(...xs) <= Math.min(...xs) || Math.max(...ys) <= Math.min(...ys))
+      return `${label}多边形顶点须围成非零面积。`;
+    return undefined;
+  }
+  if (roi.type === 'Brush') {
+    const strokes = roi.strokes;
+    if (!Array.isArray(strokes) || strokes.length < 1 || strokes.length > 10_000)
+      return `${label}笔刷需要 1..10000 笔有效笔迹。`;
+    const pointCount = strokes.reduce((count, stroke) => count
+      + (stroke && typeof stroke === 'object' && Array.isArray((stroke as Record<string, unknown>).points)
+        ? ((stroke as Record<string, unknown>).points as unknown[]).length : 0), 0);
+    const invalidStroke = strokes.some(stroke => {
+      if (!stroke || typeof stroke !== 'object') return true;
+      const item = stroke as Record<string, unknown>;
+      const points = item.points;
+      return !['Add', 'Erase'].includes(String(item.mode)) || !finite(item.width)
+        || (item.width as number) <= 0 || (item.width as number) > maxBrushWidth
+        || !Array.isArray(points) || points.length === 0
+        || points.some(point => !point || typeof point !== 'object'
+          || !bounded((point as Record<string, unknown>).x, (point as Record<string, unknown>).y));
+    });
+    if (pointCount > 500_000 || invalidStroke || !strokes.some(stroke => stroke && typeof stroke === 'object'
+      && (stroke as Record<string, unknown>).mode === 'Add'))
+      return `${label}笔刷需至少一笔添加选区；笔宽须在 0..${maxBrushWidth} px 内，坐标有效（最多 10000 笔 / 500000 点）。`;
+    return undefined;
+  }
+  return `${label}类型无效。`;
+}
+
 export function configurationIssues(catalog: NodeCatalogItem, parameters: NodeParameters): string[] {
   const issues = validateParameterValues(catalog.parameters, parameters).map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
-  for (const key of ['roi', 'searchRoi'] as const) {
-    const roi = parameters[key] as VisionRoi | undefined;
-    if (!roi) continue;
-    const label = key === 'roi' ? 'ROI' : '搜索区域';
-    const finite = (...values: number[]) => values.every((value) => typeof value === 'number' && Number.isFinite(value));
-    if (roi.type === 'Rectangle' && (!finite(roi.x, roi.y, roi.width, roi.height) || roi.width <= 0 || roi.height <= 0)) issues.push(`${label} 的位置须有效，宽和高须大于 0。`);
-    else if (roi.type === 'Circle' && (!finite(roi.x, roi.y, roi.radius) || roi.radius <= 0)) issues.push(`${label} 的位置须有效，半径须大于 0。`);
-    else if (roi.type === 'Polygon' && (!Array.isArray(roi.points) || roi.points.length < 3 || roi.points.some((p) => !p || !finite(p.x, p.y)))) issues.push(`${label}多边形需要至少三个有效顶点。`);
-    else if (roi.type === 'Brush') {
-      const strokes = Array.isArray(roi.strokes) ? roi.strokes : [];
-      const pointCount = strokes.reduce((count, stroke) => count + (Array.isArray(stroke.points) ? stroke.points.length : 0), 0);
-      if (strokes.length === 0 || strokes.length > 10000 || pointCount > 500000
-        || strokes.some((stroke) => !['Add', 'Erase'].includes(stroke.mode) || !finite(stroke.width)
-          || stroke.width <= 0 || stroke.width > 512 || !Array.isArray(stroke.points) || stroke.points.length === 0
-          || stroke.points.some((point) => !point || !finite(point.x, point.y)))) issues.push(`${label}笔刷需要有效笔迹、1..512 px 笔宽和有限坐标（最多 10000 笔 / 500000 点）。`);
-      else if (!strokes.some((stroke) => stroke.mode === 'Add')) issues.push(`${label}笔刷至少需要一笔添加选区。`);
-    }
-    else if (!['Rectangle', 'Circle', 'Polygon', 'Brush'].includes(roi.type)) issues.push(`${label}类型无效。`);
+  for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
+    const value = parameters[key];
+    if (value === undefined || value === null) continue;
+    const label = key === 'roi' ? 'ROI' : key === 'clutterRoi' ? '杂乱区域' : '搜索区域';
+    const issue = roiConfigurationIssue(value, label, catalog.type === 'image.crop' ? 512 : 1024);
+    if (issue) issues.push(issue);
   }
   return issues;
 }
