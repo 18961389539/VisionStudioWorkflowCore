@@ -137,6 +137,25 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             }
         }
 
+        foreach (var circleNode in workflow.Nodes.Where(node =>
+            string.Equals(node.Type, "measure.caliperCircle", StringComparison.OrdinalIgnoreCase)))
+        {
+            var circleSource = workflow.Edges.FirstOrDefault(edge =>
+                edge.TargetNodeId.Equals(circleNode.Id, StringComparison.OrdinalIgnoreCase)
+                && edge.TargetPort.Equals("circle", StringComparison.OrdinalIgnoreCase));
+            if (circleSource is null || !byId.TryGetValue(circleSource.SourceNodeId, out var sourceNode)
+                || !string.Equals(sourceNode.Type, "roi.transform", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var transformSource = workflow.Edges.FirstOrDefault(edge =>
+                edge.TargetNodeId.Equals(circleNode.Id, StringComparison.OrdinalIgnoreCase)
+                && edge.TargetPort.Equals("transform", StringComparison.OrdinalIgnoreCase));
+            if (transformSource is not null
+                && transformSource.SourceNodeId.Equals(circleSource.SourceNodeId, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Node '{circleNode.Id}' receives an already corrected circle and its transform from ROI transform '{sourceNode.Id}'. Remove that transform input; applying both would shift the circle twice.");
+        }
+
         foreach (var node in workflow.Nodes)
         {
             var catalog = registry.Require(node.Type).Catalog;

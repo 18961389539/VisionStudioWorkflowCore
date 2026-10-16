@@ -183,10 +183,16 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const circleInputEdge = isCaliperCircle
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'circle')
     : undefined;
+  const circleSourceNode = circleInputEdge ? nodes.find((item) => item.id === circleInputEdge.source) : undefined;
   const transformInputEdge = ['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'transform')
     : undefined;
   const transformSourceNode = transformInputEdge ? nodes.find((item) => item.id === transformInputEdge.source) : undefined;
+  const correctedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
+    && circleInputEdge.source === transformInputEdge.source && circleSourceNode?.data.typeKey === 'roi.transform');
+  const correctedCircleTransformMessage = correctedCircleTransformConflict
+    ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
+    : undefined;
   const transformSourceParameters = (transformSourceNode?.data.parameters ?? {}) as NodeParameters;
   const savedMeasurementReference = transformSourceNode?.data.typeKey === 'roi.transform'
     && typeof transformSourceParameters.referenceImage === 'string' && transformSourceParameters.referenceImage
@@ -368,7 +374,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     });
   };
   const runPreview = async () => {
-    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch) return;
+    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || correctedCircleTransformConflict) return;
     if (isShapeMatch) { setShapeWorkspaceTab('search'); setShapeImageKind(undefined); setRegionEditMode('search'); }
     setTrainingView(false);
     setShowSavedTrainingImage(false);
@@ -804,11 +810,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           description={transformInputEdge
             ? `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
             : '上游 searchLine 会覆盖本节点的起点和终点参数；请在提供搜索线的上游节点中调整几何。'} />}
-        {circleInputEdge && <Alert showIcon type={transformInputEdge ? 'warning' : 'info'}
-          title={`标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
-          description={transformInputEdge
-            ? `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；若上游已输出当前图像坐标（例如定位修正 ROI），请断开 transform，避免圆心被重复移动。`
-            : '上游 circle 会覆盖本节点的圆心和标称半径参数；请在上游节点中调整圆几何。'} />}
+        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict ? 'error' : transformInputEdge ? 'warning' : 'info'}
+          title={correctedCircleTransformConflict ? '定位修正圆不能再次应用 transform' : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
+          description={correctedCircleTransformMessage ?? (transformInputEdge
+            ? `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`
+            : '上游 circle 会覆盖本节点的圆心和标称半径参数；请在上游节点中调整圆几何。')} />}
         {!searchLineInputEdge && !circleInputEdge && transformInputEdge && <Alert showIcon type="info"
           title={`几何将按变换跟随：${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}`}
           description={canEditMeasurementGeometry
@@ -915,10 +921,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       footer={<div className="node-configuration-footer">
         <span>{dirty ? '修改已暂存；取消或关闭将丢弃本次修改' : '参数与当前流程一致'}{previewBusy ? ' · 测试中' : ''}</span>
         <div>
-          <Tooltip title={previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
+          <Tooltip title={correctedCircleTransformMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
             <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
               onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
-              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || correctedCircleTransformConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>

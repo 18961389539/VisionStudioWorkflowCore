@@ -508,10 +508,13 @@ describe('caliper geometry input guidance', () => {
       { id: 'circle-geometry-input', source: roiNode.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' },
       { id: 'circle-transform-input', source: roiNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
     ];
-    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges });
+    const { dialog, props } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges });
 
-    expect(dialog.getByText('标称圆来自上游：定位修正 ROI')).toBeTruthy();
-    expect(dialog.getByText(/断开 transform，避免圆心被重复移动/)).toBeTruthy();
+    expect(dialog.getByText('定位修正圆不能再次应用 transform')).toBeTruthy();
+    expect(dialog.getByText(/圆已经是当前图像坐标，请断开这个 transform 输入/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    expect(props.onPreview).not.toHaveBeenCalled();
     for (const name of ['centerX', 'centerY', 'radius'])
       expect(dialog.queryByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
     expect(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();

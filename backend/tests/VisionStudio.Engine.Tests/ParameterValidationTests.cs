@@ -55,6 +55,52 @@ public sealed class ParameterValidationTests
         Assert.Contains("n1", compiled.OrderedNodeIds);
     }
 
+    [Fact]
+    public void CaliperCircleRejectsASecondTransformOnAnAlreadyCorrectedRoiCircle()
+    {
+        var workflow = new WorkflowDefinition("circle-frame-conflict", "Circle frame conflict",
+        [
+            new NodeDefinition("image", "image.synthetic", null, null, null),
+            new NodeDefinition("corrected-roi", "roi.transform", null, null, null),
+            new NodeDefinition("caliper", "measure.caliperCircle", null, null, null)
+        ],
+        [
+            new EdgeDefinition("image-input", "image", "image", "caliper", "image", "data"),
+            new EdgeDefinition("corrected-circle", "corrected-roi", "circle", "caliper", "circle", "data"),
+            new EdgeDefinition("duplicate-transform", "corrected-roi", "transform", "caliper", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("already corrected circle", error.Message);
+        Assert.Contains("Remove that transform input", error.Message);
+    }
+
+    [Fact]
+    public void CaliperCircleAllowsCropTransformAfterReceivingACorrectedRoiCircle()
+    {
+        var workflow = new WorkflowDefinition("circle-crop-frame", "Circle crop frame",
+        [
+            new NodeDefinition("image", "image.synthetic", null, null, null),
+            new NodeDefinition("corrected-roi", "roi.transform", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("caliper", "measure.caliperCircle", null, null, null)
+        ],
+        [
+            new EdgeDefinition("start-roi", "image", "next", "corrected-roi", "exec", "control"),
+            new EdgeDefinition("roi-crop", "corrected-roi", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-caliper", "crop", "next", "caliper", "exec", "control"),
+            new EdgeDefinition("crop-image", "image", "image", "crop", "image", "data"),
+            new EdgeDefinition("circle-image", "crop", "image", "caliper", "image", "data"),
+            new EdgeDefinition("corrected-circle", "corrected-roi", "circle", "caliper", "circle", "data"),
+            new EdgeDefinition("crop-transform", "crop", "transform", "caliper", "transform", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("caliper", compiled.OrderedNodeIds);
+    }
+
     [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
