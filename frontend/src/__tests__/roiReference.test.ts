@@ -114,4 +114,44 @@ describe('ROI reference capture', () => {
     expect(nodes[1].data.parameters).toMatchObject({ centerX: 130, centerY: 60 });
     expect(moved[0].data.parameters).toEqual({ baseX: 200, baseY: 70, baseThetaDeg: 0 });
   });
+
+  it.each(['measure.caliperCircle', 'measure.caliperLine', 'measure.caliper', 'feature.edgeSubpixel'])(
+    'rebases %s geometry through an ROI-then-crop transform composition', type => {
+      const geometry = type === 'measure.caliperCircle'
+        ? { centerX: 130, centerY: 60, radius: 8 }
+        : { startX: 130, startY: 60, endX: 150, endY: 70 };
+      const nodes = [
+        { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', parameters: { baseX: 100, baseY: 50 } } },
+        { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: 'image.crop', parameters: {} } },
+        { id: 'compose', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformCompose', parameters: {} } },
+        { id: 'measure', position: { x: 0, y: 0 }, data: { typeKey: type, parameters: geometry } }
+      ];
+      const edges: Edge[] = [
+        { id: 'roi-compose', source: 'roi', sourceHandle: 'transform', target: 'compose', targetHandle: 'transformA' },
+        { id: 'crop-compose', source: 'crop', sourceHandle: 'transform', target: 'compose', targetHandle: 'transformB' },
+        { id: 'compose-measure', source: 'compose', sourceHandle: 'transform', target: 'measure', targetHandle: 'transform' }
+      ];
+
+      const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 0 });
+      const movedGeometry = moved.find(node => node.id === 'measure')!.data.parameters;
+
+      if (type === 'measure.caliperCircle') expect(movedGeometry).toMatchObject({ centerX: 230, centerY: 80, radius: 8 });
+      else expect(movedGeometry).toMatchObject({ startX: 230, startY: 80, endX: 250, endY: 90 });
+    });
+
+  it('does not rebase geometry when the ROI transform is the second composition input', () => {
+    const nodes = [
+      { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', parameters: { baseX: 100, baseY: 50 } } },
+      { id: 'compose', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformCompose', parameters: {} } },
+      { id: 'measure', position: { x: 0, y: 0 }, data: { typeKey: 'measure.caliperLine', parameters: { startX: 130, startY: 60, endX: 150, endY: 70 } } }
+    ];
+    const edges: Edge[] = [
+      { id: 'roi-compose', source: 'roi', sourceHandle: 'transform', target: 'compose', targetHandle: 'transformB' },
+      { id: 'compose-measure', source: 'compose', sourceHandle: 'transform', target: 'measure', targetHandle: 'transform' }
+    ];
+
+    const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 0 });
+
+    expect(moved[2].data.parameters).toEqual(nodes[2].data.parameters);
+  });
 });

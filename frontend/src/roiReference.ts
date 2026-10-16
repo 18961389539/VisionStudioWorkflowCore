@@ -163,7 +163,30 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
   const previous = (source?.data.parameters ?? {}) as NodeParameters;
   const rebase = source?.data.typeKey === 'roi.transform'
     && ['baseX', 'baseY', 'baseThetaDeg'].some(key => Number(previous[key] ?? 0) !== Number(parameters[key] ?? 0));
-  const targets = new Set(rebase ? edges.filter(edge => edge.source === nodeId && edge.sourceHandle === 'transform' && edge.targetHandle === 'transform').map(edge => edge.target) : []);
+  const targets = new Set<string>();
+  if (rebase) {
+    const nodesById = new Map(nodes.map(node => [node.id, node]));
+    const transformPath = new Set([nodeId]);
+    const pending = [nodeId];
+    while (pending.length > 0) {
+      const currentId = pending.pop()!;
+      for (const edge of edges) {
+        if (edge.source !== currentId || edge.sourceHandle !== 'transform') continue;
+        const target = nodesById.get(edge.target);
+        if (!target) continue;
+        const type = String(target.data.typeKey ?? '');
+        if (type === 'coordinate.transformCompose' && edge.targetHandle === 'transformA') {
+          if (!transformPath.has(target.id)) {
+            transformPath.add(target.id);
+            pending.push(target.id);
+          }
+        } else if (edge.targetHandle === 'transform'
+          && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+          targets.add(target.id);
+        }
+      }
+    }
+  }
   return nodes.map(node => {
     if (node.id === nodeId) return { ...node, data: { ...node.data, stale: true, parameters } };
     if (!targets.has(node.id)) return node;
