@@ -88,16 +88,23 @@ public sealed class ImageCropNode : IVisionNodeExecutor
     private static VisionRoi TranslateRoiToCrop(VisionRoi roi, int cropX, int cropY) => roi.Type switch
     {
         VisionRoiType.Rectangle => roi with { X = (roi.X ?? 0) - cropX, Y = (roi.Y ?? 0) - cropY },
-        VisionRoiType.Circle => roi with { X = (roi.X ?? 0) - cropX, Y = (roi.Y ?? 0) - cropY },
+        VisionRoiType.Circle => roi with
+        {
+            X = Math.Round(roi.X ?? 0) - cropX,
+            Y = Math.Round(roi.Y ?? 0) - cropY,
+            Radius = Math.Round(roi.Radius ?? 0)
+        },
         VisionRoiType.Polygon => roi with
         {
-            Points = (roi.Points ?? []).Select(point => new VisionRoiPoint(point.X - cropX, point.Y - cropY)).ToArray()
+            Points = (roi.Points ?? []).Select(point => new VisionRoiPoint(
+                Math.Round(point.X) - cropX, Math.Round(point.Y) - cropY)).ToArray()
         },
         VisionRoiType.Brush => roi with
         {
             Strokes = (roi.Strokes ?? []).Select(stroke => stroke with
             {
-                Points = stroke.Points.Select(point => new VisionRoiPoint(point.X - cropX, point.Y - cropY)).ToArray()
+                Points = stroke.Points.Select(point => new VisionRoiPoint(
+                    Math.Round(point.X) - cropX, Math.Round(point.Y) - cropY)).ToArray()
             }).ToArray()
         },
         _ => throw new InvalidOperationException($"Unsupported crop ROI type '{roi.Type}'.")

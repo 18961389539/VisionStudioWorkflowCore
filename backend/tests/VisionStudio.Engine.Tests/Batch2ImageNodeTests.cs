@@ -195,6 +195,9 @@ public sealed class Batch2ImageNodeTests
     [InlineData("""{"roi":{"type":"Circle","x":20,"y":20,"radius":8}}""")]
     [InlineData("""{"roi":{"type":"Polygon","points":[{"x":5,"y":4},{"x":30,"y":8},{"x":14,"y":32}]}}""")]
     [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":8,"points":[{"x":8,"y":10},{"x":28,"y":26}]},{"mode":"Erase","width":4,"points":[{"x":18,"y":18}]}]}}""")]
+    [InlineData("""{"roi":{"type":"Circle","x":11.5,"y":12.5,"radius":3}}""")]
+    [InlineData("""{"roi":{"type":"Polygon","points":[{"x":3,"y":2},{"x":10.5,"y":2},{"x":10.5,"y":8.5},{"x":3,"y":8.5}]}}""")]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":4,"points":[{"x":3,"y":5},{"x":10.5,"y":5}]}]}}""")]
     public async Task CropNonRectangularRoi_PreservesTightBoundsAndBinaryMask(string json)
     {
         using var source = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(90));
@@ -210,6 +213,9 @@ public sealed class Batch2ImageNodeTests
         var result = await RunImage(new ImageCropNode(), Image(source), json);
         using var actual = ImageFrom(result);
         using var actualMask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        using var translatedMask = result.Outputs["croppedRoi"].Require<VisionRoi>("croppedRoi").BuildMask(actual.Mat.Size());
+        using var translatedBinary = new Mat();
+        Cv2.InRange(translatedMask, Scalar.All(1), Scalar.All(255), translatedBinary);
         Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["x"]));
         Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["y"]));
         Assert.Equal(Cv2.CountNonZero(expectedMask), Convert.ToInt32(result.Summary["selectedPixels"]));
@@ -220,6 +226,7 @@ public sealed class Batch2ImageNodeTests
         Assert.Equal(new VisionPoint2D(3, 4), cropTransform.Apply(new VisionPoint2D(bounds.X + 3, bounds.Y + 4)));
         Assert.Equal(0d, Cv2.Norm(expected, actual.Mat, NormTypes.INF));
         Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
+        Assert.Equal(0d, Cv2.Norm(actualMask.Mat, translatedBinary, NormTypes.INF));
     }
 
     [Fact]
