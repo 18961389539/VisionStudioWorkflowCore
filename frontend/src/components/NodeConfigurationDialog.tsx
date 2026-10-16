@@ -66,6 +66,21 @@ function connectedCircleGeometry(value: unknown): { x: number; y: number; radius
   return { x, y, radius };
 }
 
+function connectedSearchLineGeometry(value: unknown): { start: { x: number; y: number }; end: { x: number; y: number } } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const line = value as Record<string, unknown>;
+  const point = (value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const coordinates = value as Record<string, unknown>;
+    const x = coordinates.x ?? coordinates.X;
+    const y = coordinates.y ?? coordinates.Y;
+    return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y) ? { x, y } : undefined;
+  };
+  const start = point(line.start ?? line.Start);
+  const end = point(line.end ?? line.End);
+  return start && end ? { start, end } : undefined;
+}
+
 export default function NodeConfigurationDialog({ node, catalogItem, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
@@ -270,10 +285,15 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
     : undefined;
   const connectedCircle = circleInputEdge && !transformInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
+  const searchLineInputSnapshot = searchLineInputEdge && (!resultStale || Boolean(preview))
+    ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
+    : undefined;
+  const connectedSearchLine = searchLineInputEdge && !transformInputEdge ? connectedSearchLineGeometry(searchLineInputSnapshot) : undefined;
+  const canDisplayConnectedSearchLine = Boolean(measurementGeometryType === 'line' && connectedSearchLine && !transformInputEdge && measurementGeometryFrameKind);
   const canEditMeasurementGeometry = Boolean(measurementGeometryType && !searchLineInputEdge
     && (!circleInputEdge || connectedCircle) && measurementGeometryFrameKind);
   useEffect(() => {
-    if (!open || !canEditMeasurementGeometry) return;
+    if (!open || !canEditMeasurementGeometry && !canDisplayConnectedSearchLine) return;
     if (measurementGeometryFrameKind === 'saved-reference' || measurementGeometryFrameKind === 'current') {
       setPreviewNodeId(node.id);
       setImageSource(measurementGeometryFrameKind === 'current' && !selectedInputAvailable && selectedOutputAvailable ? 'output' : 'input');
@@ -281,7 +301,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       setPreviewNodeId(cropMeasurementReferenceNodeId);
       setImageSource('output');
     }
-  }, [canEditMeasurementGeometry, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open,
+  }, [canEditMeasurementGeometry, canDisplayConnectedSearchLine, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open,
     selectedInputAvailable, selectedOutputAvailable, setImageSource]);
   const measurementImageFrameReady = measurementGeometryFrameKind === 'saved-reference'
     ? previewNodeId === node.id && Boolean(savedMeasurementReference && savedMeasurementReference.width > 0 && savedMeasurementReference.height > 0)
@@ -290,10 +310,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       : previewNodeId === node.id
         && (imageSource === 'input' && selectedInputAvailable || imageSource === 'output' && selectedOutputAvailable);
   const geometryNumber = (key: string, fallback: number) => Number.isFinite(Number(draft[key])) ? Number(draft[key]) : fallback;
-  const measurementGeometry: MeasurementGeometry | undefined = canEditMeasurementGeometry && measurementImageFrameReady
+  const measurementGeometry: MeasurementGeometry | undefined = (canEditMeasurementGeometry || canDisplayConnectedSearchLine) && measurementImageFrameReady
     ? measurementGeometryType === 'line'
-      ? { type: 'line', start: { x: geometryNumber('startX', 120), y: geometryNumber('startY', 240) },
-        end: { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
+      ? { type: 'line', start: connectedSearchLine?.start ?? { x: geometryNumber('startX', 120), y: geometryNumber('startY', 240) },
+        end: connectedSearchLine?.end ?? { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
         ...(catalogItem.type === 'measure.caliperLine' ? { profileSpan: Math.max(0, geometryNumber('edgeLength', 0)),
           profileCount: geometryNumber('caliperCount', 9) } : {}) }
       : { type: 'circle', center: connectedCircle ? { x: connectedCircle.x, y: connectedCircle.y }
@@ -304,7 +324,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         angleStepDeg: geometryNumber('angleStepDeg', 5), centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
   const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
-    if (locked) return;
+    if (locked || searchLineInputEdge) return;
     if (geometry.type === 'line') {
       setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y }));
     } else {
@@ -831,7 +851,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge
             ? `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
-            : '上游 searchLine 会覆盖本节点的起点和终点参数；请在提供搜索线的上游节点中调整几何。'} />}
+            : connectedSearchLine
+              ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
+              : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。'} />}
         {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict ? 'error' : transformInputEdge ? 'warning' : 'info'}
           title={correctedCircleTransformConflict ? '定位修正圆不能再次应用 transform' : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
           description={correctedCircleTransformMessage ?? (transformInputEdge
@@ -847,7 +869,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
           overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
-          measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && !locked}
+          measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked}
           onMeasurementGeometryChange={updateMeasurementGeometry}
           roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : roiInputImageSourceId ? `输入图像 · ${nodeLabels[roiInputImageSourceId] ?? roiInputImageSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}

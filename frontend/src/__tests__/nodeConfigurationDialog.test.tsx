@@ -20,6 +20,9 @@ vi.mock('../components/ImageViewer', () => ({
       {measurementGeometry?.type === 'circle' && <span data-testid="circle-geometry" data-center-x={measurementGeometry.center.x}
         data-center-y={measurementGeometry.center.y} data-radius={measurementGeometry.radius} data-band={measurementGeometry.band}
         data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
+      {measurementGeometry?.type === 'line' && <span data-testid="line-geometry" data-start-x={measurementGeometry.start.x}
+        data-start-y={measurementGeometry.start.y} data-end-x={measurementGeometry.end.x} data-end-y={measurementGeometry.end.y}
+        data-editable={Boolean(measurementGeometryEditable)} />}
       {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
       {measurementGeometryEditable && measurementGeometry?.type === 'circle' && measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false
         && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
@@ -609,6 +612,34 @@ describe('caliper geometry input guidance', () => {
     for (const name of ['startX', 'startY', 'endX', 'endY'])
       expect(dialog.queryByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === name)!.label })).toBeNull();
     expect(dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
+  });
+
+  it('shows the actual connected search line as a read-only image overlay', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',
+      inputs: lineCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20, caliperCount: 9 } } };
+    const geometryNode: Node = { id: 'fitted-line', position: { x: 0, y: 0 }, data: { typeKey: 'measure.fitLine', label: '上游拟合线' } };
+    const imageNode: Node = { id: 'line-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'line-geometry-input', source: geometryNode.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' }
+    ];
+    const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { searchLine: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
+        value: { start: { x: 14, y: 22 }, end: { x: 88, y: 46 } } } } }] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: lineNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, geometryNode, imageNode], edges, result: lineResult });
+
+    expect(dialog.getByText(/蓝色线显示本次运行实际使用的上游搜索线/)).toBeTruthy();
+    const geometry = await dialog.findByTestId('line-geometry');
+    expect(geometry.getAttribute('data-start-x')).toBe('14');
+    expect(geometry.getAttribute('data-start-y')).toBe('22');
+    expect(geometry.getAttribute('data-end-x')).toBe('88');
+    expect(geometry.getAttribute('data-end-y')).toBe('46');
+    expect(geometry.getAttribute('data-editable')).toBe('false');
+    expect(dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
   });
 
   it('warns against applying a pose transform twice to an already corrected circle', () => {
