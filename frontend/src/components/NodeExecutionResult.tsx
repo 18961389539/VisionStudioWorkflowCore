@@ -133,6 +133,17 @@ function valueText(value: unknown): string {
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
+function summaryForDisplay(summary: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(summary).map(([key, value]) => [key,
+    key === 'referenceImage' && typeof value === 'string' && value.length > 0
+      ? `[图像数据已隐藏，${value.length.toLocaleString()} 个 Base64 字符]`
+      : value]));
+}
+
+function summaryJsonForDisplay(summary: Record<string, unknown>) {
+  return JSON.stringify(summaryForDisplay(summary), null, 2);
+}
+
 function Values({ values, catalog, input = false }: { values: Record<string, VisionValueSnapshot>; catalog: NodeCatalogItem; input?: boolean }) {
   return <div className="node-result-table-wrap"><table className="node-info-table node-result-table">
     <thead><tr><th>名称</th><th>类型</th><th>值</th></tr></thead>
@@ -150,8 +161,11 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const notFound = Boolean(report?.success && report.summary.found === false && measurementNodeTypes.has(catalog.type));
   const notFoundMessage = measurementNotFoundMessage(catalog.type, report?.summary);
   const reportErrorMessage = report?.error ? executionErrorMessage(catalog, report.error) : undefined;
-  const prominentSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
-    ? pickSummaryKeys(report.summary, catalog.type, 4) : [];
+  const reportSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
+    ? pickSummaryKeys(report.summary, catalog.type, catalog.type === 'measure.caliperCircle' ? 5 : 4) : [];
+  const prominentSummaryKeys = catalog.type === 'measure.caliper' && report?.summary.found === false
+    ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength'].includes(key))].slice(0, 4)
+    : reportSummaryKeys;
   return <section className="node-execution-result" aria-label="本节点运行结果">
     <button type="button" className="node-result-heading" aria-label="本节点运行结果" aria-expanded={expanded}
       aria-controls={bodyId} onClick={() => onExpandedChange(!expanded)}>
@@ -179,9 +193,9 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
           {prominentSummaryKeys.map(key => <span key={key}><b>{portNames[key] ?? key}</b> {valueText(report.summary[key])}</span>)}
         </div>}
         {report.outputs && Object.keys(report.outputs).length > 0 ? <Values values={report.outputs} catalog={catalog} />
-          : <div className="node-result-scalars">{Object.entries(report.summary ?? {}).map(([key, value]) => <span key={key}><b>{portNames[key] ?? key}</b> {valueText(value)}</span>)}</div>}
+          : <div className="node-result-scalars">{Object.entries(summaryForDisplay(report.summary)).map(([key, value]) => <span key={key}><b>{portNames[key] ?? key}</b> {valueText(value)}</span>)}</div>}
         {report.inputs && Object.keys(report.inputs).length > 0 && <details><summary>本次运行的输入</summary><Values values={report.inputs} catalog={catalog} input /></details>}
-        <details><summary>完整摘要</summary><pre className="debug-json">{JSON.stringify(report.summary, null, 2)}</pre></details>
+        <details><summary>完整摘要</summary><pre className="debug-json">{summaryJsonForDisplay(report.summary)}</pre></details>
       </>}
     </>}
     </div>

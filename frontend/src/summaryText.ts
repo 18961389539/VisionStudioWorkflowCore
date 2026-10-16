@@ -39,7 +39,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'contour.extract': ['found', 'count', 'holes'], 'contour.filter': ['count', 'dropped'],
   'contour.properties': ['area', 'circularity', 'selectedIndex'],
   'feature.edgeSubpixel': ['found', 'edgeX', 'edgeY'], 'measure.caliperLine': ['found', 'fitError', 'sampleCount'],
-  'measure.caliperCircle': ['found', 'fittedRadius', 'fitError'], 'measure.fitEllipse': ['width', 'height', 'angleDeg'],
+  'measure.caliperCircle': ['found', 'fittedRadius', 'radiusDelta', 'radiusSpread', 'fitError'], 'measure.fitEllipse': ['width', 'height', 'angleDeg'],
   'match.shape': ['found', 'bestScore', 'matchedAngle'], 'roi.transform': ['roiType', 'thetaDeg', 'basePose', 'currentPose'],
   'measure.blobs': ['mode', 'count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
   'value.arithmetic': ['result'], 'value.range': ['pass', 'value'], 'logic.boolean': ['result'],
@@ -79,9 +79,10 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
 
 /** 低信息量的元数据键（单位 / 类型标注 / 时间戳 …）：没有主字段命中时才兜底展示。 */
 const META_SUMMARY_KEYS = new Set([
-  'algorithmBackend', 'modelCacheHit', 'roi', 'unit', 'source', 'frame', 'pixelFormat', 'frameMode', 'timestamp', 'timestampBasis',
+  'algorithmBackend', 'modelCacheHit', 'roi', 'reason', 'unit', 'source', 'frame', 'pixelFormat', 'frameMode', 'timestamp', 'timestampBasis',
   'centerType', 'circleType', 'resultReadyTag', 'tagId', 'dataType', 'writeOrder', 'replay'
 ]);
+const SUPPRESSED_SUMMARY_KEYS = new Set(['referenceImage']);
 
 const isMetaKey = (key: string) => META_SUMMARY_KEYS.has(key) || key.endsWith('Type');
 
@@ -91,7 +92,7 @@ export function pickSummaryKeys(
   typeKey?: string,
   max = 3,
 ): string[] {
-  const keys = Object.entries(summary ?? {}).filter(([, value]) => isScalar(value)).map(([key]) => key);
+  const keys = Object.entries(summary ?? {}).filter(([key, value]) => !SUPPRESSED_SUMMARY_KEYS.has(key) && isScalar(value)).map(([key]) => key);
   if (keys.length === 0) return [];
   const primary = (typeKey ? PRIMARY_SUMMARY_KEYS[typeKey] ?? [] : []).filter((key) => keys.includes(key));
   const rest = keys.filter((key) => !primary.includes(key));

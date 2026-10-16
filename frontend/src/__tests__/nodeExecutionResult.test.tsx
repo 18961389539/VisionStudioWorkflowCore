@@ -48,6 +48,29 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.queryByText('未找到有效结果')).toBeNull();
   });
 
+  it('puts the no-result state before empty single-caliper coordinates', () => {
+    const caliperResult = result(false, 'no-edge-above-threshold');
+    caliperResult.nodeReports[0].summary = { found: false, reason: 'no-edge-above-threshold', x: null, y: null, strength: null };
+    mount('measure.caliper', caliperResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toBe('找到目标 否');
+  });
+
+  it('localizes and prioritizes the fitted radius and roundness metrics', () => {
+    const circleResult = result(true, 'ok');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = { found: true, fittedRadius: 12.5, fitError: 0.2, radiusDelta: 0.5, radiusSpread: 1.2 };
+    mount('measure.caliperCircle', circleResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('拟合半径 12.5');
+    expect(summary.textContent).toContain('半径偏差 0.5');
+    expect(summary.textContent).toContain('半径极差 1.2');
+    expect(summary.textContent).toContain('拟合误差 0.2');
+    expect(summary.textContent).not.toContain('fittedRadius');
+  });
+
   it('explains when the search geometry is clipped or excluded by the ROI', () => {
     mount(catalog.type, result(false, 'search-region-clipped-too-short'));
     expect(screen.getByText(/平行搜索剖面与图像相交的部分不足 2 px/)).toBeTruthy();
@@ -111,6 +134,19 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toContain('角度修正 12.5');
     expect(summary.textContent).toContain('基准位姿 100,80,0');
     expect(summary.textContent).toContain('当前位姿 130,90,12.5');
+  });
+
+  it('summarizes captured reference pixels instead of dumping the image payload into result details', () => {
+    const roiResult = result(true, 'ok');
+    roiResult.nodeReports[0].nodeType = 'roi.transform';
+    const referenceImage = 'encoded-reference-image-'.repeat(20);
+    roiResult.nodeReports[0].summary = { referenceCaptured: true, referenceImage, referenceWidth: 640, referenceHeight: 480 };
+    delete roiResult.nodeReports[0].outputs;
+    mount('roi.transform', roiResult);
+
+    expect(screen.getAllByText(/图像数据已隐藏，\d+ 个 Base64 字符/)).toHaveLength(2);
+    expect(screen.queryByText(referenceImage)).toBeNull();
+    expect(screen.getByLabelText('关键测量结果').textContent).not.toContain(referenceImage);
   });
 
   it('localizes common crop and ROI-transform errors while keeping raw diagnostics available', () => {
