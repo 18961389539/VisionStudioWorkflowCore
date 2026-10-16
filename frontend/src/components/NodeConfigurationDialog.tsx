@@ -342,7 +342,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle, radialBand: Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
-  const roiInputImageSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;
+  const imageInputSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;
   const roiSourceNode = roiInputEdge ? nodes.find((item) => item.id === roiInputEdge.source) : undefined;
   const roiSourceDebugImageId = roiInputEdge
     ? edges.find((edge) => edge.target === roiInputEdge.source && edge.targetHandle === 'debugImage')?.source
@@ -350,10 +350,16 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   // RoiTransform overlays are in the debugImage coordinate frame. Only copy them onto an input
   // image when that exact frame is connected, so a different preprocessed image is never misled.
   const roiOverlayFrameMatchesInput = roiSourceNode?.data.typeKey === 'roi.transform'
-    && Boolean(roiInputImageSourceId && (roiInputImageSourceId === roiInputEdge?.source || roiInputImageSourceId === roiSourceDebugImageId));
+    && Boolean(imageInputSourceId && (imageInputSourceId === roiInputEdge?.source || imageInputSourceId === roiSourceDebugImageId));
   const connectedRoiInputOverlays = roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
     ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
+    : [];
+  // Measurement nodes pass the input image through unchanged, so their own result overlays
+  // remain aligned when users switch to the input image to edit measurement geometry.
+  const sameFrameMeasurementOverlays = measurementGeometryType && imageSource === 'input'
+    && imageViewerSource.nodeId === imageInputSourceId
+    ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === node.id)
     : [];
   useEffect(() => {
     if (open && isRoiTransform && roiImageView !== 'reference') setImageSource(roiImageView);
@@ -389,7 +395,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? [...trainingContours.map((points, index) => ({ id: `saved-shape-training-contour-${index}`, type: 'Polyline' as const, points, label: '已保存模型轮廓片段', stroke: '#13c2c2', strokeWidth: 2 })),
       { id: 'saved-shape-training-origin', type: 'Point', x: Number(draft.trainedOriginImageX ?? 0), y: Number(draft.trainedOriginImageY ?? 0), label: '训练原点', stroke: '#fa541c', strokeWidth: 3 }]
     : (isRoiTransform && roiImageView === 'reference') || showCapturedTrainingImage || showMeasurementReferenceImage ? []
-      : [...new Map([...viewerOverlays, ...connectedRoiInputOverlays].map(overlay => [`${overlay.nodeId ?? ''}:${overlay.id}`, overlay])).values()];
+      : [...new Map([...viewerOverlays, ...connectedRoiInputOverlays, ...sameFrameMeasurementOverlays]
+        .map(overlay => [`${overlay.nodeId ?? ''}:${overlay.id}`, overlay])).values()];
   const imagePorts = [...catalogItem.inputs, ...catalogItem.outputs].some((p) => p.dataType === 'Image' || p.dataType === 'DomainImage');
   const showImage = imagePorts || initialTab === 'image';
   const supportsRoi = catalogItem.capabilities?.supportsRoi === true;
@@ -884,7 +891,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
           measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked}
           onMeasurementGeometryChange={updateMeasurementGeometry}
-          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : roiInputImageSourceId ? `输入图像 · ${nodeLabels[roiInputImageSourceId] ?? roiInputImageSourceId}` : String(node.data.label ?? node.id)}
+          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : imageInputSourceId ? `输入图像 · ${nodeLabels[imageInputSourceId] ?? imageInputSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
           emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? regionEditMode === 'clutter' ? '在训练图像上绘制预期为空的杂乱区域' : '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
           emptyAction={{

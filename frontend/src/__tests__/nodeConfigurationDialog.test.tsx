@@ -712,6 +712,25 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper/image');
   });
 
+  it('keeps caliper result overlays visible while editing over the same-frame input image', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺找线',
+      inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const resultWithCandidate: RunResult = { ...report, runId: 'caliper-candidate-run', overlays: [
+      { id: 'caliper-line-candidate-point-0', nodeId: caliperNode.id, type: 'Point', x: 64, y: 32, stroke: '#faad14', strokeWidth: 2.5 }
+    ], nodeReports: [{ nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: true, durationMs: 1,
+      summary: { found: false, reason: 'too-few-edge-points' } }] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: resultWithCandidate });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('caliper-line-candidate-point-0');
+  });
+
   it('hides local search-line coordinates when a searchLine input is connected', () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',
