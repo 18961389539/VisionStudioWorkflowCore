@@ -567,6 +567,68 @@ public sealed class ParameterValidationTests
         Assert.NotEmpty(CreateCompiler().Compile(workflow).DslJson);
     }
 
+    [Fact]
+    public void CaliperLineRejectsMinimumValidCountAboveConfiguredCount()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperLine", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"caliperCount":5,"minValidCalipers":6}"""));
+        var workflow = new WorkflowDefinition("caliper-line-impossible-gate", "Caliper line impossible gate", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("requires 6 valid calipers, but caliperCount is 5", error.Message);
+        Assert.Contains("Lower minValidCalipers or increase caliperCount", error.Message);
+    }
+
+    [Fact]
+    public void CaliperCircleRejectsMinimumValidCountAboveCountSampling()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"caliperCount":5,"minValidCalipers":6}"""));
+        var workflow = new WorkflowDefinition("caliper-circle-impossible-gate", "Caliper circle impossible gate", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("requires 6 valid calipers", error.Message);
+        Assert.Contains("generate only 5", error.Message);
+    }
+
+    [Fact]
+    public void CaliperCircleRejectsStepArcThatCannotProvideThreePointsForAFit()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"samplingMode":"step","angleStartDeg":10,"angleEndDeg":30,"angleStepDeg":15}"""));
+        var workflow = new WorkflowDefinition("caliper-circle-too-few-steps", "Caliper circle too few steps", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("generate only 2 radial caliper(s)", error.Message);
+        Assert.Contains("circle fitting requires at least 3", error.Message);
+    }
+
+    [Fact]
+    public void CaliperCircleRejectsStepModeGateAboveGeneratedCaliperCount()
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("target", "measure.caliperCircle", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"samplingMode":"step","angleStartDeg":0,"angleEndDeg":90,"angleStepDeg":30,"minValidCalipers":5}"""));
+        var workflow = new WorkflowDefinition("caliper-circle-step-gate", "Caliper circle step gate", [source, target],
+            [new EdgeDefinition("image", "source", "image", "target", "image", "data")]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("requires 5 valid calipers", error.Message);
+        Assert.Contains("generate only 4", error.Message);
+    }
+
     [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]

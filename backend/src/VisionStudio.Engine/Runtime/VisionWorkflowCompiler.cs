@@ -209,6 +209,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             ValidateNodeParameters(node, catalog, connectedInputPorts);
             ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
             ValidateCaliperCircleArc(node, catalog);
+            ValidateCaliperSampleRequirements(node, catalog);
         }
     }
 
@@ -629,6 +630,66 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             throw new InvalidOperationException(
                 $"Node '{node.Id}' arc start and end angles are equal, producing only one radial caliper. Widen the arc angle range to fit a circle.");
     }
+
+    private static void ValidateCaliperSampleRequirements(NodeDefinition node, NodeCatalogItem catalog)
+    {
+        if (catalog.Type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase))
+        {
+            var count = RoundedIntParameter(node, catalog, "caliperCount", 9, 3, 101);
+            var minimum = RoundedIntParameter(node, catalog, "minValidCalipers", 3, 3, 101);
+            if (minimum > count)
+                throw new InvalidOperationException(
+                    $"Node '{node.Id}' requires {minimum} valid calipers, but caliperCount is {count}. " +
+                    "Lower minValidCalipers or increase caliperCount.");
+            return;
+        }
+
+        if (!catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)) return;
+
+        var mode = node.GetString("samplingMode", string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(mode))
+            mode = node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count";
+
+        var countAvailable = mode == "count"
+            ? RoundedIntParameter(node, catalog, "caliperCount", 72, 3, 361)
+            : CircleCaliperCountByStep(node, catalog);
+        if (countAvailable < 3)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' arc and angleStepDeg generate only {countAvailable} radial caliper(s); circle fitting requires at least 3. " +
+                "Widen the arc or reduce angleStepDeg.");
+
+        var minimumValid = RoundedIntParameter(node, catalog, "minValidCalipers", 3, 3, 361);
+        if (minimumValid > countAvailable)
+            throw new InvalidOperationException(
+                $"Node '{node.Id}' requires {minimumValid} valid calipers, but its arc and sampling settings generate only {countAvailable}. " +
+                "Lower minValidCalipers, widen the arc, or increase sampling density.");
+    }
+
+    private static int CircleCaliperCountByStep(NodeDefinition node, NodeCatalogItem catalog)
+    {
+        var start = GetNumericParameter(node, catalog, "angleStartDeg");
+        var end = GetNumericParameter(node, catalog, "angleEndDeg");
+        var rawSpan = end - start;
+        var span = rawSpan % 360;
+        var fullCircle = Math.Abs(rawSpan) >= 1e-9 && Math.Abs(span) < 1e-9;
+        if (Math.Abs(rawSpan) < 1e-9) return 1;
+        if (fullCircle) span = 360;
+        else if (span < 0) span += 360;
+
+        var step = Math.Clamp(GetNumericParameter(node, catalog, "angleStepDeg"), 0.5, 45);
+        var intervalCount = span / step;
+        var nearestIntervalCount = (int)Math.Round(intervalCount);
+        var reachesEnd = nearestIntervalCount > 0
+            && Math.Abs(nearestIntervalCount * step - span) <= 1e-9;
+        var count = fullCircle && reachesEnd
+            ? nearestIntervalCount
+            : (int)Math.Floor(intervalCount) + 1;
+        var maximumCount = fullCircle ? 360 : 361;
+        return Math.Min(count, maximumCount);
+    }
+
+    private static int RoundedIntParameter(NodeDefinition node, NodeCatalogItem catalog, string name, int fallback, int minimum, int maximum)
+        => (int)Math.Clamp(Math.Floor(GetNumericParameter(node, catalog, name) + 0.5), minimum, maximum);
 
     private static double GetNumericParameter(NodeDefinition node, NodeCatalogItem catalog, string name)
     {
