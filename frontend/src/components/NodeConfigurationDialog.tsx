@@ -276,6 +276,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         angleStepDeg: geometryNumber('angleStepDeg', 5) }
     : undefined;
   const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
+    if (locked) return;
     if (geometry.type === 'line') {
       setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y }));
     } else {
@@ -816,7 +817,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
           overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
-          measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry)}
+          measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && !locked}
           onMeasurementGeometryChange={updateMeasurementGeometry}
           roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : roiInputImageSourceId ? `输入图像 · ${nodeLabels[roiInputImageSourceId] ?? roiInputImageSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}

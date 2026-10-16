@@ -369,6 +369,39 @@ describe('caliper geometry input guidance', () => {
     });
   });
 
+  it('makes caliper geometry read-only when the dialog becomes disabled', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    const view = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: report });
+
+    expect(await view.dialog.findByRole('button', { name: '模拟拖动搜索线' })).toBeTruthy();
+    view.rerender(<NodeConfigurationDialog {...view.props} disabled />);
+    expect(view.dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
+  });
+
+  it('locks caliper geometry editing while a preview is running', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    let finishPreview!: (value: RunResult) => void;
+    const onPreview = vi.fn(() => new Promise<RunResult>(resolve => { finishPreview = resolve; }));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: report, onPreview });
+
+    expect(await dialog.findByRole('button', { name: '模拟拖动搜索线' })).toBeTruthy();
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true));
+    expect(dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
+
+    finishPreview(report);
+    await waitFor(() => expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(dialog.getByRole('button', { name: '模拟拖动搜索线' })).toBeTruthy();
+  });
+
   it('locks a local ROI when the caliper receives an upstream current-image mask', async () => {
     const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
     const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺测量',
