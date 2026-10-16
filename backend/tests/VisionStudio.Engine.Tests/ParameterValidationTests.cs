@@ -55,6 +55,27 @@ public sealed class ParameterValidationTests
         Assert.Contains("n1", compiled.OrderedNodeIds);
     }
 
+    [Theory]
+    [InlineData("measure.caliper", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
+    [InlineData("feature.edgeSubpixel", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
+    [InlineData("measure.caliperLine", """{"startX":12000,"startY":8000,"endX":16000,"endY":8000}""")]
+    [InlineData("measure.caliperCircle", """{"centerX":12000,"centerY":8000,"radius":8000}""")]
+    public void HighResolutionCaliperGeometry_Compiles(string nodeType, string parametersJson)
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var target = new NodeDefinition("n1", nodeType, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(parametersJson));
+        var workflow = new WorkflowDefinition("high-resolution-caliper", "High resolution caliper", [source, target],
+        [
+            new EdgeDefinition("control", "source", "next", "n1", "exec", "control"),
+            new EdgeDefinition("image", "source", "image", "n1", "image", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("n1", compiled.OrderedNodeIds);
+    }
+
     [Fact]
     public void CaliperCircleRejectsASecondTransformOnAnAlreadyCorrectedRoiCircle()
     {

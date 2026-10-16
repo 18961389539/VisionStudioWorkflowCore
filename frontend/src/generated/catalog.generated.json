@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "957fb630c2c526793196d141579e233f2f40d40b8cea3315fc7cb1e81b929a70",
+  "hash": "60973fa26021a93994f2f5a522594dd39c389f1b9e42f9e37a20d244d32ee1f5",
   "items": [
     {
       "type": "image.acquire",
@@ -3525,8 +3525,8 @@
           "label": "Start X",
           "type": "number",
           "defaultValue": 120,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -3536,8 +3536,8 @@
           "label": "Start Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -3547,8 +3547,8 @@
           "label": "End X",
           "type": "number",
           "defaultValue": 520,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -3558,8 +3558,8 @@
           "label": "End Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6085,8 +6085,8 @@
           "label": "Center X",
           "type": "number",
           "defaultValue": 320,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle"
@@ -6096,8 +6096,8 @@
           "label": "Center Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle"
@@ -6108,7 +6108,7 @@
           "type": "number",
           "defaultValue": 100,
           "min": 1,
-          "max": 5000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle"
@@ -6404,8 +6404,8 @@
           "label": "Start X",
           "type": "number",
           "defaultValue": 120,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6415,8 +6415,8 @@
           "label": "Start Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6426,8 +6426,8 @@
           "label": "End X",
           "type": "number",
           "defaultValue": 520,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6437,8 +6437,8 @@
           "label": "End Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6627,8 +6627,8 @@
           "label": "Start X",
           "type": "number",
           "defaultValue": 120,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6638,8 +6638,8 @@
           "label": "Start Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6649,8 +6649,8 @@
           "label": "End X",
           "type": "number",
           "defaultValue": 520,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"
@@ -6660,8 +6660,8 @@
           "label": "End Y",
           "type": "number",
           "defaultValue": 240,
-          "min": -10000,
-          "max": 10000,
+          "min": -100000,
+          "max": 100000,
           "step": 1,
           "unit": "px",
           "group": "Search Line"

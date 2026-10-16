@@ -48,11 +48,39 @@ describe('precision workflow catalog', () => {
     for (const type of types) {
       const item = fallbackCatalogRaw.find(entry => entry.type === type)!;
       for (const name of ['startX', 'startY', 'endX', 'endY'])
-        expect(item.parameters.find(parameter => parameter.name === name)?.min).toBe(-10000);
+        expect(item.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -100000, max: 100000 });
     }
     const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
     for (const name of ['centerX', 'centerY'])
-      expect(circle.parameters.find(parameter => parameter.name === name)?.min).toBe(-10000);
+      expect(circle.parameters.find(parameter => parameter.name === name)).toMatchObject({ min: -100000, max: 100000 });
+    expect(circle.parameters.find(parameter => parameter.name === 'radius')).toMatchObject({ min: 1, max: 100000 });
+  });
+
+  it('validates caliper geometry across the full supported high-resolution range', () => {
+    const image = fallbackCatalogRaw.find(item => item.type === 'image.synthetic')!;
+    const imageNode = { id: 'image', position: { x: 0, y: 0 }, data: { typeKey: image.type,
+      inputs: image.inputs, outputs: image.outputs, parameters: makeDefaultParameters(image) } };
+    for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine']) {
+      const item = fallbackCatalogRaw.find(entry => entry.type === type)!;
+      const parameters = { ...makeDefaultParameters(item), startX: 12_000, startY: 8_000, endX: 16_000, endY: 8_000 };
+      expect(validateWorkflow([
+        imageNode,
+        { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: type, inputs: item.inputs, outputs: item.outputs, parameters } }
+      ], fallbackCatalogRaw, [
+        { id: 'control', source: 'image', sourceHandle: 'next', target: 'caliper', targetHandle: 'exec', data: { kind: 'control' } },
+        { id: 'image', source: 'image', sourceHandle: 'image', target: 'caliper', targetHandle: 'image', data: { kind: 'data' } }
+      ])).toEqual([]);
+    }
+
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    const circleParameters = { ...makeDefaultParameters(circle), centerX: 12_000, centerY: 8_000, radius: 8_000 };
+    expect(validateWorkflow([
+      imageNode,
+      { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: circle.type, inputs: circle.inputs, outputs: circle.outputs, parameters: circleParameters } }
+    ], fallbackCatalogRaw, [
+      { id: 'control', source: 'image', sourceHandle: 'next', target: 'caliper', targetHandle: 'exec', data: { kind: 'control' } },
+      { id: 'image', source: 'image', sourceHandle: 'image', target: 'caliper', targetHandle: 'image', data: { kind: 'data' } }
+    ])).toEqual([]);
   });
 
   it('can validate the shipped precision template including the image and dynamic ROI connections', () => {
