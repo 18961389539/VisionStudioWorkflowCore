@@ -85,6 +85,24 @@ public sealed class RoiCorrectionSafetyTests : IDisposable
         Assert.Contains("dimensions", error.Message);
     }
 
+    [Fact]
+    public async Task CorrectionRejectsCoordinatesOutsideTheRoiRasterizationRange()
+    {
+        var inputRoiError = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(), [],
+            """{"roi":{"type":"Circle","x":10000001,"y":10,"radius":4}}"""));
+        Assert.Contains("10000000", inputRoiError.Message);
+
+        var poseError = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(), new()
+        {
+            ["currentPose"] = VisionValue.Pose(new(10_000_001, 0, 0))
+        }, """{"roi":{"type":"Rectangle","x":2,"y":3,"width":4,"height":5}}"""));
+        Assert.Contains("10000000", poseError.Message);
+
+        var correctedRoiError = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(), [],
+            """{"roi":{"type":"Rectangle","x":9999998,"y":3,"width":2,"height":5},"currentX":100}"""));
+        Assert.Contains("10000000", correctedRoiError.Message);
+    }
+
     [Theory]
     [InlineData("measure.caliperLine", false)]
     [InlineData("measure.caliperLine", true)]

@@ -25,6 +25,7 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
 public sealed class RoiTransformNode : IVisionNodeExecutor
 {
     public string Type => "roi.transform";
+    private const double MaxRoiCoordinate = 10_000_000;
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
@@ -39,6 +40,9 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             currentPose = poseValue.Require<VisionPose2D>("currentPose");
         if (new[] { basePose.X, basePose.Y, basePose.ThetaDeg, currentPose.X, currentPose.Y, currentPose.ThetaDeg }.Any(v => !double.IsFinite(v)))
             throw new InvalidOperationException("Base/current pose components must be finite (non-finite pose received).");
+        if (Math.Abs(basePose.X) > MaxRoiCoordinate || Math.Abs(basePose.Y) > MaxRoiCoordinate
+            || Math.Abs(currentPose.X) > MaxRoiCoordinate || Math.Abs(currentPose.Y) > MaxRoiCoordinate)
+            throw new InvalidOperationException($"Base/current pose coordinates must be within ±{MaxRoiCoordinate:0} px.");
 
         // A single node execution freezes pixels and the actual connected pose together.
         // This also works before any ROI exists, without fabricating a correction result.
@@ -185,6 +189,8 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             }
         }
 
+        // Reject invalid coordinates here, before they reach image-mask rasterizers or measurement nodes.
+        ValidateTransformRoi(transformed);
         var pointsF = region.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray();
         var rect = JLVisionOperators.MinAreaRect(pointsF);
         var rectangle = new VisionRectangle2D(
@@ -310,6 +316,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
     private static void ValidateTransformRoi(VisionRoi roi)
     {
         static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
+        static bool Bounded(params double?[] values) => values.All(value => value.HasValue && Math.Abs(value.Value) <= MaxRoiCoordinate);
         switch (roi.Type)
         {
             case VisionRoiType.Rectangle:
@@ -318,20 +325,22 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 var y = roi.Y ?? 0;
                 var width = roi.Width ?? 0;
                 var height = roi.Height ?? 0;
-                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || width <= 0 || height <= 0
-                    || !double.IsFinite(x + width) || !double.IsFinite(y + height))
-                    throw new InvalidOperationException("The rectangle ROI needs finite coordinates and positive width and height.");
+                if (!Finite(roi.X, roi.Y, roi.Width, roi.Height) || !Bounded(roi.X, roi.Y, roi.Width, roi.Height)
+                    || width <= 0 || height <= 0 || !double.IsFinite(x + width) || !double.IsFinite(y + height)
+                    || Math.Abs(x + width) > MaxRoiCoordinate || Math.Abs(y + height) > MaxRoiCoordinate)
+                    throw new InvalidOperationException($"The rectangle ROI needs positive dimensions and coordinates within ±{MaxRoiCoordinate:0} px.");
                 break;
             }
             case VisionRoiType.Circle:
-                if (!Finite(roi.X, roi.Y, roi.Radius) || roi.Radius <= 0)
-                    throw new InvalidOperationException("The circle ROI needs a finite center and a positive radius.");
+                if (!Finite(roi.X, roi.Y, roi.Radius) || !Bounded(roi.X, roi.Y, roi.Radius) || roi.Radius <= 0)
+                    throw new InvalidOperationException($"The circle ROI needs a positive radius and coordinates within ±{MaxRoiCoordinate:0} px.");
                 break;
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
-                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
-                    throw new InvalidOperationException("The polygon ROI needs at least three finite points.");
+                if (points.Count < 3 || points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                    || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
+                    throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");
                 var area2 = points.Select((point, index) =>
                 {
                     var next = points[(index + 1) % points.Count];
@@ -352,8 +361,9 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
                         || stroke.Points is null || stroke.Points.Count == 0
-                        || stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)))
-                        throw new InvalidOperationException("Brush ROI strokes need a valid mode, finite points and a width between 0 and 1024 px.");
+                        || stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                            || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
+                        throw new InvalidOperationException($"Brush ROI strokes need a valid mode, finite points within ±{MaxRoiCoordinate:0} px and a width between 0 and 1024 px.");
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("The brush ROI may contain at most 500000 points.");
