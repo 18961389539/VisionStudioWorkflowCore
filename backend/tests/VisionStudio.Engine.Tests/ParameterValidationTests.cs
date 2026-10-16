@@ -102,6 +102,34 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("roi.transform", "roi", """{"type":"Ellipse"}""", "known string type")]
+    [InlineData("match.shape", "searchRoi", """{"type":"Ellipse"}""", "known string type")]
+    [InlineData("match.shape", "clutterRoi", "[]", "must be an object or null")]
+    public void MalformedRoiParametersAreRejectedDuringCompilation(string nodeType, string parameterName, string roiJson, string message)
+    {
+        var parameters = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            $"{{\"{parameterName}\":{roiJson}}}");
+        var node = new NodeDefinition("n1", nodeType, null, null, parameters);
+        WorkflowDefinition workflow;
+        if (nodeType.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+        {
+            var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+            workflow = new WorkflowDefinition("malformed-roi", "Malformed ROI", [source, node],
+            [
+                new EdgeDefinition("start", "source", "next", "n1", "exec", "control"),
+                new EdgeDefinition("image", "source", "image", "n1", "image", "data")
+            ]);
+        }
+        else workflow = new WorkflowDefinition("malformed-roi", "Malformed ROI", [node], []);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'n1'", error.Message);
+        Assert.Contains($"ROI parameter '{parameterName}'", error.Message);
+        Assert.Contains(message, error.Message);
+    }
+
+    [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"open","kernelWidth":"inactive"}""")]

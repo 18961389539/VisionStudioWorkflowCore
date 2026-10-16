@@ -167,6 +167,20 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     throw new InvalidOperationException($"Required input '{node.Id}.{required.Name}' ({required.DataType}) is not connected.");
             }
 
+            var roiParameterNames = new List<string>();
+            if (catalog.Capabilities?.SupportsRoi == true) roiParameterNames.Add("roi");
+            if (catalog.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+                roiParameterNames.AddRange(["searchRoi", "clutterRoi"]);
+            foreach (var roiParameter in roiParameterNames)
+            {
+                if (node.Parameters?.ContainsKey(roiParameter) != true) continue;
+                try { _ = node.GetRoi(roiParameter); }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidOperationException($"Node '{node.Id}' has an invalid ROI setting: {exception.Message}", exception);
+                }
+            }
+
             ValidateNodeParameters(node, catalog);
         }
     }
