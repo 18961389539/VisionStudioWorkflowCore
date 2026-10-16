@@ -357,6 +357,31 @@ public sealed class Batch5PrecisionNodeTests
         Assert.Contains(parameterName, error.Message);
     }
 
+    [Theory]
+    [InlineData("measure.caliperLine", 4.5, 5)]
+    [InlineData("measure.caliperLine", 5.5, 6)]
+    [InlineData("measure.caliperCircle", 4.5, 5)]
+    [InlineData("measure.caliperCircle", 5.5, 6)]
+    public async Task CaliperCountsUseTheSameHalfUpRoundingAsThePreview(string nodeType, double requestedCount, int expectedCount)
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        var isCircle = nodeType == "measure.caliperCircle";
+        var parameters = isCircle
+            ? JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["centerX"] = 32, ["centerY"] = 32, ["radius"] = 12,
+                ["samplingMode"] = "count", ["caliperCount"] = requestedCount
+            })
+            : JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["startX"] = 10, ["startY"] = 32, ["endX"] = 50, ["endY"] = 32,
+                ["edgeLength"] = 20, ["caliperCount"] = requestedCount
+            });
+        var result = await Run(isCircle ? new CaliperCircleNode() : new CaliperLineNode(), Image(image), parameters);
+        var actualCount = Convert.ToInt32(result.Summary[isCircle ? "spokes" : "caliperCount"]);
+        Assert.Equal(expectedCount, actualCount);
+    }
+
     [Fact]
     public async Task CaliperCircle_CountModeWrapsArcsAndRejectsFitOutliers()
     {

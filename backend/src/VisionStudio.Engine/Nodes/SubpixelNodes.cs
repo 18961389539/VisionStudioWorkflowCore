@@ -95,7 +95,8 @@ internal static class SubpixelEdgeCore
     public static int ClampedIntParameter(NodeDefinition node, string name, int fallback, int minimum, int maximum)
     {
         var value = RequireFiniteParameter(node, name, fallback);
-        return (int)Math.Clamp(Math.Round(value), minimum, maximum);
+        // Match the frontend's Math.round so fractional legacy/workflow values preview and execute identically.
+        return (int)Math.Clamp(Math.Floor(value + 0.5), minimum, maximum);
     }
 
     /// <summary>沿搜索线的坐标 → 图像点。</summary>

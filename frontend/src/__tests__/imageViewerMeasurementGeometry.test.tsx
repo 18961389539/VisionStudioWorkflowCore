@@ -72,6 +72,8 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(counted[0]).toBe(0);
     expect(counted.at(-1)).toBe(92);
 
+    expect(buildCaliperCircleAngles({ ...base, caliperCount: 4.5 })).toHaveLength(5);
+
     const stepped = buildCaliperCircleAngles({ ...base, samplingMode: 'step', angleStepDeg: 5 });
     expect(stepped).toHaveLength(19);
     expect(stepped.at(-1)).toBe(90);
