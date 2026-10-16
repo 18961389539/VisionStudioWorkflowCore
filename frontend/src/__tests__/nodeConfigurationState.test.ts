@@ -76,6 +76,9 @@ describe('node configuration snapshots', () => {
     const crop = fallbackCatalogRaw.find(item => item.type === 'image.crop')!;
     expect(configurationIssues(crop, { roi: largePolygon })).toEqual([]);
     expect(cropRoiOutsideImageIssue(largePolygon, 100, 80)).toBeUndefined();
+
+    const excessivePolygon = { type: 'Polygon', points: Array(500_001).fill({ x: 10, y: 10 }) };
+    expect(configurationIssues(crop, { roi: excessivePolygon }).join(' ')).toContain('多边形最多支持 500000 个顶点');
   });
 
   it('preflights polygon, coordinate, clutter, and node-specific brush limits before preview', () => {

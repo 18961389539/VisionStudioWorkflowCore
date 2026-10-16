@@ -68,6 +68,9 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
       parameter?.options?.find(option => option.value.toLowerCase() === value.toLowerCase())?.label ?? value);
     return `参数“${label}”的选项值无效。可选项：${choices.join('、')}。`;
   }
+  if (error === 'Polygon ROI exceeds the 500000-point limit.'
+    && ['image.crop', 'roi.transform', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
+    return '多边形 ROI 最多允许 500000 个顶点。';
   if (['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
     if (error.startsWith('Rectangle ROI requires finite coordinates'))
       return '矩形 ROI 必须具有有限坐标和正宽高，且边界在允许范围内。';

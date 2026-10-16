@@ -57,6 +57,7 @@ public sealed class Batch2ImageNodeTests
             (new(VisionRoiType.Rectangle, X: 0, Y: 0, Width: 0, Height: 5), "positive width/height"),
             (new(VisionRoiType.Circle, X: 4, Y: 4, Radius: 0), "positive radius"),
             (new(VisionRoiType.Polygon, Points: [new(1, 1), new(8, 1)]), "3..500000 finite vertices"),
+            (new(VisionRoiType.Polygon, Points: Enumerable.Repeat(new VisionRoiPoint(1, 1), 500_001).ToArray()), "exceeds the 500000-point limit"),
             (new(VisionRoiType.Polygon, Points: [new(1, 1), new(8, 1), new(4, 1)]), "non-zero area"),
             (new(VisionRoiType.Brush, Strokes: [new(VisionRoiStrokeMode.Erase, 2, [new(4, 4)])]), "at least one add stroke")
         };
@@ -76,6 +77,17 @@ public sealed class Batch2ImageNodeTests
 
         Assert.Equal(0, Cv2.CountNonZero(rectangle));
         Assert.Equal(0, Cv2.CountNonZero(circle));
+    }
+
+    [Fact]
+    public void RoiMaskRejectsOversizedPolygonBeforeRasterization()
+    {
+        var roi = new VisionRoi(VisionRoiType.Polygon,
+            Points: Enumerable.Repeat(new VisionRoiPoint(1, 1), 500_001).ToArray());
+
+        var error = Assert.Throws<InvalidOperationException>(() => roi.BuildMask(new Size(16, 16)));
+
+        Assert.Equal("Polygon ROI exceeds the 500000-point limit.", error.Message);
     }
 
     [Theory]
@@ -104,6 +116,23 @@ public sealed class Batch2ImageNodeTests
             RunImage(new ImageCropNode(), Image(source), """{"roi":{"type":"Polygon","points":[{"x":1,"y":1},null,{"x":8,"y":1}]}}"""));
 
         Assert.Contains("有效顶点", error.Message);
+    }
+
+    [Fact]
+    public async Task CropRejectsOversizedConnectedPolygonBeforeRasterization()
+    {
+        using var source = new Mat(16, 16, MatType.CV_8UC1, Scalar.All(1));
+        using var image = VisionImage.Own(source.Clone());
+        var roi = new VisionRoi(VisionRoiType.Polygon,
+            Points: Enumerable.Repeat(new VisionRoiPoint(1, 1), 500_001).ToArray());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => new ImageCropNode().ExecuteAsync(
+            new NodeExecutionContext(new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(image), ["roi"] = VisionValue.Roi(roi)
+            }), Node("image.crop", "{}"), CancellationToken.None).AsTask());
+
+        Assert.Contains("最多允许 500000 个顶点", error.Message);
     }
 
     [Fact]

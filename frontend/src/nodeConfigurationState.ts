@@ -66,6 +66,7 @@ export function withParameter(parameters: NodeParameters, key: string, value: un
 }
 
 const roiCoordinateLimit = 10_000_000;
+const roiPolygonPointLimit = 500_000;
 
 function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: number): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return `${label}结构无效。`;
@@ -89,7 +90,10 @@ function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: num
   }
   if (roi.type === 'Polygon') {
     const points = roi.points;
-    if (!Array.isArray(points) || points.length < 3 || points.some(point => !point || typeof point !== 'object'
+    if (!Array.isArray(points)) return `${label}多边形需要至少三个有效顶点，坐标须在 ±${roiCoordinateLimit} px 范围内。`;
+    if (points.length > roiPolygonPointLimit)
+      return `${label}多边形最多支持 ${roiPolygonPointLimit} 个顶点。`;
+    if (points.length < 3 || points.some(point => !point || typeof point !== 'object'
       || !bounded((point as Record<string, unknown>).x, (point as Record<string, unknown>).y)))
       return `${label}多边形需要至少三个有效顶点，坐标须在 ±${roiCoordinateLimit} px 范围内。`;
     const twiceArea = points.reduce((sum: number, point: Record<string, number>, index: number) => {

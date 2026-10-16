@@ -112,6 +112,41 @@ public sealed class RoiCorrectionSafetyTests : IDisposable
         Assert.Contains("at least three finite points", error.Message);
     }
 
+    [Fact]
+    public async Task CorrectionRejectsOversizedPolygonBeforeTransformingIt()
+    {
+        var roi = new VisionRoi(VisionRoiType.Polygon,
+            Points: Enumerable.Repeat(new VisionRoiPoint(1, 1), 500_001).ToArray());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(),
+            new() { ["roi"] = VisionValue.Roi(roi) }));
+
+        Assert.Equal("Polygon ROI exceeds the 500000-point limit.", error.Message);
+    }
+
+    [Fact]
+    public async Task CorrectionKeepsLargePolygonGeometryButBoundsDebugOverlayPointCount()
+    {
+        const int vertexCount = 1200;
+        var points = Enumerable.Range(0, vertexCount).Select(index =>
+        {
+            var angle = 2 * Math.PI * index / vertexCount;
+            return new VisionRoiPoint(32 + 20 * Math.Cos(angle), 32 + 20 * Math.Sin(angle));
+        }).ToArray();
+        using var image = VisionImage.Own(new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0)));
+
+        var result = await Run(new RoiTransformNode(), new()
+        {
+            ["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Polygon, Points: points)),
+            ["debugImage"] = VisionValue.Image(image)
+        });
+
+        Assert.Equal(vertexCount, result.Outputs["roi"].Require<VisionRoi>("roi").Points!.Count);
+        var overlays = result.Overlays!.Where(overlay => overlay.Id is "roi-transform-base-shape" or "roi-transform-corrected-shape").ToArray();
+        Assert.Equal(2, overlays.Length);
+        Assert.All(overlays, overlay => Assert.InRange(overlay.Points!.Count, 3, 1024));
+    }
+
     [Theory]
     [InlineData("measure.caliperLine", false)]
     [InlineData("measure.caliperLine", true)]

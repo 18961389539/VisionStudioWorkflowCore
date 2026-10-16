@@ -289,7 +289,8 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             }
             case VisionRoiType.Polygon:
             {
-                var points = (roi.Points ?? []).Select(point => new VisionOverlayPoint(point.X, point.Y)).ToArray();
+                var polygonPoints = roi.Points ?? [];
+                var points = SampleBrushPoints(polygonPoints, 1024);
                 if (points.Length == 0) return [];
                 return
                 [
@@ -357,6 +358,8 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
+                if (points.Count > VisionRoiOpenCvExtensions.MaxPolygonPoints)
+                    throw new InvalidOperationException($"Polygon ROI exceeds the {VisionRoiOpenCvExtensions.MaxPolygonPoints}-point limit.");
                 if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
                     || Math.Abs(point.X) > MaxRoiCoordinate || Math.Abs(point.Y) > MaxRoiCoordinate))
                     throw new InvalidOperationException($"The polygon ROI needs at least three finite points within ±{MaxRoiCoordinate:0} px.");

@@ -107,6 +107,8 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
+                if (points.Count > VisionRoiOpenCvExtensions.MaxPolygonPoints)
+                    throw new InvalidOperationException($"多边形裁剪区域最多允许 {VisionRoiOpenCvExtensions.MaxPolygonPoints} 个顶点。");
                 if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
                     || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
                     throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");

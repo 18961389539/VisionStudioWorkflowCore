@@ -5,13 +5,14 @@ namespace VisionStudio.Engine;
 public static class VisionRoiOpenCvExtensions
 {
     private const double MaxCoordinate = 10_000_000;
-    private const int MaxPolygonPoints = 500_000;
+    internal const int MaxPolygonPoints = 500_000;
 
     public static Mat BuildMask(this VisionRoi roi, Size size)
     {
         ArgumentNullException.ThrowIfNull(roi);
         if (size.Width <= 0 || size.Height <= 0)
             throw new InvalidOperationException("ROI mask dimensions must be positive.");
+        ValidatePolygonRasterInput(roi);
 
         var mask = new Mat(size.Height, size.Width, MatType.CV_8UC1, Scalar.All(0));
         try
@@ -91,7 +92,9 @@ public static class VisionRoiOpenCvExtensions
             case VisionRoiType.Polygon:
             {
                 var points = roi.Points ?? [];
-                if (points.Count is < 3 or > MaxPolygonPoints
+                if (points.Count > MaxPolygonPoints)
+                    throw new InvalidOperationException($"Polygon ROI exceeds the {MaxPolygonPoints}-point limit.");
+                if (points.Count < 3
                     || points.Any(point => point is null || !IsBounded(point.X) || !IsBounded(point.Y)))
                     throw new InvalidOperationException($"Polygon ROI requires 3..{MaxPolygonPoints} finite vertices within ±10000000 px.");
                 var doubledArea = points.Select((point, index) =>
@@ -128,6 +131,16 @@ public static class VisionRoiOpenCvExtensions
             default:
                 throw new InvalidOperationException($"ROI type '{roi.Type}' is not supported.");
         }
+    }
+
+    private static void ValidatePolygonRasterInput(VisionRoi roi)
+    {
+        if (roi.Type != VisionRoiType.Polygon) return;
+        var points = roi.Points ?? [];
+        if (points.Count > MaxPolygonPoints)
+            throw new InvalidOperationException($"Polygon ROI exceeds the {MaxPolygonPoints}-point limit.");
+        if (points.Any(point => point is null))
+            throw new InvalidOperationException("Polygon ROI points must be finite.");
     }
 
     internal static void DrawBrushStrokes(Mat target, IReadOnlyList<VisionRoiBrushStroke>? strokes, double offsetX = 0, double offsetY = 0)

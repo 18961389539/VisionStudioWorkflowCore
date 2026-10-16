@@ -224,6 +224,12 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText('多边形 ROI 至少需要 3 个有效顶点，且坐标在允许范围内。')).toBeTruthy();
   });
 
+  it('localizes oversized connected polygon ROI errors', () => {
+    mount('measure.caliperCircle', failedResult('Polygon ROI exceeds the 500000-point limit.'));
+
+    expect(screen.getByText('多边形 ROI 最多允许 500000 个顶点。')).toBeTruthy();
+  });
+
   it('keeps unknown native errors intact for diagnosis', () => {
     const nativeError = 'HALCON error #3022: Wrong size of filter for Gauss in operator measure_pos';
     mount('measure.caliper', failedResult(nativeError));
