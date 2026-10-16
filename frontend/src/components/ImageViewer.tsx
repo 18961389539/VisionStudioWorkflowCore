@@ -8,6 +8,7 @@ import { createPixelBuffer, readPixel } from '../imagePixels';
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
+type BrushRoiBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
 type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
@@ -160,7 +161,28 @@ function roiBounds(roi: VisionRoi) {
 function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
   if (roi.type === 'Rectangle') return point.x >= roi.x && point.x <= roi.x + roi.width && point.y >= roi.y && point.y <= roi.y + roi.height;
   if (roi.type === 'Circle') return Math.hypot(point.x - roi.x, point.y - roi.y) <= roi.radius;
-  if (roi.type === 'Brush') return false;
+  if (roi.type === 'Brush') {
+    let inside = false;
+    for (const stroke of roi.strokes) {
+      const radiusSquared = (stroke.width / 2) ** 2;
+      const segmentCount = Math.max(1, stroke.points.length - 1);
+      for (let index = 0; index < segmentCount; index++) {
+        const start = stroke.points[stroke.points.length === 1 ? 0 : index];
+        const end = stroke.points[stroke.points.length === 1 ? 0 : index + 1];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const fraction = lengthSquared > 0
+          ? clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1)
+          : 0;
+        const nearestX = start.x + fraction * dx;
+        const nearestY = start.y + fraction * dy;
+        if ((point.x - nearestX) ** 2 + (point.y - nearestY) ** 2 <= radiusSquared)
+          inside = stroke.mode === 'Add';
+      }
+    }
+    return inside;
+  }
   let inside = false;
   const pts = roi.points;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -170,8 +192,36 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
   return inside;
 }
 
+function brushRoiBounds(roi: Extract<VisionRoi, { type: 'Brush' }>): BrushRoiBounds | undefined {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const stroke of roi.strokes) {
+    const radius = stroke.width / 2;
+    for (const point of stroke.points) {
+      minX = Math.min(minX, point.x - radius);
+      maxX = Math.max(maxX, point.x + radius);
+      minY = Math.min(minY, point.y - radius);
+      maxY = Math.max(maxY, point.y + radius);
+    }
+  }
+  return Number.isFinite(minX) ? { minX, maxX, minY, maxY } : undefined;
+}
+
+function clampBrushMove(bounds: BrushRoiBounds, delta: Point, maxW: number, maxH: number): Point {
+  const clampAxis = (min: number, max: number, offset: number, limit: number) => {
+    const minOffset = -min, maxOffset = limit - max;
+    if (minOffset <= maxOffset) return clamp(offset, minOffset, maxOffset);
+    const center = (min + max) / 2;
+    return clamp(offset, -center, limit - center);
+  };
+  return {
+    x: clampAxis(bounds.minX, bounds.maxX, delta.x, maxW),
+    y: clampAxis(bounds.minY, bounds.maxY, delta.y, maxH)
+  };
+}
+
 /** 按拖动模式生成新的 ROI：矩形四角缩放 / 圆形按半径 / 多边形整体平移；拖动过程始终限制在图像范围内 */
-function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, current: Point, maxW: number, maxH: number): VisionRoi | undefined {
+function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, current: Point, maxW: number, maxH: number,
+  brushBounds?: BrushRoiBounds): VisionRoi | undefined {
   const dx = current.x - start.x;
   const dy = current.y - start.y;
   if (origin.type === 'Rectangle') {
@@ -192,7 +242,15 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
     const maxRadius = maxCircleRadius(origin, maxW, maxH);
     return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), Math.min(2, maxRadius), maxRadius) };
   }
-  if (origin.type === 'Brush') return undefined;
+  if (origin.type === 'Brush') {
+    if (mode !== 'move') return undefined;
+    const bounds = brushBounds ?? brushRoiBounds(origin);
+    if (!bounds) return undefined;
+    const { x: moveX, y: moveY } = clampBrushMove(bounds, { x: dx, y: dy }, maxW, maxH);
+    return { type: 'Brush', strokes: origin.strokes.map(stroke => ({
+      ...stroke, points: stroke.points.map(point => ({ x: point.x + moveX, y: point.y + moveY }))
+    })) };
+  }
   if (mode.startsWith('vertex:')) {
     const index = Number(mode.slice('vertex:'.length));
     if (!Number.isInteger(index) || index < 0 || index >= origin.points.length) return undefined;
@@ -439,7 +497,8 @@ export default function ImageViewer({
   const geometryGestureStart = useRef<Point | undefined>(undefined);
   const geometryDrag = useRef<{ mode: MeasurementDragMode; origin: MeasurementGeometry; start: Point } | undefined>(undefined);
   const panStart = useRef<{ pointer: Point; view: ViewState } | undefined>(undefined);
-  const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point } | undefined>(undefined);
+  const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point; brushBounds?: BrushRoiBounds } | undefined>(undefined);
+  const [brushDragOffset, setBrushDragOffset] = useState<Point>();
   const polygonPoints = useRef<OverlayPoint[]>([]);
   const brushStroke = useRef<{ roi: Extract<VisionRoi, { type: 'Brush' }> } | undefined>(undefined);
   const lastFocusTick = useRef(focusTick ?? 0);
@@ -472,6 +531,7 @@ export default function ImageViewer({
       brushStroke.current = undefined;
       gestureStart.current = undefined;
       roiDrag.current = undefined;
+      setBrushDragOffset(undefined);
     }
   }, [roiEnabled]);
   useEffect(() => {
@@ -484,6 +544,8 @@ export default function ImageViewer({
     geometryDrag.current = undefined;
     polygonPoints.current = [];
     brushStroke.current = undefined;
+    roiDrag.current = undefined;
+    setBrushDragOffset(undefined);
   }, [previewUrl]);
   useEffect(() => {
     if (measurementGeometryEditable) return;
@@ -683,14 +745,16 @@ export default function ImageViewer({
       }
     }
     // 已有选区时优先响应拖动：控制点缩放 > 选区内部平移 > 平移画布 / 新建选区
-    if (roi && roiEnabled && roi.type !== 'Brush' && tool !== 'brush' && tool !== 'eraser') {
+    if (roi && roiEnabled && tool !== 'brush' && tool !== 'eraser') {
       const handle = hitRoiHandle(roi, p);
       if (handle) {
         roiDrag.current = { mode: handle, origin: roi, start: imagePoint(p) };
         return;
       }
       if (tool !== 'polygon' && pointInsideRoi(roi, imagePoint(p))) {
-        roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p) };
+        const brushBounds = roi.type === 'Brush' ? brushRoiBounds(roi) : undefined;
+        roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p), brushBounds };
+        if (roi.type === 'Brush') setBrushDragOffset({ x: 0, y: 0 });
         return;
       }
     }
@@ -777,7 +841,13 @@ export default function ImageViewer({
       return;
     }
     if (roiDrag.current) {
-      const next = applyRoiDrag(roiDrag.current.origin, roiDrag.current.mode, roiDrag.current.start, ip, actualWidth, actualHeight);
+      const active = roiDrag.current;
+      if (active.origin.type === 'Brush' && active.brushBounds) {
+        setBrushDragOffset(clampBrushMove(active.brushBounds,
+          { x: ip.x - active.start.x, y: ip.y - active.start.y }, actualWidth, actualHeight));
+        return;
+      }
+      const next = applyRoiDrag(active.origin, active.mode, active.start, ip, actualWidth, actualHeight, active.brushBounds);
       if (next) setDraft(next);
       return;
     }
@@ -823,10 +893,16 @@ export default function ImageViewer({
       return;
     }
     if (roiDrag.current) {
+      const active = roiDrag.current;
       roiDrag.current = undefined;
-      if (draft && (draft.type !== 'Rectangle' || (draft.width >= 2 && draft.height >= 2)) && (draft.type !== 'Circle' || draft.radius >= 2)) {
-        onRoiChange(draft);
+      const next = active.origin.type === 'Brush'
+        ? applyRoiDrag(active.origin, active.mode, { x: 0, y: 0 }, brushDragOffset ?? { x: 0, y: 0 },
+          actualWidth, actualHeight, active.brushBounds)
+        : draft;
+      if (next && (next.type !== 'Rectangle' || (next.width >= 2 && next.height >= 2)) && (next.type !== 'Circle' || next.radius >= 2)) {
+        onRoiChange(next);
       }
+      setBrushDragOffset(undefined);
       setDraft(undefined);
       return;
     }
@@ -844,6 +920,7 @@ export default function ImageViewer({
     geometryGestureStart.current = undefined;
     geometryDrag.current = undefined;
     roiDrag.current = undefined;
+    setBrushDragOffset(undefined);
     brushStroke.current = undefined;
     setDraft(undefined);
     setMeasurementDraft(undefined);
@@ -898,6 +975,7 @@ export default function ImageViewer({
         geometryGestureStart.current = undefined;
         geometryDrag.current = undefined;
         roiDrag.current = undefined;
+        setBrushDragOffset(undefined);
         polygonPoints.current = [];
         brushStroke.current = undefined;
         setDraft(undefined);
@@ -937,7 +1015,7 @@ export default function ImageViewer({
             value={tool}
             onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; gestureStart.current = undefined;
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
-              setDraft(undefined); setTool(value as ToolMode); }}
+              roiDrag.current = undefined; setBrushDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
               { value: 'pan', label: <Tooltip title="平移">平移</Tooltip> },
               { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="矩形选区">矩形</Tooltip> },
@@ -1030,8 +1108,12 @@ export default function ImageViewer({
             </Layer>}
             <Layer>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
-                <RoiShape roi={draft} scale={view.scale} draft />
+                {brushDragOffset && roi?.type === 'Brush'
+                  ? <Group x={brushDragOffset.x} y={brushDragOffset.y}><RoiShape roi={roi} scale={view.scale} /></Group>
+                  : <>
+                    {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
+                    <RoiShape roi={draft} scale={view.scale} draft />
+                  </>}
                 {roi && roiEnabled && !draft && <RoiHandles roi={roi} scale={view.scale} />}
               </Group>
             </Layer>

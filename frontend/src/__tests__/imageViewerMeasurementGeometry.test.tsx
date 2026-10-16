@@ -343,4 +343,43 @@ describe('ImageViewer measurement geometry editing', () => {
       { x: 0, y: 10 }, { x: 20, y: 10 }, { x: 20, y: 30 }, { x: 0, y: 30 }
     ] });
   });
+
+  it('moves a brush ROI by dragging a painted pixel and clamps its strokes to the image', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Brush', strokes: [
+      { mode: 'Add', width: 10, points: [{ x: 10, y: 10 }, { x: 30, y: 10 }] },
+      { mode: 'Erase', width: 4, points: [{ x: 20, y: 10 }] }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    // Drag from a painted, unerased area to request x=0; the brush bounds should stop at x=0.
+    fireEvent.mouseDown(stage, { clientX: 117.4, clientY: 35.6 }); // image (15, 10)
+    fireEvent.mouseMove(stage, { clientX: 82, clientY: 35.6 }); // image (0, 10)
+    fireEvent.mouseUp(document.body, { clientX: 82, clientY: 35.6 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    expect(onRoiChange).toHaveBeenCalledWith({ type: 'Brush', strokes: [
+      { mode: 'Add', width: 10, points: [{ x: 5, y: 10 }, { x: 25, y: 10 }] },
+      { mode: 'Erase', width: 4, points: [{ x: 15, y: 10 }] }
+    ] });
+  });
+
+  it('does not start a brush move from a pixel erased by a later stroke', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Brush', strokes: [
+      { mode: 'Add', width: 10, points: [{ x: 10, y: 10 }, { x: 30, y: 10 }] },
+      { mode: 'Erase', width: 4, points: [{ x: 20, y: 10 }] }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 35.6 }); // image (20, 10), erased
+    fireEvent.mouseMove(stage, { clientX: 176.4, clientY: 35.6 }); // image (40, 10)
+    fireEvent.mouseUp(document.body, { clientX: 176.4, clientY: 35.6 });
+
+    expect(onRoiChange).not.toHaveBeenCalled();
+  });
 });
