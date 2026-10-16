@@ -9,12 +9,14 @@ vi.mock('react-konva', async () => {
     Stage: React.forwardRef((props: Record<string, any>, ref: React.ForwardedRef<any>) => {
       const pointer = React.useRef<{ x: number; y: number } | undefined>(undefined);
       React.useImperativeHandle(ref, () => ({ getPointerPosition: () => pointer.current }));
-      const dispatch = (handler?: (event: unknown) => void) => (event: React.MouseEvent<HTMLDivElement>) => {
-        pointer.current = { x: event.clientX, y: event.clientY };
+      const dispatch = (handler?: (event: unknown) => void) => (event: any) => {
+        const touch = event.touches?.[0] ?? event.changedTouches?.[0];
+        pointer.current = { x: touch?.clientX ?? event.clientX, y: touch?.clientY ?? event.clientY };
         handler?.(event);
       };
       return <div data-testid="stage" onMouseDown={dispatch(props.onMouseDown)} onMouseMove={dispatch(props.onMouseMove)}
-        onMouseUp={dispatch(props.onMouseUp)} onClick={dispatch(props.onClick)}>{props.children}</div>;
+        onMouseUp={dispatch(props.onMouseUp)} onTouchStart={dispatch(props.onTouchStart)} onTouchMove={dispatch(props.onTouchMove)}
+        onTouchEnd={dispatch(props.onTouchEnd)} onClick={dispatch(props.onClick)}>{props.children}</div>;
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
@@ -136,6 +138,32 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.start.x).toBeCloseTo(20, 4);
     expect(result.start.y).toBeCloseTo(30, 4);
     expect(result.end).toEqual({ x: 50, y: 10 });
+  });
+
+  it('commits a touch-drawn search line when touch ends outside the viewer', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
+    fireEvent.click(screen.getByRole('button', { name: '重绘搜索线' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.touchStart(stage, { touches: [{ clientX: 105.6, clientY: 35.6 }] });
+    fireEvent.touchMove(stage, { touches: [{ clientX: 129.2, clientY: 82.8 }] });
+    fireEvent.touchEnd(document.body, { changedTouches: [{ clientX: 129.2, clientY: 82.8 }] });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '重绘搜索线' })).toBeTruthy();
+  });
+
+  it('discards an interrupted touch redraw instead of committing partial geometry', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
+    fireEvent.click(screen.getByRole('button', { name: '重绘搜索线' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.touchStart(stage, { touches: [{ clientX: 105.6, clientY: 35.6 }] });
+    fireEvent.touchMove(stage, { touches: [{ clientX: 129.2, clientY: 82.8 }] });
+    fireEvent.touchCancel(document.body, { changedTouches: [{ clientX: 129.2, clientY: 82.8 }] });
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '重绘搜索线' })).toBeTruthy();
   });
 
   it('moves a polygon ROI rigidly at image boundaries and commits when released outside the viewer', () => {
