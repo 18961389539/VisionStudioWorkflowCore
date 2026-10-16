@@ -198,6 +198,7 @@ public sealed class Batch2ImageNodeTests
     [InlineData("""{"roi":{"type":"Circle","x":11.5,"y":12.5,"radius":3}}""")]
     [InlineData("""{"roi":{"type":"Polygon","points":[{"x":3,"y":2},{"x":10.5,"y":2},{"x":10.5,"y":8.5},{"x":3,"y":8.5}]}}""")]
     [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":4,"points":[{"x":3,"y":5},{"x":10.5,"y":5}]}]}}""")]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":2,"points":[{"x":21.5,"y":21.5}]}]}}""")]
     public async Task CropNonRectangularRoi_PreservesTightBoundsAndBinaryMask(string json)
     {
         using var source = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(90));

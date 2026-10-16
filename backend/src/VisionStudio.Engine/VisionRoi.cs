@@ -8,6 +8,10 @@ public static class VisionRoiOpenCvExtensions
     internal const int MaxPolygonPoints = 500_000;
 
     public static Mat BuildMask(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
+        => BuildMaskForRegion(roi, size, 0, 0, cancellationToken);
+
+    /// <summary>Rasterize the ROI into a canvas whose top-left corresponds to an image-space origin.</summary>
+    internal static Mat BuildMaskForRegion(VisionRoi roi, Size size, int originX, int originY, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roi);
         cancellationToken.ThrowIfCancellationRequested();
@@ -28,18 +32,18 @@ public static class VisionRoiOpenCvExtensions
                     if (w < 0 || h < 0) throw new InvalidOperationException("ROI dimensions must be non-negative.");
                     // Intersect the original rectangle with the canvas. Moving its origin first
                     // would enlarge partially visible regions and create regions for off-screen ROIs.
-                    var left = (int)Math.Clamp(Math.Ceiling(x), 0, size.Width);
-                    var top = (int)Math.Clamp(Math.Ceiling(y), 0, size.Height);
-                    var right = (int)Math.Clamp(Math.Ceiling(x + w), 0, size.Width);
-                    var bottom = (int)Math.Clamp(Math.Ceiling(y + h), 0, size.Height);
+                    var left = (int)Math.Clamp(Math.Ceiling(x) - originX, 0, size.Width);
+                    var top = (int)Math.Clamp(Math.Ceiling(y) - originY, 0, size.Height);
+                    var right = (int)Math.Clamp(Math.Ceiling(x + w) - originX, 0, size.Width);
+                    var bottom = (int)Math.Clamp(Math.Ceiling(y + h) - originY, 0, size.Height);
                     if (right > left && bottom > top)
                         Cv2.Rectangle(mask, new Rect(left, top, right - left, bottom - top), Scalar.All(255), -1);
                     break;
                 }
                 case VisionRoiType.Circle:
                 {
-                    var x = RasterCoordinate(roi.X ?? 0);
-                    var y = RasterCoordinate(roi.Y ?? 0);
+                    var x = checked(RasterCoordinate(roi.X ?? 0) - originX);
+                    var y = checked(RasterCoordinate(roi.Y ?? 0) - originY);
                     var radius = RasterCoordinate(roi.Radius ?? 0);
                     if (radius < 0) throw new InvalidOperationException("ROI radius must be non-negative.");
                     if (radius > 0)
@@ -54,7 +58,7 @@ public static class VisionRoiOpenCvExtensions
                     {
                         if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
                         var point = roiPoints[index];
-                        points[index] = new Point(RasterCoordinate(point.X), RasterCoordinate(point.Y));
+                        points[index] = new Point(checked(RasterCoordinate(point.X) - originX), checked(RasterCoordinate(point.Y) - originY));
                     }
                     cancellationToken.ThrowIfCancellationRequested();
                     if (points.Length >= 3)
@@ -62,7 +66,7 @@ public static class VisionRoiOpenCvExtensions
                     break;
                 }
                 case VisionRoiType.Brush:
-                    DrawBrushStrokes(mask, roi.Strokes, cancellationToken: cancellationToken);
+                    DrawBrushStrokes(mask, roi.Strokes, originX, originY, cancellationToken);
                     break;
                 default:
                     throw new InvalidOperationException($"ROI type '{roi.Type}' is not supported.");
@@ -183,6 +187,11 @@ public static class VisionRoiOpenCvExtensions
         if (target.Empty()) return;
         if (!double.IsFinite(offsetX) || !double.IsFinite(offsetY))
             throw new InvalidOperationException("Brush ROI offsets must be finite.");
+        if (offsetX != Math.Truncate(offsetX) || offsetY != Math.Truncate(offsetY)
+            || offsetX < int.MinValue || offsetX > int.MaxValue || offsetY < int.MinValue || offsetY > int.MaxValue)
+            throw new InvalidOperationException("Brush ROI offsets must be integer image coordinates.");
+        var offsetPixelX = (int)offsetX;
+        var offsetPixelY = (int)offsetY;
         if (strokes is null || strokes.Count == 0) return;
         if (strokes.Count > 10_000) throw new InvalidOperationException("Brush ROI exceeds the 10000-stroke limit.");
 
@@ -209,7 +218,10 @@ public static class VisionRoiOpenCvExtensions
                     throw new InvalidOperationException("Brush ROI points must be finite.");
                 // OpenCV clips drawing primitives; preserve off-canvas endpoints so strokes
                 // and erasers cannot be displaced onto the image border.
-                points[pointIndex] = new Point(RasterCoordinate(point.X - offsetX), RasterCoordinate(point.Y - offsetY));
+                // Rasterize each point in its source-image frame before shifting to a crop.
+                // Rounding after subtracting an odd origin changes half-pixel ties.
+                points[pointIndex] = new Point(checked(RasterCoordinate(point.X) - offsetPixelX),
+                    checked(RasterCoordinate(point.Y) - offsetPixelY));
             }
             var color = stroke.Mode == VisionRoiStrokeMode.Add ? Scalar.All(255) : Scalar.All(0);
             var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);

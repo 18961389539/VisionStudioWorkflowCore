@@ -25,10 +25,20 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 Height: node.GetDouble("height", source.Height));
         ValidateCropRoi(roi, cancellationToken);
 
-        using var rasterMask = roi.BuildMask(source.Size(), cancellationToken);
-        using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var bounds, out var selectedPixels, cancellationToken);
+        var candidateBounds = CandidateRasterBounds(roi, source.Size(), cancellationToken);
+        if (candidateBounds.Width <= 0 || candidateBounds.Height <= 0)
+            throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+        var useLocalRaster = CanRasterizeAtOffset(roi, candidateBounds.X, candidateBounds.Y, cancellationToken);
+        var rasterOriginX = useLocalRaster ? candidateBounds.X : 0;
+        var rasterOriginY = useLocalRaster ? candidateBounds.Y : 0;
+        var rasterSize = useLocalRaster ? candidateBounds.Size : source.Size();
+        using var rasterMask = useLocalRaster
+            ? VisionRoiOpenCvExtensions.BuildMaskForRegion(roi, rasterSize, rasterOriginX, rasterOriginY, cancellationToken)
+            : roi.BuildMask(source.Size(), cancellationToken);
+        using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var localBounds, out var selectedPixels, cancellationToken);
         if (selectedPixels == 0)
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+        var bounds = new Rect(rasterOriginX + localBounds.X, rasterOriginY + localBounds.Y, localBounds.Width, localBounds.Height);
         cancellationToken.ThrowIfCancellationRequested();
         using var sourceCrop = new Mat(source, bounds);
         var croppedImage = new Mat(sourceCrop.Rows, sourceCrop.Cols, sourceCrop.Type(), Scalar.All(0));
@@ -65,6 +75,130 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             croppedImage.Dispose();
             maskImage.Dispose();
             throw;
+        }
+    }
+
+    private static Rect CandidateRasterBounds(VisionRoi roi, Size imageSize, CancellationToken cancellationToken)
+    {
+        static int Clip(double value, int maximum) => (int)Math.Clamp(value, 0, maximum);
+        static Rect ClipBounds(long left, long top, long right, long bottom, Size size)
+        {
+            var clippedLeft = (int)Math.Clamp(left, 0, size.Width);
+            var clippedTop = (int)Math.Clamp(top, 0, size.Height);
+            var clippedRight = (int)Math.Clamp(right, 0, size.Width);
+            var clippedBottom = (int)Math.Clamp(bottom, 0, size.Height);
+            return new Rect(clippedLeft, clippedTop, Math.Max(0, clippedRight - clippedLeft), Math.Max(0, clippedBottom - clippedTop));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+            {
+                var x = roi.X!.Value; var y = roi.Y!.Value;
+                var width = roi.Width!.Value; var height = roi.Height!.Value;
+                return new Rect(
+                    Clip(Math.Ceiling(x), imageSize.Width), Clip(Math.Ceiling(y), imageSize.Height),
+                    Math.Max(0, Clip(Math.Ceiling(x + width), imageSize.Width) - Clip(Math.Ceiling(x), imageSize.Width)),
+                    Math.Max(0, Clip(Math.Ceiling(y + height), imageSize.Height) - Clip(Math.Ceiling(y), imageSize.Height)));
+            }
+            case VisionRoiType.Circle:
+            {
+                var centerX = (int)Math.Round(roi.X!.Value);
+                var centerY = (int)Math.Round(roi.Y!.Value);
+                var radius = (int)Math.Round(roi.Radius!.Value);
+                const int antialiasPadding = 2;
+                return ClipBounds(centerX - (long)radius - antialiasPadding,
+                    centerY - (long)radius - antialiasPadding,
+                    centerX + (long)radius + antialiasPadding + 1,
+                    centerY + (long)radius + antialiasPadding + 1, imageSize);
+            }
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                var minX = int.MaxValue; var minY = int.MaxValue;
+                var maxX = int.MinValue; var maxY = int.MinValue;
+                for (var index = 0; index < points.Count; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var x = (int)Math.Round(points[index].X);
+                    var y = (int)Math.Round(points[index].Y);
+                    minX = Math.Min(minX, x); minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
+                }
+                const int antialiasPadding = 2;
+                return ClipBounds(minX - (long)antialiasPadding, minY - (long)antialiasPadding,
+                    maxX + (long)antialiasPadding + 1, maxY + (long)antialiasPadding + 1, imageSize);
+            }
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                var minX = int.MaxValue; var minY = int.MaxValue;
+                var maxX = int.MinValue; var maxY = int.MinValue;
+                var padding = 0;
+                var pointIndex = 0;
+                foreach (var stroke in strokes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (stroke.Mode != VisionRoiStrokeMode.Add) continue;
+                    var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);
+                    padding = Math.Max(padding, thickness / 2 + 2);
+                    foreach (var point in stroke.Points)
+                    {
+                        if ((pointIndex++ & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var x = (int)Math.Round(point.X);
+                        var y = (int)Math.Round(point.Y);
+                        minX = Math.Min(minX, x); minY = Math.Min(minY, y);
+                        maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
+                    }
+                }
+                if (minX == int.MaxValue) return default;
+                return ClipBounds(minX - (long)padding, minY - (long)padding,
+                    maxX + (long)padding + 1, maxY + (long)padding + 1, imageSize);
+            }
+            default:
+                throw new InvalidOperationException($"Unsupported crop ROI type '{roi.Type}'.");
+        }
+    }
+
+    private static bool CanRasterizeAtOffset(VisionRoi roi, int originX, int originY, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        switch (roi.Type)
+        {
+            case VisionRoiType.Rectangle:
+                return true;
+            case VisionRoiType.Circle:
+                return (long)Math.Round(roi.X!.Value) - originX is >= int.MinValue and <= int.MaxValue
+                    && (long)Math.Round(roi.Y!.Value) - originY is >= int.MinValue and <= int.MaxValue;
+            case VisionRoiType.Polygon:
+            {
+                var points = roi.Points ?? [];
+                for (var index = 0; index < points.Count; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = points[index];
+                    if ((long)Math.Round(point.X) - originX is < int.MinValue or > int.MaxValue
+                        || (long)Math.Round(point.Y) - originY is < int.MinValue or > int.MaxValue)
+                        return false;
+                }
+                return true;
+            }
+            case VisionRoiType.Brush:
+            {
+                var pointIndex = 0;
+                foreach (var stroke in roi.Strokes ?? [])
+                    foreach (var point in stroke.Points)
+                    {
+                        if ((pointIndex++ & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        if ((long)Math.Round(point.X) - originX is < int.MinValue or > int.MaxValue
+                            || (long)Math.Round(point.Y) - originY is < int.MinValue or > int.MaxValue)
+                            return false;
+                    }
+                return true;
+            }
+            default:
+                return false;
         }
     }
 
