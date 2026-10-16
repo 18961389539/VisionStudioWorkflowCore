@@ -124,6 +124,8 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.line", "line", "measure.caliper", "searchLine")]
+    [InlineData("feature.line", "line", "feature.edgeSubpixel", "searchLine")]
     [InlineData("feature.line", "line", "measure.caliperLine", "searchLine")]
     [InlineData("feature.circle", "circle", "measure.caliperCircle", "circle")]
     public void MeasurementRejectsGeometryAlreadyInTheTransformTargetFrame(
@@ -175,6 +177,69 @@ public sealed class ParameterValidationTests
             new EdgeDefinition("crop-measure", "crop", "image", "measure", "image", "data"),
             new EdgeDefinition("line-measure", "line", "line", "measure", "searchLine", "data"),
             new EdgeDefinition("crop-transform", "crop", "transform", "measure", "transform", "data")
+        ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Theory]
+    [InlineData("feature.line", "line", "measure.caliper", "searchLine")]
+    [InlineData("feature.line", "line", "feature.edgeSubpixel", "searchLine")]
+    [InlineData("feature.line", "line", "measure.caliperLine", "searchLine")]
+    [InlineData("feature.circle", "circle", "measure.caliperCircle", "circle")]
+    public void MeasurementRejectsGeometryFromADifferentImageFrameWithoutTransform(
+        string geometryType,
+        string geometryOutput,
+        string measurementType,
+        string measurementInput)
+    {
+        var workflow = new WorkflowDefinition("geometry-frame-mismatch", "Geometry from another image",
+        [
+            new NodeDefinition("geometry-image", "image.synthetic", null, null, null),
+            new NodeDefinition("geometry-crop", "image.crop", null, null, null),
+            new NodeDefinition("measurement-crop", "image.crop", null, null, null),
+            new NodeDefinition("geometry", geometryType, null, null, null),
+            new NodeDefinition("measure", measurementType, null, null, null)
+        ],
+        [
+            new EdgeDefinition("geometry-crop-control", "geometry-image", "next", "geometry-crop", "exec", "control"),
+            new EdgeDefinition("measurement-crop-control", "geometry-crop", "next", "measurement-crop", "exec", "control"),
+            new EdgeDefinition("geometry-control", "measurement-crop", "next", "geometry", "exec", "control"),
+            new EdgeDefinition("measure-control", "geometry", "next", "measure", "exec", "control"),
+            new EdgeDefinition("geometry-crop-image", "geometry-image", "image", "geometry-crop", "image", "data"),
+            new EdgeDefinition("measurement-crop-image", "geometry-image", "image", "measurement-crop", "image", "data"),
+            new EdgeDefinition("geometry-image-input", "geometry-crop", "image", "geometry", "image", "data"),
+            new EdgeDefinition("measurement-image-input", "measurement-crop", "image", "measure", "image", "data"),
+            new EdgeDefinition("geometry-input", "geometry", geometryOutput, "measure", measurementInput, "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains($"Node 'measure' input '{measurementInput}' geometry is in frame 'geometry-crop.image (crop frame)'", error.Message);
+        Assert.Contains("measurement image is in frame 'measurement-crop.image (crop frame)'", error.Message);
+        Assert.Contains("Connect geometry and image from the same pixel frame", error.Message);
+    }
+
+    [Fact]
+    public void MeasurementAcceptsGeometryFromTheSameImageFrameThroughImagePreservingNodes()
+    {
+        var workflow = new WorkflowDefinition("matching-geometry-frame", "Geometry from same image frame",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("gray", "image.grayscale", null, null, null),
+            new NodeDefinition("geometry", "feature.line", null, null, null),
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("gray-control", "scene", "next", "gray", "exec", "control"),
+            new EdgeDefinition("geometry-control", "gray", "next", "geometry", "exec", "control"),
+            new EdgeDefinition("measure-control", "geometry", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-gray", "scene", "image", "gray", "image", "data"),
+            new EdgeDefinition("gray-geometry", "gray", "image", "geometry", "image", "data"),
+            new EdgeDefinition("gray-measure", "gray", "image", "measure", "image", "data"),
+            new EdgeDefinition("geometry-measure", "geometry", "line", "measure", "searchLine", "data")
         ]);
 
         var compiled = CreateCompiler().Compile(workflow);

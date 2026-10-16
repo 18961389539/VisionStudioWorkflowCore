@@ -217,8 +217,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     /// <summary>
     /// Measurement transforms are meaningful only in the pixel frame of the image being sampled.
     /// Transform2D values carry named frames, but several image-producing nodes use generic names
-    /// such as CurrentImage/CropImage. Trace the graph as well so two unrelated image branches
-    /// cannot silently appear to share a frame just because their labels match.
+    /// such as CurrentImage/CropImage. Trace the graph as well so unrelated image branches cannot
+    /// silently appear to share a frame just because their labels match.
     /// </summary>
     private void ValidateMeasurementImageFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
@@ -343,6 +343,11 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         return null;
     }
 
+    /// <summary>
+    /// Connected line and circle geometry must match the sampled image frame, or the source frame
+    /// of an explicit transform. Pixel coordinates from a cropped branch are otherwise plausible
+    /// values that silently point at a different location.
+    /// </summary>
     private void ValidateMeasurementGeometryFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
         var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -353,9 +358,12 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
         {
             var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
-            if (transformEdge is null) continue;
-            var transform = ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            if (transform is null) continue;
+            var transform = transformEdge is null ? null
+                : ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+            if (transformEdge is not null && transform is null) continue;
+            var imageFrame = transformEdge is null
+                ? ResolveImageInputFrame(node.Id, "image", workflow, byId)
+                : null;
 
             foreach (var inputPort in new[] { "searchLine", "circle" })
             {
@@ -364,6 +372,16 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 var geometryFrame = ResolveGeometryFrame(geometryEdge.SourceNodeId, geometryEdge.SourcePort,
                     workflow, byId, new(StringComparer.OrdinalIgnoreCase));
                 if (geometryFrame is null || !geometryFrame.IsTraceable) continue;
+
+                if (transform is null)
+                {
+                    if (imageFrame is { IsTraceable: true }
+                        && !string.Equals(geometryFrame.Key, imageFrame.Key, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(
+                            $"Node '{node.Id}' input '{inputPort}' geometry is in frame '{geometryFrame.Label}', but its measurement image is in frame '{imageFrame.Label}'. " +
+                            "Connect geometry and image from the same pixel frame, or provide a transform for reference-frame geometry.");
+                    continue;
+                }
 
                 if (transform.Source is { IsTraceable: true } sourceFrame
                     && string.Equals(geometryFrame.Key, sourceFrame.Key, StringComparison.OrdinalIgnoreCase))
