@@ -80,4 +80,15 @@ describe('node configuration snapshots', () => {
     const transform = fallbackCatalogRaw.find(item => item.type === 'roi.transform')!;
     expect(configurationIssues(transform, { ...makeDefaultParameters(transform), roi: brush })).toEqual([]);
   });
+
+  it('does not validate a local ROI that a connected ROI input overrides', () => {
+    const crop = fallbackCatalogRaw.find(item => item.type === 'image.crop')!;
+    const invalidRoi = { type: 'Rectangle', x: 0, y: 0, width: 0, height: 10 };
+
+    expect(configurationIssues(crop, { roi: invalidRoi })).toHaveLength(1);
+    expect(configurationIssues(crop, { roi: invalidRoi }, { connectedRoiInput: true })).toEqual([]);
+
+    const shape = fallbackCatalogRaw.find(item => item.type === 'match.shape')!;
+    expect(configurationIssues(shape, { roi: invalidRoi }, { connectedRoiInput: true }).join(' ')).toContain('矩形须为正尺寸');
+  });
 });

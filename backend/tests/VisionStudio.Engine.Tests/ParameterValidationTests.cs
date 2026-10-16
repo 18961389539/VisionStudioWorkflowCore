@@ -130,6 +130,48 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("image.crop")]
+    [InlineData("contour.extract")]
+    [InlineData("feature.edgeSubpixel")]
+    [InlineData("measure.caliper")]
+    [InlineData("measure.caliperLine")]
+    [InlineData("measure.caliperCircle")]
+    public void MalformedLocalRoiIsIgnoredWhenConnectedRoiInputOverridesIt(string targetType)
+    {
+        var source = new NodeDefinition("source", "image.synthetic", null, null, null);
+        var roi = new NodeDefinition("roi", "roi.transform", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"roi":{"type":"Rectangle","x":2,"y":3,"width":20,"height":15}}"""));
+        var target = new NodeDefinition("target", targetType, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"roi":{"type":"Rectangle","x":0,"y":0,"width":0,"height":10}}"""));
+        var workflow = new WorkflowDefinition("roi-input-overrides-local", "ROI input override",
+            [source, roi, target],
+            [
+                new EdgeDefinition("start-roi", "source", "next", "roi", "exec", "control"),
+                new EdgeDefinition("next-target", "roi", "next", "target", "exec", "control"),
+                new EdgeDefinition("target-image", "source", "image", "target", "image", "data"),
+                new EdgeDefinition("target-roi", "roi", "roi", "target", "roi", "data")
+            ]);
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.NotEmpty(compiled.DslJson);
+    }
+
+    [Fact]
+    public void RoiTransformCanCaptureReferenceEvenWhenItsOldLocalRoiIsMalformed()
+    {
+        var node = new NodeDefinition("roi", "roi.transform", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"captureReference":true,"roi":{"type":"Ellipse"}}"""));
+
+        var compiled = CreateCompiler().Compile(new WorkflowDefinition("capture-reference", "Capture reference", [node], []));
+
+        Assert.NotEmpty(compiled.DslJson);
+    }
+
+    [Theory]
     [InlineData("image.filter", """{"method":"median","sigmaX":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"gradient","kernelSize":"inactive"}""")]
     [InlineData("image.morphology", """{"operation":"open","kernelWidth":"inactive"}""")]

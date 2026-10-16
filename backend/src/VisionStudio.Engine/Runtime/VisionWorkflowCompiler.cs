@@ -171,9 +171,23 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             if (catalog.Capabilities?.SupportsRoi == true) roiParameterNames.Add("roi");
             if (catalog.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
                 roiParameterNames.AddRange(["searchRoi", "clutterRoi"]);
+            var roiInputConnected = catalog.Inputs.Any(input =>
+                input.Name.Equals("roi", StringComparison.OrdinalIgnoreCase)
+                && input.DataType == VisionDataType.Roi)
+                && workflow.Edges.Any(edge =>
+                    edge.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)
+                    && edge.TargetPort.Equals("roi", StringComparison.OrdinalIgnoreCase));
             foreach (var roiParameter in roiParameterNames)
             {
                 if (node.Parameters?.ContainsKey(roiParameter) != true) continue;
+                // A connected ROI is the effective runtime value for ROI-port nodes, so malformed
+                // dormant local ROI data must not block compilation. ROI Transform also returns
+                // before reading its ROI while capturing a reference, allowing users to replace it.
+                if (roiParameter.Equals("roi", StringComparison.OrdinalIgnoreCase)
+                    && (roiInputConnected
+                        || catalog.Type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
+                        && node.GetBool("captureReference", false)))
+                    continue;
                 try { _ = node.GetRoi(roiParameter); }
                 catch (InvalidOperationException exception)
                 {

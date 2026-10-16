@@ -128,9 +128,16 @@ function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: num
   return `${label}类型无效。`;
 }
 
-export function configurationIssues(catalog: NodeCatalogItem, parameters: NodeParameters): string[] {
+export function configurationIssues(
+  catalog: NodeCatalogItem,
+  parameters: NodeParameters,
+  options: { connectedRoiInput?: boolean } = {}
+): string[] {
   const issues = validateParameterValues(catalog.parameters, parameters).map((issue) => `${catalog.parameters.find((p) => p.name === issue.name)?.label ?? issue.name}：${issue.message}`);
+  const roiInputOverridesParameter = options.connectedRoiInput === true && catalog.inputs.some((input) =>
+    input.name.toLowerCase() === 'roi' && input.dataType.toLowerCase() === 'roi');
   for (const key of ['roi', 'searchRoi', 'clutterRoi'] as const) {
+    if (key === 'roi' && roiInputOverridesParameter) continue;
     const value = parameters[key];
     if (value === undefined || value === null) continue;
     const label = key === 'roi' ? 'ROI' : key === 'clutterRoi' ? '杂乱区域' : '搜索区域';

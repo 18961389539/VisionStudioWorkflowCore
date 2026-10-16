@@ -270,6 +270,22 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
+  it('allows preview when a malformed local ROI is dormant behind the connected ROI input', async () => {
+    const invalidCropNode: Node = { ...cropNode, data: { ...cropNode.data,
+      parameters: { roi: { type: 'Rectangle', x: 0, y: 0, width: 0, height: 10 } } } };
+    const edges = [
+      { id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const onPreview = vi.fn(async () => result);
+    const { dialog } = mount({ node: invalidCropNode, catalogItem: cropCatalog, nodes: [invalidCropNode, roiNode, imageNode], edges, result, onPreview });
+
+    expect(dialog.queryByText(/请修正参数后再运行或应用/)).toBeNull();
+    fireEvent.click(dialog.getByRole('button', { name: '预览裁剪结果' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+  });
+
   it('does not project an upstream ROI overlay onto a different image coordinate frame', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'processed', portName: 'image', width: 80, height: 80 }

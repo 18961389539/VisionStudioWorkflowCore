@@ -126,7 +126,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const [discardOpen, setDiscardOpen] = useState(false);
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
-  const issues = configurationIssues(catalogItem, draft);
+  const roiInputEdge = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'roi');
+  const connectedRoiInput = Boolean(roiInputEdge && catalogItem.inputs.some((input) =>
+    input.name.toLowerCase() === 'roi' && input.dataType.toLowerCase() === 'roi'));
+  const issues = configurationIssues(catalogItem, draft, { connectedRoiInput });
   const isShapeMatch = catalogItem.type === 'match.shape';
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';
@@ -172,7 +175,6 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const changedTrainingLabels = trainingSettingsWithDefaults ? Object.keys(currentTrainingSettings)
     .filter(key => parameterFingerprint(trainingSettingsWithDefaults[key as keyof typeof trainingSettingsWithDefaults]) !== parameterFingerprint(currentTrainingSettings[key as keyof typeof currentTrainingSettings]))
     .map(key => catalogItem.parameters.find(parameter => parameter.name === key)?.label ?? (key === 'roi' ? '模型区域' : key)).join('、') : '';
-  const roiInputEdge = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'roi');
   const roiInputConnected = isRoiTransform && Boolean(roiInputEdge);
   const roiMaskInputConnected = !isRoiTransform && !isImageCrop && Boolean(roiInputEdge);
   const cropRoiEdge = isImageCrop ? roiInputEdge : undefined;
