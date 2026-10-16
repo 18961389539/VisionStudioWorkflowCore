@@ -188,6 +188,24 @@ const parameterNames: Record<string, string> = {
   Y: 'Y 坐标', 'Y Tag': 'Y 标签', 'Y Translation': 'Y 平移量'
 };
 
+const parameterGroups: Record<string, string> = {
+  Acquisition: '采集', Arc: '圆弧', 'Base Pose': '基准位姿', Binarize: '二值化', Candidates: '候选目标',
+  Calibration: '标定', Command: '指令', Condition: '条件', Contour: '轮廓',
+  'Current Pose': '当前位姿', Detection: '检测', Device: '设备', Eccentricity: '偏心', Edge: '边缘',
+  Fallback: '备用方案', Filter: '筛选', Fit: '拟合', 'Frame Tree': '坐标系树', Frames: '帧组',
+  Geometry: '几何', Handshake: '握手', Hierarchy: '层级', Limit: '限制', Mapping: '映射', Matching: '匹配',
+  'Multi-target': '多目标', 'Nominal Circle': '标称圆', 'Origin Estimation': '原点估算', Point: '点',
+  Pose: '位姿', Position: '位置', Provenance: '来源', Read: '读取', Retrieval: '提取方式', Resolve: '解析',
+  'Rigid Transform': '刚体变换', Robot: '机器人', Rotation: '旋转', Sampling: '采样', Search: '搜索',
+  'Search Line': '搜索线', Selection: '选择', Synchronization: '同步', Tag: '标签', Target: '目标',
+  Training: '训练', Wait: '等待'
+};
+const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
+
+export function canonicalParameterGroup(group?: string): string {
+  return group ? sourceParameterGroups[group] ?? group : 'General';
+}
+
 const optionNames: Record<string, string> = {
   Inner: '内侧', Outer: '外侧',
   'HSV (degrees, 0-1, 0-1)': 'HSV（角度、0–1、0–1）', 'sRGB (0-1)': 'sRGB（归一化 0–1）', 'CIELAB (D65)': 'CIELAB（D65 白点）',
@@ -505,6 +523,7 @@ export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): No
     parameters: item.parameters.map((parameter) => ({
       ...parameter,
       label: parameterNames[parameter.label] ?? parameter.label,
+      ...(parameter.group ? { group: parameterGroups[parameter.group] ?? parameter.group } : {}),
       description: parameterDescriptions[`${item.type}.${parameter.name}`] ?? parameter.description,
       options: parameter.options?.map((option) => ({ ...option, label: optionNames[option.label] ?? option.label }))
     }))

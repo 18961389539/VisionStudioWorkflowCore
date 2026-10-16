@@ -135,10 +135,10 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("startY", "Start Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("endX", "End X", "number", 520, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("endY", "End Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("startX", "Start X", "number", 120, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("startY", "Start Y", "number", 240, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("endX", "End X", "number", 520, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("endY", "End Y", "number", 240, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
@@ -187,10 +187,10 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("startY", "Start Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("endX", "End X", "number", 520, 0, 10000, 1, Unit: "px", Group: "Search Line"),
-                new("endY", "End Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("startX", "Start X", "number", 120, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("startY", "Start Y", "number", 240, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("endX", "End X", "number", 520, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
+                new("endY", "End Y", "number", 240, -10000, 10000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
@@ -245,8 +245,8 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("centerX", "Center X", "number", 320, 0, 10000, 1, Unit: "px", Group: "Nominal Circle"),
-                new("centerY", "Center Y", "number", 240, 0, 10000, 1, Unit: "px", Group: "Nominal Circle"),
+                new("centerX", "Center X", "number", 320, -10000, 10000, 1, Unit: "px", Group: "Nominal Circle"),
+                new("centerY", "Center Y", "number", 240, -10000, 10000, 1, Unit: "px", Group: "Nominal Circle"),
                 new("radius", "Nominal Radius", "number", 100, 1, 5000, 1, Unit: "px", Group: "Nominal Circle"),
                 new("angleStartDeg", "Angle Start", "number", -180, -360, 360, 1, Unit: "deg", Group: "Arc"),
                 new("angleEndDeg", "Angle End", "number", 180, -360, 360, 1, Unit: "deg", Group: "Arc"),

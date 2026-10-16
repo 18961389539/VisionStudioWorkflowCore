@@ -10,6 +10,7 @@ import SplitHandle from './SplitHandle';
 import { useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
+import { canonicalParameterGroup } from '../i18n/catalog';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
@@ -711,7 +712,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     const shapePanelCatalogItem = shapeMode ? {
       ...catalogItem,
       parameters: catalogItem.parameters.filter((parameter) => {
-        const group = parameter.group ?? 'General';
+        const group = canonicalParameterGroup(parameter.group);
         if (parameter.name === 'angleRangeDeg' && !legacyWorkflow) return false;
         if (parameter.name === 'templatePath' && templateSourceNodeId) return false;
         if (parameter.name === 'scoreUsingClutter' && !draft.clutterRoi) return false;
@@ -728,7 +729,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           Training: '模型训练', 'Origin Estimation': '原点估算', Candidates: '特征筛选', General: '训练图像来源',
           Matching: '匹配条件', 'Multi-target': '多目标定位', Search: '搜索范围'
         } as Record<string, string>)[['trainingAngleRangeDeg', 'scaleTolerancePercent', 'scaleToleranceXPercent', 'scaleToleranceYPercent'].includes(parameter.name)
-          ? 'Training' : parameter.group ?? 'General'] ?? parameter.group
+          ? 'Training' : canonicalParameterGroup(parameter.group)] ?? parameter.group
       }))
     } : searchLineInputEdge ? { ...catalogItem, parameters: catalogItem.parameters.filter(parameter =>
       !['startX', 'startY', 'endX', 'endY'].includes(parameter.name))

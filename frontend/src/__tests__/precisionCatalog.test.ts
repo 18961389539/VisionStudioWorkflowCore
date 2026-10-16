@@ -26,6 +26,35 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('localizes parameter groups for ROI and caliper workspaces while preserving English catalogs', () => {
+    const english = localizeCatalog(fallbackCatalogRaw, 'en');
+    const chinese = localizeCatalog(fallbackCatalogRaw, 'zh');
+    const expected: Record<string, string[]> = {
+      'measure.caliper': ['搜索线', '采样'],
+      'measure.caliperLine': ['搜索线', '采样', '拟合'],
+      'measure.caliperCircle': ['标称圆', '圆弧', '采样', '拟合'],
+      'roi.transform': ['基准位姿', '当前位姿']
+    };
+    for (const [type, groups] of Object.entries(expected)) {
+      const englishItem = english.find(item => item.type === type)!;
+      const chineseItem = chinese.find(item => item.type === type)!;
+      expect([...new Set(chineseItem.parameters.map(parameter => parameter.group).filter(Boolean))]).toEqual(groups);
+      expect([...new Set(englishItem.parameters.map(parameter => parameter.group).filter(Boolean))]).not.toEqual(groups);
+    }
+  });
+
+  it('lets users place clipped caliper search geometry outside the image bounds', () => {
+    const types = ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine'];
+    for (const type of types) {
+      const item = fallbackCatalogRaw.find(entry => entry.type === type)!;
+      for (const name of ['startX', 'startY', 'endX', 'endY'])
+        expect(item.parameters.find(parameter => parameter.name === name)?.min).toBe(-10000);
+    }
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    for (const name of ['centerX', 'centerY'])
+      expect(circle.parameters.find(parameter => parameter.name === name)?.min).toBe(-10000);
+  });
+
   it('can validate the shipped precision template including the image and dynamic ROI connections', () => {
     const graph = precisionDemo();
     const nodes = graph.nodes.map(node => {
