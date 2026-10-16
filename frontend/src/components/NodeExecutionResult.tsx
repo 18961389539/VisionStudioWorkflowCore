@@ -33,6 +33,72 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
   return messages[reason] ?? `没有找到有效测量结果${reason ? `（${reason}）` : ''}。请检查搜索几何、ROI 和边缘阈值。`;
 }
 
+function executionErrorMessage(type: string, error: string): string | undefined {
+  const common: Record<string, string> = {
+    'The search line is too short (minimum 2 px).': '搜索线长度不足 2 px。请把搜索线拉长后重试。',
+    'Search line coordinates must be finite and within +/-10000000 pixels.': '搜索线坐标必须是有限数值，且绝对值不超过 10000000 px。请检查上游几何或坐标变换。',
+    'Search line parameters must be finite numbers.': '搜索线参数必须是有效数值。请检查起点和终点坐标。',
+    'The connected search line has non-finite endpoints.': '上游搜索线包含无效坐标。请检查提供搜索线的节点输出。',
+    'Measurement transform must be a finite, orientation-preserving rigid px-to-px transform (translation and rotation only).': '测量变换必须是有效的像素坐标刚性变换，只能包含平移和旋转。请检查 transform 输入。'
+  };
+  if (common[error] && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
+    return common[error];
+
+  const messages: Record<string, Record<string, string>> = {
+    'image.crop': {
+      'Image crop requires a non-empty image.': '裁剪输入图像为空。请检查 image 输入和上游节点输出。'
+    },
+    'roi.transform': {
+      'Connect a non-empty debugImage before capturing the reference.': '获取基准前，请先连接有效的调试图像。',
+      'Scene dimensions differ from the saved reference. Capture a new reference before correcting the ROI.': '当前场景图像尺寸与已保存基准不一致。请重新获取基准后再执行 ROI 修正。',
+      "ROI transform requires either a connected 'roi' input or a 'roi' parameter.": '定位修正 ROI 需要连接 roi 输入，或在节点中绘制基准 ROI。',
+      'Base/current pose components must be finite (non-finite pose received).': '基准位姿或当前位姿包含无效数值。请检查定位节点的位姿输出。',
+      'Angle period must be greater than 0 and at most 360 degrees.': '角度周期必须大于 0° 且不超过 360°。',
+      'The circle ROI radius must be non-negative.': '圆形 ROI 半径不能为负数。',
+      'The polygon ROI needs at least 3 points.': '多边形 ROI 至少需要 3 个顶点。',
+      'The rectangle ROI width/height must be non-negative.': '矩形 ROI 的宽度和高度不能为负数。',
+      'The brush ROI needs 1..10000 strokes.': '笔刷 ROI 需要 1 至 10000 笔有效笔迹。',
+      'The brush ROI needs finite points in at least one add stroke.': '笔刷 ROI 至少需要一笔包含有效坐标的添加笔迹。',
+      'Brush ROI strokes need a valid mode, positive width and points.': '笔刷笔迹的模式、宽度或坐标无效。请检查 ROI 笔迹。'
+    },
+    'measure.caliper': {
+      'Caliper measurement requires a non-empty image.': '卡尺输入图像为空。请检查 image 输入和上游节点输出。'
+    },
+    'measure.caliperLine': {
+      'Caliper line measurement requires a non-empty image.': '卡尺找线的输入图像为空。请检查 image 输入和上游节点输出。'
+    },
+    'feature.edgeSubpixel': {
+      'Subpixel edge detection requires a non-empty image.': '亚像素边缘检测的输入图像为空。请检查 image 输入和上游节点输出。'
+    },
+    'measure.caliperCircle': {
+      'Caliper circle measurement requires a non-empty image.': '卡尺找圆的输入图像为空。请检查 image 输入和上游节点输出。',
+      'The connected circle input must have a finite center and positive radius.': '上游圆心或半径无效。请检查圆几何输出，半径必须为正数。',
+      'Caliper circle requires a finite center and a positive radius.': '标称圆心必须是有效坐标，半径必须为正数。',
+      'Caliper circle coordinates and radius must be within 10000000 pixels.': '标称圆坐标和半径的绝对值不能超过 10000000 px。请检查上游几何和坐标系。'
+    }
+  };
+  const exact = messages[type]?.[error];
+  if (exact) return exact;
+
+  if (type === 'roi.transform') {
+    const boundedPose = error.match(/^Base\/current pose coordinates must be within ±([\d.]+) px\.$/);
+    if (boundedPose) return `基准位姿和当前位姿坐标必须在 ±${boundedPose[1]} px 范围内。`;
+    const invalidRoi = error.match(/^Unsupported ROI type '(.+)'\.$/);
+    if (invalidRoi) return `不支持此 ROI 类型（${invalidRoi[1]}）。请使用矩形、圆形、多边形或笔刷 ROI。`;
+    if (error.startsWith('Brush ROI strokes need a valid mode, finite points within '))
+      return '笔刷 ROI 笔迹包含无效坐标、模式或宽度。请检查笔迹，并将笔宽设在 1 至 1024 px 之间。';
+    if (error === 'The brush ROI may contain at most 500000 points.') return '笔刷 ROI 最多允许 500000 个坐标点。';
+    if (error === 'The polygon ROI must enclose a finite non-zero area.') return '多边形 ROI 必须围成有限且非零的面积。';
+    if (error.startsWith('The rectangle ROI needs positive dimensions and coordinates within '))
+      return '矩形 ROI 必须具有正宽高，且坐标需在允许范围内。';
+    if (error.startsWith('The circle ROI needs a positive radius and coordinates within '))
+      return '圆形 ROI 必须具有正半径，且坐标需在允许范围内。';
+    if (error.startsWith('The polygon ROI needs at least three finite points within '))
+      return '多边形 ROI 至少需要 3 个有效顶点，且坐标需在允许范围内。';
+  }
+  return undefined;
+}
+
 type Props = {
   nodeId: string;
   catalog: NodeCatalogItem;
@@ -67,6 +133,7 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
   const report = reports[reports.length - 1];
   const notFound = Boolean(report?.success && report.summary.found === false && measurementNodeTypes.has(catalog.type));
   const notFoundMessage = measurementNotFoundMessage(catalog.type, report?.summary);
+  const reportErrorMessage = report?.error ? executionErrorMessage(catalog.type, report.error) : undefined;
   const prominentSummaryKeys = report && geometryResultNodeTypes.has(catalog.type)
     ? pickSummaryKeys(report.summary, catalog.type, 4) : [];
   return <section className="node-execution-result" aria-label="本节点运行结果">
@@ -88,7 +155,8 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
     {!result ? <p className="node-info-muted">尚无运行结果。可使用暂存参数运行此节点；测试会预热上游输入。</p> : <>
       <p className="node-result-time">{draftResult ? '暂存参数测试' : '流程运行结果'}{receivedAt ? ` · 更新于 ${new Date(receivedAt).toLocaleString()}` : ''}{reports.length > 1 ? ` · 显示最近一次（共 ${reports.length} 次）` : ''}</p>
       {!report && <Alert type={result.success ? 'info' : 'error'} showIcon title="本次运行未产生此节点的报告" description={result.error ?? result.haltReason ?? '该节点未执行，请检查上游输入或分支条件。'} />}
-      {report?.error && <Alert type="error" showIcon title={report.error} />}
+      {report?.error && <Alert type="error" showIcon title={reportErrorMessage ? '节点执行失败' : report.error}
+        description={reportErrorMessage && <div><p>{reportErrorMessage}</p><details><summary>查看原始诊断</summary><pre>{report.error}</pre></details></div>} />}
       {notFoundMessage && <Alert type="warning" showIcon title="节点已运行，但未检出目标" description={notFoundMessage} />}
       {report && <>
         {prominentSummaryKeys.length > 0 && <div className="node-result-scalars" aria-label="关键测量结果">

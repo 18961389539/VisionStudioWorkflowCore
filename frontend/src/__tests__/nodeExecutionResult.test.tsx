@@ -16,6 +16,13 @@ function result(found: boolean, reason: string): RunResult {
   };
 }
 
+function failedResult(error: string): RunResult {
+  const run = result(false, 'execution-error');
+  run.success = false;
+  run.nodeReports[0] = { ...run.nodeReports[0], success: false, error };
+  return run;
+}
+
 function mount(type = catalog.type, runResult = result(false, 'too-few-edge-points')) {
   const selectedCatalog = { ...catalog, type };
   return render(<NodeExecutionResult nodeId="caliper" catalog={selectedCatalog} result={runResult} stale={false}
@@ -89,5 +96,34 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toContain('角度修正 12.5');
     expect(summary.textContent).toContain('基准位姿 100,80,0');
     expect(summary.textContent).toContain('当前位姿 130,90,12.5');
+  });
+
+  it('localizes common crop and ROI-transform errors while keeping raw diagnostics available', () => {
+    mount('image.crop', failedResult('Image crop requires a non-empty image.'));
+    expect(screen.getByText('节点执行失败')).toBeTruthy();
+    expect(screen.getByText(/裁剪输入图像为空/)).toBeTruthy();
+    expect(screen.getByText('Image crop requires a non-empty image.')).toBeTruthy();
+
+    cleanup();
+    mount('roi.transform', failedResult('Scene dimensions differ from the saved reference. Capture a new reference before correcting the ROI.'));
+    expect(screen.getByText(/当前场景图像尺寸与已保存基准不一致/)).toBeTruthy();
+    expect(screen.getByText(/重新获取基准/)).toBeTruthy();
+  });
+
+  it('explains invalid caliper geometry and connected circle inputs in Chinese', () => {
+    mount('measure.caliperLine', failedResult('The search line is too short (minimum 2 px).'));
+    expect(screen.getByText(/搜索线长度不足 2 px/)).toBeTruthy();
+    expect(screen.getByText('The search line is too short (minimum 2 px).')).toBeTruthy();
+
+    cleanup();
+    mount('measure.caliperCircle', failedResult('The connected circle input must have a finite center and positive radius.'));
+    expect(screen.getByText(/上游圆心或半径无效/)).toBeTruthy();
+  });
+
+  it('keeps unknown native errors intact for diagnosis', () => {
+    const nativeError = 'HALCON error #3022: Wrong size of filter for Gauss in operator measure_pos';
+    mount('measure.caliper', failedResult(nativeError));
+    expect(screen.getByText(nativeError)).toBeTruthy();
+    expect(screen.queryByText('节点执行失败')).toBeNull();
   });
 });
