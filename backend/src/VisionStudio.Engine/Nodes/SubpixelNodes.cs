@@ -15,8 +15,10 @@ namespace VisionStudio.Engine.Nodes;
 internal static class SubpixelEdgeCore
 {
     /// <summary>沿搜索线采样 1D 灰度剖面（垂直条带平均）。ROI 掩膜外采样点跳过；整点无效时为 NaN。</summary>
-    public static double[] SampleProfile(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end, int sampleWidth, out VisionPoint2D[] points, out double spacing)
+    public static double[] SampleProfile(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end, int sampleWidth,
+        out VisionPoint2D[] points, out double spacing, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         sampleWidth = NormalizeSampleWidth(sampleWidth);
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
@@ -34,6 +36,7 @@ internal static class SubpixelEdgeCore
 
         for (var i = 0; i <= steps; i++)
         {
+            if ((i & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
             var t = i / (double)steps;
             var x = start.X + dx * t;
             var y = start.Y + dy * t;
@@ -86,9 +89,11 @@ internal static class SubpixelEdgeCore
         public static EdgeResult NotFound(string reason) => new(false, 0, 0, 0, 0, reason);
     }
 
-    public static EdgeResult FindEdge(double[] profile, double spacing, string polarity, double minContrast, string direction, string refine)
+    public static EdgeResult FindEdge(double[] profile, double spacing, string polarity, double minContrast, string direction, string refine,
+        CancellationToken cancellationToken = default)
     {
-        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine);
+        cancellationToken.ThrowIfCancellationRequested();
+        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine, cancellationToken);
         return new(edge.Found, edge.Position, edge.Strength, edge.Error, edge.Count, edge.Reason);
     }
 
@@ -228,7 +233,7 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                     ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-outside-image")
                     : clippedLength < 2
                         ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-clipped-too-short")
-                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine);
+                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine, cancellationToken);
 
                 var outputs = new Dictionary<string, VisionValue>
                 {
@@ -288,10 +293,10 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
     }
 
     private static SubpixelEdgeCore.EdgeResult FindClippedEdge(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end,
-        int sampleWidth, string polarity, double minContrast, string direction, string refine)
+        int sampleWidth, string polarity, double minContrast, string direction, string refine, CancellationToken cancellationToken)
     {
-        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
-        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
+        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing, cancellationToken);
+        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, cancellationToken);
     }
 }
 
@@ -371,8 +376,8 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                     overlays.Add(new($"caliper-line-profile-{i}", VisionOverlayType.Line,
                         X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
                         Stroke: "#91d5ff", StrokeWidth: 0.8));
-                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var lineSpacing);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine);
+                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var lineSpacing, cancellationToken);
+                    var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine, cancellationToken);
                     if (!edge.Found)
                     {
                         failures++;
@@ -647,8 +652,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     if (!spokeIntersects) { rejected++; spokesOutsideImage++; continue; }
                     if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
                     { rejected++; spokesTooShortAfterClip++; continue; }
-                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic");
+                    var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing, cancellationToken);
+                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic", cancellationToken);
                     if (!edge.Found)
                     {
                         spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,

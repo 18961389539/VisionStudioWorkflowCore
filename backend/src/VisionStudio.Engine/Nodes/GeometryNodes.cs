@@ -197,8 +197,8 @@ public sealed class CaliperNode : IVisionNodeExecutor
         {
             if (roi is not null)
             {
-                roi.ValidateForMeasurement();
-                mask = roi.BuildMask(sourceImage.Mat.Size());
+                roi.ValidateForMeasurement(cancellationToken);
+                mask = roi.BuildMask(sourceImage.Mat.Size(), cancellationToken);
             }
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
@@ -213,7 +213,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
                     ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-outside-image")
                     : clippedLength < 2
                         ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-clipped-too-short")
-                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine);
+                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine, cancellationToken);
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
@@ -263,10 +263,10 @@ public sealed class CaliperNode : IVisionNodeExecutor
     }
 
     private static SubpixelEdgeCore.EdgeResult FindClippedEdge(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end,
-        int sampleWidth, string polarity, double minContrast, string direction, string refine)
+        int sampleWidth, string polarity, double minContrast, string direction, string refine, CancellationToken cancellationToken)
     {
-        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing);
-        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine);
+        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing, cancellationToken);
+        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, cancellationToken);
     }
 }
 

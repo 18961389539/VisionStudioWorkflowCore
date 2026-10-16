@@ -23,25 +23,29 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 Y: node.GetDouble("y", 0),
                 Width: node.GetDouble("width", source.Width),
                 Height: node.GetDouble("height", source.Height));
-        ValidateCropRoi(roi);
+        ValidateCropRoi(roi, cancellationToken);
 
         using var rasterMask = roi.BuildMask(source.Size(), cancellationToken);
         using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var bounds, out var selectedPixels, cancellationToken);
         if (selectedPixels == 0)
             throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+        cancellationToken.ThrowIfCancellationRequested();
         using var sourceCrop = new Mat(source, bounds);
         var croppedImage = new Mat(sourceCrop.Rows, sourceCrop.Cols, sourceCrop.Type(), Scalar.All(0));
         var maskImage = cropMask.Clone();
         try
         {
             // 非矩形 ROI 输出紧包围框；区域外清零。BGRA 输入会同时得到透明外区。
+            cancellationToken.ThrowIfCancellationRequested();
             sourceCrop.CopyTo(croppedImage, cropMask);
+            cancellationToken.ThrowIfCancellationRequested();
+            var croppedRoi = TranslateRoiToCrop(roi, bounds.X, bounds.Y, cancellationToken);
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(VisionImage.Own(croppedImage)),
                     ["roiMask"] = VisionValue.Image(VisionImage.Own(maskImage)),
-                    ["croppedRoi"] = VisionValue.Roi(TranslateRoiToCrop(roi, bounds.X, bounds.Y)),
+                    ["croppedRoi"] = VisionValue.Roi(croppedRoi),
                     ["cropOrigin"] = VisionValue.Point(new VisionPoint2D(bounds.X, bounds.Y)),
                     ["transform"] = VisionValue.Transform(new VisionTransform2D(
                         "CurrentImage", "CropImage", "px",
@@ -64,35 +68,61 @@ public sealed class ImageCropNode : IVisionNodeExecutor
         }
     }
 
-    private static VisionRoi TranslateRoiToCrop(VisionRoi roi, int cropX, int cropY) => roi.Type switch
+    private static VisionRoi TranslateRoiToCrop(VisionRoi roi, int cropX, int cropY, CancellationToken cancellationToken)
     {
-        VisionRoiType.Rectangle => roi with { X = (roi.X ?? 0) - cropX, Y = (roi.Y ?? 0) - cropY },
-        VisionRoiType.Circle => roi with
+        cancellationToken.ThrowIfCancellationRequested();
+        switch (roi.Type)
         {
-            X = Math.Round(roi.X ?? 0) - cropX,
-            Y = Math.Round(roi.Y ?? 0) - cropY,
-            Radius = Math.Round(roi.Radius ?? 0)
-        },
-        VisionRoiType.Polygon => roi with
-        {
-            Points = (roi.Points ?? []).Select(point => new VisionRoiPoint(
-                Math.Round(point.X) - cropX, Math.Round(point.Y) - cropY)).ToArray()
-        },
-        VisionRoiType.Brush => roi with
-        {
-            Strokes = (roi.Strokes ?? []).Select(stroke => stroke with
+            case VisionRoiType.Rectangle:
+                return roi with { X = (roi.X ?? 0) - cropX, Y = (roi.Y ?? 0) - cropY };
+            case VisionRoiType.Circle:
+                return roi with
+                {
+                    X = Math.Round(roi.X ?? 0) - cropX,
+                    Y = Math.Round(roi.Y ?? 0) - cropY,
+                    Radius = Math.Round(roi.Radius ?? 0)
+                };
+            case VisionRoiType.Polygon:
             {
-                Points = stroke.Points.Select(point => new VisionRoiPoint(
-                    Math.Round(point.X) - cropX, Math.Round(point.Y) - cropY)).ToArray()
-            }).ToArray()
-        },
-        _ => throw new InvalidOperationException($"Unsupported crop ROI type '{roi.Type}'.")
-    };
+                var points = roi.Points ?? [];
+                var translated = new VisionRoiPoint[points.Count];
+                for (var index = 0; index < translated.Length; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    translated[index] = new VisionRoiPoint(Math.Round(points[index].X) - cropX, Math.Round(points[index].Y) - cropY);
+                }
+                return roi with { Points = translated };
+            }
+            case VisionRoiType.Brush:
+            {
+                var strokes = roi.Strokes ?? [];
+                var translatedStrokes = new VisionRoiBrushStroke[strokes.Count];
+                for (var strokeIndex = 0; strokeIndex < translatedStrokes.Length; strokeIndex++)
+                {
+                    if ((strokeIndex & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var stroke = strokes[strokeIndex];
+                    var points = stroke.Points;
+                    var translatedPoints = new VisionRoiPoint[points.Count];
+                    for (var pointIndex = 0; pointIndex < translatedPoints.Length; pointIndex++)
+                    {
+                        if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        translatedPoints[pointIndex] = new VisionRoiPoint(
+                            Math.Round(points[pointIndex].X) - cropX, Math.Round(points[pointIndex].Y) - cropY);
+                    }
+                    translatedStrokes[strokeIndex] = stroke with { Points = translatedPoints };
+                }
+                return roi with { Strokes = translatedStrokes };
+            }
+            default:
+                throw new InvalidOperationException($"Unsupported crop ROI type '{roi.Type}'.");
+        }
+    }
 
-    private static void ValidateCropRoi(VisionRoi roi)
+    private static void ValidateCropRoi(VisionRoi roi, CancellationToken cancellationToken)
     {
         static bool Finite(params double?[] values) => values.All(value => value.HasValue && double.IsFinite(value.Value));
         static bool Bounded(params double?[] values) => values.All(value => value.HasValue && Math.Abs(value.Value) <= 10_000_000);
+        cancellationToken.ThrowIfCancellationRequested();
         switch (roi.Type)
         {
             case VisionRoiType.Rectangle:
@@ -114,14 +144,21 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 var points = roi.Points ?? [];
                 if (points.Count > VisionRoiOpenCvExtensions.MaxPolygonPoints)
                     throw new InvalidOperationException($"多边形裁剪区域最多允许 {VisionRoiOpenCvExtensions.MaxPolygonPoints} 个顶点。");
-                if (points.Count < 3 || points.Any(point => point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
-                    || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
+                if (points.Count < 3)
                     throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");
-                var doubledArea = points.Select((point, index) =>
+                var doubledArea = 0d;
+                for (var index = 0; index < points.Count; index++)
                 {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var point = points[index];
+                    if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                        || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000)
+                        throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");
                     var next = points[(index + 1) % points.Count];
-                    return point.X * next.Y - next.X * point.Y;
-                }).Sum();
+                    if (next is null)
+                        throw new InvalidOperationException("多边形裁剪区域需要至少三个有效顶点，且顶点坐标绝对值不超过 10000000 px。");
+                    doubledArea += point.X * next.Y - next.X * point.Y;
+                }
                 if (Math.Abs(doubledArea) < 1e-6)
                     throw new InvalidOperationException("多边形裁剪区域的顶点不能共线，且必须围成有效面积。");
                 break;
@@ -129,22 +166,30 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                if (strokes.Count == 0 || strokes.Count > 10_000 || strokes.Any(stroke => stroke is null))
+                if (strokes.Count == 0 || strokes.Count > 10_000)
                     throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
                 var totalPoints = 0;
-                foreach (var stroke in strokes)
+                for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
                 {
+                    if ((strokeIndex & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    var stroke = strokes[strokeIndex];
+                    if (stroke is null)
+                        throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
                     if (stroke.Mode is not (VisionRoiStrokeMode.Add or VisionRoiStrokeMode.Erase)
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 512
-                        || stroke.Points is null || stroke.Points.Count == 0
-                        || stroke.Points.Any(point => point is null))
+                        || stroke.Points is null || stroke.Points.Count == 0)
                         throw new InvalidOperationException("笔刷笔迹需要有效模式、1..512 px 笔宽和至少一个点。");
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("笔刷裁剪区域最多允许 500000 个笔迹点。");
-                    if (stroke.Points.Any(point => !double.IsFinite(point.X) || !double.IsFinite(point.Y)
-                        || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000))
-                        throw new InvalidOperationException("笔刷点必须为有限坐标，且绝对值不超过 10000000 px。");
+                    for (var pointIndex = 0; pointIndex < stroke.Points.Count; pointIndex++)
+                    {
+                        if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var point = stroke.Points[pointIndex];
+                        if (point is null || !double.IsFinite(point.X) || !double.IsFinite(point.Y)
+                            || Math.Abs(point.X) > 10_000_000 || Math.Abs(point.Y) > 10_000_000)
+                            throw new InvalidOperationException("笔刷点必须为有限坐标，且绝对值不超过 10000000 px。");
+                    }
                 }
                 break;
             }
