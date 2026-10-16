@@ -604,6 +604,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         const group = parameter.group ?? 'General';
         if (parameter.name === 'angleRangeDeg' && !legacyWorkflow) return false;
         if (parameter.name === 'templatePath' && templateSourceNodeId) return false;
+        if (parameter.name === 'scoreUsingClutter' && !draft.clutterRoi) return false;
         if (['trainingOriginX', 'trainingOriginY'].includes(parameter.name) && draft.trainingOriginMode !== 'manual') return false;
         if (parameter.name === 'scaleStepPercent' && Number(draft.scaleTolerancePercent ?? 0) === 0
           && Number(draft.scaleToleranceXPercent ?? 0) === 0 && Number(draft.scaleToleranceYPercent ?? 0) === 0) return false;
@@ -738,12 +739,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         </div>}
         {shapeMode === 'search' && <div className="shape-training-panel shape-search-panel">
           <strong>搜索与定位</strong>
-          <p>设置角度/尺度窗口、最低分数、局部形变容差、杂乱分阈值、目标数量和搜索区域，然后运行搜索。角度与尺度窗口会限制在模型训练覆盖内，调整它们无需重训；局部形变默认关闭，增大后可容忍边缘小幅移动，但会降低定位约束。匹配分数为 0～1，区域留空时搜索整张场景图。杂乱分只在训练时设置过“杂乱区域”后生效。</p>
+          <p>设置角度/尺度窗口、最低分数、局部形变、特征对比度、杂乱评分、目标数量和搜索区域，然后运行搜索。角度与尺度窗口会限制在模型训练覆盖内，调整它们无需重训；局部形变默认关闭，增大后可容忍边缘小幅移动，但会降低定位约束。运行时对比度阈值可剔除弱边缘，设为 0 时关闭；相对阈值需要无损训练图。启用“杂乱度参与评分”后，分数按匹配分 ×（1 − 杂乱分）调整，同时保留原生分数供核对。区域留空时搜索整张场景图。</p>
           {matchReport?.success && typeof matchReport.summary.found === 'boolean' && <Alert showIcon
             type={matchStale ? 'info' : matchReport.summary.found ? 'success' : 'warning'}
             title={`${matchStale ? '上次搜索 · ' : ''}${matchReport.summary.found ? '已找到目标' : '未找到目标'}${matchStale ? ' · 当前参数待验证' : ''}`}
             description={matchReport.summary.found
-              ? `数量 ${matchNumber('count', 'count', 0)} · 最佳分数 ${matchNumber('score', 'bestScore', 3)} · X ${matchNumber('x')} / Y ${matchNumber('y')} px · 角度 ${matchNumber('angle', 'matchedAngle')}°`
+              ? `数量 ${matchNumber('count', 'count', 0)} · 最佳分数 ${matchNumber('score', 'bestScore', 3)}${typeof matchReport.summary.matchedNativeScore === 'number' ? `（原生 ${matchNumber('nativeScore', 'matchedNativeScore', 3)}）` : ''}${typeof matchReport.summary.matchedContrast === 'number' ? ` · 特征对比度 ${matchNumber('contrast', 'matchedContrast', 1)}` : ''}${typeof matchReport.summary.matchedContrastFraction === 'number' ? ` · 相对对比度 ${matchNumber('contrastFraction', 'matchedContrastFraction', 3)}` : ''} · X ${matchNumber('x')} / Y ${matchNumber('y')} px · 角度 ${matchNumber('angle', 'matchedAngle')}°`
               : '请检查目标是否在搜索区域内、场景与模型是否一致，以及最小匹配分数设置。'} />}
           {!legacyWorkflow && <p>模型覆盖：角度 ±{String(trainedSettings?.trainingAngleRangeDeg ?? trainedSettings?.angleRangeDeg ?? draft.trainingAngleRangeDeg ?? 180)}° · 尺度 {Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0) > 0 || Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0) > 0
             ? `X ${100 - Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}% · Y ${100 - Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%`

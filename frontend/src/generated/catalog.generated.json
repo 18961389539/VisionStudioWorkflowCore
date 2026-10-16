@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "5deef05804511d391c2c5ac943c43a5bfea4c896200decf80fe3e25da0dda585",
+  "hash": "f6e2dbf36c56cbc02cd29a080d3b2dd143898d76cbc51df700ffde6a1aa3609c",
   "items": [
     {
       "type": "image.acquire",
@@ -5393,6 +5393,21 @@
           "required": false
         },
         {
+          "name": "nativeScore",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "contrast",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "contrastFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "center",
           "dataType": "Point2D",
           "required": false
@@ -5773,6 +5788,36 @@
           "description": "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value."
         },
         {
+          "name": "scoreUsingClutter",
+          "label": "Score Using Clutter",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Matching",
+          "description": "When a Clutter ROI is trained, multiply the native match score by (1 - clutter score). The unadjusted score is also available as nativeScore."
+        },
+        {
+          "name": "runtimeContrastThreshold",
+          "label": "Runtime Contrast Threshold",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Matching",
+          "description": "Minimum average gradient strength (0–255) at matched model features. Zero disables this run-time filter; it does not require retraining."
+        },
+        {
+          "name": "contrastFractionThreshold",
+          "label": "Contrast Fraction Threshold",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Matching",
+          "description": "Minimum run-time feature contrast divided by the trained-image feature contrast, capped at 1. Zero disables this check; it needs the lossless original training image."
+        },
+        {
           "name": "maxTargets",
           "label": "Max Targets",
           "type": "number",
@@ -5794,7 +5839,7 @@
           "group": "Multi-target"
         }
       ],
-      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height.",
+      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

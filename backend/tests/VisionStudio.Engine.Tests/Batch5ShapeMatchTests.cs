@@ -228,10 +228,51 @@ public sealed class Batch5ShapeMatchTests
         Assert.True(clutterScore > 0, SummaryText(result));
         Assert.Equal(clutterScore, Convert.ToDouble(result.Summary["matchedClutterScore"]), 6);
 
+        var weightedParameters = parameters.Replace("\"clutterContrast\":5", "\"clutterContrast\":5,\"scoreUsingClutter\":true", StringComparison.Ordinal)
+            .Replace("\"minScore\":0.4", "\"minScore\":0.05", StringComparison.Ordinal)
+            .Replace("\"angleRangeDeg\":15", "\"angleRangeDeg\":0", StringComparison.Ordinal);
+        var weighted = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) }, weightedParameters);
+        Assert.True(Convert.ToBoolean(weighted.Summary["found"]), SummaryText(weighted));
+        var nativeScore = Convert.ToDouble(weighted.Summary["matchedNativeScore"]);
+        var adjustedScore = weighted.Outputs["score"].Require<double>("score");
+        var matchedClutter = Convert.ToDouble(weighted.Summary["matchedClutterScore"]);
+        Assert.Equal(nativeScore * (1 - Math.Clamp(matchedClutter, 0, 1)), adjustedScore, 6);
+        Assert.Equal(nativeScore, weighted.Outputs["nativeScore"].Require<double>("nativeScore"), 6);
+
         var rejected = await Run(new ShapeMatchNode(),
             new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
             parameters.Replace("\"maxClutterScore\":1", "\"maxClutterScore\":0", StringComparison.Ordinal));
         Assert.False(Convert.ToBoolean(rejected.Summary["found"]), SummaryText(rejected));
+    }
+
+    [Fact]
+    public async Task ShapeMatch_RuntimeContrastChecks_ReportStrengthAndRejectDimMatches()
+    {
+        using var template = BuildTemplate();
+        using var dimmedTemplate = new Mat();
+        template.ConvertTo(dimmedTemplate, MatType.CV_8UC1, .35);
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(210, 200, 6))
+            Cv2.WarpAffine(dimmedTemplate, scene, matrix, scene.Size(), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.All(0));
+        Dictionary<string, VisionValue> Inputs() => new() { ["image"] = Image(scene), ["template"] = Image(template) };
+        const string baseParameters = "\"minScore\":0.4,\"angleRangeDeg\":15,\"angleStepDeg\":2,\"minArea\":100";
+
+        var accepted = await Run(new ShapeMatchNode(), Inputs(),
+            $"{{{baseParameters},\"runtimeContrastThreshold\":20,\"contrastFractionThreshold\":0.25}}");
+        Assert.True(Convert.ToBoolean(accepted.Summary["found"]), SummaryText(accepted));
+        Assert.True(accepted.Outputs["contrast"].Require<double>("contrast") > 20, SummaryText(accepted));
+        var contrastFraction = accepted.Outputs["contrastFraction"].Require<double>("contrastFraction");
+        Assert.InRange(contrastFraction, .25, .55);
+        Assert.Equal(contrastFraction, Convert.ToDouble(accepted.Summary["matchedContrastFraction"]), 6);
+
+        var rejectedByAbsolute = await Run(new ShapeMatchNode(), Inputs(),
+            $"{{{baseParameters},\"runtimeContrastThreshold\":120}}");
+        Assert.False(Convert.ToBoolean(rejectedByAbsolute.Summary["found"]), SummaryText(rejectedByAbsolute));
+
+        var rejectedByFraction = await Run(new ShapeMatchNode(), Inputs(),
+            $"{{{baseParameters},\"contrastFractionThreshold\":0.7}}");
+        Assert.False(Convert.ToBoolean(rejectedByFraction.Summary["found"]), SummaryText(rejectedByFraction));
     }
 
     [Fact]
@@ -321,6 +362,7 @@ public sealed class Batch5ShapeMatchTests
         Assert.InRange(modelContourPoints.Max(point => point.Y), 106, 113);
         var asset = Assert.IsType<string>(trained.Summary["trainingModelData"]);
         Assert.NotEmpty(asset);
+        Cv2.ImEncode(".png", template, out var sourceImageBytes);
 
         var runtimeParameters = JsonSerializer.Serialize(new
         {
@@ -328,6 +370,8 @@ public sealed class Batch5ShapeMatchTests
             trainedModelConfig = trained.Summary["trainingConfig"],
             trainedWidth = trained.Summary["trainingWidth"], trainedHeight = trained.Summary["trainingHeight"],
             trainedOriginX = trained.Summary["trainingOriginX"], trainedOriginY = trained.Summary["trainingOriginY"],
+            trainedOriginImageX = trained.Summary["trainingOriginImageX"], trainedOriginImageY = trained.Summary["trainingOriginImageY"],
+            trainedSourceImage = Convert.ToBase64String(sourceImageBytes), contrastFractionThreshold = 0.8,
             angleRangeDeg = 180, angleStepDeg = 2, trainingOriginMode = "centroid", trainingOriginX = 0, trainingOriginY = 0,
             minScore = 0.5, minArea = 100, maxDeformationPx = 2
         });
@@ -340,6 +384,7 @@ public sealed class Batch5ShapeMatchTests
             new Dictionary<string, VisionValue> { ["image"] = Image(scene) }, restoredParameters);
         Assert.True(Convert.ToBoolean(matched.Summary["found"]), SummaryText(matched));
         Assert.Equal(2, Convert.ToInt32(matched.Summary["maxDeformationPx"]));
+        Assert.InRange(matched.Outputs["contrastFraction"].Require<double>("contrastFraction"), .8, 1);
         Assert.Equal("workflow-asset", matched.Summary["modelSource"]);
         using var expectedTransform = PasteMatrix(165, 145, 20);
         var expectedPose = TemplateCentroidThrough(expectedTransform);

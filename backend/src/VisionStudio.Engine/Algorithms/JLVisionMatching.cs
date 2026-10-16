@@ -18,6 +18,8 @@ internal static class JLVisionMatching
         double? SourceOriginX = null, double? SourceOriginY = null);
     private sealed record ShapeModelSetEnvelope(int Version, ShapeModelSetItem[] Models);
     private readonly record struct ShapeFeaturePoint(double X, double Y);
+    private sealed record ShapeContrastReference(ShapeFeaturePoint[] Points, double TrainingMeanContrast,
+        double TrainingOriginX, double TrainingOriginY);
     private readonly record struct TrainingPoseAlignment(double X, double Y, double Angle, double ScaleX, double ScaleY, double Score);
     private sealed record ConsensusContour(ShapeFeaturePoint[] Points, double Support);
     private sealed class ShapeFeatureSpatialIndex
@@ -62,7 +64,8 @@ internal static class JLVisionMatching
         private (int X, int Y) Cell(double x, double y) => ((int)Math.Floor(x / _cellSize), (int)Math.Floor(y / _cellSize));
     }
     private readonly record struct ShapeMatchCandidate(double X, double Y, double Angle, double ScaleX, double ScaleY, double Score,
-        int Width, int Height, double OriginX, double OriginY, int Index, double? ClutterScore = null)
+        int Width, int Height, double OriginX, double OriginY, int Index, double? ClutterScore = null,
+        ShapeContrastReference? ContrastReference = null)
     {
         public double Scale => Math.Sqrt(ScaleX * ScaleY);
     }
@@ -175,6 +178,13 @@ internal static class JLVisionMatching
             var searchRoi = shape ? node.GetRoi("searchRoi") : null;
             var maxClutterScore = Math.Clamp(node.GetDouble("maxClutterScore", .2), 0, 1);
             var maxDeformationPx = shape ? Math.Clamp(node.GetInt("maxDeformationPx", 0), 0, 32) : 0;
+            var scoreUsingClutter = shape && node.GetBool("scoreUsingClutter", false);
+            if (scoreUsingClutter && !clutterEnabled)
+                throw new InvalidOperationException("Score Using Clutter requires a trained Clutter ROI.");
+            var runtimeContrastThreshold = shape ? Math.Clamp(node.GetDouble("runtimeContrastThreshold", 0), 0, 255) : 0;
+            var contrastFractionThreshold = shape ? Math.Clamp(node.GetDouble("contrastFractionThreshold", 0), 0, 1) : 0;
+            var contrastEnabled = runtimeContrastThreshold > 0 || contrastFractionThreshold > 0;
+            using var contrastSceneImage = contrastEnabled ? JLVisionImages.ToMat(gray) : null;
             var originX = (templateBuffer.Width - 1) / 2d; var originY = (templateBuffer.Height - 1) / 2d;
             var minArea = node.GetDouble("minArea", 200);
             var templateSource = shape && savedModel.Length > 0 ? "trained-model" : fromPort ? "input-port" : "file";
@@ -185,6 +195,9 @@ internal static class JLVisionMatching
                 outputs["scaleX"] = VisionValue.Double(1);
                 outputs["scaleY"] = VisionValue.Double(1);
                 if (clutterEnabled) outputs["clutterScore"] = VisionValue.Double(0);
+                if (scoreUsingClutter) outputs["nativeScore"] = VisionValue.Double(0);
+                if (contrastEnabled) outputs["contrast"] = VisionValue.Double(0);
+                if (contrastFractionThreshold > 0) outputs["contrastFraction"] = VisionValue.Double(0);
             }
             var summary = new Dictionary<string, object?> { ["found"] = false, ["bestScore"] = 0d, ["score"] = 0d, ["templateSource"] = templateSource, ["algorithmBackend"] = "JLVision", ["angleRangeDeg"] = range * 180 / Math.PI, ["angleStepDeg"] = step * 180 / Math.PI };
             if (shape)
@@ -195,6 +208,11 @@ internal static class JLVisionMatching
                 summary["ignorePolarity"] = ignorePolarity;
                 summary["clutterEnabled"] = clutterEnabled;
                 if (clutterEnabled) summary["maxClutterScore"] = maxClutterScore;
+                summary["scoreUsingClutter"] = scoreUsingClutter;
+                if (scoreUsingClutter) summary["clutterScoreAdjustment"] = "nativeScore × (1 - clutterScore)";
+                summary["runtimeContrastThreshold"] = runtimeContrastThreshold;
+                summary["contrastFractionThreshold"] = contrastFractionThreshold;
+                summary["contrastCheckEnabled"] = contrastEnabled;
                 summary["maxDeformationPx"] = maxDeformationPx;
                 summary["searchAngleStartDeg"] = searchStart * 180 / Math.PI;
                 summary["searchAngleEndDeg"] = searchEnd * 180 / Math.PI;
@@ -218,6 +236,8 @@ internal static class JLVisionMatching
             var overlays = new List<VisionOverlay>();
             var detections = new List<VisionDetection>();
             var modelSet = shape ? DeserializeShapeModelSet(savedModel) : null;
+            if (contrastEnabled && modelSet is { Models.Length: > 0 })
+                throw new InvalidOperationException("Runtime contrast checks require one fused native shape model; retrain this legacy model set as a composite model first.");
             if (clutterEnabled && modelSet is { Models.Length: > 0 })
                 throw new InvalidOperationException("Clutter scoring requires one fused native shape model; retrain this legacy model set as a composite model first.");
             var templateBox = new Rect(0, 0, templateBuffer.Width, templateBuffer.Height);
@@ -269,6 +289,7 @@ internal static class JLVisionMatching
             }
             var matchingScene = searchScene ?? gray;
             var matchedCandidates = new List<ShapeMatchCandidate>();
+            ShapeContrastReference? contrastReference = null;
             if (modelSet is { Models.Length: > 0 })
             {
                 var cacheHits = 0;
@@ -399,6 +420,17 @@ internal static class JLVisionMatching
                 JlTuple rows, cols, angles, scores, scalesX, scalesY;
                 try
                 {
+                    if (contrastEnabled)
+                    {
+                        using var contrastTrainingImage = contrastFractionThreshold <= 0 ? null
+                            : savedModel.Length == 0 ? JLVisionImages.ToMat(template)
+                            : DecodeGrayscaleImage(node.GetString("trainedSourceImage", string.Empty), "saved training image");
+                        var trainingOriginImageX = savedModel.Length == 0 ? originX
+                            : node.GetDouble("trainedOriginImageX", node.GetDouble("trainedOriginX", originX)) + node.GetDouble("trainedPoseOffsetX", 0);
+                        var trainingOriginImageY = savedModel.Length == 0 ? originY
+                            : node.GetDouble("trainedOriginImageY", node.GetDouble("trainedOriginY", originY)) + node.GetDouble("trainedPoseOffsetY", 0);
+                        contrastReference = CreateContrastReference(model, contrastTrainingImage, trainingOriginImageX, trainingOriginImageY);
+                    }
                     if (anisotropicScale)
                     {
                         if (clutterEnabled || maxDeformationPx > 0)
@@ -439,7 +471,7 @@ internal static class JLVisionMatching
                     for (var index = 0; index < matchCount; index++)
                         matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scalesX[index].D, scalesY[index].D, scores[index].D,
                             templateBox.Width, templateBox.Height, originX, originY, index,
-                            clutterEnabled ? scores[matchCount + index].D : null));
+                            clutterEnabled ? scores[matchCount + index].D : null, contrastReference));
                 }
             }
             else
@@ -468,11 +500,12 @@ internal static class JLVisionMatching
                     }
                 }
             }
-            foreach (var candidate in matchedCandidates.OrderByDescending(candidate => candidate.Score))
+            foreach (var candidate in matchedCandidates.OrderByDescending(candidate => CandidateScore(candidate, scoreUsingClutter)))
             {
                 token.ThrowIfCancellationRequested();
                 var x = candidate.X + searchOffsetX; var y = candidate.Y + searchOffsetY;
-                var radians = candidate.Angle; var scale = candidate.Scale; var score = candidate.Score;
+                var radians = candidate.Angle; var scale = candidate.Scale; var nativeScore = candidate.Score;
+                var score = CandidateScore(candidate, scoreUsingClutter);
                 var poseOffsetX = shape && savedModel.Length > 0 ? node.GetDouble("trainedPoseOffsetX", 0) : 0;
                 var poseOffsetY = shape && savedModel.Length > 0 ? node.GetDouble("trainedPoseOffsetY", 0) : 0;
                 if (poseOffsetX != 0 || poseOffsetY != 0)
@@ -487,8 +520,24 @@ internal static class JLVisionMatching
                 if (shape && savedModel.Length > 0 && (radians < searchStart - 1e-9 || radians > searchEnd + 1e-9)) continue;
                 if (shape && savedModel.Length > 0 && (candidate.ScaleX < searchScaleXMin - 1e-9 || candidate.ScaleX > searchScaleXMax + 1e-9
                     || candidate.ScaleY < searchScaleYMin - 1e-9 || candidate.ScaleY > searchScaleYMax + 1e-9)) continue;
-                if (score < minScore || !shape && detections.Count > 0) continue;
+                if (!shape && (score < minScore || detections.Count > 0)) continue;
                 if (shape && searchRoi is not null && !Contains(searchRoi, x, y)) continue;
+                double? contrast = null;
+                double? contrastFraction = null;
+                if (contrastEnabled)
+                {
+                    var reference = candidate.ContrastReference
+                        ?? throw new InvalidOperationException("The shape model has no contrast reference points.");
+                    contrast = MeasureCandidateContrast(contrastSceneImage!, reference,
+                        candidate.X + searchOffsetX, candidate.Y + searchOffsetY, radians, candidate.ScaleX, candidate.ScaleY);
+                    if (contrast.Value < runtimeContrastThreshold) continue;
+                    if (contrastFractionThreshold > 0)
+                    {
+                        contrastFraction = Math.Clamp(contrast.Value / reference.TrainingMeanContrast, 0, 1);
+                        if (contrastFraction.Value < contrastFractionThreshold) continue;
+                    }
+                }
+                if (score < minScore) continue;
                 var cos = Math.Cos(radians); var sin = Math.Sin(radians);
                 var corners = new[] { (candidateBox.Left, candidateBox.Top), (candidateBox.Right - 1, candidateBox.Top), (candidateBox.Right - 1, candidateBox.Bottom - 1), (candidateBox.Left, candidateBox.Bottom - 1) }
                     .Select(p => new VisionPoint2D(x + cos * candidate.ScaleX * (p.Item1 - candidate.OriginX) + sin * candidate.ScaleY * (p.Item2 - candidate.OriginY),
@@ -509,6 +558,9 @@ internal static class JLVisionMatching
                         outputs["scaleX"] = VisionValue.Double(candidate.ScaleX);
                         outputs["scaleY"] = VisionValue.Double(candidate.ScaleY);
                         if (clutterEnabled) outputs["clutterScore"] = VisionValue.Double(candidate.ClutterScore ?? 0);
+                        if (scoreUsingClutter) outputs["nativeScore"] = VisionValue.Double(nativeScore);
+                        if (contrast is { } measuredContrast) outputs["contrast"] = VisionValue.Double(measuredContrast);
+                        if (contrastFraction is { } measuredFraction) outputs["contrastFraction"] = VisionValue.Double(measuredFraction);
                     }
                     outputs["x"] = VisionValue.Double(shape ? x : left); outputs["y"] = VisionValue.Double(shape ? y : top);
                     outputs["angle"] = VisionValue.Double(degrees); outputs["center"] = VisionValue.Point(shape ? new(x, y) : new(left + width / 2, top + height / 2));
@@ -521,6 +573,9 @@ internal static class JLVisionMatching
                         summary["matchedScaleX"] = candidate.ScaleX;
                         summary["matchedScaleY"] = candidate.ScaleY;
                         if (clutterEnabled) summary["matchedClutterScore"] = candidate.ClutterScore;
+                        if (scoreUsingClutter) summary["matchedNativeScore"] = nativeScore;
+                        if (contrast is { } measuredContrast) summary["matchedContrast"] = measuredContrast;
+                        if (contrastFraction is { } measuredFraction) summary["matchedContrastFraction"] = measuredFraction;
                     }
                 }
                 var box = new VisionRectangle2D(left, top, width, height);
@@ -542,6 +597,88 @@ internal static class JLVisionMatching
         var intersection = Math.Max(0, Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X)) * Math.Max(0, Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y));
         return intersection / Math.Max(1e-9, a.Width * a.Height + b.Width * b.Height - intersection);
     }
+
+    private static Mat DecodeGrayscaleImage(string encodedImage, string label)
+    {
+        if (string.IsNullOrWhiteSpace(encodedImage))
+            throw new InvalidOperationException("Contrast fraction needs the lossless original training image. Reopen the shape node, fetch its training image, and retrain it before using this threshold.");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(encodedImage); }
+        catch (FormatException ex) { throw new InvalidOperationException($"The {label} is invalid.", ex); }
+        using var decoded = Cv2.ImDecode(bytes, ImreadModes.Unchanged);
+        if (decoded.Empty()) throw new InvalidOperationException($"The {label} could not be decoded.");
+        var gray = new Mat();
+        try
+        {
+            if (decoded.Channels() == 1) decoded.CopyTo(gray);
+            else if (decoded.Channels() == 3) Cv2.CvtColor(decoded, gray, ColorConversionCodes.BGR2GRAY);
+            else if (decoded.Channels() == 4) Cv2.CvtColor(decoded, gray, ColorConversionCodes.BGRA2GRAY);
+            else throw new InvalidOperationException($"The {label} must have 1, 3, or 4 channels.");
+            return gray;
+        }
+        catch { gray.Dispose(); throw; }
+    }
+
+    private static ShapeContrastReference CreateContrastReference(JlShapeModel model, Mat? trainingImage,
+        double trainingOriginX, double trainingOriginY)
+    {
+        using var contours = model.GetShapeModelContours(1);
+        var points = ExtractShapeContours(contours).SelectMany(contour => contour).ToArray();
+        if (points.Length == 0) throw new InvalidOperationException("The shape model contains no contour points for contrast measurement.");
+        var stride = Math.Max(1, (int)Math.Ceiling(points.Length / 1024d));
+        var samples = points.Where((_, index) => index % stride == 0).ToArray();
+        var trainingMean = trainingImage is null ? 0 : MeanPointContrast(trainingImage, samples,
+            point => (point.X + trainingOriginX, point.Y + trainingOriginY));
+        if (trainingImage is not null && trainingMean <= 1e-6)
+            throw new InvalidOperationException("The stored training image has no measurable contrast along the shape-model features.");
+        return new(samples, trainingMean, trainingOriginX, trainingOriginY);
+    }
+
+    private static double MeasureCandidateContrast(Mat image, ShapeContrastReference reference,
+        double poseX, double poseY, double angle, double scaleX, double scaleY)
+    {
+        var cos = Math.Cos(angle);
+        var sin = Math.Sin(angle);
+        return MeanPointContrast(image, reference.Points, point =>
+            (poseX + cos * scaleX * point.X + sin * scaleY * point.Y,
+             poseY - sin * scaleX * point.X + cos * scaleY * point.Y));
+    }
+
+    private static double MeanPointContrast(Mat image, IReadOnlyList<ShapeFeaturePoint> points,
+        Func<ShapeFeaturePoint, (double X, double Y)> project)
+    {
+        if (points.Count == 0) return 0;
+        double total = 0;
+        foreach (var point in points)
+        {
+            var position = project(point);
+            total += LocalGradientContrast(image, position.X, position.Y);
+        }
+        return total / points.Count;
+    }
+
+    private static double LocalGradientContrast(Mat image, double x, double y)
+    {
+        var centerX = (int)Math.Round(x);
+        var centerY = (int)Math.Round(y);
+        var best = 0d;
+        for (var offsetY = -1; offsetY <= 1; offsetY++)
+            for (var offsetX = -1; offsetX <= 1; offsetX++)
+            {
+                var px = centerX + offsetX;
+                var py = centerY + offsetY;
+                if (px <= 0 || py <= 0 || px >= image.Width - 1 || py >= image.Height - 1) continue;
+                var gx = image.At<byte>(py, px + 1) - image.At<byte>(py, px - 1);
+                var gy = image.At<byte>(py + 1, px) - image.At<byte>(py - 1, px);
+                best = Math.Max(best, Math.Min(255, Math.Sqrt(gx * gx + gy * gy)));
+            }
+        return best;
+    }
+
+    private static double CandidateScore(ShapeMatchCandidate candidate, bool scoreUsingClutter) =>
+        scoreUsingClutter && candidate.ClutterScore is { } clutter
+            ? candidate.Score * (1 - Math.Clamp(clutter, 0, 1))
+            : candidate.Score;
 
     private static JlTuple CreateShapeSearchSubPixel(int maxDeformationPx, bool clutterEnabled) =>
         maxDeformationPx > 0
