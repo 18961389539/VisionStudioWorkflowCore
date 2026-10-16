@@ -39,6 +39,15 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Fact]
+    public async Task CropReportsAnEmptyInputImageClearly()
+    {
+        using var empty = new Mat();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RunImage(new ImageCropNode(), Image(empty), """{"x":0,"y":0,"width":1,"height":1}"""));
+        Assert.Contains("non-empty image", error.Message);
+    }
+
     [Theory]
     [InlineData("""{"roi":{"type":"Rectangle","x":-2,"y":3,"width":7,"height":4}}""")]
     [InlineData("""{"roi":{"type":"Circle","x":1,"y":5,"radius":3}}""")]

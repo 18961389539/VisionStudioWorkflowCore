@@ -17,6 +17,15 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('explains that disabling parabolic refinement does not guarantee integer image coordinates', () => {
+    const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
+    for (const type of ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel']) {
+      const refine = translated.find(item => item.type === type)?.parameters.find(parameter => parameter.name === 'refine');
+      expect(refine?.options?.find(option => option.value === 'none')?.label).toBe('不做抛物线细化');
+      expect(refine?.description).toContain('图像坐标仍可能是小数');
+    }
+  });
+
   it('can validate the shipped precision template including the image and dynamic ROI connections', () => {
     const graph = precisionDemo();
     const nodes = graph.nodes.map(node => {

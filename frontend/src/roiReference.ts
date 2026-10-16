@@ -4,6 +4,9 @@ import type { OverlayPoint, VisionRoi } from './types';
 import type { Edge, Node } from '@xyflow/react';
 
 const coordinateParameters: Record<string, string[]> = {
+  'image.acquire': ['cameraId'],
+  'camera.syncCapture': ['groupId'],
+  'frameset.image': ['cameraId'],
   'image.crop': ['roi', 'x', 'y', 'width', 'height'],
   'image.resize': ['width', 'height'],
   'image.rotate': ['angleDeg', 'expand'],
@@ -26,6 +29,7 @@ const coordinateParameters: Record<string, string[]> = {
 };
 
 const coordinateInputPorts: Record<string, string[]> = {
+  'frameset.image': ['frameSet'],
   'image.undistort': ['calibrationJson'],
   'image.warpAffine': ['transform'],
   'coordinate.transformInverse': ['transform'],

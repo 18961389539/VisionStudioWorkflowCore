@@ -13,6 +13,8 @@ public sealed class ImageCropNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
+        if (source.Empty())
+            throw new InvalidOperationException("Image crop requires a non-empty image.");
         var roi = context.TryGetValue("roi", out var roiValue)
             ? roiValue.Require<VisionRoi>("roi")
             : node.GetRoi() ?? new VisionRoi(

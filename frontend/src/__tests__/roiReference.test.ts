@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyReferenceParameters, capturedReference, rebaseRoi } from '../roiReference';
+import type { Edge, Node } from '@xyflow/react';
+import { applyReferenceParameters, capturedReference, imageFrameFingerprint, rebaseRoi } from '../roiReference';
 
 describe('ROI reference capture', () => {
   it('captures pixels and the actual pose together and rebases a legacy ROI without mutating it', () => {
@@ -30,6 +31,28 @@ describe('ROI reference capture', () => {
       { referenceCaptured: true, referenceImage: 'png', referenceX: NaN, referenceY: 0, referenceThetaDeg: 0, referenceWidth: 10, referenceHeight: 10 },
       { referenceCaptured: true, referenceImage: 'png', referenceX: 0, referenceY: 0, referenceThetaDeg: 0, referenceWidth: 0, referenceHeight: 10 }
     ]) expect(() => capturedReference({}, summary, '', '')).toThrow('完整的基准图像');
+  });
+
+  it('invalidates a saved reference when its camera or synchronized frame source changes', () => {
+    const acquisition = (cameraId: string): Node => ({ id: 'camera', position: { x: 0, y: 0 }, data: {
+      typeKey: 'image.acquire', parameters: { cameraId }
+    } });
+    const cameraA = imageFrameFingerprint('camera', [acquisition('camera-a')], []);
+    const cameraB = imageFrameFingerprint('camera', [acquisition('camera-b')], []);
+    expect(cameraA).not.toBe(cameraB);
+
+    const frameImage: Node = { id: 'frame-image', position: { x: 0, y: 0 }, data: {
+      typeKey: 'frameset.image', inputs: [{ name: 'frameSet', dataType: 'FrameSet' }], parameters: { cameraId: 'camera-a' }
+    } };
+    const sync = (groupId: string): Node => ({ id: 'sync', position: { x: 0, y: 0 }, data: {
+      typeKey: 'camera.syncCapture', parameters: { groupId }
+    } });
+    const edge: Edge = { id: 'frame-set', source: 'sync', sourceHandle: 'frameSet', target: 'frame-image', targetHandle: 'frameSet' };
+    const frameSetA = imageFrameFingerprint('frame-image', [frameImage, sync('line-a')], [edge]);
+    const frameSetB = imageFrameFingerprint('frame-image', [frameImage, sync('line-b')], [edge]);
+    expect(frameSetA).not.toBe(frameSetB);
+    const selectedCameraB: Node = { ...frameImage, data: { ...frameImage.data, parameters: { cameraId: 'camera-b' } } };
+    expect(imageFrameFingerprint('frame-image', [selectedCameraB, sync('line-a')], [edge])).not.toBe(frameSetA);
   });
 
   it('moves connected measurement parameters atomically when the reference changes', () => {

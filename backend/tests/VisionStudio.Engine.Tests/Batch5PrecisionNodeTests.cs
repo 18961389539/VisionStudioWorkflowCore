@@ -301,6 +301,8 @@ public sealed class Batch5PrecisionNodeTests
             """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"angleStepDeg":5,"minContrast":15,"polarity":"Any"}""");
 
         Assert.True(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal(72, Convert.ToInt32(result.Summary["spokes"]));
+        Assert.Equal(5, Convert.ToDouble(result.Summary["angleStepDeg"]), 6);
         var radius = result.Outputs["radius"].Require<double>("radius");
         Assert.InRange(radius, truth.r - 0.8, truth.r + 0.8);
         var circle = result.Outputs["circle"].Require<VisionCircle>("circle");
@@ -314,11 +316,45 @@ public sealed class Batch5PrecisionNodeTests
             - Convert.ToDouble(result.Outputs["radiusMin"].Require<double>("radiusMin"));
         Assert.InRange(spread, 0, 2.5);
 
+        var denseLegacyStep = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"samplingMode":"step","angleStepDeg":0.5,"minContrast":15}""");
+        Assert.True(Convert.ToBoolean(denseLegacyStep.Summary["found"]));
+        Assert.Equal(360, Convert.ToInt32(denseLegacyStep.Summary["spokes"]));
+        Assert.Equal(1, Convert.ToDouble(denseLegacyStep.Summary["angleStepDeg"]), 6);
+
         // 部分弧（±45°）仍能拟合半径。
         var arc = await Run(new CaliperCircleNode(), Image(image),
             """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"angleStepDeg":5,"angleStartDeg":-45,"angleEndDeg":45,"minContrast":15}""");
         Assert.True(Convert.ToBoolean(arc.Summary["found"]));
         Assert.InRange(arc.Outputs["radius"].Require<double>("radius"), truth.r - 1.5, truth.r + 1.5);
+    }
+
+    [Theory]
+    [InlineData("angleStartDeg")]
+    [InlineData("angleEndDeg")]
+    [InlineData("angleStepDeg")]
+    [InlineData("caliperCount")]
+    [InlineData("radialBand")]
+    [InlineData("minContrast")]
+    [InlineData("sampleWidth")]
+    [InlineData("maxRadiusDeviation")]
+    [InlineData("maxFitOutliers")]
+    [InlineData("fitOutlierThreshold")]
+    [InlineData("fitRadiusTolerance")]
+    public async Task CaliperCircle_RejectsNonFiniteNumericParameters(string parameterName)
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        var parameters = new Dictionary<string, object>
+        {
+            ["centerX"] = 32,
+            ["centerY"] = 32,
+            ["radius"] = 12,
+            [parameterName] = "NaN"
+        };
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new CaliperCircleNode(), Image(image), JsonSerializer.Serialize(parameters)));
+        Assert.Contains(parameterName, error.Message);
     }
 
     [Fact]

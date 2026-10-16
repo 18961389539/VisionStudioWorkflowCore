@@ -28,6 +28,45 @@ const persistPixelated = (value: boolean) => {
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
 const maxCircleRadius = (center: Point, width: number, height: number) => Math.max(0, Math.min(center.x, center.y, width - center.x, height - center.y));
+
+function circleArcSpan(start: number, end: number) {
+  const rawSpan = end - start;
+  if (Math.abs(rawSpan) < 1e-9) return { span: 0, fullCircle: false };
+  let span = rawSpan % 360;
+  if (Math.abs(span) < 1e-9) return { span: 360, fullCircle: true };
+  if (span < 0) span += 360;
+  return { span, fullCircle: false };
+}
+
+/** Match the backend caliper-circle sampling rules so the editable preview shows the actual search rays. */
+export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>): number[] {
+  const start = geometry.angleStartDeg ?? -180;
+  const end = geometry.angleEndDeg ?? 180;
+  const { span, fullCircle } = circleArcSpan(start, end);
+  if (span === 0) return [start];
+
+  let count: number;
+  let effectiveStep: number;
+  if (geometry.samplingMode === 'step') {
+    effectiveStep = clamp(geometry.angleStepDeg ?? 5, 0.5, 45);
+    const intervalCount = span / effectiveStep;
+    const nearestIntervalCount = Math.round(intervalCount);
+    const reachesEnd = nearestIntervalCount > 0
+      && Math.abs(nearestIntervalCount * effectiveStep - span) <= 1e-9;
+    count = fullCircle && reachesEnd ? nearestIntervalCount : Math.floor(intervalCount) + 1;
+    const maximumCount = fullCircle ? 360 : 361;
+    if (count > maximumCount) {
+      effectiveStep = span / (fullCircle ? maximumCount : maximumCount - 1);
+      count = maximumCount;
+    }
+  } else {
+    count = Math.round(clamp(geometry.caliperCount ?? 72, 3, 361));
+    effectiveStep = fullCircle ? span / count : span / (count - 1);
+  }
+
+  return Array.from({ length: count }, (_, index) => start + index * effectiveStep);
+}
+
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
 
@@ -219,18 +258,8 @@ function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: Mea
   const outer = geometry.radius + band;
   const start = geometry.angleStartDeg ?? -180;
   const end = geometry.angleEndDeg ?? 180;
-  const rawSpan = end - start;
-  const span = Math.abs(rawSpan) >= 359.999 ? 360 : ((rawSpan % 360) + 360) % 360;
-  const fullCircle = Math.abs(rawSpan) >= 359.999 || Math.abs(rawSpan) < 1e-9;
-  const angleSpan = fullCircle ? 360 : span;
-  const stepMode = geometry.samplingMode === 'step';
-  const legacyStep = clamp(geometry.angleStepDeg ?? 5, 0.5, 45);
-  const requestedStepCount = Math.floor(angleSpan / legacyStep) + 1;
-  const count = angleSpan === 0 ? 1 : stepMode
-    ? Math.min(361, requestedStepCount)
-    : Math.round(clamp(geometry.caliperCount ?? 72, 3, 361));
-  const effectiveStep = stepMode ? requestedStepCount > 361 ? angleSpan / 360 : legacyStep
-    : fullCircle ? angleSpan / count : count <= 1 ? 0 : angleSpan / (count - 1);
+  const { span, fullCircle } = circleArcSpan(start, end);
+  const angles = buildCaliperCircleAngles(geometry);
   const boundary = (angleDeg: number) => {
     const radians = angleDeg * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -242,14 +271,14 @@ function MeasurementGeometryShape({ geometry, scale, editable }: { geometry: Mea
       <Circle x={geometry.center.x} y={geometry.center.y} radius={outer} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
     </>}
     <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16" strokeWidth={2.5 / scale} />
-    {count > 1 && Array.from({ length: count }, (_, index) => {
-      const radians = (start + index * effectiveStep) * Math.PI / 180;
+    {angles.map((angleDeg, index) => {
+      const radians = angleDeg * Math.PI / 180;
       return <Line key={`spoke-${index}`} points={[
         geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
         geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)
       ]} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
     })}
-    {span < 359.999 && <>
+    {!fullCircle && span > 0 && <>
       <Line points={boundary(start)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
       <Line points={boundary(start + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     </>}

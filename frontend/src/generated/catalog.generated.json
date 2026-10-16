@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "1c3170e5954dc5ee4007529c77d3f8e949e92246f5d4fc6f05b33402234ac6c8",
+  "hash": "bcc57f380d8ee6d5432d4a7c5274604595299741bd608324c40edf0e8560430e",
   "items": [
     {
       "type": "image.acquire",
@@ -3640,7 +3640,7 @@
               "value": "parabolic"
             },
             {
-              "label": "None (integer)",
+              "label": "No parabolic refinement",
               "value": "none"
             }
           ],
@@ -6180,6 +6180,7 @@
           "step": 0.5,
           "unit": "deg",
           "group": "Arc",
+          "description": "Fixed angular interval. Full circles omit the duplicate end ray; partial arcs sample from the start by this interval and may stop before the end.",
           "visibleWhen": {
             "parameter": "samplingMode",
             "values": [
@@ -6517,7 +6518,7 @@
               "value": "parabolic"
             },
             {
-              "label": "None (integer)",
+              "label": "No parabolic refinement",
               "value": "none"
             }
           ],
@@ -6740,7 +6741,7 @@
               "value": "parabolic"
             },
             {
-              "label": "None (integer)",
+              "label": "No parabolic refinement",
               "value": "none"
             }
           ],

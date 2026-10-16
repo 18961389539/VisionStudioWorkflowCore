@@ -459,7 +459,7 @@ public static class BuiltInNodeCatalog
                 new("refine", "Refine", "select", "parabolic", Options:
                 [
                     new("Parabolic (subpixel)", "parabolic"),
-                    new("None (integer)", "none")
+                    new("No parabolic refinement", "none")
                 ], Group: "Sampling")
             ],
             "Single-caliper grayscale edge location along a configurable search line. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",

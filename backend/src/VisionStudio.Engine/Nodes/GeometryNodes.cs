@@ -185,8 +185,8 @@ public sealed class CaliperNode : IVisionNodeExecutor
             throw new InvalidOperationException("Caliper measurement requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
-        var minContrast = Math.Max(0, node.GetDouble("edgeThreshold", 12));
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
+        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "edgeThreshold", 12));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
         if (direction is not ("strongest" or "firstfromstart" or "firstfromend")) direction = "strongest";

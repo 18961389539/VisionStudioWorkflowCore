@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import ImageViewer, { type MeasurementGeometry } from '../components/ImageViewer';
+import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
 import type { VisionOverlay } from '../types';
 
 vi.mock('react-konva', async () => {
@@ -44,6 +44,39 @@ const imageView = (geometry: MeasurementGeometry, onChange: (geometry: Measureme
 );
 
 describe('ImageViewer measurement geometry editing', () => {
+  it('matches backend circle-caliper angles for full circles and a single-ray arc', () => {
+    const base: Extract<MeasurementGeometry, { type: 'circle' }> = {
+      type: 'circle', center: { x: 50, y: 50 }, radius: 20, angleStartDeg: -180, angleEndDeg: 180,
+      samplingMode: 'step', angleStepDeg: 5
+    };
+
+    const fiveDegreeAngles = buildCaliperCircleAngles(base);
+    expect(fiveDegreeAngles).toHaveLength(72);
+    expect(fiveDegreeAngles[0]).toBe(-180);
+    expect(fiveDegreeAngles.at(-1)).toBe(175);
+
+    const denseAngles = buildCaliperCircleAngles({ ...base, angleStepDeg: 0.5 });
+    expect(denseAngles).toHaveLength(360);
+    expect(denseAngles.at(-1)).toBe(179);
+
+    expect(buildCaliperCircleAngles({ ...base, angleStartDeg: 0, angleEndDeg: 0 })).toEqual([0]);
+  });
+
+  it('includes both partial-arc endpoints in count mode and stops at the last fixed step in legacy mode', () => {
+    const base: Extract<MeasurementGeometry, { type: 'circle' }> = {
+      type: 'circle', center: { x: 50, y: 50 }, radius: 20, angleStartDeg: 0, angleEndDeg: 92,
+      samplingMode: 'count', caliperCount: 10
+    };
+    const counted = buildCaliperCircleAngles(base);
+    expect(counted).toHaveLength(10);
+    expect(counted[0]).toBe(0);
+    expect(counted.at(-1)).toBe(92);
+
+    const stepped = buildCaliperCircleAngles({ ...base, samplingMode: 'step', angleStepDeg: 5 });
+    expect(stepped).toHaveLength(19);
+    expect(stepped.at(-1)).toBe(90);
+  });
+
   it('draws a new search line in image coordinates and emits its endpoints', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);

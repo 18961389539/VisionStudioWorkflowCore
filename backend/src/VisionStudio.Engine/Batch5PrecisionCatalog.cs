@@ -157,7 +157,7 @@ public static class Batch5PrecisionCatalog
                 new("refine", "Refine", "select", "parabolic", Options:
                 [
                     new("Parabolic (subpixel)", "parabolic"),
-                    new("None (integer)", "none")
+                    new("No parabolic refinement", "none")
                 ], Group: "Sampling")
             ],
             "Subpixel edge location along a search line. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
@@ -208,7 +208,7 @@ public static class Batch5PrecisionCatalog
                 new("refine", "Refine", "select", "parabolic", Options:
                 [
                     new("Parabolic (subpixel)", "parabolic"),
-                    new("None (integer)", "none")
+                    new("No parabolic refinement", "none")
                 ], Group: "Sampling"),
                 new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles along the expected edge; zero uses the search-line length."),
                 new("caliperCount", "Caliper Count", "number", 9, 3, 101, 1, Group: "Sampling", Description: "Number of parallel search profiles along the edge span; at least 3 valid edge points must remain after fitting."),
@@ -259,6 +259,7 @@ public static class Batch5PrecisionCatalog
                     Description: "Number of radial calipers. Full circles distribute them without duplicating the end angle; partial arcs include both ends.",
                     VisibleWhen: new("samplingMode", ["count"])),
                 new("angleStepDeg", "Angle Step (Legacy)", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Arc",
+                    Description: "Fixed angular interval. Full circles omit the duplicate end ray; partial arcs sample from the start by this interval and may stop before the end.",
                     VisibleWhen: new("samplingMode", ["step"])),
                 new("radialBand", "Radial Search Half-Width", "number", 8, 1, 500, 1, Unit: "px", Group: "Sampling",
                     Description: "Searches from max(0, nominal radius minus this value) to nominal radius plus this value; the radial search never crosses the center."),

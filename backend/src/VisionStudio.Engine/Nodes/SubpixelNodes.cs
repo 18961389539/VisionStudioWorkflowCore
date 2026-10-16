@@ -84,6 +84,20 @@ internal static class SubpixelEdgeCore
         return new(edge.Found, edge.Position, edge.Strength, edge.Error, edge.Count, edge.Reason);
     }
 
+    public static double RequireFiniteParameter(NodeDefinition node, string name, double fallback)
+    {
+        var value = node.GetDouble(name, fallback);
+        if (!double.IsFinite(value))
+            throw new InvalidOperationException($"Parameter '{name}' must be a finite number.");
+        return value;
+    }
+
+    public static int ClampedIntParameter(NodeDefinition node, string name, int fallback, int minimum, int maximum)
+    {
+        var value = RequireFiniteParameter(node, name, fallback);
+        return (int)Math.Clamp(Math.Round(value), minimum, maximum);
+    }
+
     /// <summary>沿搜索线的坐标 → 图像点。</summary>
     public static VisionPoint2D Locate(VisionPoint2D start, VisionPoint2D end, double position)
     {
@@ -171,8 +185,8 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
             throw new InvalidOperationException("Subpixel edge detection requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
-        var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
+        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
         var refine = node.GetString("refine", "parabolic").Trim().ToLowerInvariant();
@@ -278,14 +292,15 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
             throw new InvalidOperationException("Caliper line measurement requires a non-empty image.");
 
         var search = SubpixelEdgeCore.ResolveSearchLine(context, node);
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 5));
-        var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 5, 1, 99));
+        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var direction = node.GetString("direction", "strongest").Trim().ToLowerInvariant();
         var refine = node.GetString("refine", "parabolic").Trim().ToLowerInvariant();
-        var edgeLength = Math.Clamp(node.GetDouble("edgeLength", 0), 0, 10000);
-        var maxFitOutliers = Math.Clamp(node.GetInt("maxFitOutliers", 0), 0, 16);
-        var fitOutlierThreshold = Math.Max(0, node.GetDouble("fitOutlierThreshold", 2));
+        var edgeLength = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0), 0, 10000);
+        var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 3, 101);
+        var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
+        var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -300,7 +315,6 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 if (length < 2)
                     throw new InvalidOperationException("The search line is too short (minimum 2 px).");
                 var span = edgeLength > 0 ? edgeLength : length;
-                var caliperCount = Math.Clamp(node.GetInt("caliperCount", 9), 3, 101);
                 var tangentX = -(search.End.Y - search.Start.Y) / length;
                 var tangentY = (search.End.X - search.Start.X) / length;
                 var points = new List<VisionPoint2D>(caliperCount);
@@ -515,8 +529,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         if (Math.Abs(center.X) > 10_000_000 || Math.Abs(center.Y) > 10_000_000 || nominalRadius > 10_000_000)
             throw new InvalidOperationException("Caliper circle coordinates and radius must be within 10000000 pixels.");
 
-        var angleStart = node.GetDouble("angleStartDeg", -180);
-        var angleEnd = node.GetDouble("angleEndDeg", 180);
+        var angleStart = SubpixelEdgeCore.RequireFiniteParameter(node, "angleStartDeg", -180);
+        var angleEnd = SubpixelEdgeCore.RequireFiniteParameter(node, "angleEndDeg", 180);
         var fixture = MeasurementFixture.Resolve(context);
         if (fixture is not null)
         {
@@ -528,23 +542,23 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             angleEnd += rotation;
         }
         var requestedMode = node.GetString("samplingMode", "").Trim().ToLowerInvariant();
-        // Old workflows only have angleStepDeg. Keep their sampling layout intact until the user
+        // Old workflows only have angleStepDeg. Keep their fixed-step spacing until the user
         // explicitly switches to count mode; new nodes use a direct caliper count.
         var samplingMode = requestedMode is "count" or "step"
             ? requestedMode
             : node.Parameters?.ContainsKey("angleStepDeg") == true ? "step" : "count";
-        var angleStep = Math.Clamp(node.GetDouble("angleStepDeg", 5), 0.5, 45);
-        var caliperCount = Math.Clamp(node.GetInt("caliperCount", 72), 3, 361);
-        var band = Math.Clamp(node.GetDouble("radialBand", 8), 1, 500);
-        var minContrast = Math.Max(0, node.GetDouble("minContrast", 8));
+        var angleStep = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "angleStepDeg", 5), 0.5, 45);
+        var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 72, 3, 361);
+        var band = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "radialBand", 8), 1, 500);
+        var minContrast = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "minContrast", 8));
         var polarity = node.GetString("polarity", "any").Trim().ToLowerInvariant();
         var searchDirection = node.GetString("searchDirection", "strongest").Trim().ToLowerInvariant();
         if (searchDirection is not ("strongest" or "firstfromstart" or "firstfromend")) searchDirection = "strongest";
-        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(node.GetInt("sampleWidth", 3));
-        var maxDeviation = Math.Max(0, node.GetDouble("maxRadiusDeviation", 0));
-        var maxFitOutliers = Math.Clamp(node.GetInt("maxFitOutliers", 0), 0, 16);
-        var fitOutlierThreshold = Math.Max(0, node.GetDouble("fitOutlierThreshold", 2));
-        var fitRadiusTolerance = Math.Max(0, node.GetDouble("fitRadiusTolerance", 0));
+        var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 3, 1, 99));
+        var maxDeviation = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxRadiusDeviation", 0));
+        var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
+        var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
+        var fitRadiusTolerance = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitRadiusTolerance", 0));
         var innerRadius = Math.Max(0, nominalRadius - band);
         var outerRadius = nominalRadius + band;
         var roi = ContourNodesHelper.ResolveRoi(context, node);
@@ -790,14 +804,22 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
 
     private static double[] BuildAnglesByStep(double start, double end, double step, out double effectiveStep)
     {
-        var (span, _) = ArcSpan(start, end);
+        var (span, fullCircle) = ArcSpan(start, end);
         effectiveStep = step;
         if (span == 0) return [start];
-        var count = (int)Math.Floor(span / effectiveStep) + 1;
-        if (count > 361)
+
+        var intervalCount = span / effectiveStep;
+        var nearestIntervalCount = (int)Math.Round(intervalCount);
+        var reachesEnd = nearestIntervalCount > 0
+            && Math.Abs(nearestIntervalCount * effectiveStep - span) <= 1e-9;
+        var count = fullCircle && reachesEnd
+            ? nearestIntervalCount
+            : (int)Math.Floor(intervalCount) + 1;
+        var maximumCount = fullCircle ? 360 : 361;
+        if (count > maximumCount)
         {
-            effectiveStep = span / 360d;
-            count = 361;
+            effectiveStep = span / (fullCircle ? maximumCount : maximumCount - 1);
+            count = maximumCount;
         }
         var angles = new double[count];
         for (var i = 0; i < count; i++) angles[i] = start + i * effectiveStep;
