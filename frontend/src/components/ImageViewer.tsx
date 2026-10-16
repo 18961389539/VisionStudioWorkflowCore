@@ -259,7 +259,10 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
   }
   if (origin.type === 'Circle') {
     if (mode === 'move') {
-      return { ...origin, x: clamp(origin.x + dx, origin.radius, maxW - origin.radius), y: clamp(origin.y + dy, origin.radius, maxH - origin.radius) };
+      const moveCenter = (center: number, delta: number, limit: number) => origin.radius * 2 <= limit
+        ? clamp(center + delta, origin.radius, limit - origin.radius)
+        : clamp(center + delta, 0, limit);
+      return { ...origin, x: moveCenter(origin.x, dx, maxW), y: moveCenter(origin.y, dy, maxH) };
     }
     const maxRadius = maxCircleRadius(origin, maxW, maxH);
     return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), Math.min(2, maxRadius), maxRadius) };

@@ -374,6 +374,27 @@ describe('ImageViewer measurement geometry editing', () => {
     ] });
   });
 
+  it('keeps an oversized circle ROI center inside the image when moving it', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Circle', x: 50, y: 50, radius: 60 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 130 }); // image center
+    fireEvent.mouseMove(stage, { clientX: 223.6, clientY: 141.8 }); // request image (60, 55)
+    fireEvent.mouseUp(document.body, { clientX: 223.6, clientY: 141.8 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const moved = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(moved.type).toBe('Circle');
+    if (moved.type === 'Circle') {
+      expect(moved.x).toBeCloseTo(60);
+      expect(moved.y).toBeCloseTo(55);
+      expect(moved.radius).toBe(60);
+    }
+  });
+
   it('moves a brush ROI by dragging a painted pixel and clamps its strokes to the image', () => {
     const onRoiChange = vi.fn();
     const roi: VisionRoi = { type: 'Brush', strokes: [
