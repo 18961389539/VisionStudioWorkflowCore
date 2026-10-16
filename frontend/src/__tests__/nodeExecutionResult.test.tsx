@@ -136,6 +136,19 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toContain('当前位姿 130,90,12.5');
   });
 
+  it('localizes the debug-image preview state for an ROI transform', () => {
+    const roiResult = result(true, 'ok');
+    roiResult.nodeReports[0].nodeType = 'roi.transform';
+    roiResult.nodeReports[0].summary = { debugImageConnected: true, debugImagePreviewReady: true };
+    delete roiResult.nodeReports[0].outputs;
+    mount('roi.transform', roiResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('已连接调试图像 是');
+    expect(summary.textContent).toContain('调试图像预览就绪 是');
+    expect(summary.textContent).not.toContain('debugImagePreviewReady');
+  });
+
   it('summarizes captured reference pixels instead of dumping the image payload into result details', () => {
     const roiResult = result(true, 'ok');
     roiResult.nodeReports[0].nodeType = 'roi.transform';
