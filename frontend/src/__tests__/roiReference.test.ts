@@ -12,6 +12,15 @@ describe('ROI reference capture', () => {
     expect(previous.roi.x).toBe(130);
   });
 
+  it('preserves an invalid ROI draft so a new reference can still be captured and the region replaced', () => {
+    const invalidRoi = { type: 'Polygon' };
+    const next = capturedReference({ roi: invalidRoi }, { referenceCaptured: true, referenceImage: 'png-bytes',
+      referenceWidth: 640, referenceHeight: 480, referenceX: 200, referenceY: 70, referenceThetaDeg: 0 }, 'binding', 'captured-at');
+
+    expect(next.roi).toEqual(invalidRoi);
+    expect(next).toMatchObject({ baseX: 200, baseY: 70, referenceImage: 'png-bytes', referenceBindings: 'binding' });
+  });
+
   it('rotates rectangles and brush erasers in the same direction as the backend correction', () => {
     expect(rebaseRoi({ type: 'Rectangle', x: 10, y: 0, width: 20, height: 10 }, {}, 100, 100, 90))
       .toEqual({ type: 'Polygon', points: [{ x: 100, y: 90 }, { x: 100, y: 70 }, { x: 110, y: 70 }, { x: 110, y: 90 }] });

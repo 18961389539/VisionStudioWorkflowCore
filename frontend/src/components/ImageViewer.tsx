@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
+import { roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
 
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
@@ -378,7 +379,7 @@ export default function ImageViewer({
   imageWidth,
   imageHeight,
   overlays,
-  roi,
+  roi: inputRoi,
   roiEnabled,
   showRoiTools = true,
   roiTargetLabel,
@@ -416,6 +417,9 @@ export default function ImageViewer({
   /** 无图像时的操作入口（如“运行此节点”）：空态不再只有一行灰字 */
   emptyAction?: { label: string; onClick: () => void; disabled?: boolean; title?: string };
 }) {
+  // Imported workflows can contain malformed legacy ROI JSON. Ignore it in the canvas so
+  // the parameter editor can explain and clear it without crashing the whole configuration UI.
+  const roi = useMemo(() => inputRoi && !roiConfigurationIssue(inputRoi, 'ROI', 1024) ? inputRoi : undefined, [inputRoi]);
   const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<any>(null);
   const [size, setSize] = useState({ width: 400, height: 260 });

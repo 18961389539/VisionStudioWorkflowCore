@@ -3,6 +3,7 @@ import { Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
 import { isParameterVisible, validateParameterValues } from '../validation';
+import { roiConfigurationIssue } from '../nodeConfigurationState';
 
 type Props = {
   node?: Node;
@@ -247,13 +248,17 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
           const value = parameters[field.key];
           if (value === undefined && !field.showEmpty) return null;
           const roi = isVisionRoi(value) ? value : undefined;
+          const roiIssue = value === undefined ? undefined : roiConfigurationIssue(value, field.label, 1024);
           return <div className="roi-property" key={field.key}>
             <div className="roi-property-title">
               <span>{field.label}</span>
               {onLocateRoi && <button type="button" className="text-button" disabled={disabled}
                 onClick={() => onLocateRoi(field.key)} title="在图像查看器中编辑此选区">在图像中编辑</button>}
             </div>
-            {roi ? <RoiEditor roi={roi} disabled={disabled} onChange={(next) => onChange(field.key, next)} />
+            {roiIssue ? <div role="alert" className="roi-invalid-state" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="roi-polygon-note" style={{ color: '#ff4d4f', flex: 1 }}>{roiIssue}</span>
+              <Button size="small" danger disabled={disabled} onClick={() => onChange(field.key, undefined)}>清除无效区域</Button>
+            </div> : roi ? <RoiEditor roi={roi} disabled={disabled} onChange={(next) => onChange(field.key, next)} />
               : value !== undefined ? <code>{JSON.stringify(value)}</code>
                 : <span className="roi-polygon-note">{field.emptyText ?? '未设置'}</span>}
           </div>;

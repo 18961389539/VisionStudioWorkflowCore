@@ -1,5 +1,5 @@
 import type { NodeParameters } from './nodeConfigurationState';
-import { parameterFingerprint } from './nodeConfigurationState';
+import { parameterFingerprint, roiConfigurationIssue } from './nodeConfigurationState';
 import type { OverlayPoint, VisionRoi } from './types';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -148,9 +148,15 @@ export function capturedReference(parameters: NodeParameters, summary: Record<st
     || ![x, y, theta, width, height].every(value => typeof value === 'number' && Number.isFinite(value))
     || Number(width) <= 0 || Number(height) <= 0)
     throw new Error('没有获取到完整的基准图像与有效位姿，请检查图像及定位结果。');
+  const roi = parameters.roi as VisionRoi | undefined;
+  // Reference capture is also the recovery path for an invalid legacy ROI. Keep that draft
+  // editable so the user can replace it instead of failing while trying to transform it.
+  const migratedRoi = roi && !roiConfigurationIssue(roi, 'ROI', 1024)
+    ? rebaseRoi(roi, parameters, Number(x), Number(y), Number(theta))
+    : roi;
   return {
     ...parameters,
-    ...(parameters.roi ? { roi: rebaseRoi(parameters.roi as VisionRoi, parameters, Number(x), Number(y), Number(theta)) } : {}),
+    ...(roi ? { roi: migratedRoi } : {}),
     baseX: x, baseY: y, baseThetaDeg: theta,
     referenceImage: image, referenceWidth: width, referenceHeight: height,
     referenceBindings: bindings, referenceCapturedAt: capturedAt

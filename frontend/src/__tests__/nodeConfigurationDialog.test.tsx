@@ -118,6 +118,22 @@ describe('ROI reference workspace', () => {
     expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('lets users capture a new reference and replace a malformed legacy ROI', async () => {
+    const invalidNode = { ...roiNode, data: { ...roiNode.data,
+      parameters: { ...roiNode.data.parameters as object, roi: { type: 'Polygon' } } } };
+    const view = mount({ node: invalidNode, catalogItem: roiCatalog, nodes: [invalidNode, imageNode, locateNode], edges,
+      onPreview: vi.fn(async () => capture) });
+    const captureButton = view.dialog.getByRole('button', { name: '获取图像并设为基准' }) as HTMLButtonElement;
+
+    expect(view.dialog.getByRole('button', { name: '清除无效区域' })).toBeTruthy();
+    expect(captureButton.disabled).toBe(false);
+    fireEvent.click(captureButton);
+    await waitFor(() => expect(view.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png'));
+    expect(view.dialog.getByRole('button', { name: '清除无效区域' })).toBeTruthy();
+    fireEvent.click(view.dialog.getByRole('button', { name: '清除无效区域' }));
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('invalidates a saved ROI reference when shape-match search settings can change the connected pose', async () => {
     const shapeCatalog = fallbackCatalog.find(item => item.type === 'match.shape')!;
     const matcher: Node = { id: 'locate', position: { x: 0, y: 0 }, data: {

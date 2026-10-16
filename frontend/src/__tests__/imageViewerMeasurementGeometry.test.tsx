@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
-import type { VisionOverlay } from '../types';
+import type { VisionOverlay, VisionRoi } from '../types';
 
 vi.mock('react-konva', async () => {
   const React = await import('react');
@@ -47,6 +47,14 @@ const imageView = (geometry: MeasurementGeometry, onChange: (geometry: Measureme
 );
 
 describe('ImageViewer measurement geometry editing', () => {
+  it('keeps the image canvas usable when a legacy ROI has malformed shape data', () => {
+    const invalidRoi = { type: 'Polygon' } as unknown as VisionRoi;
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={invalidRoi} roiEnabled={false} onRoiChange={emptyRoi} />);
+
+    expect(screen.getByTestId('stage')).toBeTruthy();
+  });
+
   it('shows the search-line start, end, and direction in the geometry preview', () => {
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, vi.fn());
 

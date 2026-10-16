@@ -68,7 +68,7 @@ export function withParameter(parameters: NodeParameters, key: string, value: un
 const roiCoordinateLimit = 10_000_000;
 const roiPolygonPointLimit = 500_000;
 
-function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: number): string | undefined {
+export function roiConfigurationIssue(value: unknown, label: string, maxBrushWidth: number): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return `${label}结构无效。`;
   const roi = value as Record<string, unknown>;
   const finite = (...values: unknown[]) => values.every(item => typeof item === 'number' && Number.isFinite(item));
