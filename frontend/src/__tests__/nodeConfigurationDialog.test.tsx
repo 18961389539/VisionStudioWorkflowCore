@@ -426,6 +426,22 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.queryByRole('button', { name: '在图像中编辑' })).toBeNull();
   });
 
+  it('uses the caliper pass-through output for geometry editing when the run did not save its input image', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺找线',
+      inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 80, endY: 20 } } };
+    const imageNode: Node = { id: 'missing-input', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: report });
+
+    expect(await dialog.findByRole('button', { name: '模拟拖动搜索线' })).toBeTruthy();
+    expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper/image');
+  });
+
   it('hides local search-line coordinates when a searchLine input is connected', () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',

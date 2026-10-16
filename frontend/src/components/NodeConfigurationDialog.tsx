@@ -249,12 +249,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (!open || !canEditMeasurementGeometry) return;
     if (measurementGeometryFrameKind === 'saved-reference' || measurementGeometryFrameKind === 'current') {
       setPreviewNodeId(node.id);
-      setImageSource('input');
+      setImageSource(measurementGeometryFrameKind === 'current' && !selectedInputAvailable && selectedOutputAvailable ? 'output' : 'input');
     } else if (cropMeasurementReferenceNodeId) {
       setPreviewNodeId(cropMeasurementReferenceNodeId);
       setImageSource('output');
     }
-  }, [canEditMeasurementGeometry, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open, setImageSource]);
+  }, [canEditMeasurementGeometry, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open,
+    selectedInputAvailable, selectedOutputAvailable, setImageSource]);
   const measurementImageFrameReady = measurementGeometryFrameKind === 'saved-reference'
     ? previewNodeId === node.id && Boolean(savedMeasurementReference && savedMeasurementReference.width > 0 && savedMeasurementReference.height > 0)
     : measurementGeometryFrameKind === 'transform-input'
