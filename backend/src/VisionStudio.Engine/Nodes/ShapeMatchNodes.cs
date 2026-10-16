@@ -114,7 +114,7 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             case VisionRoiType.Brush:
             {
                 var strokes = roi.Strokes ?? [];
-                if (strokes.Count is < 1 or > 10_000 || strokes.Any(stroke => stroke is null))
+                if (strokes.Count is < 1 or > 10_000)
                     throw new InvalidOperationException("The brush ROI needs 1..10000 valid strokes.");
                 var movedStrokes = new VisionRoiBrushStroke[strokes.Count];
                 var regionPoints = new List<VisionPoint2D>();
@@ -135,15 +135,20 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                             throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
                         var moved = Apply(new VisionPoint2D(point.X, point.Y));
                         movedPoints[pointIndex] = new VisionRoiPoint(moved.X, moved.Y);
-                        if (stroke.Mode == VisionRoiStrokeMode.Add) regionPoints.Add(moved);
+                        if (stroke.Mode == VisionRoiStrokeMode.Add)
+                        {
+                            regionPoints.Add(moved);
+                            regionPadding = Math.Max(regionPadding, stroke.Width / 2);
+                        }
                     }
                     movedStrokes[strokeIndex] = stroke with { Points = movedPoints };
                 }
                 if (regionPoints.Count == 0)
                     throw new InvalidOperationException("The brush ROI needs finite points in at least one add stroke.");
                 transformed = roi with { Strokes = movedStrokes };
-                region = regionPoints.Distinct().ToList();
-                regionPadding = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add).Max(stroke => stroke.Width / 2);
+                // Duplicate brush vertices do not change the convex bounds used below; keep the
+                // original point stream to avoid allocating a large HashSet for dense strokes.
+                region = regionPoints;
                 break;
             }
             case VisionRoiType.Circle:
@@ -159,15 +164,17 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             {
                 var points = roi.Points ?? [];
                 if (points.Count < 3) throw new InvalidOperationException("The polygon ROI needs at least 3 points.");
-                var moved = new VisionPoint2D[points.Count];
-                for (var index = 0; index < moved.Length; index++)
+                var movedRoiPoints = new VisionRoiPoint[points.Count];
+                region = new List<VisionPoint2D>(points.Count);
+                for (var index = 0; index < points.Count; index++)
                 {
                     if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
                     var point = points[index];
-                    moved[index] = Apply(new VisionPoint2D(point.X, point.Y));
+                    var moved = Apply(new VisionPoint2D(point.X, point.Y));
+                    movedRoiPoints[index] = new VisionRoiPoint(moved.X, moved.Y);
+                    region.Add(moved);
                 }
-                transformed = roi with { Points = moved.Select(p => new VisionRoiPoint(p.X, p.Y)).ToArray() };
-                region = moved.ToList();
+                transformed = roi with { Points = movedRoiPoints };
                 break;
             }
             default:
@@ -223,8 +230,15 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
             }
             else
             {
-                var pointsF = region.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray();
+                var pointsF = new Point2f[region.Count];
+                for (var index = 0; index < pointsF.Length; index++)
+                {
+                    if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    pointsF[index] = new Point2f((float)region[index].X, (float)region[index].Y);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
                 var rect = JLVisionOperators.MinAreaRect(pointsF);
+                cancellationToken.ThrowIfCancellationRequested();
                 center = new VisionPoint2D(rect.Center.X, rect.Center.Y);
                 rectangle = new VisionRectangle2D(
                     center.X, center.Y,
@@ -232,7 +246,14 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     Math.Min(rect.Size.Width, rect.Size.Height) + regionPadding * 2,
                     rect.Size.Width < rect.Size.Height ? VisionTransform2D.NormalizeAngleDeg(rect.Angle + 90) : rect.Angle);
             }
-            var boundingRadius = region.Max(p => MeasurementMath.Hypot(p.X - center.X, p.Y - center.Y)) + regionPadding;
+            var maximumRadius = 0d;
+            for (var index = 0; index < region.Count; index++)
+            {
+                if ((index & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                var point = region[index];
+                maximumRadius = Math.Max(maximumRadius, MeasurementMath.Hypot(point.X - center.X, point.Y - center.Y));
+            }
+            var boundingRadius = maximumRadius + regionPadding;
             circle = new VisionCircle(center.X, center.Y, boundingRadius);
         }
 
