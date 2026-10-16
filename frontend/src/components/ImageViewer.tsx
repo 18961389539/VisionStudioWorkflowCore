@@ -367,6 +367,7 @@ export default function ImageViewer({
   const polygonPoints = useRef<OverlayPoint[]>([]);
   const brushStroke = useRef<{ roi: Extract<VisionRoi, { type: 'Brush' }> } | undefined>(undefined);
   const lastFocusTick = useRef(focusTick ?? 0);
+  const pointerUpHandler = useRef<() => void>(() => undefined);
   const { image, failed } = useHtmlImage(previewUrl);
   const actualWidth = imageWidth || image?.naturalWidth || 0;
   const actualHeight = imageHeight || image?.naturalHeight || 0;
@@ -729,6 +730,21 @@ export default function ImageViewer({
     gestureStart.current = undefined;
     setDraft(undefined);
   };
+
+  useEffect(() => { pointerUpHandler.current = onPointerUp; });
+  useEffect(() => {
+    const releaseInteraction = () => pointerUpHandler.current();
+    // Konva's stage only receives mouse/touch end while the pointer is over the viewer.
+    // Listen on document as well so drags released over a toolbar or outside the canvas commit.
+    document.addEventListener('mouseup', releaseInteraction);
+    document.addEventListener('touchend', releaseInteraction);
+    document.addEventListener('touchcancel', releaseInteraction);
+    return () => {
+      document.removeEventListener('mouseup', releaseInteraction);
+      document.removeEventListener('touchend', releaseInteraction);
+      document.removeEventListener('touchcancel', releaseInteraction);
+    };
+  }, []);
 
   const onClick = () => {
     if (tool !== 'polygon' || !roiEnabled) return;

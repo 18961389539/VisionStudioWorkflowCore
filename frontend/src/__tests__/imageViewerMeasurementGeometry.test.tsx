@@ -122,13 +122,13 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.angleEndDeg).toBe(90);
   });
 
-  it('lets the operator drag one search-line endpoint without moving the other', () => {
+  it('commits a search-line endpoint drag released outside the viewer', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
     const stage = screen.getByTestId('stage');
     fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 });
     fireEvent.mouseMove(stage, { clientX: 129.2, clientY: 82.8 });
-    fireEvent.mouseUp(stage, { clientX: 129.2, clientY: 82.8 });
+    fireEvent.mouseUp(document.body, { clientX: 129.2, clientY: 82.8 });
 
     const result = onChange.mock.calls[0][0] as MeasurementGeometry;
     expect(result.type).toBe('line');
@@ -138,7 +138,7 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.end).toEqual({ x: 50, y: 10 });
   });
 
-  it('moves a polygon ROI rigidly when the drag reaches an image boundary', () => {
+  it('moves a polygon ROI rigidly at image boundaries and commits when released outside the viewer', () => {
     const onRoiChange = vi.fn();
     const roi = { type: 'Polygon' as const, points: [
       { x: 10, y: 10 }, { x: 30, y: 10 }, { x: 30, y: 30 }, { x: 10, y: 30 }
@@ -150,7 +150,7 @@ describe('ImageViewer measurement geometry editing', () => {
     // The image view uses a 2.36x scale with a screen offset of (82, 12).
     fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 59.2 }); // image (20, 20), inside polygon
     fireEvent.mouseMove(stage, { clientX: 93.8, clientY: 59.2 }); // request image x=5; polygon should stop at x=0
-    fireEvent.mouseUp(stage, { clientX: 93.8, clientY: 59.2 });
+    fireEvent.mouseUp(document.body, { clientX: 93.8, clientY: 59.2 });
 
     expect(onRoiChange).toHaveBeenCalledOnce();
     expect(onRoiChange).toHaveBeenCalledWith({ type: 'Polygon', points: [
