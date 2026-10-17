@@ -35,7 +35,8 @@ public sealed class DetectionFilterNode : IVisionNodeExecutor
         var filtered=items.Where(d=>d.Area>=minArea&&(maxArea<=0||d.Area<=maxArea)&&d.Circularity>=minCircularity&&d.Circularity<=maxCircularity&&
             (minConfidence < 0 || d.Confidence is { } confidence && confidence >= minConfidence) &&
             (classId < 0 || d.ClassId == classId)).Select((d,i)=>d with{Index=i}).ToArray();
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"detections",VisionValue.Detections(filtered)},{"count",VisionValue.Integer(filtered.Length)}},new Dictionary<string,object?>{{"inputCount",items.Count},{"count",filtered.Length},{"minArea",minArea},{"maxArea",maxArea<=0?"unlimited":maxArea},{"minCircularity",minCircularity},{"maxCircularity",maxCircularity},{"minConfidence",minConfidence<0?"unlimited":minConfidence},{"classId",classId<0?"unlimited":classId}}));
+        var diag=CoordinateValidation.Diagnostics(Type,("inputCount",items.Count),("keptCount",filtered.Length),("rejectedCount",items.Count-filtered.Length),("minArea",minArea),("maxArea",maxArea),("classId",classId));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"detections",VisionValue.Detections(filtered)},{"count",VisionValue.Integer(filtered.Length)},{"rejectedCount",VisionValue.Integer(items.Count-filtered.Length)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"inputCount",items.Count},{"count",filtered.Length},{"diagnostics",diag},{"minArea",minArea},{"maxArea",maxArea<=0?"unlimited":maxArea},{"minCircularity",minCircularity},{"maxCircularity",maxCircularity},{"minConfidence",minConfidence<0?"unlimited":minConfidence},{"classId",classId<0?"unlimited":classId}}));
     }
 }
 
@@ -51,11 +52,14 @@ public sealed class DetectionSortNode : IVisionNodeExecutor
             "y"=>descending?items.OrderByDescending(x=>x.Y):items.OrderBy(x=>x.Y),
             "circularity"=>descending?items.OrderByDescending(x=>x.Circularity):items.OrderBy(x=>x.Circularity),
             "perimeter"=>descending?items.OrderByDescending(x=>x.Perimeter):items.OrderBy(x=>x.Perimeter),
+            "confidence"=>descending?items.OrderByDescending(x=>x.Confidence ?? -1):items.OrderBy(x=>x.Confidence ?? -1),
+            "confidenceOrDefault"=>descending?items.OrderByDescending(x=>x.Confidence ?? -1):items.OrderBy(x=>x.Confidence ?? -1),
             "area"=>descending?items.OrderByDescending(x=>x.Area):items.OrderBy(x=>x.Area),
-            _=>throw new InvalidOperationException("sortBy must be area, x, y, circularity, or perimeter.")
+            _=>throw new InvalidOperationException("sortBy must be area, x, y, circularity, perimeter or confidence.")
         };
-        var result=ordered.Select((d,i)=>d with{Index=i}).ToArray();
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"detections",VisionValue.Detections(result)}},new Dictionary<string,object?>{{"count",result.Length},{"sortBy",key},{"descending",descending}}));
+        var result=ordered.ThenBy(x=>x.Index).Select((d,i)=>d with{Index=i}).ToArray();
+        var diag=CoordinateValidation.Diagnostics(Type,("count",result.Length),("sortBy",key),("descending",descending),("empty",result.Length==0));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"detections",VisionValue.Detections(result)},{"count",VisionValue.Integer(result.Length)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"count",result.Length},{"sortBy",key},{"descending",descending},{"diagnostics",diag}}));
     }
 }
 
@@ -68,7 +72,8 @@ public sealed class DetectionAtIndexNode : IVisionNodeExecutor
         if(index<0) throw new InvalidOperationException("Detection index is zero-based and cannot be negative.");
         var outputs=new Dictionary<string,VisionValue>{{"found",VisionValue.Boolean(index<items.Count)},{"index",VisionValue.Integer(index)}};
         if(index<items.Count){var d=items[index];outputs["x"]=VisionValue.Double(d.X);outputs["y"]=VisionValue.Double(d.Y);outputs["width"]=VisionValue.Double(d.Width);outputs["height"]=VisionValue.Double(d.Height);outputs["area"]=VisionValue.Double(d.Area);outputs["perimeter"]=VisionValue.Double(d.Perimeter);outputs["circularity"]=VisionValue.Double(d.Circularity);outputs["center"]=VisionValue.Point(new(d.Circle.X,d.Circle.Y));outputs["circle"]=VisionValue.Circle(d.Circle);outputs["rectangle"]=VisionValue.Rectangle(d.BoundingBox);if(d.Confidence is{}confidence)outputs["confidence"]=VisionValue.Double(confidence);if(d.ClassId is{}classId)outputs["classId"]=VisionValue.Integer(classId);}
-        return ValueTask.FromResult(new NodeExecutorResult(outputs,new Dictionary<string,object?>{{"index",index},{"found",index<items.Count},{"count",items.Count}}));
+        var diag=CoordinateValidation.Diagnostics(Type,("index",index),("found",index<items.Count),("count",items.Count)); outputs["diagnostics"]=VisionValue.String(diag);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs,new Dictionary<string,object?>{{"index",index},{"found",index<items.Count},{"count",items.Count},{"diagnostics",diag}}));
     }
 }
 
@@ -78,6 +83,6 @@ public sealed class DetectionCountNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); var items=DetectionListInput.Read(context);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"count",VisionValue.Integer(items.Count)}},new Dictionary<string,object?>{{"count",items.Count}}));
+        var diag=CoordinateValidation.Diagnostics(Type,("count",items.Count),("empty",items.Count==0)); return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"count",VisionValue.Integer(items.Count)},{"isEmpty",VisionValue.Boolean(items.Count==0)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"count",items.Count},{"diagnostics",diag}}));
     }
 }

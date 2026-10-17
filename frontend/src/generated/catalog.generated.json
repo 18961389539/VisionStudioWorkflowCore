@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "f7066e4be45af65de8258080f77a9c22c77b2a879ebbf1dd9eeee4128b81167c",
+  "hash": "59fab9aaa9e46e76ae0d837f73e08f8213bacdc78116dd14500c5baf6047e42c",
   "items": [
     {
       "type": "image.acquire",
@@ -4562,10 +4562,20 @@
           "name": "condition",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "branch",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Choose the true or false path from the Boolean condition input, then converge the paths at a Join.",
+      "description": "Choose the true or false path from the Boolean condition input, then converge the paths at a Join. Also emits the condition, the selected branch name (true/false) and JSON diagnostics for run tracing.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4596,6 +4606,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -4610,10 +4625,11 @@
           "min": 0,
           "max": 600000,
           "step": 10,
-          "unit": "ms"
+          "unit": "ms",
+          "description": "Requested wait in milliseconds (0-600000); cancellation stops the wait immediately."
         }
       ],
-      "description": "Wait for the configured duration; cancellation stops the wait immediately.",
+      "description": "Wait for the configured duration; cancellation stops the wait immediately. Reports requested and measured elapsed time in JSON diagnostics; out-of-range delays fail deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4722,10 +4738,15 @@
           "name": "next",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Converge selected If/Switch branches. A real incoming branch is required by structured workflow compilation.",
+      "description": "Converge selected If/Switch branches. A real incoming branch is required by structured workflow compilation. Emits a JSON diagnostics marker so merged runs remain traceable in node summaries.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4819,6 +4840,16 @@
           "name": "classId",
           "dataType": "Integer",
           "required": false
+        },
+        {
+          "name": "isEmpty",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -4829,7 +4860,8 @@
           "defaultValue": 100,
           "min": 1,
           "max": 500,
-          "step": 1
+          "step": 1,
+          "description": "Hard item-count limit (1-500); exceeding it fails the loop instead of silently truncating."
         }
       ],
       "description": "Sequentially execute the structured body once for each DetectionList item in input order. The body receives current index/center/circle/rectangle/x/y and optional confidence/classId; the loop fails when item count exceeds maxItems.",
@@ -4875,6 +4907,21 @@
           "name": "condition",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -4917,10 +4964,11 @@
           "defaultValue": 15000,
           "min": -99999999,
           "max": 99999999,
-          "step": 1
+          "step": 1,
+          "description": "Finite comparison threshold; equality uses a 1e-9 absolute tolerance."
         }
       ],
-      "description": "Workflow Core conditional marker.",
+      "description": "Workflow Core numeric conditional: compares a finite input against a threshold with a strict operator set (unknown operators fail). Emits condition, echoed value, signed margin (value - threshold) and JSON diagnostics, then schedules the selected branch.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4945,10 +4993,15 @@
           "name": "next",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
+      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4968,10 +5021,15 @@
           "name": "repeat",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump.",
+      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump. Emits a JSON diagnostics boundary marker.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5004,10 +5062,15 @@
           "name": "branch2",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Start two Workflow Core parallel paths.",
+      "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -5039,13 +5102,18 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+      "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -5068,6 +5136,21 @@
       "outputs": [
         {
           "name": "selected",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "caseCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
           "dataType": "String",
           "required": true
         },
@@ -5162,10 +5245,11 @@
           "name": "casesJson",
           "label": "Cases (JSON string array)",
           "type": "textarea",
-          "defaultValue": "[\"OK\",\"NG\"]"
+          "defaultValue": "[\"OK\",\"NG\"]",
+          "description": "JSON array of 1-16 non-empty unique case labels; malformed JSON or duplicates fail deterministically."
         }
       ],
-      "description": "Choose one matching path. casesJson entries map in order to case1-case16; unmatched values take the default path. Converge all configured paths at Flow Merge.",
+      "description": "Choose one matching path. casesJson entries map in order to case1-case16; unmatched values take the default path and report matched=false. Converge all configured paths at Flow Merge. Emits case count and JSON diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5219,6 +5303,11 @@
           "name": "attempts",
           "dataType": "Integer",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -5229,7 +5318,8 @@
           "defaultValue": 0,
           "min": 0,
           "max": 3,
-          "step": 1
+          "step": 1,
+          "description": "Automatic retries for eligible deterministic compute bodies only; cancellation is never retried."
         },
         {
           "name": "retryDelayMs",
@@ -5239,7 +5329,8 @@
           "min": 0,
           "max": 5000,
           "step": 10,
-          "unit": "ms"
+          "unit": "ms",
+          "description": "Delay between retry attempts in milliseconds."
         }
       ],
       "description": "Catch body failures and route to success or error. Automatic retries are limited to linear deterministic built-in Pipeline compute nodes with no declared actions; cancellation is never retried. Connect body/success/error to flow.merge case1/case2/default.",
@@ -6773,6 +6864,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -6801,10 +6897,11 @@
               "label": "NOT (a)",
               "value": "not"
             }
-          ]
+          ],
+          "description": "Strictly one of and/or/xor/not; NOT uses input a only, unknown operations fail."
         }
       ],
-      "description": "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+      "description": "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -8928,13 +9025,23 @@
           "required": true
         },
         {
+          "name": "isEmpty",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Return the number of items in a DetectionList.",
+      "description": "Return the number of items in a DetectionList, with an isEmpty flag and JSON diagnostics. The list is validated for finite geometry before counting.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -9025,6 +9132,11 @@
           "name": "classId",
           "dataType": "Integer",
           "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         },
         {
           "name": "next",
@@ -9194,6 +9306,16 @@
           "required": true
         },
         {
+          "name": "rejectedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9255,7 +9377,7 @@
           "step": 1
         }
       ],
-      "description": "Filter DetectionList items by area, circularity, optional confidence and class ID; missing optional values do not match configured filters.",
+      "description": "Filter DetectionList items by area, circularity, optional confidence and class ID with strict finite/ordered bound validation; missing optional values do not match configured filters. Emits kept count, rejected count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -10841,6 +10963,16 @@
           "required": true
         },
         {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -10872,8 +11004,13 @@
             {
               "label": "Perimeter",
               "value": "perimeter"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
             }
-          ]
+          ],
+          "description": "Sort key; ties keep input order (stable) and indices are refreshed after sorting. Unknown keys fail."
         },
         {
           "name": "descending",
@@ -10882,7 +11019,7 @@
           "defaultValue": true
         }
       ],
-      "description": "Sort a DetectionList by a selected numeric field and refresh result indices.",
+      "description": "Sort a DetectionList by area, position, circularity, perimeter or confidence (stable for ties) and refresh result indices. Emits count and JSON diagnostics; empty lists pass through with empty=true.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -15552,6 +15689,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15580,10 +15722,11 @@
               "label": "Divide (a / b)",
               "value": "divide"
             }
-          ]
+          ],
+          "description": "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add."
         }
       ],
-      "description": "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+      "description": "Combine two measurements with one of the four basic operations; division by zero, overflow and unknown operations fail explicitly instead of producing NaN/Infinity or silently defaulting. Emits JSON diagnostics with operands, operation and result.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -15611,6 +15754,16 @@
           "required": true
         },
         {
+          "name": "isInteger",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15624,10 +15777,11 @@
           "defaultValue": 0,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Finite constant within the signed 64-bit integer range; non-finite values fail deterministically."
         }
       ],
-      "description": "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+      "description": "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -15655,6 +15809,21 @@
           "required": true
         },
         {
+          "name": "inside",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15668,7 +15837,8 @@
           "defaultValue": 0,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Inclusive lower bound; reversed bounds are swapped and reported in diagnostics."
         },
         {
           "name": "max",
@@ -15677,16 +15847,18 @@
           "defaultValue": 100,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Inclusive upper bound; must be finite."
         },
         {
           "name": "invert",
           "label": "Invert",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "When true, pass means the value lies outside the inclusive window."
         }
       ],
-      "description": "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+      "description": "Inclusive range check (min/max are swapped when configured in reverse and flagged in diagnostics); invert for exclusive windows. Emits pass, raw inside flag, signed margin to the nearest bound (negative outside) and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

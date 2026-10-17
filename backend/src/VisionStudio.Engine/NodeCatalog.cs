@@ -930,18 +930,18 @@ public static class BuiltInNodeCatalog
             "Number Constant",
             "Value",
             [ExecIn],
-            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), Next],
-            [new("value", "Value", "number", 0, -1000000000, 1000000000, 1)],
-            "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), new("isInteger", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
+            [new("value", "Value", "number", 0, -1000000000, 1000000000, 1, Description: "Finite constant within the signed 64-bit integer range; non-finite values fail deterministically.")],
+            "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
             "builtin"),
         new(
             "value.arithmetic",
             "Arithmetic",
             "Value",
             [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double)],
-            [new("result", VisionDataType.Double), Next],
+            [new("result", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
-                new("op", "Operation", "select", "add", Options:
+                new("op", "Operation", "select", "add", Description: "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add.", Options:
                 [
                     new("Add (a + b)", "add"),
                     new("Subtract (a - b)", "subtract"),
@@ -949,29 +949,29 @@ public static class BuiltInNodeCatalog
                     new("Divide (a / b)", "divide")
                 ])
             ],
-            "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+            "Combine two measurements with one of the four basic operations; division by zero, overflow and unknown operations fail explicitly instead of producing NaN/Infinity or silently defaulting. Emits JSON diagnostics with operands, operation and result.",
             "builtin"),
         new(
             "value.range",
             "Range Check",
             "Value",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("pass", VisionDataType.Boolean), Next],
+            [new("pass", VisionDataType.Boolean), new("inside", VisionDataType.Boolean), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
-                new("min", "Min", "number", 0, -1000000000, 1000000000, 1),
-                new("max", "Max", "number", 100, -1000000000, 1000000000, 1),
-                new("invert", "Invert", "boolean", false)
+                new("min", "Min", "number", 0, -1000000000, 1000000000, 1, Description: "Inclusive lower bound; reversed bounds are swapped and reported in diagnostics."),
+                new("max", "Max", "number", 100, -1000000000, 1000000000, 1, Description: "Inclusive upper bound; must be finite."),
+                new("invert", "Invert", "boolean", false, Description: "When true, pass means the value lies outside the inclusive window.")
             ],
-            "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+            "Inclusive range check (min/max are swapped when configured in reverse and flagged in diagnostics); invert for exclusive windows. Emits pass, raw inside flag, signed margin to the nearest bound (negative outside) and JSON diagnostics.",
             "builtin"),
         new(
             "logic.boolean",
             "Boolean Logic",
             "Logic",
             [ExecIn, new("a", VisionDataType.Boolean), new("b", VisionDataType.Boolean, Required: false)],
-            [new("result", VisionDataType.Boolean), Next],
+            [new("result", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
             [
-                new("op", "Operation", "select", "and", Options:
+                new("op", "Operation", "select", "and", Description: "Strictly one of and/or/xor/not; NOT uses input a only, unknown operations fail.", Options:
                 [
                     new("AND", "and"),
                     new("OR", "or"),
@@ -979,14 +979,14 @@ public static class BuiltInNodeCatalog
                     new("NOT (a)", "not")
                 ])
             ],
-            "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+            "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
             "builtin"),
         new(
             "flow.if",
             "If",
             "Flow",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean)],
+            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean), new("value", VisionDataType.Double), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String)],
             [
                 new(
                     "operator",
@@ -1002,27 +1002,27 @@ public static class BuiltInNodeCatalog
                         new("==", "=="),
                         new("!=", "!=")
                     ]),
-                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1)
+                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1, Description: "Finite comparison threshold; equality uses a 1e-9 absolute tolerance.")
             ],
-            "Workflow Core conditional marker.",
+            "Workflow Core numeric conditional: compares a finite input against a threshold with a strict operator set (unknown operators fail). Emits condition, echoed value, signed margin (value - threshold) and JSON diagnostics, then schedules the selected branch.",
             "builtin"),
         new(
             "flow.result",
             "Result / Disposition",
             "Flow",
             [ExecIn, new("pass", VisionDataType.Boolean)],
-            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), Next],
+            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+            "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
             "builtin"),
         new(
             "flow.parallel",
             "Parallel",
             "Flow",
             [ExecIn],
-            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control)],
+            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control), new("diagnostics", VisionDataType.String)],
             [],
-            "Start two Workflow Core parallel paths.",
+            "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
             "builtin"),
         .. Batch2ImageCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. Batch2UtilityCatalog.Items,
@@ -1041,9 +1041,9 @@ public static class BuiltInNodeCatalog
             "Join",
             "Flow",
             [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control)],
-            [Next],
+            [Next, new("diagnostics", VisionDataType.String)],
             [],
-            "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
+            "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
             "builtin")
     ];
 
