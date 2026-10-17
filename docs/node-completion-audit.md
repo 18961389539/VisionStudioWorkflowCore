@@ -331,3 +331,7 @@ Usage and model limits are documented in [Camera Intrinsic Calibration](camera-i
 
 Usage and scope are documented in [2D Hand-Eye Calibration](hand-eye-2d.md). The node remains planar SE(2); 3D robot/camera hand-eye calibration is still a substantial feature gap.
 
+## Follow-up implementation: calibration asset integrity
+
+Planar calibration asset reads and publication now recompute the stored workspace/result snapshot hash and reject mismatches. Production dependency capture reads the same immutable version, so corrupted snapshot contents cannot pass dependency validation under an unchanged recorded hash. `calibration.planar` continues to solve the point pairs embedded in the workflow; asset id/version remain provenance fields rather than runtime-loaded solve inputs.
+

@@ -14,4 +14,4 @@ The node reports `rmse`, `maxError`, the zero-based `worstPairIndex`, and `resid
 
 - This is a planar projective calibration. It does not model lens distortion or non-planar work surfaces; calibrate camera intrinsics and undistort images before fitting when lens distortion matters.
 - The pair fit is ordinary least squares. A wrong point increases the residuals and can trip the quality gates, but the node does not automatically identify and discard outliers.
-- `assetId` and `assetVersion` are provenance fields. The node uses the `pairsJson` stored in the workflow definition for its solve.
+- `assetId` and `assetVersion` are provenance fields. The node uses the `pairsJson` stored in the workflow definition for its solve. Calibration asset versions store an immutable workspace/result snapshot; loading or publishing a version recomputes its SHA-256 and rejects content that no longer matches the recorded hash. Production dependency capture reads the same version and therefore also rejects a damaged snapshot. The workflow still carries its own point pairs, so re-apply the chosen asset version after changing calibration points.
