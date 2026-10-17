@@ -1,6 +1,7 @@
 using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
+using System.Text.Json;
 using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Nodes;
@@ -151,18 +152,126 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         var threshold = DefectNodeHelpers.Positive(node, "threshold", 15);
         var minArea = node.GetDouble("minArea", 5);
         if (!double.IsFinite(minArea) || minArea < 0) throw new InvalidOperationException("minArea must be finite and non-negative.");
-        using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(reference, true);
-        using var domain = DefectNodeHelpers.Domain(image, source.Width, source.Height, scoped, context);
-        using var difference = node.GetString("polarity", "both") switch
+        var maxArea = node.GetDouble("maxArea", 0);
+        if (!double.IsFinite(maxArea) || maxArea < 0 || maxArea > 0 && maxArea < minArea) throw new InvalidOperationException("maxArea must be 0 (unbounded) or at least minArea.");
+        var registrationTolerance = node.GetInt("registrationTolerance", 0);
+        if (registrationTolerance is < 0 or > 25) throw new InvalidOperationException("registrationTolerance must be between 0 and 25 pixels.");
+        var compensation = node.GetString("compensation", "none").Trim().ToLowerInvariant();
+        if (compensation is not ("none" or "offset" or "gainoffset")) throw new InvalidOperationException("compensation must be none, offset, or gainOffset.");
+        var openSize = node.GetInt("morphologyOpen", 0);
+        var closeSize = node.GetInt("morphologyClose", 0);
+        if (openSize is not (0 or 3 or 5 or 7 or 9 or 11 or 15)) throw new InvalidOperationException("morphologyOpen must be 0, 3, 5, 7, 9, 11, or 15.");
+        if (closeSize is not (0 or 3 or 5 or 7 or 9 or 11 or 15)) throw new InvalidOperationException("morphologyClose must be 0, 3, 5, 7, 9, 11, or 15.");
+        var majorArea = node.GetDouble("majorArea", 500);
+        var criticalArea = node.GetDouble("criticalArea", 5000);
+        if (!double.IsFinite(majorArea) || !double.IsFinite(criticalArea) || majorArea < 0 || criticalArea < majorArea)
+            throw new InvalidOperationException("Defect grading requires 0 <= majorArea <= criticalArea.");
+
+        // Golden-template preparation (PatInspect / HALCON variation-model ideas):
+        // exhaustive small-shift registration, then least-squares illumination
+        // compensation of the reference toward the inspected image. Both are opt-in
+        // (defaults keep the historical pixel-exact behaviour).
+        VisionImage? preparedReference = null;
+        var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d;
+        try
         {
-            "both" => image.AbsDiffImage(baseline, 1d), "bright" => image.SubImage(baseline, 1d, 0d), "dark" => baseline.SubImage(image, 1d, 0d),
-            _ => throw new InvalidOperationException("Invalid defect polarity.")
-        };
-        if (domain.AreaCenter(out double _, out double _) > 0) _ = DefectNodeHelpers.Statistics(difference, domain);
-        using var limited = difference.ReduceDomain(domain); using var detected = limited.Threshold(threshold, (double)float.MaxValue);
-        using var connected = detected.Connection(); using var filtered = connected.SelectShape("area", "and", minArea, Math.Max(minArea, (double)source.Width * source.Height));
-        var result = RegionNodeHelpers.Result(JLVisionRegions.FromNative(filtered, source.Width, source.Height, cancellationToken), cancellationToken);
-        return ValueTask.FromResult(result with { Summary = new Dictionary<string, object?>(result.Summary) { ["threshold"] = threshold, ["minArea"] = minArea, ["polarity"] = node.GetString("polarity", "both") } });
+            if (registrationTolerance > 0 || compensation != "none")
+            {
+                using var sourceGray = RecognitionImageHelpers.ToGray8(source.Mat);
+                using var referenceGray = RecognitionImageHelpers.ToGray8(reference.Mat);
+                sourceGray.GetArray(out byte[] imageBytes);
+                referenceGray.GetArray(out byte[] referenceBytes);
+                var width = source.Width; var height = source.Height;
+                if (registrationTolerance > 0)
+                {
+                    var shift = ReferenceAlignment.SearchShift(imageBytes, referenceBytes, width, height, registrationTolerance);
+                    shiftX = shift.ShiftX; shiftY = shift.ShiftY;
+                }
+                var aligned = new byte[imageBytes.Length];
+                for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                {
+                    var rx = x - shiftX; var ry = y - shiftY;
+                    aligned[y * width + x] = rx >= 0 && rx < width && ry >= 0 && ry < height ? referenceBytes[ry * width + rx] : imageBytes[y * width + x];
+                }
+                if (compensation != "none")
+                {
+                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(imageBytes, aligned);
+                    gain = compensation == "gainoffset" ? fittedGain : 1d;
+                    offset = fittedOffset;
+                    for (var i = 0; i < aligned.Length; i++)
+                        aligned[i] = (byte)Math.Clamp(Math.Round(gain * aligned[i] + offset), 0, 255);
+                }
+                using var alignedMat = new Mat(height, width, MatType.CV_8UC1);
+                alignedMat.SetArray(aligned);
+                preparedReference = VisionImage.Own(alignedMat.Clone());
+            }
+            var effectiveReference = preparedReference ?? reference;
+            using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(effectiveReference, true);
+            using var domain = DefectNodeHelpers.Domain(image, source.Width, source.Height, scoped, context);
+            using var difference = node.GetString("polarity", "both") switch
+            {
+                "both" => image.AbsDiffImage(baseline, 1d), "bright" => image.SubImage(baseline, 1d, 0d), "dark" => baseline.SubImage(image, 1d, 0d),
+                _ => throw new InvalidOperationException("Invalid defect polarity.")
+            };
+            if (domain.AreaCenter(out double _, out double _) > 0) _ = DefectNodeHelpers.Statistics(difference, domain);
+            using var limited = difference.ReduceDomain(domain); using var detected = limited.Threshold(threshold, (double)float.MaxValue);
+            using var cleaned = Clean(detected, openSize, closeSize);
+            using var connected = cleaned.Connection();
+            var upperArea = maxArea > 0 ? maxArea : Math.Max(minArea, (double)source.Width * source.Height);
+            using var filtered = connected.SelectShape("area", "and", minArea, upperArea);
+            var regionResult = JLVisionRegions.FromNative(filtered, source.Width, source.Height, cancellationToken);
+            var result = RegionNodeHelpers.Result(regionResult, cancellationToken);
+
+            // Per-defect grading from the actual region objects (area + bounding box).
+            var defects = regionResult.Components.Select((component, index) =>
+            {
+                var area = component.Runs.Sum(r => (long)r.EndColumn - r.StartColumn + 1);
+                var x = component.Runs.Min(r => r.StartColumn); var y = component.Runs.Min(r => r.Row);
+                return new
+                {
+                    index, area,
+                    x, y,
+                    width = component.Runs.Max(r => r.EndColumn) - x + 1,
+                    height = component.Runs.Max(r => r.Row) - y + 1,
+                    grade = area >= criticalArea ? "critical" : area >= majorArea ? "major" : "minor"
+                };
+            }).ToArray();
+            var maxDefectArea = defects.Length == 0 ? 0d : defects.Max(d => (double)d.area);
+            var grade = defects.Length == 0 ? "none" : defects.Any(d => d.grade == "critical") ? "critical" : defects.Any(d => d.grade == "major") ? "major" : "minor";
+            var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+            {
+                ["defects"] = VisionValue.String(JsonSerializer.Serialize(defects)),
+                ["maxDefectArea"] = VisionValue.Double(maxDefectArea),
+                ["grade"] = VisionValue.String(grade)
+            };
+            return ValueTask.FromResult(result with
+            {
+                Outputs = outputs,
+                Summary = new Dictionary<string, object?>(result.Summary)
+                {
+                    ["threshold"] = threshold, ["minArea"] = minArea, ["maxArea"] = maxArea,
+                    ["polarity"] = node.GetString("polarity", "both"),
+                    ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
+                    ["compensation"] = compensation, ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
+                    ["morphologyOpen"] = openSize, ["morphologyClose"] = closeSize,
+                    ["grade"] = grade, ["maxDefectArea"] = maxDefectArea
+                }
+            });
+        }
+        finally { preparedReference?.Dispose(); }
+    }
+
+    private static JlRegion Clean(JlRegion detected, int openSize, int closeSize)
+    {
+        JlRegion current = detected.CopyObj(1, -1);
+        try
+        {
+            if (openSize > 0) { var next = current.OpeningRectangle1(openSize, openSize); current.Dispose(); current = next; }
+            if (closeSize > 0) { var next = current.ClosingRectangle1(closeSize, closeSize); current.Dispose(); current = next; }
+            return current;
+        }
+        catch { current.Dispose(); throw; }
     }
 }
 

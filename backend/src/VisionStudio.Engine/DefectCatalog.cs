@@ -20,9 +20,19 @@ public static class DefectCatalog
         new("image.difference", "Image Difference", "Defect", [Exec, Image, new("reference", VisionDataType.Image)], [Image, Next],
             [new("mode", "Difference Mode", "select", "absolute", Options: [new("Absolute difference", "absolute"), new("Signed image-reference", "signed")])],
             "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.", "builtin"),
-        new("defect.referenceCompare", "Reference Defect Compare", "Defect", [.. Source, new("reference", VisionDataType.Image), new("region", VisionDataType.Region, Required: false)], RegionOutputs,
-            [Polarity, new("threshold", "Reference Difference Threshold", "number", 15, 0.001, 65535, 1), new("minArea", "Minimum Defect Area", "number", 5, 0, 99999999, 1, Unit: "px²")],
-            "Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+        new("defect.referenceCompare", "Reference Defect Compare", "Defect", [.. Source, new("reference", VisionDataType.Image), new("region", VisionDataType.Region, Required: false)],
+            [Region, Image, new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), new("defects", VisionDataType.String), new("maxDefectArea", VisionDataType.Double), new("grade", VisionDataType.String), Next],
+            [
+                Polarity, new("threshold", "Reference Difference Threshold", "number", 15, 0.001, 65535, 1), new("minArea", "Minimum Defect Area", "number", 5, 0, 99999999, 1, Unit: "px²"),
+                new("maxArea", "Maximum Defect Area (0=unbounded)", "number", 0, 0, 99999999, 1, Unit: "px²"),
+                new("registrationTolerance", "Registration Tolerance", "number", 0, 0, 25, 1, Unit: "px", Description: "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. 0 disables registration."),
+                new("compensation", "Illumination Compensation", "select", "none", Options: [new("None", "none"), new("Offset Only", "offset"), new("Gain + Offset", "gainoffset")], Description: "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."),
+                new("morphologyOpen", "Morphology Open Kernel", "number", 0, 0, 15, 2, Unit: "px", Description: "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd."),
+                new("morphologyClose", "Morphology Close Kernel", "number", 0, 0, 15, 2, Unit: "px", Description: "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."),
+                new("majorArea", "Major Defect Area", "number", 500, 0, 99999999, 1, Unit: "px²"),
+                new("criticalArea", "Critical Defect Area", "number", 5000, 0, 99999999, 1, Unit: "px²")
+            ],
+            "Golden-template defect comparison (PatInspect/variation-model style): optional small-shift registration and illumination compensation align the good reference, differences are thresholded, morphology cleans the mask, defects are split, area-filtered and graded minor/major/critical. defects JSON lists area and bounding box per defect; grade is the worst defect grade (none when clean). Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("measure.regionIntensity", "Region Gray Statistics", "Defect", [.. Source, Region],
             [.. RegionOutputs, new("mean", VisionDataType.Double, Required: false), new("stdDev", VisionDataType.Double, Required: false), new("min", VisionDataType.Double, Required: false), new("max", VisionDataType.Double, Required: false), new("range", VisionDataType.Double, Required: false)], [],
             "Grayscale mean, population deviation, min/max and range over the union of region pixels intersected with the image domain. Overlapping objects count once. Empty selection returns found=false and omits statistics; check found before consuming them.", "builtin", new VisionToolCapabilities(EmitsOverlay: true))
