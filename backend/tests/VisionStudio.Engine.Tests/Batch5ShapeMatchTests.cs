@@ -928,6 +928,21 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task RoiTransform_NormalizesFiniteLargeAnglesBeforeSubtractingThem()
+    {
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Circle","x":50,"y":60,"radius":8},"baseThetaDeg":-1e308,"currentThetaDeg":1e308,"anglePeriodDeg":360}""");
+
+        var theta = Convert.ToDouble(result.Summary["thetaDeg"]);
+        var roi = result.Outputs["roi"].Require<VisionRoi>("roi");
+        var transform = result.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.True(double.IsFinite(theta));
+        Assert.InRange(theta, -180, 180);
+        Assert.True(double.IsFinite(roi.X!.Value) && double.IsFinite(roi.Y!.Value));
+        Assert.All(transform.Matrix, value => Assert.True(double.IsFinite(value)));
+    }
+
+    [Fact]
     public async Task RoiTransform_CircleTranslates_AndPortOverridesParameter()
     {
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),

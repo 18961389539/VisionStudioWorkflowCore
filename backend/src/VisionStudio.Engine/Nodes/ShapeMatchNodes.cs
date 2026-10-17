@@ -90,7 +90,9 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
         var anglePeriodDeg = node.GetDouble("anglePeriodDeg", 360);
         if (!double.IsFinite(anglePeriodDeg) || anglePeriodDeg <= 0 || anglePeriodDeg > 360)
             throw new InvalidOperationException("Angle period must be greater than 0 and at most 360 degrees.");
-        var thetaDeg = (currentPose.ThetaDeg - basePose.ThetaDeg) % anglePeriodDeg;
+        // Reduce each angle before subtracting so two finite upstream angles cannot overflow
+        // their difference before the configured symmetry period is applied.
+        var thetaDeg = ((currentPose.ThetaDeg % anglePeriodDeg) - (basePose.ThetaDeg % anglePeriodDeg)) % anglePeriodDeg;
         var halfPeriodDeg = anglePeriodDeg / 2;
         if (thetaDeg > halfPeriodDeg) thetaDeg -= anglePeriodDeg;
         else if (thetaDeg < -halfPeriodDeg) thetaDeg += anglePeriodDeg;
