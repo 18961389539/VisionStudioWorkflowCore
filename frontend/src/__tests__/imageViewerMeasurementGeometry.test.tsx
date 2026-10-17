@@ -29,7 +29,7 @@ vi.mock('react-konva', async () => {
       : stroke === '#ff4d4f'
         ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
     Circle: ({ name }: { name?: string }) => name?.startsWith('measurement-profile-span-')
-      ? <span data-testid={name} /> : null,
+      || name?.startsWith('caliper-circle-angle-') ? <span data-testid={name} /> : null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
@@ -132,6 +132,30 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
     expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
+  it('keeps distinct angle handles on a full circle and lets users drag it into an arc', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: -180, angleEndDeg: 180 }, onChange);
+
+    expect(screen.getByTestId('caliper-circle-angle-start')).toBeTruthy();
+    expect(screen.getByTestId('caliper-circle-angle-end')).toBeTruthy();
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 166.8, clientY: 130 }); // blue start handle sits inside the nominal circle
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 82.8 }); // move start angle to -90 degrees
+    fireEvent.mouseUp(document.body, { clientX: 200, clientY: 82.8 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') {
+      expect(result.angleStartDeg).toBeCloseTo(-90, 4);
+      expect(result.angleEndDeg).toBe(180);
+      expect(result.center).toEqual({ x: 50, y: 50 });
+      expect(result.radius).toBe(20);
+      expect(result.band).toBe(5);
+    }
   });
 
   it('matches backend circle-caliper angles for full circles and a single-ray arc', () => {

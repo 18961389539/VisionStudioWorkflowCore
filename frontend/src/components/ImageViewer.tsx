@@ -132,8 +132,8 @@ function polygonHandleIndices(pointCount: number): number[] {
 
 function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
   const start = geometry.angleStartDeg ?? -180;
-  const { span, fullCircle } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
-  if (fullCircle || width <= 0 || height <= 0) return undefined;
+  const { span } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
+  if (width <= 0 || height <= 0) return undefined;
   const offset = (HANDLE_HIT + 4) / scale;
   const smallCircle = geometry.radius * scale < HANDLE_HIT * 3;
   const atAngle = (angleDeg: number, radius: number): Point => {
@@ -545,8 +545,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       {geometry.centerEditable !== false && <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {radiusHandle && <Circle x={radiusHandle.x} y={radiusHandle.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {arcHandles && <>
-        <Circle x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
-        <Circle x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle name="caliper-circle-angle-start" x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle name="caliper-circle-angle-end" x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
       </>}
       {bandHandles && <>
         <Circle x={bandHandles.inner.x} y={bandHandles.inner.y} radius={handleRadius} fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
