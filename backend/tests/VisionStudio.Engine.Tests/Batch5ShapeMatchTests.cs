@@ -707,13 +707,15 @@ public sealed class Batch5ShapeMatchTests
                 baseX = basePose.X, baseY = basePose.Y, baseThetaDeg = basePose.ThetaDeg
             }));
         using var sceneImage = VisionImage.Own(scene.Clone());
-        var crop = await new ImageCropNode().ExecuteAsync(
-            new NodeExecutionContext(new Dictionary<string, VisionValue>
+        using var cropRegistry = new VisionNodeRegistry();
+        cropRegistry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        var crop = await new VisionNodeDispatcher(cropRegistry).ExecuteAsync(
+            new NodeDefinition("crop", "image.crop", null, null, Params("{}")),
+            new Dictionary<string, VisionValue>
             {
                 ["image"] = VisionValue.Image(sceneImage),
                 ["roi"] = corrected.Outputs["roi"]
-            }),
-            new NodeDefinition("crop", "image.crop", null, null, Params("{}")), CancellationToken.None);
+            }, null, CancellationToken.None);
         using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
 
         var composed = await new ComposeTransformNode().ExecuteAsync(
@@ -725,7 +727,7 @@ public sealed class Batch5ShapeMatchTests
             new NodeDefinition("compose", "coordinate.transformCompose", null, null, Params("{}")), CancellationToken.None);
         var composedTransform = composed.Outputs["transform"].Require<VisionTransform2D>("transform");
         Assert.Equal("ReferenceImage", composedTransform.SourceFrame);
-        Assert.Equal("CropImage", composedTransform.TargetFrame);
+        Assert.Equal("image:crop:crop", composedTransform.TargetFrame);
         var expectedCircleCenter = composedTransform.Apply(new VisionPoint2D(80, 50));
         var measurement = await new CaliperCircleNode().ExecuteAsync(
             new NodeExecutionContext(new Dictionary<string, VisionValue>

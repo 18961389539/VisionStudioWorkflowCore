@@ -97,7 +97,7 @@ public sealed class Batch5CaliperRegressionTests
         {
             ["image"] = VisionValue.Image(image),
             ["transform"] = VisionValue.Transform(new VisionTransform2D(
-                "Reference", "Current", "px", 0, -1, 133, 1, 0, -3, 0, 0, 1))
+                "ReferenceImage", "CurrentImage", "px", 0, -1, 133, 1, 0, -3, 0, 0, 1))
         }), Node("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":10,"angleEndDeg":70,"caliperCount":5,"radialBand":6,"minContrast":19,"sampleWidth":7,"maxRadiusDeviation":1.5,"maxFitOutliers":2,"fitOutlierThreshold":0.75}"""),
             CancellationToken.None);
         Assert.Equal(69d, Convert.ToDouble(circle.Summary["centerX"]));
@@ -764,6 +764,16 @@ public sealed class Batch5CaliperRegressionTests
 
         Assert.Contains("targets image frame 'image:crop:crop'", error.Message);
         Assert.Contains("connected image is in frame 'CurrentImage'", error.Message);
+
+        var genericMismatchInputs = Inputs(source);
+        genericMismatchInputs["transform"] = VisionValue.Transform(new VisionTransform2D(
+            "ReferenceImage", "Current", "px", 1, 0, 0, 0, 1, 0, 0, 0, 1));
+        var genericFrameError = await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.ExecuteAsync(
+            ConfiguredNode("measure-generic-frame", "measure.caliperLine", "{}"),
+            genericMismatchInputs, null, CancellationToken.None).AsTask());
+
+        Assert.Contains("targets image frame 'Current'", genericFrameError.Message);
+        Assert.Contains("connected image is in frame 'CurrentImage'", genericFrameError.Message);
     }
 
     [Fact]
@@ -859,37 +869,43 @@ public sealed class Batch5CaliperRegressionTests
         using var sceneMat = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(20));
         using (var brightSide = new Mat(sceneMat, new Rect(50, 0, 50, 100))) brightSide.SetTo(Scalar.All(220));
         using var scene = VisionImage.Own(sceneMat.Clone());
-        var corrected = await new RoiTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
-            Node("roi.transform", """{"roi":{"type":"Circle","x":40,"y":30,"radius":5},"baseX":0,"baseY":0,"currentX":20,"currentY":10}"""),
-            CancellationToken.None);
-        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(scene)),
-            Node("image.crop", """{"x":5,"y":7,"width":90,"height":80}"""), CancellationToken.None);
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("roi.transform"), new RoiTransformNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("coordinate.transformCompose"), new ComposeTransformNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("measure.caliper"), new CaliperNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+        var corrected = await dispatcher.ExecuteAsync(ConfiguredNode("correction", "roi.transform",
+            """{"roi":{"type":"Circle","x":40,"y":30,"radius":5},"baseX":0,"baseY":0,"currentX":20,"currentY":10}"""),
+            new Dictionary<string, VisionValue>(), null, CancellationToken.None);
+        var crop = await dispatcher.ExecuteAsync(ConfiguredNode("crop", "image.crop",
+            """{"x":5,"y":7,"width":90,"height":80}"""), Inputs(scene), null, CancellationToken.None);
         using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
-        var poseCorrection = corrected.Outputs["transform"].Require<VisionTransform2D>("transform");
-        var cropTransform = crop.Outputs["transform"].Require<VisionTransform2D>("transform");
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
 
-        var composedResult = await new ComposeTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        var composedResult = await dispatcher.ExecuteAsync(ConfiguredNode("compose", "coordinate.transformCompose", "{}"), new Dictionary<string, VisionValue>
         {
-            ["transformA"] = VisionValue.Transform(poseCorrection),
-            ["transformB"] = VisionValue.Transform(cropTransform)
-        }), Node("coordinate.transformCompose", "{}"), CancellationToken.None);
+            ["transformA"] = corrected.Outputs["transform"],
+            ["transformB"] = crop.Outputs["transform"]
+        }, null, CancellationToken.None);
         var composed = composedResult.Outputs["transform"].Require<VisionTransform2D>("transform");
-        var measurement = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        var measurement = await dispatcher.ExecuteAsync(ConfiguredNode("measure", "measure.caliper",
+            """{"sampleWidth":1,"edgeThreshold":20,"direction":"strongest","refine":"none"}"""), new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(croppedImage),
             ["searchLine"] = VisionValue.Line(new(new(0, 20), new(80, 20))),
             ["transform"] = VisionValue.Transform(composed)
-        }), Node("measure.caliper", """{"sampleWidth":1,"edgeThreshold":20,"direction":"strongest","refine":"none"}"""),
-            CancellationToken.None);
+        }, null, CancellationToken.None);
+        using var measuredImage = (VisionImage)measurement.Outputs["image"].Require<IVisionImage>("image");
 
         Assert.True(Convert.ToBoolean(measurement.Summary["found"]));
         var point = measurement.Outputs["point"].Require<VisionPoint2D>("point");
         Assert.InRange(point.X, 44, 46);
         Assert.Equal(23, point.Y, 6);
-        Assert.Equal("ReferenceImage", composed.SourceFrame);
-        Assert.Equal("CropImage", composed.TargetFrame);
-        (measurement.Outputs["image"].Value as IDisposable)?.Dispose();
-        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        Assert.Equal("roi:correction:reference", composed.SourceFrame);
+        Assert.Equal("image:crop:crop", composed.TargetFrame);
     }
 
     [Fact]
@@ -898,25 +914,35 @@ public sealed class Batch5CaliperRegressionTests
         using var sceneMat = new Mat(100, 120, MatType.CV_8UC1, Scalar.All(20));
         Cv2.Ellipse(sceneMat, new Point(70, 30), new Size(15, 15), 0, -90, 90, Scalar.All(220), 2);
         using var scene = VisionImage.Own(sceneMat.Clone());
-        var corrected = await new RoiTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
-            Node("roi.transform", """{"roi":{"type":"Circle","x":30,"y":30,"radius":15},"baseX":0,"baseY":0,"currentX":40,"currentY":60,"currentThetaDeg":90}"""),
-            CancellationToken.None);
-        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(scene)),
-            Node("image.crop", """{"x":5,"y":2,"width":110,"height":96}"""), CancellationToken.None);
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("roi.transform"), new RoiTransformNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("coordinate.transformCompose"), new ComposeTransformNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("measure.caliperCircle"), new CaliperCircleNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+        var corrected = await dispatcher.ExecuteAsync(ConfiguredNode("correction", "roi.transform",
+            """{"roi":{"type":"Circle","x":30,"y":30,"radius":15},"baseX":0,"baseY":0,"currentX":40,"currentY":60,"currentThetaDeg":90}"""),
+            new Dictionary<string, VisionValue>(), null, CancellationToken.None);
+        var crop = await dispatcher.ExecuteAsync(ConfiguredNode("crop", "image.crop",
+            """{"x":5,"y":2,"width":110,"height":96}"""), Inputs(scene), null, CancellationToken.None);
         using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
-        var composedResult = await new ComposeTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        var composedResult = await dispatcher.ExecuteAsync(ConfiguredNode("compose", "coordinate.transformCompose", "{}"), new Dictionary<string, VisionValue>
         {
             ["transformA"] = corrected.Outputs["transform"],
             ["transformB"] = crop.Outputs["transform"]
-        }), Node("coordinate.transformCompose", "{}"), CancellationToken.None);
+        }, null, CancellationToken.None);
 
-        var measurement = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        var measurement = await dispatcher.ExecuteAsync(ConfiguredNode("measure", "measure.caliperCircle",
+            """{"angleStartDeg":0,"angleEndDeg":180,"samplingMode":"count","caliperCount":36,"radialBand":5,"sampleWidth":1,"minContrast":20}"""), new Dictionary<string, VisionValue>
         {
             ["image"] = VisionValue.Image(croppedImage),
             ["circle"] = VisionValue.Circle(new VisionCircle(30, 30, 15)),
             ["transform"] = composedResult.Outputs["transform"]
-        }), Node("measure.caliperCircle", """{"angleStartDeg":0,"angleEndDeg":180,"samplingMode":"count","caliperCount":36,"radialBand":5,"sampleWidth":1,"minContrast":20}"""),
-            CancellationToken.None);
+        }, null, CancellationToken.None);
+        using var measuredImage = (VisionImage)measurement.Outputs["image"].Require<IVisionImage>("image");
 
         Assert.True(Convert.ToBoolean(measurement.Summary["found"]), Convert.ToString(measurement.Summary["reason"]));
         Assert.True(Convert.ToInt32(measurement.Summary["edgePoints"]) >= 10);
@@ -924,10 +950,8 @@ public sealed class Batch5CaliperRegressionTests
         Assert.InRange(circle.X, 63, 67);
         Assert.InRange(circle.Y, 26, 30);
         Assert.InRange(circle.Radius, 13, 17);
-        Assert.Equal("ReferenceImage", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").SourceFrame);
-        Assert.Equal("CropImage", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").TargetFrame);
-        (measurement.Outputs["image"].Value as IDisposable)?.Dispose();
-        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        Assert.Equal("roi:correction:reference", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").SourceFrame);
+        Assert.Equal("image:crop:crop", composedResult.Outputs["transform"].Require<VisionTransform2D>("transform").TargetFrame);
     }
 
     [Fact]

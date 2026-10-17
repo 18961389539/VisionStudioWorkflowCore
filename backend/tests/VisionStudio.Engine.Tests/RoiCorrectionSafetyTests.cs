@@ -200,8 +200,8 @@ public sealed class RoiCorrectionSafetyTests : IDisposable
         using var image = VisionImage.Own(new Mat(20, 20, MatType.CV_8UC1, Scalar.All(0)));
         foreach (var transform in new[]
         {
-            new VisionTransform2D("base", "current", "px", 2, 0, 0, 0, 2, 0, 0, 0, 1),
-            new VisionTransform2D("base", "current", "mm", 1, 0, 0, 0, 1, 0, 0, 0, 1)
+            new VisionTransform2D("base", "CurrentImage", "px", 2, 0, 0, 0, 2, 0, 0, 0, 1),
+            new VisionTransform2D("base", "CurrentImage", "mm", 1, 0, 0, 0, 1, 0, 0, 0, 1)
         })
             await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new CaliperLineNode(), new()
             {

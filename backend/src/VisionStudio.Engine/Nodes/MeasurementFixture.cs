@@ -24,7 +24,6 @@ internal static class MeasurementFixture
 
         if (context.TryGetValue("image", out var imageValue)
             && imageValue.Value is VisionImage image
-            && (IsGraphImageFrame(transform.TargetFrame) || IsGraphImageFrame(image.CoordinateFrame))
             && !string.Equals(transform.TargetFrame, image.CoordinateFrame, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"Measurement transform targets image frame '{transform.TargetFrame}', but the connected image is in frame '{image.CoordinateFrame}'. " +
@@ -32,8 +31,6 @@ internal static class MeasurementFixture
 
         return transform;
     }
-
-    private static bool IsGraphImageFrame(string frame) => frame.StartsWith("image:", StringComparison.OrdinalIgnoreCase);
 
     public static VisionLine2D Apply(VisionLine2D line, VisionTransform2D? transform) => transform is null
         ? line : new VisionLine2D(transform.Apply(line.Start), transform.Apply(line.End));
