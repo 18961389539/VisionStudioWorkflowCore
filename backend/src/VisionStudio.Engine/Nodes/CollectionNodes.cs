@@ -45,22 +45,70 @@ public sealed class DetectionSortNode : IVisionNodeExecutor
     public string Type => "collection.detections.sort";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested(); var items=DetectionListInput.Read(context); var key=node.GetString("sortBy","area").Trim().ToLowerInvariant(); var descending=node.GetBool("descending",true);
-        IOrderedEnumerable<VisionDetection> ordered=key switch
+        cancellationToken.ThrowIfCancellationRequested();
+        var items = DetectionListInput.Read(context);
+        var keys = new[]
         {
-            "x"=>descending?items.OrderByDescending(x=>x.X):items.OrderBy(x=>x.X),
-            "y"=>descending?items.OrderByDescending(x=>x.Y):items.OrderBy(x=>x.Y),
-            "circularity"=>descending?items.OrderByDescending(x=>x.Circularity):items.OrderBy(x=>x.Circularity),
-            "perimeter"=>descending?items.OrderByDescending(x=>x.Perimeter):items.OrderBy(x=>x.Perimeter),
-            "confidence"=>descending?items.OrderByDescending(x=>x.Confidence ?? -1):items.OrderBy(x=>x.Confidence ?? -1),
-            "confidenceOrDefault"=>descending?items.OrderByDescending(x=>x.Confidence ?? -1):items.OrderBy(x=>x.Confidence ?? -1),
-            "area"=>descending?items.OrderByDescending(x=>x.Area):items.OrderBy(x=>x.Area),
-            _=>throw new InvalidOperationException("sortBy must be area, x, y, circularity, perimeter or confidence.")
+            (node.GetString("sortBy", "area"), node.GetBool("descending", true), required: true),
+            (node.GetString("sortBy2", "none"), node.GetBool("descending2", true), required: false),
+            (node.GetString("sortBy3", "none"), node.GetBool("descending3", true), required: false)
         };
-        var result=ordered.ThenBy(x=>x.Index).Select((d,i)=>d with{Index=i}).ToArray();
-        var diag=CoordinateValidation.Diagnostics(Type,("count",result.Length),("sortBy",key),("descending",descending),("empty",result.Length==0));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"detections",VisionValue.Detections(result)},{"count",VisionValue.Integer(result.Length)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"count",result.Length},{"sortBy",key},{"descending",descending},{"diagnostics",diag}}));
+        var topN = node.GetInt("topN", 0);
+        if (topN < 0) throw new InvalidOperationException("collection.detections.sort topN cannot be negative.");
+        IOrderedEnumerable<VisionDetection>? ordered = null;
+        foreach (var (name, descending, required) in keys)
+        {
+            var key = name.Trim().ToLowerInvariant();
+            if (key is "none" or "")
+            {
+                if (required) throw new InvalidOperationException("sortBy must name a detection field.");
+                continue;
+            }
+            ordered = ordered is null
+                ? Order(items, key, descending)
+                : Then(ordered, key, descending);
+        }
+        var sorted = (ordered ?? items.OrderBy(_ => 0)).ToArray();
+        if (topN > 0) sorted = sorted.Take(topN).ToArray();
+        var result = sorted.Select((detection, index) => detection with { Index = index }).ToArray();
+        var diag = CoordinateValidation.Diagnostics(Type, ("count", result.Length), ("sortBy", keys[0].Item1), ("descending", keys[0].Item2), ("empty", result.Length == 0));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue> { ["detections"] = VisionValue.Detections(result), ["count"] = VisionValue.Integer(result.Length), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?>
+            {
+                ["count"] = result.Length,
+                ["sortBy"] = keys[0].Item1,
+                ["descending"] = keys[0].Item2,
+                ["sortBy2"] = keys[1].Item1,
+                ["sortBy3"] = keys[2].Item1,
+                ["topN"] = topN,
+                ["diagnostics"] = diag
+            }));
     }
+
+    private static IOrderedEnumerable<VisionDetection> Order(IReadOnlyList<VisionDetection> items, string key, bool descending)
+        => descending
+            ? items.OrderBy(item => Rank(item, key).Missing).ThenByDescending(item => Rank(item, key).Value)
+            : items.OrderBy(item => Rank(item, key).Missing).ThenBy(item => Rank(item, key).Value);
+
+    private static IOrderedEnumerable<VisionDetection> Then(IOrderedEnumerable<VisionDetection> items, string key, bool descending)
+        => descending
+            ? items.ThenBy(item => Rank(item, key).Missing).ThenByDescending(item => Rank(item, key).Value)
+            : items.ThenBy(item => Rank(item, key).Missing).ThenBy(item => Rank(item, key).Value);
+
+    private static (int Missing, double Value) Rank(VisionDetection item, string key) => key switch
+    {
+        "area" => (0, item.Area),
+        "x" => (0, item.X),
+        "y" => (0, item.Y),
+        "circularity" => (0, item.Circularity),
+        "perimeter" => (0, item.Perimeter),
+        "width" => (0, item.Width),
+        "height" => (0, item.Height),
+        "confidence" => item.Confidence is { } confidence ? (0, confidence) : (1, 0),
+        "classid" => item.ClassId is { } classId ? (0, classId) : (1, 0),
+        _ => throw new InvalidOperationException("sortBy must be area, x, y, circularity, perimeter, width, height, confidence, or classId.")
+    };
 }
 
 public sealed class DetectionAtIndexNode : IVisionNodeExecutor

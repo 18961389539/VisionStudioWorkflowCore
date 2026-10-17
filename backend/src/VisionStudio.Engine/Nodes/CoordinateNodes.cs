@@ -107,13 +107,9 @@ public sealed class CoordinatePointNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var x=CoordinateValidation.RequireFinite(node.GetDouble("x",0),"x");
-        var y=CoordinateValidation.RequireFinite(node.GetDouble("y",0),"y");
-        var frame=CoordinateValidation.RequireFrame(node.GetString("frame","Workpiece"),"frame");
-        var unit=CoordinateValidation.RequireUnit(node.GetString("unit","mm"),"unit","mm","cm","m","px");
-        var p=new VisionCoordinatePoint2D(x,y,frame,unit);
-        var diag=CoordinateValidation.Diagnostics(Type,("x",x),("y",y),("frame",frame),("unit",unit));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.CoordinatePoint(p)},{"x",VisionValue.Double(x)},{"y",VisionValue.Double(y)},{"frame",VisionValue.String(frame)},{"unit",VisionValue.String(unit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"point",$"({p.X:0.###},{p.Y:0.###}) {p.Unit}"},{"frame",p.Frame},{"diagnostics",diag}}));
+        var p = CoordinateLiteral.Point(context, node, 0, 0, "Workpiece");
+        var diag = CoordinateValidation.Diagnostics(Type, ("x", p.X), ("y", p.Y), ("frame", p.Frame), ("unit", p.Unit));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.CoordinatePoint(p)},{"x",VisionValue.Double(p.X)},{"y",VisionValue.Double(p.Y)},{"frame",VisionValue.String(p.Frame)},{"unit",VisionValue.String(p.Unit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"point",$"({p.X:0.###},{p.Y:0.###}) {p.Unit}"},{"frame",p.Frame},{"unit",p.Unit},{"diagnostics",diag}}));
     }
 }
 public sealed class CoordinateDistanceNode : IVisionNodeExecutor
@@ -130,5 +126,54 @@ public sealed class CoordinateDistanceNode : IVisionNodeExecutor
         if (!double.IsFinite(d)) throw new InvalidOperationException("coordinate.distance produced a non-finite distance.");
         var diag=CoordinateValidation.Diagnostics(Type,("dx",dx),("dy",dy),("distance",d),("frame",a.Frame),("unit",a.Unit),("coincident",d<1e-12));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"measurement",VisionValue.Measurement(new(d,a.Unit,"Distance"))},{"distance",VisionValue.Double(d)},{"dx",VisionValue.Double(dx)},{"dy",VisionValue.Double(dy)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"distance",Math.Round(d,4)},{"unit",a.Unit},{"frame",a.Frame},{"diagnostics",diag}}));
+    }
+}
+
+internal static class CoordinateLiteral
+{
+    public static VisionCoordinatePoint2D Point(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, string defaultFrame)
+    {
+        var (x, y, frame, unit) = Read(context, node, defaultX, defaultY, defaultFrame, "coordinate.point");
+        return new VisionCoordinatePoint2D(x, y, frame, unit);
+    }
+
+    public static VisionCoordinatePose2D Pose(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, double defaultTheta, string defaultFrame)
+    {
+        var (x, y, frame, unit) = Read(context, node, defaultX, defaultY, defaultFrame, "coordinate.pose");
+        var theta = Number(context, node, "thetaDeg", defaultTheta, "coordinate.pose");
+        return new VisionCoordinatePose2D(x, y, VisionTransform2D.NormalizeAngleDeg(theta), frame, unit);
+    }
+
+    private static (double X, double Y, string Frame, string Unit) Read(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, string defaultFrame, string nodeType)
+    {
+        var x = Number(context, node, "x", defaultX, nodeType);
+        var y = Number(context, node, "y", defaultY, nodeType);
+        var frame = node.GetString("frame", defaultFrame).Trim();
+        if (frame.Length == 0)
+            throw new InvalidOperationException($"{nodeType} frame must be non-empty. Connect a frame tree to check the name against known frames.");
+        var unitText = node.GetString("unit", "mm");
+        var unit = unitText.Trim().ToLowerInvariant();
+        if (unit is not ("mm" or "cm" or "m"))
+            throw new InvalidOperationException($"{nodeType} unit '{unitText}' is not supported. Allowed units: mm, cm, m.");
+        if (context.TryGetValue("tree", out var treeValue))
+        {
+            var tree = treeValue.Require<VisionFrameTree2D>("tree");
+            var known = tree.Transforms
+                .SelectMany(transform => new[] { transform.SourceFrame, transform.TargetFrame })
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (!known.Any(name => name.Equals(frame, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"{nodeType} frame '{frame}' is not in the connected frame tree. Known frames: {string.Join(", ", known)}.");
+        }
+        return (x, y, frame, unit);
+    }
+
+    private static double Number(NodeExecutionContext context, NodeDefinition node, string name, double fallback, string nodeType)
+    {
+        var value = context.TryGetValue(name, out _) ? context.RequireNumber(name) : node.GetDouble(name, fallback);
+        if (!double.IsFinite(value))
+            throw new InvalidOperationException($"{nodeType} {name} must be a finite number.");
+        return value;
     }
 }

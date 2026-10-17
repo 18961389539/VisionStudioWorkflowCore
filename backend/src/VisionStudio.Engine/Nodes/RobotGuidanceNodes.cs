@@ -92,11 +92,12 @@ public sealed class CoordinatePoseNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var x=CoordinateValidation.RequireFinite(node.GetDouble("x",0),"x"); var y=CoordinateValidation.RequireFinite(node.GetDouble("y",0),"y"); var theta=CoordinateValidation.RequireFinite(node.GetDouble("thetaDeg",0),"thetaDeg");
-        var frame=CoordinateValidation.RequireFrame(node.GetString("frame","RobotBase"),"frame"); var unit=CoordinateValidation.RequireUnit(node.GetString("unit","mm"),"unit","mm","cm","m","px");
-        var pose=new VisionCoordinatePose2D(x,y,theta,frame,unit); var normalized=VisionTransform2D.NormalizeAngleDeg(theta);
-        var diag=CoordinateValidation.Diagnostics(Type,("x",x),("y",y),("thetaDeg",theta),("normalizedThetaDeg",normalized),("frame",frame),("unit",unit));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"pose",VisionValue.CoordinatePose(pose)},{"x",VisionValue.Double(x)},{"y",VisionValue.Double(y)},{"thetaDeg",VisionValue.Double(theta)},{"frame",VisionValue.String(frame)},{"unit",VisionValue.String(unit)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"pose",$"X={x:0.###}, Y={y:0.###}, R={theta:0.###}"},{"frame",frame},{"unit",unit},{"diagnostics",diag}}));
+        var rawTheta = context.TryGetValue("thetaDeg", out _) ? context.RequireNumber("thetaDeg") : node.GetDouble("thetaDeg", 0);
+        var pose = CoordinateLiteral.Pose(context, node, 0, 0, 0, "RobotBase");
+        var diag = CoordinateValidation.Diagnostics(Type, ("x", pose.X), ("y", pose.Y), ("thetaDeg", rawTheta), ("normalizedThetaDeg", pose.ThetaDeg), ("frame", pose.Frame), ("unit", pose.Unit));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue> { ["pose"] = VisionValue.CoordinatePose(pose), ["x"] = VisionValue.Double(pose.X), ["y"] = VisionValue.Double(pose.Y), ["thetaDeg"] = VisionValue.Double(rawTheta), ["frame"] = VisionValue.String(pose.Frame), ["unit"] = VisionValue.String(pose.Unit), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["pose"] = $"X={pose.X:0.###}, Y={pose.Y:0.###}, R={pose.ThetaDeg:0.###}", ["frame"] = pose.Frame, ["unit"] = pose.Unit, ["diagnostics"] = diag }));
     }
 }
 public sealed class PoseToTransformNode : IVisionNodeExecutor

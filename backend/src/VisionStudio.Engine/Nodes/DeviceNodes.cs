@@ -101,17 +101,92 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         var compare = node.GetString("compareValue", "1");
         var timeoutMs = Math.Clamp(node.GetInt("timeoutMs", 5000), 50, 120000);
         var pollMs = Math.Clamp(node.GetInt("pollMs", 25), 10, 5000);
+        var stableMs = Math.Clamp(node.GetInt("stableMs", 0), 0, 120000);
         var autoConnect = node.GetBool("autoConnect", true);
+        var triggerMode = node.GetString("triggerMode", "Level").Trim();
+        var qualityMode = node.GetString("qualityMode", "Any").Trim();
+        var onTimeout = node.GetString("onTimeout", "Fail").Trim();
+        if (triggerMode.ToLowerInvariant() is not ("level" or "rising" or "falling"))
+            throw new InvalidOperationException($"device.waitTag triggerMode '{triggerMode}' is not supported.");
+        if (qualityMode.ToLowerInvariant() is not ("any" or "good" or "goodoruncertain"))
+            throw new InvalidOperationException($"device.waitTag qualityMode '{qualityMode}' is not supported.");
+        if (onTimeout.ToLowerInvariant() is not ("fail" or "continue"))
+            throw new InvalidOperationException($"device.waitTag onTimeout '{onTimeout}' is not supported.");
+        if (stableMs > timeoutMs)
+            throw new InvalidOperationException($"device.waitTag stableMs {stableMs} is greater than timeoutMs {timeoutMs}.");
+
         var started = DateTimeOffset.UtcNow;
-        var sample = await devices.WaitForTagAsync(
-            deviceId,
-            tagId,
-            value => Matches(value, op, compare),
-            TimeSpan.FromMilliseconds(timeoutMs),
-            TimeSpan.FromMilliseconds(pollMs),
-            autoConnect,
-            cancellationToken);
-        var waitMs = (DateTimeOffset.UtcNow - started).TotalMilliseconds;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(timeoutMs);
+        DeviceTagSample? last = null;
+        bool? previousLevel = null;
+        var edgeArmed = false;
+        DateTimeOffset? stableSince = null;
+        try
+        {
+            while (true)
+            {
+                var sample = await devices.ReadTagAsync(deviceId, tagId, fresh: true, autoConnect, timeoutCts.Token);
+                last = sample;
+                if (!QualityAccepted(sample.Quality, qualityMode))
+                {
+                    stableSince = null;
+                    await Task.Delay(pollMs, timeoutCts.Token);
+                    continue;
+                }
+
+                var level = Matches(sample, op, compare);
+                var armed = Arm(triggerMode, level, previousLevel, ref edgeArmed);
+                previousLevel = level;
+                if (!armed)
+                {
+                    stableSince = null;
+                    await Task.Delay(pollMs, timeoutCts.Token);
+                    continue;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                stableSince ??= now;
+                if ((now - stableSince.Value).TotalMilliseconds >= stableMs)
+                    return Matched(sample, deviceId, op, compare, triggerMode, qualityMode, (now - started).TotalMilliseconds);
+                await Task.Delay(pollMs, timeoutCts.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            if (onTimeout.Equals("Continue", StringComparison.OrdinalIgnoreCase))
+                return TimedOut(deviceId, tagId, last, op, compare, triggerMode, qualityMode, (DateTimeOffset.UtcNow - started).TotalMilliseconds);
+            throw new TimeoutException($"Timed out waiting for device '{deviceId}' tag '{tagId}' after {timeoutMs:0} ms.");
+        }
+    }
+
+    private static bool Arm(string triggerMode, bool level, bool? previousLevel, ref bool edgeArmed)
+    {
+        switch (triggerMode.ToLowerInvariant())
+        {
+            case "rising":
+                if (previousLevel == false && level) edgeArmed = true;
+                if (!level) edgeArmed = false;
+                return edgeArmed && level;
+            case "falling":
+                if (previousLevel == true && !level) edgeArmed = true;
+                if (level) edgeArmed = false;
+                return edgeArmed && !level;
+            default:
+                return level;
+        }
+    }
+
+    private static bool QualityAccepted(DeviceTagQuality quality, string qualityMode)
+        => qualityMode.ToLowerInvariant() switch
+        {
+            "good" => quality == DeviceTagQuality.Good,
+            "goodoruncertain" => quality is DeviceTagQuality.Good or DeviceTagQuality.Uncertain,
+            _ => true
+        };
+
+    private static NodeExecutorResult Matched(DeviceTagSample sample, string deviceId, string op, string compare, string triggerMode, string qualityMode, double waitMs)
+    {
         var result = DeviceReadTagNode.Result(sample, deviceId);
         var outputs = new Dictionary<string, VisionValue>(result.Outputs)
         {
@@ -122,9 +197,36 @@ public sealed class DeviceWaitTagNode(DeviceManager devices) : IVisionNodeExecut
         {
             ["operator"] = op,
             ["compareValue"] = compare,
+            ["triggerMode"] = triggerMode,
+            ["qualityMode"] = qualityMode,
             ["waitMs"] = Math.Round(waitMs, 2),
             ["matched"] = true
         };
+        return new NodeExecutorResult(outputs, summary);
+    }
+
+    private static NodeExecutorResult TimedOut(string deviceId, string tagId, DeviceTagSample? last, string op, string compare, string triggerMode, string qualityMode, double waitMs)
+    {
+        var result = last is null
+            ? DeviceReadTagNode.Result(new DeviceTagSample(deviceId, tagId, DeviceTagDataType.String, null, DeviceTagQuality.Disconnected, DateTimeOffset.UtcNow, "Timeout"), deviceId)
+            : DeviceReadTagNode.Result(last, deviceId);
+        var outputs = new Dictionary<string, VisionValue>(result.Outputs)
+        {
+            ["matched"] = VisionValue.Boolean(false),
+            ["waitMs"] = VisionValue.Double(waitMs)
+        };
+        if (last is null) outputs["quality"] = VisionValue.String("Timeout");
+        var summary = new Dictionary<string, object?>(result.Summary)
+        {
+            ["operator"] = op,
+            ["compareValue"] = compare,
+            ["triggerMode"] = triggerMode,
+            ["qualityMode"] = qualityMode,
+            ["onTimeout"] = "Continue",
+            ["waitMs"] = Math.Round(waitMs, 2),
+            ["matched"] = false
+        };
+        if (last is null) summary["quality"] = "Timeout";
         return new NodeExecutorResult(outputs, summary);
     }
 

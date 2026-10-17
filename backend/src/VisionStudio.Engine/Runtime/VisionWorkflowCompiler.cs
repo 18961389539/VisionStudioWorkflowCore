@@ -185,6 +185,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             if (catalog.Capabilities?.SupportsRoi == true) roiParameterNames.Add("roi");
             if (catalog.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
                 roiParameterNames.AddRange(["searchRoi", "clutterRoi"]);
+            if (catalog.Type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
+                roiParameterNames.AddRange(["searchRoi", "templateRoi"]);
             var roiInputConnected = catalog.Inputs.Any(input =>
                 input.Name.Equals("roi", StringComparison.OrdinalIgnoreCase)
                 && input.DataType == VisionDataType.Roi)

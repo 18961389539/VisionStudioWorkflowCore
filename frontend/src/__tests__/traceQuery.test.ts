@@ -5,6 +5,14 @@ import {
 } from '../traceQuery';
 
 const NOW = new Date('2026-10-11T15:30:00+08:00');
+const DAY_MS = 86_400_000;
+
+/** 与 presetRange 的契约一致：按运行器本地日历取零点，再序列化成 UTC ISO。固定 +08 时间戳只在东八区机器上成立。 */
+function startOfLocalDay(value: Date): Date {
+  const copy = new Date(value);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
 
 describe('presetRange', () => {
   it('最近一小时返回一小时前的 UTC ISO 起点', () => {
@@ -15,14 +23,21 @@ describe('presetRange', () => {
 
   it('今天返回本地零点的 UTC 起点', () => {
     const range = presetRange({ preset: 'today' }, NOW);
-    expect(range.from).toBe('2026-10-10T16:00:00.000Z'); // 本地 2026-10-11 00:00 (+08:00)
+    const localMidnight = startOfLocalDay(NOW);
+    expect(range.from).toBe(localMidnight.toISOString());
+    expect(new Date(range.from!).getHours()).toBe(0);
+    expect(new Date(range.from!).getMinutes()).toBe(0);
+    expect(new Date(range.from!).getSeconds()).toBe(0);
+    expect(new Date(range.from!).getMilliseconds()).toBe(0);
     expect(range.to).toBeUndefined();
   });
 
   it('昨天返回昨天零点到今天零点前一毫秒（含 <= 边界）', () => {
     const range = presetRange({ preset: 'yesterday' }, NOW);
-    expect(range.from).toBe('2026-10-09T16:00:00.000Z');
-    expect(range.to).toBe('2026-10-10T15:59:59.999Z');
+    const todayStart = startOfLocalDay(NOW);
+    const yesterdayStart = startOfLocalDay(new Date(NOW.getTime() - DAY_MS));
+    expect(range.from).toBe(yesterdayStart.toISOString());
+    expect(range.to).toBe(new Date(todayStart.getTime() - 1).toISOString());
   });
 
   it('自定义时间窗原样透传', () => {
@@ -43,7 +58,7 @@ describe('effectiveRange（运行 ID 直查不受时间窗限制）', () => {
 
   it('runIdPrefix 为空白时回到预设时间窗', () => {
     const range = effectiveRange({ preset: 'today', runIdPrefix: '   ' }, NOW);
-    expect(range.from).toBe('2026-10-10T16:00:00.000Z');
+    expect(range.from).toBe(startOfLocalDay(NOW).toISOString());
   });
 });
 
@@ -57,7 +72,7 @@ describe('buildTraceParams', () => {
     expect(params.get('limit')).toBe('50');
     expect(params.get('jobId')).toBe('job-1');
     expect(params.get('executionStatus')).toBe('Failed');
-    expect(params.get('from')).toBe('2026-10-10T16:00:00.000Z');
+    expect(params.get('from')).toBe(startOfLocalDay(NOW).toISOString());
     expect(params.has('errorCode')).toBe(false);
     expect(params.has('workflow')).toBe(false);
   });
