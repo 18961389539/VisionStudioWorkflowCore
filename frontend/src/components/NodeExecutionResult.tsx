@@ -78,6 +78,11 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
     && ['image.crop', 'roi.transform', 'feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
     return '多边形 ROI 最多允许 500000 个顶点。';
   if (['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+    const emptyRasterRoi = error.match(/^(Rectangle|Circle|Polygon|Brush) ROI does not cover any pixels in the measurement image \((\d+)×(\d+)\)\. Move the ROI into the image or check its coordinate frame\.$/);
+    if (emptyRasterRoi) {
+      const roiName: Record<string, string> = { Rectangle: '矩形', Circle: '圆形', Polygon: '多边形', Brush: '笔刷' };
+      return `${roiName[emptyRasterRoi[1]]} ROI 在当前测量图像（${emptyRasterRoi[2]}×${emptyRasterRoi[3]}）中没有覆盖任何像素。请将 ROI 移入图像，或检查坐标系。`;
+    }
     if (error.startsWith('Rectangle ROI requires finite coordinates'))
       return '矩形 ROI 必须具有有限坐标和正宽高，且边界在允许范围内。';
     if (error.startsWith('Circle ROI requires finite center coordinates'))

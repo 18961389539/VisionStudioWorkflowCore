@@ -131,6 +131,33 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Contains("Polygon ROI requires 3..500000 finite vertices", error.Message);
     }
 
+    [Theory]
+    [InlineData(0.1, 0.1, 0.2, 0.2)]
+    [InlineData(500, 500, 10, 10)]
+    public async Task CaliperNodesRejectRoiThatSelectsNoImagePixelsInsteadOfReportingNoEdge(
+        double x, double y, double width, double height)
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+        var inputs = Inputs(image);
+        inputs["roi"] = VisionValue.Roi(new VisionRoi(VisionRoiType.Rectangle, x, y, width, height));
+        IVisionNodeExecutor[] executors =
+        [
+            new EdgeSubpixelNode(),
+            new CaliperNode(),
+            new CaliperLineNode(),
+            new CaliperCircleNode()
+        ];
+
+        foreach (var executor in executors)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(
+                new NodeExecutionContext(inputs), Node(executor.Type, "{}"), CancellationToken.None).AsTask());
+
+            Assert.Contains("Rectangle ROI does not cover any pixels in the measurement image (128×128)", error.Message);
+            Assert.Contains("check its coordinate frame", error.Message);
+        }
+    }
+
     [Fact]
     public async Task CaliperLine_ClassifiesProfilesBeyondCoordinateLimitAsOutsideImage()
     {

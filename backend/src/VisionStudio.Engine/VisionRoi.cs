@@ -10,6 +10,26 @@ public static class VisionRoiOpenCvExtensions
     public static Mat BuildMask(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
         => BuildMaskForRegion(roi, size, 0, 0, cancellationToken);
 
+    /// <summary>Build a measurement ROI mask and reject regions that select no pixels in the sampled image.</summary>
+    internal static Mat BuildMaskForMeasurement(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
+    {
+        roi.ValidateForMeasurement(cancellationToken);
+        var mask = roi.BuildMask(size, cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Cv2.CountNonZero(mask) == 0)
+                throw new InvalidOperationException(
+                    $"{roi.Type} ROI does not cover any pixels in the measurement image ({size.Width}×{size.Height}). Move the ROI into the image or check its coordinate frame.");
+            return mask;
+        }
+        catch
+        {
+            mask.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>Rasterize the ROI into a canvas whose top-left corresponds to an image-space origin.</summary>
     internal static Mat BuildMaskForRegion(VisionRoi roi, Size size, int originX, int originY, CancellationToken cancellationToken)
     {

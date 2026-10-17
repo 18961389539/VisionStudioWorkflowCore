@@ -311,6 +311,14 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText('多边形 ROI 至少需要 3 个有效顶点，且坐标在允许范围内。')).toBeTruthy();
   });
 
+  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'])(
+    'explains when %s receives a valid ROI that covers no image pixels', type => {
+      mount(type, failedResult('Rectangle ROI does not cover any pixels in the measurement image (128×128). Move the ROI into the image or check its coordinate frame.'));
+
+      expect(screen.getByText('矩形 ROI 在当前测量图像（128×128）中没有覆盖任何像素。请将 ROI 移入图像，或检查坐标系。')).toBeTruthy();
+      expect(screen.getByText('Rectangle ROI does not cover any pixels in the measurement image (128×128). Move the ROI into the image or check its coordinate frame.')).toBeTruthy();
+    });
+
   it.each(['feature.edgeSubpixel', 'measure.caliperCircle'])('localizes oversized connected polygon ROI errors from %s', type => {
     mount(type, failedResult('Polygon ROI exceeds the 500000-point limit.'));
 

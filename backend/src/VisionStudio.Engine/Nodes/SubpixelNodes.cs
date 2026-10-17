@@ -252,10 +252,7 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
         try
         {
             if (roi is not null)
-            {
-                roi.ValidateForMeasurement(cancellationToken);
-                mask = roi.BuildMask(sourceImage.Mat.Size(), cancellationToken);
-            }
+                mask = roi.BuildMaskForMeasurement(sourceImage.Mat.Size(), cancellationToken);
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
@@ -368,10 +365,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
         try
         {
             if (roi is not null)
-            {
-                roi.ValidateForMeasurement(cancellationToken);
-                mask = roi.BuildMask(sourceImage.Mat.Size(), cancellationToken);
-            }
+                mask = roi.BuildMaskForMeasurement(sourceImage.Mat.Size(), cancellationToken);
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
@@ -659,10 +653,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         try
         {
             if (roi is not null)
-            {
-                roi.ValidateForMeasurement(cancellationToken);
-                mask = roi.BuildMask(sourceImage.Mat.Size(), cancellationToken);
-            }
+                mask = roi.BuildMaskForMeasurement(sourceImage.Mat.Size(), cancellationToken);
             var gray = PreprocessImageHelpers.ToGray8(sourceImage.Mat, out var autoGray, out var owned);
             try
             {
