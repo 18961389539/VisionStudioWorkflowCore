@@ -439,12 +439,14 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                 {
                     var usedPoints = fit.UsedIndices.Select(index => points[index]).ToArray();
                     var usedStrengths = fit.UsedIndices.Select(index => strengths[index]).ToArray();
+                    // Keep the computed fit-quality metric available for downstream diagnostics
+                    // even when the acceptance gate rejects the geometry.
+                    outputs["fitError"] = VisionValue.Double(fit.Error);
                     if (found)
                     {
                         outputs["point"] = VisionValue.Point(fit.Point);
                         outputs["line"] = VisionValue.Line(fit.Line);
                         outputs["strength"] = VisionValue.Double(usedStrengths.Average());
-                        outputs["fitError"] = VisionValue.Double(fit.Error);
                     }
                     overlays.AddRange(usedPoints.Select((point, index) => new VisionOverlay(
                         $"caliper-line-fit-point-{index}", VisionOverlayType.Point, X: point.X, Y: point.Y, Stroke: "#52c41a", StrokeWidth: 2.5)));
@@ -827,6 +829,10 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     summary["fitError"] = Math.Round(rmse, 4);
                     summary["fitPoints"] = usedPoints.Length;
                     summary["ignoredByFit"] = fit.IgnoredIndices.Length;
+                    // These quality metrics describe the available fit and remain useful when
+                    // a radius or fit-error gate rejects its geometry.
+                    outputs["radiusSpread"] = VisionValue.Double(radiusSpread);
+                    outputs["fitError"] = VisionValue.Double(rmse);
                     if (found)
                     {
                         outputs["circle"] = VisionValue.Circle(circle);
@@ -834,8 +840,6 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         outputs["radius"] = VisionValue.Double(circle.Radius);
                         outputs["radiusMin"] = VisionValue.Double(usedRadii.Min());
                         outputs["radiusMax"] = VisionValue.Double(usedRadii.Max());
-                        outputs["radiusSpread"] = VisionValue.Double(radiusSpread);
-                        outputs["fitError"] = VisionValue.Double(rmse);
                     }
                     overlays.Add(new VisionOverlay("caliper-circle-fit", VisionOverlayType.Circle,
                         Label: $"R={circle.Radius:0.###}",

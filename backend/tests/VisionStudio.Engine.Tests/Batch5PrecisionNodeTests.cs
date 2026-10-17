@@ -330,6 +330,9 @@ public sealed class Batch5PrecisionNodeTests
         Assert.False(Convert.ToBoolean(gated.Summary["found"]));
         Assert.Equal("fit-error-exceeds-tolerance", Convert.ToString(gated.Summary["reason"]));
         Assert.False(gated.Outputs.ContainsKey("line"));
+        var rejectedFitError = gated.Outputs["fitError"].Require<double>("fitError");
+        Assert.True(rejectedFitError > 0.5);
+        Assert.Equal(Convert.ToDouble(gated.Summary["fitError"]), Math.Round(rejectedFitError, 4), 4);
         Assert.Equal(0.5, Convert.ToDouble(gated.Summary["maxFitError"]));
     }
 
@@ -396,6 +399,11 @@ public sealed class Batch5PrecisionNodeTests
         Assert.Equal("fit-error-exceeds-tolerance", Convert.ToString(gated.Summary["reason"]));
         Assert.False(gated.Outputs.ContainsKey("circle"));
         Assert.False(gated.Outputs.ContainsKey("radius"));
+        var rejectedFitError = gated.Outputs["fitError"].Require<double>("fitError");
+        Assert.True(rejectedFitError > 0.5);
+        Assert.Equal(Convert.ToDouble(gated.Summary["fitError"]), Math.Round(rejectedFitError, 4), 4);
+        var rejectedRadiusSpread = gated.Outputs["radiusSpread"].Require<double>("radiusSpread");
+        Assert.Equal(Convert.ToDouble(gated.Summary["radiusSpread"]), Math.Round(rejectedRadiusSpread, 3), 3);
         Assert.Equal(0.5, Convert.ToDouble(gated.Summary["maxFitError"]));
     }
 
