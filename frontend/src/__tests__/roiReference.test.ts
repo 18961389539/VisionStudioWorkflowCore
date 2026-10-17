@@ -33,9 +33,11 @@ describe('ROI reference capture', () => {
     expect(next).toMatchObject({ baseX: 200, baseY: 70, referenceImage: 'png-bytes', referenceBindings: 'binding' });
   });
 
-  it('rotates rectangles and brush erasers in the same direction as the backend correction', () => {
+  it('rotates the half-open pixel support of rectangles like the backend correction', () => {
     expect(rebaseRoi({ type: 'Rectangle', x: 10, y: 0, width: 20, height: 10 }, {}, 100, 100, 90))
-      .toEqual({ type: 'Polygon', points: [{ x: 100, y: 90 }, { x: 100, y: 70 }, { x: 110, y: 70 }, { x: 110, y: 90 }] });
+      .toEqual({ type: 'Polygon', points: [{ x: 100, y: 90 }, { x: 100, y: 71 }, { x: 109, y: 71 }, { x: 109, y: 90 }] });
+    expect(rebaseRoi({ type: 'Rectangle', x: 10.2, y: 0.4, width: 20.4, height: 10.3 }, {}, 100, 100, 90))
+      .toEqual({ type: 'Polygon', points: [{ x: 101, y: 89 }, { x: 101, y: 70 }, { x: 110, y: 70 }, { x: 110, y: 89 }] });
     const brush = rebaseRoi({ type: 'Brush', strokes: [
       { mode: 'Add', width: 8, points: [{ x: 10, y: 20 }] },
       { mode: 'Erase', width: 4, points: [{ x: 10, y: 30 }] }
@@ -44,6 +46,11 @@ describe('ROI reference capture', () => {
       { mode: 'Add', width: 8, points: [{ x: 120, y: 90 }] },
       { mode: 'Erase', width: 4, points: [{ x: 130, y: 90 }] }
     ] });
+  });
+
+  it('refuses to rotate a rectangle that selects no pixel', () => {
+    expect(() => rebaseRoi({ type: 'Rectangle', x: 10.1, y: 10, width: 0.2, height: 5 }, {}, 20, 20, 90))
+      .toThrow('没有覆盖任何像素');
   });
 
   it('refuses partial and failed captures instead of replacing a valid reference', () => {

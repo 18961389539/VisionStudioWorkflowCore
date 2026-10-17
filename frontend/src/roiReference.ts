@@ -142,7 +142,8 @@ function referenceAngleDelta(parameters: NodeParameters, thetaDeg: number): numb
 
 /** Re-author an existing region in a new reference frame without applying the motion twice. */
 export function rebaseRoi(roi: VisionRoi, previous: NodeParameters, x: number, y: number, thetaDeg: number): VisionRoi {
-  const angle = referenceAngleDelta(previous, thetaDeg) * Math.PI / 180;
+  const angleDeltaDeg = referenceAngleDelta(previous, thetaDeg);
+  const angle = angleDeltaDeg * Math.PI / 180;
   const cos = Math.cos(angle), sin = Math.sin(angle);
   const apply = (point: OverlayPoint): OverlayPoint => {
     const dx = point.x - Number(previous.baseX ?? 0), dy = point.y - Number(previous.baseY ?? 0);
@@ -153,11 +154,20 @@ export function rebaseRoi(roi: VisionRoi, previous: NodeParameters, x: number, y
     case 'Polygon': return { ...roi, points: roi.points.map(apply) };
     case 'Brush': return { ...roi, strokes: roi.strokes.map(stroke => ({ ...stroke, points: stroke.points.map(apply) })) };
     case 'Rectangle': {
-      if (Math.abs(Math.sin(angle)) < 1e-10 && Math.cos(angle) > 0)
+      if (Math.abs(angleDeltaDeg) < 1e-9 && Math.cos(angle) > 0)
         return { ...roi, ...apply(roi) };
+      // Match RoiTransformNode: a rectangle is a half-open pixel region, so rotate
+      // its selected pixel centers instead of its geometric outer edges. This keeps
+      // reference migration from adding a row or column to the downstream mask.
+      const left = Math.ceil(roi.x);
+      const top = Math.ceil(roi.y);
+      const right = Math.ceil(roi.x + roi.width) - 1;
+      const bottom = Math.ceil(roi.y + roi.height) - 1;
+      if (right < left || bottom < top)
+        throw new Error('矩形 ROI 当前没有覆盖任何像素，无法旋转并迁移基准。请先增大区域。');
       return { type: 'Polygon', points: [
-        { x: roi.x, y: roi.y }, { x: roi.x + roi.width, y: roi.y },
-        { x: roi.x + roi.width, y: roi.y + roi.height }, { x: roi.x, y: roi.y + roi.height }
+        { x: left, y: top }, { x: right, y: top },
+        { x: right, y: bottom }, { x: left, y: bottom }
       ].map(apply) };
     }
   }
