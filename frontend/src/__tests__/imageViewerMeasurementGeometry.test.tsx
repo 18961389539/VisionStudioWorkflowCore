@@ -665,6 +665,44 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('lets users drag a search-line endpoint outside the image to define clipped sampling', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 35.6 }); // end (50, 10)
+    fireEvent.mouseMove(stage, { clientX: 58.4, clientY: 82.8 }); // end (-10, 30), outside the image but inside the viewer
+    fireEvent.mouseUp(document.body, { clientX: 58.4, clientY: 82.8 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('line');
+    if (result.type === 'line') {
+      expect(result.start).toEqual({ x: 10, y: 10 });
+      expect(result.end.x).toBeCloseTo(-10, 4);
+      expect(result.end.y).toBeCloseTo(30, 4);
+    }
+  });
+
+  it('lets users redraw a search line past the image boundary', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
+    fireEvent.click(screen.getByRole('button', { name: '重绘搜索线' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 130 }); // start (10, 50)
+    fireEvent.mouseMove(stage, { clientX: 58.4, clientY: 130 }); // end (-10, 50)
+    fireEvent.mouseUp(document.body, { clientX: 58.4, clientY: 130 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('line');
+    if (result.type === 'line') {
+      expect(result.start.x).toBeCloseTo(10, 4);
+      expect(result.start.y).toBeCloseTo(50, 4);
+      expect(result.end.x).toBeCloseTo(-10, 4);
+      expect(result.end.y).toBeCloseTo(50, 4);
+    }
+  });
+
   it('shows an edit cursor over the caliper search-line endpoints', () => {
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, vi.fn());
     fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 200, clientY: 35.6 }); // end (50, 10)

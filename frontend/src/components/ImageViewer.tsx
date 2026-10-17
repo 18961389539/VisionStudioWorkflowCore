@@ -124,6 +124,12 @@ export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, 
 const HANDLE_HIT = 10;
 const MAX_POLYGON_HANDLES = 32;
 const MIN_EDGE_HANDLE_SPAN = 18;
+const MAX_MEASUREMENT_COORDINATE = 10_000_000;
+
+function boundedMeasurementPoint(point: Point): Point {
+  return { x: clamp(point.x, -MAX_MEASUREMENT_COORDINATE, MAX_MEASUREMENT_COORDINATE),
+    y: clamp(point.y, -MAX_MEASUREMENT_COORDINATE, MAX_MEASUREMENT_COORDINATE) };
+}
 
 function closestHandle<T extends string>(candidates: readonly (readonly [T, Point])[], screen: Point, view: ViewState): T | undefined {
   let selected: T | undefined;
@@ -980,10 +986,11 @@ export default function ImageViewer({
     setCursor(p);
     if (geometryGestureStart.current && measurementGeometry) {
       const start = geometryGestureStart.current;
-      const end = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
       setMeasurementDraft(measurementGeometry.type === 'line'
-        ? { type: 'line', start, end }
-        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxInteractiveCircleRadius(start, actualWidth, actualHeight)) });
+        ? { type: 'line', start, end: boundedMeasurementPoint(ip) }
+        : { ...measurementGeometry, center: start,
+          radius: Math.min(Math.hypot(clamp(ip.x, 0, actualWidth) - start.x, clamp(ip.y, 0, actualHeight) - start.y),
+            maxInteractiveCircleRadius(start, actualWidth, actualHeight)) });
       return;
     }
     if (geometryDrag.current) {
@@ -991,14 +998,15 @@ export default function ImageViewer({
       const current = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
       if (origin.type === 'line') {
         if (mode === 'start' || mode === 'end') {
-          setMeasurementDraft({ ...origin, [mode]: current });
+          setMeasurementDraft({ ...origin, [mode]: boundedMeasurementPoint(ip) });
         } else if (mode === 'profileStart' || mode === 'profileEnd') {
           const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
           const length = Math.hypot(dx, dy);
           if (length > 0) {
             const tangent = { x: -dy / length, y: dx / length };
             const midpoint = { x: (origin.start.x + origin.end.x) / 2, y: (origin.start.y + origin.end.y) / 2 };
-            const halfSpan = Math.abs((current.x - midpoint.x) * tangent.x + (current.y - midpoint.y) * tangent.y);
+            const profilePoint = boundedMeasurementPoint(ip);
+            const halfSpan = Math.abs((profilePoint.x - midpoint.x) * tangent.x + (profilePoint.y - midpoint.y) * tangent.y);
             setMeasurementDraft({ ...origin, profileSpan: clamp(halfSpan * 2, 1, 10_000) });
           }
         } else {
