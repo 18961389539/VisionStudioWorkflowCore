@@ -164,7 +164,8 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid samplesJson: {ex.Message}", ex); }
         var samples = request.Samples;
         if (samples is null || samples.Count < 4) throw new InvalidOperationException("2D hand-eye calibration requires at least four robot/vision pose pairs.");
-        if (samples.Any(s => s is null || !Finite(s.Robot) || !Finite(s.Vision))) throw new InvalidOperationException("Robot and vision pose coordinates and angles must be finite, and each sample must be non-null.");
+        if (samples.Count > 1000) throw new InvalidOperationException("2D hand-eye calibration accepts at most 1000 pose pairs.");
+        if (samples.Any(s => s is null || !Finite(s.Robot) || !Finite(s.Vision))) throw new InvalidOperationException("Robot and vision poses must be finite, each sample must be non-null, and X/Y coordinates must be within +/-1e9.");
         // Reject exact duplicate robot poses — they add no observability and inflate false confidence.
         for (var i = 0; i < samples.Count; i++)
         for (var j = i + 1; j < samples.Count; j++)
@@ -176,18 +177,23 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         }
         var mode = node.GetString("mode", "eyeInHand").Trim();
         if (!mode.Equals("eyeInHand", StringComparison.OrdinalIgnoreCase) && !mode.Equals("eyeToHand", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Mode must be eyeInHand or eyeToHand.");
-        var robotAngles = samples.Select(s => Normalize(s.Robot.ThetaDeg)).ToArray();
-        var visionAngles=samples.Select(s=>Normalize(s.Vision.ThetaDeg)).ToArray();
-        if (robotAngles.Max() - robotAngles.Min() < 8 || samples.Select(s => s.Robot.X).Distinct().Count() < 2 && samples.Select(s => s.Robot.Y).Distinct().Count() < 2 || visionAngles.Max()-visionAngles.Min()<8)
-            throw new InvalidOperationException("Robot poses are degenerate: vary both rotation and translation across calibration samples.");
+        var robotRotationCoverage = AngularCoverage(samples.Select(s => s.Robot.ThetaDeg));
+        var visionRotationCoverage = AngularCoverage(samples.Select(s => s.Vision.ThetaDeg));
+        var robotTranslationSpan = TranslationSpan(samples.Select(s => s.Robot));
+        var visionTranslationSpan = TranslationSpan(samples.Select(s => s.Vision));
+        if (robotRotationCoverage < 8 || visionRotationCoverage < 8 || robotTranslationSpan < 1e-3 || visionTranslationSpan < 1e-3)
+            throw new InvalidOperationException("Hand-eye poses are degenerate: robot and vision samples must each span at least 8 degrees of rotation and 0.001 coordinate units of translation.");
+        var angularWeight = node.GetDouble("angularWeight", 50);
+        if (!double.IsFinite(angularWeight) || angularWeight is < 0.001 or > 1e6)
+            throw new InvalidOperationException("angularWeight must be finite and between 0.001 and 1000000 translation units per radian.");
         var x = new double[3];
         // Damped finite-difference Gauss-Newton over the unknown SE(2) hand-eye transform.
         var damping = 1e-3;
         for (var iteration = 0; iteration < 100; iteration++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var residual = Residuals(samples, x, mode); var jac = new double[residual.Length, 3];
-            for (var j = 0; j < 3; j++) { var perturbed = (double[])x.Clone(); perturbed[j] += j == 2 ? 1e-5 : 1e-4; var delta = Residuals(samples, perturbed, mode); for (var i = 0; i < residual.Length; i++) jac[i,j] = (delta[i]-residual[i]) / (j == 2 ? 1e-5 : 1e-4); }
+            var residual = Residuals(samples, x, mode, angularWeight); var jac = new double[residual.Length, 3];
+            for (var j = 0; j < 3; j++) { var perturbed = (double[])x.Clone(); perturbed[j] += j == 2 ? 1e-5 : 1e-4; var delta = Residuals(samples, perturbed, mode, angularWeight); for (var i = 0; i < residual.Length; i++) jac[i,j] = (delta[i]-residual[i]) / (j == 2 ? 1e-5 : 1e-4); }
             var h = new double[3,3]; var g = new double[3];
             for (var i = 0; i < residual.Length; i++) for (var r = 0; r < 3; r++) { g[r] -= jac[i,r]*residual[i]; for (var c = 0; c < 3; c++) h[r,c] += jac[i,r]*jac[i,c]; }
             var trace = h[0,0]+h[1,1]+h[2,2];
@@ -197,61 +203,76 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
             double[] step;
             try { step = Solve(hd,g); } catch (InvalidOperationException) { throw new InvalidOperationException("Hand-eye solve is singular; collect more diverse robot and vision poses."); }
             var candidate = new[] { x[0]+step[0], x[1]+step[1], x[2]+step[2] };
-            if (Norm(Residuals(samples,candidate,mode)) < Norm(residual)) { x = candidate; damping = Math.Max(1e-9,damping*0.3); if (Math.Sqrt(step.Sum(v=>v*v)) < 1e-7) break; }
+            if (Norm(Residuals(samples,candidate,mode,angularWeight)) < Norm(residual)) { x = candidate; damping = Math.Max(1e-9,damping*0.3); if (Math.Sqrt(step.Sum(v=>v*v)) < 1e-7) break; }
             else damping = Math.Min(1e9,damping*10);
         }
         cancellationToken.ThrowIfCancellationRequested();
-        CheckObservability(samples,x,mode);
-        var errors = Residuals(samples,x,mode); var translationRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i]*errors[3*i]+errors[3*i+1]*errors[3*i+1])); var angleRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i+2]*errors[3*i+2]))/50;
-        if (!double.IsFinite(translationRms) || translationRms > 1e6) throw new InvalidOperationException("Hand-eye solve did not converge to a finite solution.");
+        CheckObservability(samples,x,mode,angularWeight);
+        var errors = Residuals(samples,x,mode,angularWeight); var translationRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i]*errors[3*i]+errors[3*i+1]*errors[3*i+1])); var angleRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i+2]*errors[3*i+2]))/angularWeight;
+        if (x.Any(value => !double.IsFinite(value)) || !double.IsFinite(translationRms) || !double.IsFinite(angleRms) || translationRms > 1e6)
+            throw new InvalidOperationException("Hand-eye solve did not converge to a finite solution.");
         // Per-sample residual report (translation hypot + angle degrees) so operators can
         // drop a bad pose pair the way mature hand-eye tools highlight worst samples.
         var sampleResiduals = Enumerable.Range(0, samples.Count).Select(i => new
         {
             index = i,
             translationError = Math.Sqrt(errors[3 * i] * errors[3 * i] + errors[3 * i + 1] * errors[3 * i + 1]),
-            angleErrorDeg = Math.Abs(errors[3 * i + 2] / 50) * 180 / Math.PI,
+            angleErrorDeg = Math.Abs(errors[3 * i + 2] / angularWeight) * 180 / Math.PI,
             robot = new { x = samples[i].Robot.X, y = samples[i].Robot.Y, thetaDeg = samples[i].Robot.ThetaDeg },
             vision = new { x = samples[i].Vision.X, y = samples[i].Vision.Y, thetaDeg = samples[i].Vision.ThetaDeg }
         }).ToArray();
         var maxTranslationError = sampleResiduals.Max(s => s.translationError);
         var maxAngleErrorDeg = sampleResiduals.Max(s => s.angleErrorDeg);
-        var worstSampleIndex = sampleResiduals.OrderByDescending(s => s.translationError).Select(s => s.index).First();
+        var worstTranslationSampleIndex = sampleResiduals.OrderByDescending(s => s.translationError).Select(s => s.index).First();
+        var worstAngleSampleIndex = sampleResiduals.OrderByDescending(s => s.angleErrorDeg).Select(s => s.index).First();
+        var worstSampleIndex = sampleResiduals.OrderByDescending(s => Hypot(s.translationError, s.angleErrorDeg * Math.PI / 180 * angularWeight)).Select(s => s.index).First();
         var maxTranslation = node.GetDouble("maxTranslationError", 0);
         var maxAngle = node.GetDouble("maxAngleErrorDeg", 0);
-        if (!double.IsFinite(maxTranslation) || maxTranslation < 0) throw new InvalidOperationException("maxTranslationError must be finite and non-negative (0 disables).");
-        if (!double.IsFinite(maxAngle) || maxAngle < 0) throw new InvalidOperationException("maxAngleErrorDeg must be finite and non-negative (0 disables).");
+        if (!double.IsFinite(maxTranslation) || maxTranslation is < 0 or > 1e6) throw new InvalidOperationException("maxTranslationError must be finite and between 0 and 1000000 (0 disables).");
+        if (!double.IsFinite(maxAngle) || maxAngle is < 0 or > 180) throw new InvalidOperationException("maxAngleErrorDeg must be finite and between 0 and 180 (0 disables).");
         if (maxTranslation > 0 && maxTranslationError > maxTranslation)
-            throw new InvalidOperationException($"Hand-eye sample {worstSampleIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslation:0.####}; remove or re-teach that pose pair.");
+            throw new InvalidOperationException($"Hand-eye sample {worstTranslationSampleIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslation:0.####}; remove or re-teach that pose pair.");
         if (maxAngle > 0 && maxAngleErrorDeg > maxAngle)
-            throw new InvalidOperationException($"Hand-eye max angle residual {maxAngleErrorDeg:0.####} deg exceeds maxAngleErrorDeg {maxAngle:0.####}; remove the worst pose pair and re-solve.");
+            throw new InvalidOperationException($"Hand-eye sample {worstAngleSampleIndex} angle residual {maxAngleErrorDeg:0.####} deg exceeds maxAngleErrorDeg {maxAngle:0.####}; remove or re-teach that pose pair.");
         var theta=Normalize(x[2]*180/Math.PI); var pose = new VisionPose2D(x[0],x[1],theta);
-        var radians=theta*Math.PI/180; var sourceFrame=node.GetString("sourceFrame","Camera");
+        var radians=theta*Math.PI/180; var sourceFrame=CoordinateValidation.RequireFrame(node.GetString("sourceFrame","Camera"),"sourceFrame");
         var defaultTargetFrame=mode.Equals("eyeInHand",StringComparison.OrdinalIgnoreCase)?"RobotTool":"RobotBase";
         var targetFrame=node.GetString("targetFrame",defaultTargetFrame); if(string.IsNullOrWhiteSpace(targetFrame))targetFrame=defaultTargetFrame;
-        var unit=node.GetString("unit","mm");
-        var transform=new VisionTransform2D(sourceFrame,targetFrame,unit,Math.Cos(radians),-Math.Sin(radians),x[0],Math.Sin(radians),Math.Cos(radians),x[1],0,0,1,node.GetString("sourceUnit","mm"));
+        targetFrame=CoordinateValidation.RequireFrame(targetFrame,"targetFrame");
+        var unit=CoordinateValidation.RequireUnit(node.GetString("unit","mm"),"unit");
+        var sourceUnit=CoordinateValidation.RequireUnit(node.GetString("sourceUnit","mm"),"sourceUnit");
+        var transform=new VisionTransform2D(sourceFrame,targetFrame,unit,Math.Cos(radians),-Math.Sin(radians),x[0],Math.Sin(radians),Math.Cos(radians),x[1],0,0,1,sourceUnit);
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["pose"] = VisionValue.Pose(pose), ["transform"] = VisionValue.Transform(transform),
             ["translationRms"] = VisionValue.Double(translationRms), ["angleRmsDeg"] = VisionValue.Double(angleRms*180/Math.PI),
             ["maxTranslationError"] = VisionValue.Double(maxTranslationError), ["maxAngleErrorDeg"] = VisionValue.Double(maxAngleErrorDeg),
             ["worstSampleIndex"] = VisionValue.Integer(worstSampleIndex),
+            ["worstTranslationSampleIndex"] = VisionValue.Integer(worstTranslationSampleIndex),
+            ["worstAngleSampleIndex"] = VisionValue.Integer(worstAngleSampleIndex),
+            ["robotRotationCoverageDeg"] = VisionValue.Double(robotRotationCoverage),
+            ["visionRotationCoverageDeg"] = VisionValue.Double(visionRotationCoverage),
+            ["robotTranslationSpan"] = VisionValue.Double(robotTranslationSpan),
+            ["visionTranslationSpan"] = VisionValue.Double(visionTranslationSpan),
             ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
         }, new Dictionary<string, object?>
         {
             ["mode"] = mode, ["samples"] = samples.Count, ["transform2D"] = "SE(2)", ["sourceFrame"] = sourceFrame, ["targetFrame"] = targetFrame, ["unit"] = unit,
             ["translationRms"] = translationRms, ["angleRmsDeg"] = angleRms*180/Math.PI,
             ["maxTranslationError"] = maxTranslationError, ["maxAngleErrorDeg"] = maxAngleErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
+            ["worstTranslationSampleIndex"] = worstTranslationSampleIndex, ["worstAngleSampleIndex"] = worstAngleSampleIndex,
+            ["robotRotationCoverageDeg"] = robotRotationCoverage, ["visionRotationCoverageDeg"] = visionRotationCoverage,
+            ["robotTranslationSpan"] = robotTranslationSpan, ["visionTranslationSpan"] = visionTranslationSpan, ["angularWeight"] = angularWeight,
             ["scope"] = "planar only; no 3D hand-eye"
         }));
     }
-    private static bool Finite(VisionPose2D p) => double.IsFinite(p.X)&&double.IsFinite(p.Y)&&double.IsFinite(p.ThetaDeg);
-    private static double[] Residuals(List<HandEyeSample> s, double[] x, string mode)
+    private static bool Finite(VisionPose2D p) => double.IsFinite(p.X)&&double.IsFinite(p.Y)&&Math.Abs(p.X)<=1e9&&Math.Abs(p.Y)<=1e9&&double.IsFinite(p.ThetaDeg);
+    private static double[] Residuals(List<HandEyeSample> s, double[] x, string mode, double angularWeight)
     {
         var result = new double[s.Count*3]; var closures = s.Select(v => mode.Equals("eyeInHand",StringComparison.OrdinalIgnoreCase) ? Mul(Mul(v.Robot,x),v.Vision) : Mul(Mul(Inv(v.Robot),x),v.Vision)).ToArray();
         var meanAngle = Math.Atan2(closures.Average(v=>Math.Sin(v.Theta)),closures.Average(v=>Math.Cos(v.Theta)));
-        for(var i=0;i<s.Count;i++){result[i*3]=closures[i].X-closures.Average(v=>v.X);result[i*3+1]=closures[i].Y-closures.Average(v=>v.Y);result[i*3+2]=Wrap(closures[i].Theta-meanAngle)*50;}
+        var meanX = closures.Average(v => v.X); var meanY = closures.Average(v => v.Y);
+        for(var i=0;i<s.Count;i++){result[i*3]=closures[i].X-meanX;result[i*3+1]=closures[i].Y-meanY;result[i*3+2]=Wrap(closures[i].Theta-meanAngle)*angularWeight;}
         return result;
     }
     private static (double X,double Y,double Theta) Mul((double X,double Y,double Theta) a,(double X,double Y,double Theta) b){var c=Math.Cos(a.Theta);var s=Math.Sin(a.Theta);return(a.X+c*b.X-s*b.Y,a.Y+s*b.X+c*b.Y,a.Theta+b.Theta);}
@@ -262,12 +283,26 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
     private static double Wrap(double x)=>Math.Atan2(Math.Sin(x),Math.Cos(x));
     private static double Normalize(double deg){var r=deg%360;if(r>180)r-=360;if(r<=-180)r+=360;return r;}
     private static double Norm(double[] v)=>Math.Sqrt(v.Sum(x=>x*x));
-    private static void CheckObservability(List<HandEyeSample> samples,double[] x,string mode)
+    private static void CheckObservability(List<HandEyeSample> samples,double[] x,string mode,double angularWeight)
     {
-        var residual=Residuals(samples,x,mode);var jac=new double[residual.Length,3];
-        for(var j=0;j<3;j++){var p=(double[])x.Clone();var step=j==2?1e-5:1e-4;p[j]+=step;var shifted=Residuals(samples,p,mode);for(var i=0;i<residual.Length;i++)jac[i,j]=(shifted[i]-residual[i])/step;}
+        var residual=Residuals(samples,x,mode,angularWeight);var jac=new double[residual.Length,3];
+        for(var j=0;j<3;j++){var p=(double[])x.Clone();var step=j==2?1e-5:1e-4;p[j]+=step;var shifted=Residuals(samples,p,mode,angularWeight);for(var i=0;i<residual.Length;i++)jac[i,j]=(shifted[i]-residual[i])/step;}
         var h=new double[3,3];for(var i=0;i<residual.Length;i++)for(var r=0;r<3;r++)for(var c=0;c<3;c++)h[r,c]+=jac[i,r]*jac[i,c];EnsureRank(h);
     }
+    private static double AngularCoverage(IEnumerable<double> anglesDeg)
+    {
+        var sorted = anglesDeg.Select(value => { var angle = value % 360d; return angle < 0 ? angle + 360d : angle; }).OrderBy(value => value).ToArray();
+        if (sorted.Length < 2) return 0;
+        var largestGap = sorted[0] + 360d - sorted[^1];
+        for (var i = 1; i < sorted.Length; i++) largestGap = Math.Max(largestGap, sorted[i] - sorted[i - 1]);
+        return 360d - largestGap;
+    }
+    private static double TranslationSpan(IEnumerable<VisionPose2D> poses)
+    {
+        var points = poses.ToArray();
+        return Math.Sqrt(Math.Pow(points.Max(p => p.X) - points.Min(p => p.X), 2) + Math.Pow(points.Max(p => p.Y) - points.Min(p => p.Y), 2));
+    }
+    private static double Hypot(double x, double y) { var scale = Math.Max(Math.Abs(x), Math.Abs(y)); return scale == 0 ? 0 : scale * Math.Sqrt(Math.Pow(x / scale, 2) + Math.Pow(y / scale, 2)); }
     private static void EnsureRank(double[,] h){var a=(double[,])h.Clone();var n=3;var scale=Math.Max(a[0,0],Math.Max(a[1,1],a[2,2]));if(scale<=0)throw new InvalidOperationException("Hand-eye solve is rank deficient.");for(var k=0;k<n;k++){var p=k;for(var r=k+1;r<n;r++)if(Math.Abs(a[r,k])>Math.Abs(a[p,k]))p=r;if(Math.Abs(a[p,k])<scale*1e-10)throw new InvalidOperationException("Hand-eye solve is non-unique: the 2D robot/vision motion does not sufficiently constrain translation and rotation.");for(var c=k;c<n;c++)(a[k,c],a[p,c])=(a[p,c],a[k,c]);var d=a[k,k];for(var c=k;c<n;c++)a[k,c]/=d;for(var r=k+1;r<n;r++){var f=a[r,k];for(var c=k;c<n;c++)a[r,c]-=f*a[k,c];}}}
     private static double[] Solve(double[,] a,double[] b){var n=b.Length;for(var k=0;k<n;k++){var p=k;for(var r=k+1;r<n;r++)if(Math.Abs(a[r,k])>Math.Abs(a[p,k]))p=r;if(Math.Abs(a[p,k])<1e-14)throw new InvalidOperationException();for(var c=k;c<n;c++)(a[k,c],a[p,c])=(a[p,c],a[k,c]);(b[k],b[p])=(b[p],b[k]);var d=a[k,k];for(var c=k;c<n;c++)a[k,c]/=d;b[k]/=d;for(var r=0;r<n;r++)if(r!=k){var f=a[r,k];for(var c=k;c<n;c++)a[r,c]-=f*a[k,c];b[r]-=f*b[k];}}return b;}
 }

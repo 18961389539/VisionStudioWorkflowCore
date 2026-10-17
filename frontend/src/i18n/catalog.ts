@@ -210,6 +210,7 @@ const parameterNames: Record<string, string> = {
   'Reject Weak Views': '拒绝弱视图',
   'Max Sample Translation Error (0=off)': '单样本平移残差上限（0=关闭）',
   'Max Sample Angle Error deg (0=off)': '单样本角度残差上限（度，0=关闭）',
+  'Angular Weight (translation units/radian)': '角度权重（平移单位/弧度）',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -360,6 +361,9 @@ export const portNames: Record<string, string> = {
   maxTranslationError: '最大平移残差',
   maxAngleErrorDeg: '最大角度残差',
   worstSampleIndex: '最差样本索引',
+  worstTranslationSampleIndex: '最大平移残差样本索引', worstAngleSampleIndex: '最大角度残差样本索引',
+  robotRotationCoverageDeg: '机器人旋转覆盖角度', visionRotationCoverageDeg: '视觉旋转覆盖角度',
+  robotTranslationSpan: '机器人平移跨度', visionTranslationSpan: '视觉平移跨度',
   sampleResidualsJson: '逐样本残差 JSON',
 };
 
@@ -484,7 +488,7 @@ const descriptions: Record<string, string> = {
   'value.arithmetic': '对测量值做加、减、乘、除、幂、开方、绝对值、较小值、较大值或钳位。开方、绝对值和钳位只读 A。未知运算、除数为 0、负数开方或结果不是有限数时，节点直接失败。',
   'value.range': '判断数值是否落在闭区间内，端点算通过。下限大于上限时节点失败，不再自动对调。同时输出相对区间的偏差和钳位后的值。开启取反只翻转通过与否。',
   'collection.detections.sort': '按最多三级字段重排检测目标，并按新顺序从 0 重写索引。可按面积、X、Y、圆度、周长、置信度、类别、宽度或高度排序。缺少置信度或类别的目标在升序和降序中都排在最后。保留前 N 个为 0 时不截断。',
-  'calibration.handEye2D': '平面 SE(2) 手眼标定：输出位姿与可组合变换，报告平移/角度 RMS 与逐样本残差、最差样本索引；可选残差门限；拒绝重复机器人位姿。不含三维手眼。',
+  'calibration.handEye2D': '平面 SE(2) 手眼标定：按圆周角度覆盖和位移跨度检查样本多样性，输出逐样本残差及平移/角度最差样本索引。角度与平移的拟合权重可按工作范围调整；可设置残差门限。要求机器人和视觉数据都包含转动与平移，不含三维手眼。',
 };
 
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
@@ -725,6 +729,7 @@ const parameterDescriptions: Record<string, string> = {
   'calibration.detectBoard.rejectWeakViews': '开启后，清晰度/覆盖率/角点完整性失败的视图不追加到 calibrationDataJson。',
   'calibration.handEye2D.maxTranslationError': '单样本平移残差上限（0 关闭）。超过则指出最差样本并拒绝求解结果。',
   'calibration.handEye2D.maxAngleErrorDeg': '单样本角度残差上限（度，0 关闭）。',
+  'calibration.handEye2D.angularWeight': '角度残差换算为平移单位的权重（单位/弧度，默认 50）。工作范围大时可增加，工作范围小时可减小；它会改变平移与旋转对最终拟合的相对影响。',
 };
 
 const statusNames: Record<string, string> = {

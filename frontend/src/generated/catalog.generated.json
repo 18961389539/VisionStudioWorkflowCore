@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "86e0054924d87f969d63683bf704e9e5fab182a64dfc4f6e3c6f3f68448ce145",
+  "hash": "3f8cdf89637a3a53c993069c3e777ecce5d7f05e684a0f8549c974e675beb497",
   "items": [
     {
       "type": "image.acquire",
@@ -582,6 +582,36 @@
           "required": true
         },
         {
+          "name": "worstTranslationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstAngleSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "robotRotationCoverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "visionRotationCoverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "robotTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "visionTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "sampleResidualsJson",
           "dataType": "String",
           "required": true
@@ -614,7 +644,17 @@
           "label": "Pose Pairs JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses."
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses, at most 1000."
+        },
+        {
+          "name": "angularWeight",
+          "label": "Angular Weight (translation units/radian)",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 1000000,
+          "step": 1,
+          "description": "Translation-equivalent weight for angular closure residuals. Adjust to the characteristic working distance; default 50 preserves prior behavior."
         },
         {
           "name": "maxTranslationError",
@@ -660,7 +700,7 @@
           "defaultValue": "mm"
         }
       ],
-      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Reports translation/angle RMS plus per-sample residuals, worst sample index, and optional residual gates. Rejects duplicate robot poses. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
+      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Requires rotation coverage and translation span in both robot and vision samples, rejects duplicate robot poses, and limits input to 1000 pairs. Angular residual weight is configurable in translation units per radian. Reports per-sample translation and angle errors with separate worst indexes, coverage and optional residual gates. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

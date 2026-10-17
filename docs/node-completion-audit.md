@@ -325,3 +325,9 @@ The camera-intrinsics node and wizard now expose a fitted-K per-view RMS gate in
 
 Usage and model limits are documented in [Camera Intrinsic Calibration](camera-intrinsics.md). Fisheye and telecentric model support remains a significant gap.
 
+## Follow-up implementation: planar hand-eye calibration
+
+`calibration.handEye2D` now checks circular rotation coverage and translation span in both robot and vision samples, limits inputs to 1000 poses, validates frame/unit metadata, and exposes a configurable angular-to-translation weight while preserving the prior default. Per-sample residuals now identify separate worst translation and angle samples; angle-gate errors point to the correct sample. The baseline score has not been rerated.
+
+Usage and scope are documented in [2D Hand-Eye Calibration](hand-eye-2d.md). The node remains planar SE(2); 3D robot/camera hand-eye calibration is still a substantial feature gap.
+
