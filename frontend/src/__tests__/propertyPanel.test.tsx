@@ -12,6 +12,24 @@ const catalog: NodeCatalogItem = {
 afterEach(cleanup);
 
 describe('PropertyPanel polygon ROI editing', () => {
+  it('inserts a midpoint on the selected edge, including the closing edge', () => {
+    const roi: VisionRoi = { type: 'Polygon', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] };
+    const node: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: 'image.crop', parameters: { roi } } };
+    const onChange = vi.fn();
+    const view = render(<PropertyPanel node={node} catalogItem={catalog} onChange={onChange} roiFields={[{ key: 'roi', label: '裁剪区域' }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '在点 1 后插入顶点' }));
+    const inserted = onChange.mock.calls[0][1] as Extract<VisionRoi, { type: 'Polygon' }>;
+    expect(inserted.points).toEqual([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }]);
+
+    const updatedNode: Node = { ...node, data: { ...node.data, parameters: { roi: inserted } } };
+    view.rerender(<PropertyPanel node={updatedNode} catalogItem={catalog} onChange={onChange} roiFields={[{ key: 'roi', label: '裁剪区域' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: '在点 4 后插入顶点' }));
+    const closingEdge = onChange.mock.calls[1][1] as Extract<VisionRoi, { type: 'Polygon' }>;
+    expect(closingEdge.points).toHaveLength(5);
+    expect(closingEdge.points[4]).toEqual({ x: 5, y: 5 });
+  });
+
   it('pages large polygons and keeps edits on the correct full-list vertex', () => {
     const points = Array.from({ length: 120 }, (_, index) => {
       const angle = 2 * Math.PI * index / 120;

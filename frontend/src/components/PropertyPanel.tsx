@@ -3,7 +3,7 @@ import { Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
 import { isParameterVisible, validateParameterValues } from '../validation';
-import { roiConfigurationIssue } from '../nodeConfigurationState';
+import { MAX_ROI_POLYGON_POINTS, roiConfigurationIssue } from '../nodeConfigurationState';
 
 type Props = {
   node?: Node;
@@ -50,6 +50,13 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
     points[index] = point;
     onChange({ ...roi, points });
   };
+  const insertPolygonMidpoint = (index: number) => {
+    if (roi.type !== 'Polygon' || roi.points.length >= MAX_ROI_POLYGON_POINTS) return;
+    const current = roi.points[index];
+    const next = roi.points[(index + 1) % roi.points.length];
+    const midpoint = { x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 };
+    onChange({ ...roi, points: [...roi.points.slice(0, index + 1), midpoint, ...roi.points.slice(index + 1)] });
+  };
   const field = (label: string, value: number, apply: (next: number) => void) => (
     <label className="roi-field" key={label}>
       <span>{label}</span>
@@ -95,8 +102,8 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
       <div className="roi-grid">
         <Tag color="red">多边形</Tag>
         <span className="roi-polygon-note">{roi.points.length} 个顶点 · {roi.points.length > polygonVertexPageSize
-          ? `当前编辑 ${polygonPageStart + 1}–${Math.min(polygonPageStart + polygonVertexPageSize, roi.points.length)} · 可拖动图像控制点或输入坐标`
-          : '拖动图像上的控制点或输入坐标'}</span>
+          ? `当前编辑 ${polygonPageStart + 1}–${Math.min(polygonPageStart + polygonVertexPageSize, roi.points.length)} · 可拖动控制点、插入顶点或输入坐标`
+          : '拖动图像控制点、插入顶点或输入坐标'}</span>
       </div>
       {roi.points.length > polygonVertexPageSize && <div className="roi-polygon-pagination">
         <Button size="small" disabled={disabled || currentPolygonPage <= 0} onClick={() => setPolygonPage(currentPolygonPage - 1)}>上一组</Button>
@@ -120,6 +127,10 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
                 disabled={disabled} onChange={(value) => changePolygonPoint(index, 'x', value)} />
               <InputNumber size="small" aria-label={`点 ${index + 1} Y`} value={Number(point.y.toFixed(2))}
                 disabled={disabled} onChange={(value) => changePolygonPoint(index, 'y', value)} />
+              <Button type="text" size="small" aria-label={`在点 ${index + 1} 后插入顶点`}
+                title={`在点 ${index + 1} 与点 ${(index + 1) % roi.points.length + 1} 之间插入中点`}
+                disabled={disabled || roi.points.length >= MAX_ROI_POLYGON_POINTS}
+                onClick={() => insertPolygonMidpoint(index)}>+</Button>
               <Button type="text" size="small" danger aria-label={`删除点 ${index + 1}`} title="删除此顶点" disabled={disabled || roi.points.length <= 3}
                 onClick={() => onChange({ ...roi, points: roi.points.filter((_, i) => i !== index) })}>×</Button>
             </div>
