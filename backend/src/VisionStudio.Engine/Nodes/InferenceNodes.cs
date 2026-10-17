@@ -79,7 +79,8 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var rows = shape.Length == 2 && shape[1] == 6
             ? shape[0]
             : shape.Length == 3 && shape[0] == 1 && shape[2] == 6 ? shape[1] : 0;
-        if (rows <= 0)
+        var isYoloLayout = node.GetString("layout", "xyxy").Trim().Equals("yolo", StringComparison.OrdinalIgnoreCase);
+        if (rows <= 0 && !isYoloLayout)
             throw new InvalidOperationException($"Detection output must have shape [N,6] or [1,N,6] with rows [x1,y1,x2,y2,score,classId]; received [{string.Join(',', shape)}].");
         var values = OnnxInferenceHelpers.ReadFloatTensor(output, "detection");
         var threshold = node.GetDouble("confidenceThreshold", 0.25);
@@ -91,34 +92,70 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var coordinates = node.GetString("coordinates", "normalized").Trim().ToLowerInvariant();
         if (coordinates is not ("normalized" or "pixels"))
             throw new InvalidOperationException($"Unsupported detection coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
+        var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
+        if (layout is not ("xyxy" or "yolo"))
+            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy' and 'yolo'.");
+        var letterbox = node.GetBool("letterbox", false);
 
         var candidates = new List<DetectionCandidate>();
         var sourceWidth = source.Width;
         var sourceHeight = source.Height;
         var inputWidth = node.GetInt("inputWidth", 224);
         var inputHeight = node.GetInt("inputHeight", 224);
-        for (var i = 0; i < rows; i++)
+        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("Detection inputWidth/inputHeight must be positive.");
+        // Input-pixel -> source-pixel mapping. Letterbox mode inverts the symmetric
+        // padding used when the source was resized into the model input preserving aspect.
+        double MapX(double inputX)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var offset = i * 6;
-            var x1 = (double)values[offset];
-            var y1 = (double)values[offset + 1];
-            var x2 = (double)values[offset + 2];
-            var y2 = (double)values[offset + 3];
-            var score = (double)values[offset + 4];
-            var rawClassId = values[offset + 5];
-            if (score is < 0 or > 1 || rawClassId < 0 || rawClassId > int.MaxValue || Math.Abs(rawClassId - MathF.Round(rawClassId)) > 1e-4f)
-                throw new InvalidOperationException($"Detection row {i} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
-            var classId = (int)rawClassId;
+            if (!letterbox) return inputX * sourceWidth / inputWidth;
+            var scale = Math.Min((double)inputWidth / sourceWidth, (double)inputHeight / sourceHeight);
+            return (inputX - (inputWidth - sourceWidth * scale) / 2) / scale;
+        }
+        double MapY(double inputY)
+        {
+            if (!letterbox) return inputY * sourceHeight / inputHeight;
+            var scale = Math.Min((double)inputWidth / sourceWidth, (double)inputHeight / sourceHeight);
+            return (inputY - (inputHeight - sourceHeight * scale) / 2) / scale;
+        }
+        void AddCandidate(double x1, double y1, double x2, double y2, double score, int classId, int rowIndex)
+        {
+            if (score is < 0 or > 1 || classId < 0)
+                throw new InvalidOperationException($"Detection row {rowIndex} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
+            // Coordinates arrive normalized to the model input or in input pixels; both
+            // are converted to input pixels first, then mapped back to the source.
             if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
-            x1 *= (double)sourceWidth / inputWidth; x2 *= (double)sourceWidth / inputWidth;
-            y1 *= (double)sourceHeight / inputHeight; y2 *= (double)sourceHeight / inputHeight;
-            var left = Math.Clamp(Math.Min(x1, x2), 0, sourceWidth);
-            var top = Math.Clamp(Math.Min(y1, y2), 0, sourceHeight);
-            var right = Math.Clamp(Math.Max(x1, x2), 0, sourceWidth);
-            var bottom = Math.Clamp(Math.Max(y1, y2), 0, sourceHeight);
-            if (score < threshold || right <= left || bottom <= top) continue;
+            var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, sourceWidth);
+            var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, sourceHeight);
+            var right = Math.Clamp(Math.Max(MapX(x1), MapX(x2)), 0, sourceWidth);
+            var bottom = Math.Clamp(Math.Max(MapY(y1), MapY(y2)), 0, sourceHeight);
+            if (score < threshold || right <= left || bottom <= top) return;
             candidates.Add(new DetectionCandidate(left, top, right, bottom, score, classId));
+        }
+
+        if (layout == "yolo")
+        {
+            // YOLOv8-style heads: cx, cy, w, h + per-class scores (no objectness).
+            var yolo = InferenceStats.DecodeYolo(values, shape);
+            for (var i = 0; i < yolo.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var c = yolo[i];
+                if (!double.IsFinite(c.CenterX) || !double.IsFinite(c.CenterY) || !double.IsFinite(c.Width) || !double.IsFinite(c.Height) || c.Width < 0 || c.Height < 0)
+                    throw new InvalidOperationException($"YOLO detection row {i} has non-finite or negative box geometry.");
+                AddCandidate(c.CenterX - c.Width / 2, c.CenterY - c.Height / 2, c.CenterX + c.Width / 2, c.CenterY + c.Height / 2, c.Score, c.ClassId, i);
+            }
+        }
+        else
+        {
+            for (var i = 0; i < rows; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var offset = i * 6;
+                var rawClassId = values[offset + 5];
+                if (rawClassId < 0 || rawClassId > int.MaxValue || Math.Abs(rawClassId - MathF.Round(rawClassId)) > 1e-4f)
+                    throw new InvalidOperationException($"Detection row {i} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
+                AddCandidate(values[offset], values[offset + 1], values[offset + 2], values[offset + 3], values[offset + 4], (int)rawClassId, i);
+            }
         }
         var kept = new List<DetectionCandidate>();
         foreach (var candidate in candidates.OrderByDescending(x => x.Score))
@@ -136,7 +173,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
                 ["count"] = VisionValue.Integer(detections.Length),
                 ["result"] = VisionValue.String(JsonSerializer.Serialize(new { detections = payload, outputShape = shape }))
             },
-            new Dictionary<string, object?> { ["count"] = detections.Length, ["coordinates"] = coordinates, ["outputShape"] = shape }));
+            new Dictionary<string, object?> { ["count"] = detections.Length, ["coordinates"] = coordinates, ["layout"] = layout, ["letterbox"] = letterbox, ["outputShape"] = shape }));
     }
 
     private static double IoU(DetectionCandidate a, DetectionCandidate b)
@@ -190,13 +227,19 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
         var threshold = node.GetDouble("binaryThreshold", 0.5);
         if (!double.IsFinite(threshold)) throw new InvalidOperationException("binaryThreshold must be finite.");
         using var modelMask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
+        var labels = new byte[height * width];
+        var bestScores = new float[height * width];
         for (var y = 0; y < height; y++)
         for (var x = 0; x < width; x++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             byte label;
+            float winningScore;
             if (channels == 1)
-                label = values[y * width + x] >= threshold ? (byte)1 : (byte)0;
+            {
+                winningScore = values[y * width + x];
+                label = winningScore >= threshold ? (byte)1 : (byte)0;
+            }
             else
             {
                 var bestClass = 0;
@@ -207,19 +250,41 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
                     if (score > bestScore) { bestScore = score; bestClass = c; }
                 }
                 label = (byte)bestClass;
+                winningScore = bestScore;
             }
             modelMask.Set(y, x, label);
+            labels[y * width + x] = label;
+            bestScores[y * width + x] = winningScore;
         }
+        // Per-class reporting (ViDi/HALCON DL segmentation style): area, image fraction
+        // and mean winning score per class actually present in the mask.
+        var classStats = InferenceStats.SegmentationClasses(labels, bestScores, channels == 1 ? 2 : channels)
+            .Where(s => s.PixelCount > 0).ToArray();
+        var dominant = classStats.OrderByDescending(s => s.PixelCount).FirstOrDefault();
         var mask = new Mat();
         try { JLVisionOperators.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest); }
         catch { mask.Dispose(); throw; }
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["mask"] = VisionValue.Image(VisionImage.Own(mask)) },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["classChannels"] = channels, ["maskWidth"] = mask.Width, ["maskHeight"] = mask.Height }));
+        var segOutputs = new Dictionary<string, VisionValue>
+        {
+            ["mask"] = VisionValue.Image(VisionImage.Own(mask)),
+            ["classes"] = VisionValue.String(JsonSerializer.Serialize(classStats.Select(s => new { classId = s.ClassId, pixelCount = s.PixelCount, fraction = s.Fraction, meanScore = s.MeanScore }))),
+            ["classCount"] = VisionValue.Integer(classStats.Length)
+        };
+        if (dominant is not null)
+        {
+            segOutputs["dominantClass"] = VisionValue.Integer(dominant.ClassId);
+            segOutputs["dominantFraction"] = VisionValue.Double(dominant.Fraction);
+        }
+        return ValueTask.FromResult(new NodeExecutorResult(segOutputs,
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["classChannels"] = channels, ["maskWidth"] = mask.Width, ["maskHeight"] = mask.Height, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction }));
     }
 }
 
-/// <summary>Runs an ONNX anomaly head with one scalar float32 output score.</summary>
+/// <summary>
+/// Runs an ONNX anomaly head. Scalar outputs keep the historical score behaviour;
+/// spatial outputs ([1,1,H,W] or [1,H,W], HALCON DL Anomaly style) additionally emit a
+/// normalized heatmap image, peak location in source pixels and anomalous-area fraction.
+/// </summary>
 public sealed class OnnxAnomalyNode : IVisionNodeExecutor
 {
     public string Type => "inference.anomaly";
@@ -236,22 +301,52 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
         var count = shape.Aggregate(1L, (a, b) => a * b);
-        var scalarShape = shape.Length is >= 1 and <= 4 && shape[0] == 1 && count == 1;
-        if (!scalarShape)
-            throw new InvalidOperationException($"Anomaly output must be a single scalar tensor (for example [1] or [1,1]); received [{string.Join(',', shape)}].");
-        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "anomaly");
         var threshold = node.GetDouble("threshold", 0.5);
         if (!double.IsFinite(threshold)) throw new InvalidOperationException("Anomaly threshold must be finite.");
-        var score = (double)values[0];
-        var isAnomaly = score >= threshold;
-        var json = JsonSerializer.Serialize(new { score, threshold, isAnomaly, outputShape = shape });
+        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "anomaly");
+
+        var scalarShape = shape.Length is >= 1 and <= 4 && shape[0] == 1 && count == 1;
+        if (scalarShape)
+        {
+            var scalar = (double)values[0];
+            var scalarAnomaly = scalar >= threshold;
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["score"] = VisionValue.Double(scalar),
+                    ["isAnomaly"] = VisionValue.Boolean(scalarAnomaly),
+                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { score = scalar, threshold, isAnomaly = scalarAnomaly, outputShape = shape }))
+                },
+                new Dictionary<string, object?> { ["score"] = scalar, ["threshold"] = threshold, ["isAnomaly"] = scalarAnomaly, ["outputShape"] = shape }));
+        }
+
+        int mapWidth, mapHeight;
+        if (shape.Length == 4 && shape[0] == 1 && shape[1] == 1 && shape[2] > 0 && shape[3] > 0) { mapHeight = (int)shape[2]; mapWidth = (int)shape[3]; }
+        else if (shape.Length == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] > 0) { mapHeight = (int)shape[1]; mapWidth = (int)shape[2]; }
+        else throw new InvalidOperationException($"Anomaly output must be a single scalar tensor (for example [1] or [1,1]) or an anomaly map [1,1,H,W] / [1,H,W]; received [{string.Join(',', shape)}].");
+        if (values.Length != mapWidth * mapHeight) throw new InvalidOperationException("Anomaly map element count does not match its shape.");
+        var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, threshold);
+        var normalized = InferenceStats.NormalizeMap(values);
+        using var mapMat = new Mat(mapHeight, mapWidth, MatType.CV_8UC1);
+        mapMat.SetArray(normalized);
+        var heatmap = new Mat();
+        try { JLVisionOperators.Resize(mapMat, heatmap, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Linear); }
+        catch { heatmap.Dispose(); throw; }
+        var peakX = stat.PeakX * (double)source.Width / mapWidth;
+        var peakY = stat.PeakY * (double)source.Height / mapHeight;
+        var isAnomaly = stat.Peak >= threshold;
+        var json = JsonSerializer.Serialize(new { score = stat.Peak, mean = stat.Mean, min = stat.Min, max = stat.Max, threshold, isAnomaly, peakX, peakY, areaFraction = stat.AreaFraction, outputShape = shape });
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
-                ["score"] = VisionValue.Double(score),
+                ["score"] = VisionValue.Double(stat.Peak),
                 ["isAnomaly"] = VisionValue.Boolean(isAnomaly),
+                ["heatmap"] = VisionValue.Image(VisionImage.Own(heatmap)),
+                ["peakX"] = VisionValue.Double(peakX),
+                ["peakY"] = VisionValue.Double(peakY),
+                ["areaFraction"] = VisionValue.Double(stat.AreaFraction),
                 ["result"] = VisionValue.String(json)
             },
-            new Dictionary<string, object?> { ["score"] = score, ["threshold"] = threshold, ["isAnomaly"] = isAnomaly, ["outputShape"] = shape }));
+            new Dictionary<string, object?> { ["score"] = stat.Peak, ["mean"] = stat.Mean, ["threshold"] = threshold, ["isAnomaly"] = isAnomaly, ["peakX"] = peakX, ["peakY"] = peakY, ["areaFraction"] = stat.AreaFraction, ["outputShape"] = shape }));
     }
 }

@@ -132,12 +132,54 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.Require<VisionImage>("image"); var reference = context.Require<VisionImage>("reference");
         DefectNodeHelpers.SameSize(source, reference);
+        var scale = node.GetDouble("scale", 1);
+        if (!double.IsFinite(scale) || scale <= 0 || scale > 1000) throw new InvalidOperationException("Difference scale must be finite, greater than zero, and at most 1000.");
+        var threshold = node.GetDouble("threshold", 0);
+        if (!double.IsFinite(threshold) || threshold < 0) throw new InvalidOperationException("Difference threshold must be finite and non-negative.");
         using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(reference, true);
-        var mode = node.GetString("mode", "absolute");
-        using var difference = mode switch { "absolute" => image.AbsDiffImage(baseline, 1d), "signed" => image.SubImage(baseline, 1d, 0d), _ => throw new InvalidOperationException("Difference mode must be absolute or signed.") };
+        var mode = node.GetString("mode", "absolute").Trim().ToLowerInvariant();
+        using var difference = mode switch
+        {
+            "absolute" => image.AbsDiffImage(baseline, scale),
+            "signed" => image.SubImage(baseline, scale, 0d),
+            // HALCON-style normalized difference: illumination-ratio change in [-1,1].
+            "normalized" => Normalized(image, baseline),
+            _ => throw new InvalidOperationException("Difference mode must be absolute, signed, or normalized.")
+        };
         using var domain = difference.GetDomain(); var stats = DefectNodeHelpers.Statistics(difference, domain);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(DefectNodeHelpers.ImageResult(difference, new() { ["mode"] = mode, ["meanDifference"] = stats.Mean, ["minDifference"] = stats.Min, ["maxDifference"] = stats.Max, ["outputType"] = "real" }));
+        var outputs = new Dictionary<string, VisionValue>();
+        var summary = new Dictionary<string, object?>
+        {
+            ["mode"] = mode, ["scale"] = scale, ["meanDifference"] = stats.Mean, ["stdDevDifference"] = stats.Deviation,
+            ["minDifference"] = stats.Min, ["maxDifference"] = stats.Max, ["outputType"] = "real"
+        };
+        double? aboveFraction = null;
+        if (threshold > 0)
+        {
+            using var diffMat = JLVisionImages.ToMat(difference);
+            diffMat.GetArray(out float[] pixels);
+            var above = pixels.Count(v => Math.Abs(v) >= threshold);
+            aboveFraction = pixels.Length == 0 ? 0 : (double)above / pixels.Length;
+            summary["threshold"] = threshold; summary["aboveThresholdFraction"] = aboveFraction;
+        }
+        var result = DefectNodeHelpers.ImageResult(difference, summary);
+        foreach (var (key, value) in new Dictionary<string, VisionValue>
+        {
+            ["mean"] = VisionValue.Double(stats.Mean), ["stdDev"] = VisionValue.Double(stats.Deviation),
+            ["min"] = VisionValue.Double(stats.Min), ["max"] = VisionValue.Double(stats.Max)
+        }) outputs[key] = value;
+        if (aboveFraction is not null) outputs["aboveThresholdFraction"] = VisionValue.Double(aboveFraction.Value);
+        var merged = new Dictionary<string, VisionValue>(result.Outputs);
+        foreach (var pair in outputs) merged[pair.Key] = pair.Value;
+        return ValueTask.FromResult(result with { Outputs = merged });
+    }
+
+    private static JlImage Normalized(JlImage image, JlImage baseline)
+    {
+        using var diff = image.SubImage(baseline, 1d, 0d);
+        using var sum = image.AddImage(baseline, 1d, 1e-6); // epsilon avoids 0/0 on black pixels
+        return diff.DivImage(sum, 1d, 0d);
     }
 }
 
