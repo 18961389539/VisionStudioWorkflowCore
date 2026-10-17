@@ -772,6 +772,57 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task ChainedCropsComposeIntoCaliperCircleMeasurementCoordinates()
+    {
+        using var sceneMat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(20));
+        Cv2.Circle(sceneMat, new Point(35, 29), 7, Scalar.All(220), -1, LineTypes.AntiAlias);
+        using var source = VisionImage.Own(sceneMat.Clone());
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("coordinate.transformCompose"), new ComposeTransformNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("measure.caliperCircle"), new CaliperCircleNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+
+        var firstCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop1", "image.crop",
+                """{"x":20,"y":15,"width":30,"height":30}"""), Inputs(source), null, CancellationToken.None);
+        using var firstImage = (VisionImage)firstCrop.Outputs["image"].Require<IVisionImage>("image");
+        (firstCrop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        var secondCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop2", "image.crop",
+                """{"x":5,"y":4,"width":20,"height":20}"""), Inputs(firstImage), null, CancellationToken.None);
+        using var secondImage = (VisionImage)secondCrop.Outputs["image"].Require<IVisionImage>("image");
+        (secondCrop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+
+        var composed = await dispatcher.ExecuteAsync(ConfiguredNode("compose", "coordinate.transformCompose", "{}"),
+            new Dictionary<string, VisionValue>
+            {
+                ["transformA"] = firstCrop.Outputs["transform"],
+                ["transformB"] = secondCrop.Outputs["transform"]
+            }, null, CancellationToken.None);
+        var transform = composed.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.Equal(new VisionPoint2D(10, 10), transform.Apply(new VisionPoint2D(35, 29)));
+
+        var measurement = await dispatcher.ExecuteAsync(ConfiguredNode("caliper", "measure.caliperCircle",
+                """{"angleStartDeg":0,"angleEndDeg":360,"samplingMode":"count","caliperCount":72,"radialBand":3,"sampleWidth":1,"minContrast":20,"polarity":"falling","minValidCalipers":24,"maxFitError":1}"""),
+            new Dictionary<string, VisionValue>
+            {
+                ["image"] = VisionValue.Image(secondImage),
+                ["circle"] = VisionValue.Circle(new VisionCircle(35, 29, 7)),
+                ["transform"] = composed.Outputs["transform"]
+            }, null, CancellationToken.None);
+        using var measuredImage = (VisionImage)measurement.Outputs["image"].Require<IVisionImage>("image");
+
+        Assert.True(measurement.Outputs["found"].Require<bool>("found"), Convert.ToString(measurement.Summary["reason"]));
+        var fitted = measurement.Outputs["circle"].Require<VisionCircle>("circle");
+        Assert.InRange(fitted.X, 9.5, 10.5);
+        Assert.InRange(fitted.Y, 9.5, 10.5);
+        Assert.InRange(fitted.Radius, 6, 8);
+        Assert.Equal("CurrentImage", transform.SourceFrame);
+        Assert.Equal("image:crop2:crop", transform.TargetFrame);
+    }
+
+    [Fact]
     public async Task RoiCorrectionAndCropTransformsComposeForCaliperMeasurement()
     {
         using var sceneMat = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(20));
@@ -893,6 +944,23 @@ public sealed class Batch5CaliperRegressionTests
         Assert.InRange(slope, 1.9, 2.1);
         Assert.True(Convert.ToInt32(result.Summary["profilesClippedToImage"]) > 0);
         Assert.True((result.Overlays?.Count(overlay => overlay.Id.StartsWith("caliper-line-profile-", StringComparison.Ordinal)) ?? 0) >= 3);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CaliperLine_HandlesMinimumNativeFilterProfileLength()
+    {
+        using var imageMat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(20));
+        using (var bright = new Mat(imageMat, new Rect(32, 0, 32, 64))) bright.SetTo(Scalar.All(220));
+        using var image = VisionImage.Own(imageMat.Clone());
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperLine", """{"startX":28.5,"startY":32,"endX":35.5,"endY":32,"caliperCount":3,"sampleWidth":1,"minContrast":20,"polarity":"rising"}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Convert.ToString(result.Summary["reason"]));
+        var point = result.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.InRange(point.X, 31, 33);
         (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 

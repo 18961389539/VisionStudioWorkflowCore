@@ -6,6 +6,7 @@ namespace VisionStudio.Engine.Algorithms;
 internal static class JLVisionEdgeMeasurement
 {
     internal readonly record struct Edge(bool Found, double Position, double Strength, double Error, int Count, string Reason);
+    private const int MinimumNativeSegmentLength = 8;
 
     public static Edge Find(double[] profile, double spacing, string polarity, double threshold, string direction, string refine,
         CancellationToken cancellationToken = default)
@@ -39,6 +40,16 @@ internal static class JLVisionEdgeMeasurement
             if (length >= 3)
             {
                 hasMeasurableSegment = true;
+                // HALCON's Gaussian measurement filter needs a longer support than a very
+                // narrow radial band can provide. Use a local gradient fit for these short
+                // profiles so small circles return a measurement (or found=false) instead of
+                // surfacing HALCON error #3022 to the workflow runner.
+                if (length < MinimumNativeSegmentLength)
+                {
+                    AddShortProfileCandidates(profile, start, length, polarity, threshold, refine, candidates, cancellationToken);
+                    start = end + 1;
+                    continue;
+                }
                 using var pixels = new Mat(3, length, MatType.CV_32FC1);
                 for (var y = 0; y < 3; y++)
                     for (var x = 0; x < length; x++)
@@ -70,6 +81,45 @@ internal static class JLVisionEdgeMeasurement
         var position = refine == "none" ? Math.Round(edge.Position - .5) + .5 : edge.Position;
         var error = PeakResidual(profile, edge.Position);
         return new(true, position * spacing, edge.Amplitude, error, valid, "ok");
+    }
+
+    private static void AddShortProfileCandidates(double[] profile, int start, int length, string polarity, double threshold,
+        string refine, List<(double Position, double Amplitude)> candidates, CancellationToken cancellationToken)
+    {
+        var requestedPolarity = polarity.ToLowerInvariant();
+        var gradients = new double[length - 1];
+        for (var i = 0; i < gradients.Length; i++)
+        {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+            gradients[i] = profile[start + i + 1] - profile[start + i];
+        }
+
+        for (var i = 0; i < gradients.Length; i++)
+        {
+            if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var gradient = gradients[i];
+            var amplitude = Math.Abs(gradient);
+            if (amplitude < Math.Max(threshold, .0001)
+                || requestedPolarity == "rising" && gradient <= 0
+                || requestedPolarity == "falling" && gradient >= 0)
+                continue;
+
+            var position = start + i + .5;
+            if (!refine.Equals("none", StringComparison.OrdinalIgnoreCase) && i > 0 && i + 1 < gradients.Length)
+            {
+                var left = Math.Abs(gradients[i - 1]);
+                var center = amplitude;
+                var right = Math.Abs(gradients[i + 1]);
+                var denominator = left - 2 * center + right;
+                if (denominator < -1e-12)
+                {
+                    var offset = Math.Clamp(.5 * (left - right) / denominator, -.5, .5);
+                    position += offset;
+                    amplitude = center - .25 * (left - right) * offset;
+                }
+            }
+            candidates.Add((position, amplitude));
+        }
     }
 
     private static double PeakResidual(double[] profile, double position)
