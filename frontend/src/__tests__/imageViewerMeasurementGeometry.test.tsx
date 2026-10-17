@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
 import type { VisionOverlay, VisionRoi } from '../types';
 
@@ -59,6 +60,108 @@ describe('ImageViewer measurement geometry editing', () => {
       overlays={overlays} roi={invalidRoi} roiEnabled={false} onRoiChange={emptyRoi} />);
 
     expect(screen.getByTestId('stage')).toBeTruthy();
+  });
+
+  it('undoes the last canvas ROI edit and hides stale undo after an external edit', () => {
+    const RoiHarness = () => {
+      const [roi, setRoi] = useState<VisionRoi | undefined>();
+      return <>
+        <ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+          overlays={overlays} roi={roi} roiEnabled onRoiChange={setRoi} />
+        <output data-testid="roi-state">{JSON.stringify(roi)}</output>
+        <button onClick={() => setRoi({ type: 'Rectangle', x: 1, y: 1, width: 10, height: 10 })}>外部修改</button>
+      </>;
+    };
+    render(<RoiHarness />);
+    fireEvent.click(screen.getByRole('radio', { name: '矩形' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 });
+    fireEvent.mouseMove(stage, { clientX: 152.8, clientY: 82.8 });
+    fireEvent.mouseUp(document.body, { clientX: 152.8, clientY: 82.8 });
+
+    const drawn = JSON.parse(screen.getByTestId('roi-state').textContent!);
+    expect(drawn.type).toBe('Rectangle');
+    expect(drawn.x).toBeCloseTo(10);
+    expect(drawn.y).toBeCloseTo(10);
+    expect(drawn.width).toBeCloseTo(20);
+    expect(drawn.height).toBeCloseTo(20);
+    fireEvent.click(screen.getByRole('button', { name: '撤销选区编辑' }));
+    expect(screen.getByTestId('roi-state').textContent).toBe('');
+    expect(screen.queryByRole('button', { name: '撤销选区编辑' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: '矩形' }));
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 });
+    fireEvent.mouseMove(stage, { clientX: 152.8, clientY: 82.8 });
+    fireEvent.mouseUp(document.body, { clientX: 152.8, clientY: 82.8 });
+    expect(screen.getByRole('button', { name: '撤销选区编辑' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '外部修改' }));
+    expect(screen.getByTestId('roi-state').textContent).toContain('"x":1');
+    expect(screen.queryByRole('button', { name: '撤销选区编辑' })).toBeNull();
+  });
+
+  it('undoes the last caliper geometry drag', () => {
+    const initial: MeasurementGeometry = { type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } };
+    const GeometryHarness = () => {
+      const [geometry, setGeometry] = useState<MeasurementGeometry>(initial);
+      return <>
+        <ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+          overlays={overlays} roiEnabled={false} onRoiChange={emptyRoi} measurementGeometry={geometry}
+          measurementGeometryEditable onMeasurementGeometryChange={setGeometry} />
+        <output data-testid="geometry-state">{JSON.stringify(geometry)}</output>
+        <button onClick={() => setGeometry({ ...initial, start: { x: 5, y: 5 } })}>外部修改测量几何</button>
+      </>;
+    };
+    render(<GeometryHarness />);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 });
+    fireEvent.mouseMove(stage, { clientX: 129.2, clientY: 35.6 });
+    fireEvent.mouseUp(document.body, { clientX: 129.2, clientY: 35.6 });
+
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!).start.x).toBeCloseTo(20);
+    fireEvent.click(screen.getByRole('button', { name: '撤销测量编辑' }));
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!)).toEqual(initial);
+    expect(screen.queryByRole('button', { name: '撤销测量编辑' })).toBeNull();
+
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 });
+    fireEvent.mouseMove(stage, { clientX: 129.2, clientY: 35.6 });
+    fireEvent.mouseUp(document.body, { clientX: 129.2, clientY: 35.6 });
+    expect(screen.getByRole('button', { name: '撤销测量编辑' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '外部修改测量几何' }));
+    expect(screen.queryByRole('button', { name: '撤销测量编辑' })).toBeNull();
+  });
+
+  it('undoes circle edits after the arc angles are canonicalized', () => {
+    const initial: MeasurementGeometry = { type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: 350, angleEndDeg: 370, samplingMode: 'count', caliperCount: 12 };
+    const CircleHarness = () => {
+      const [geometry, setGeometry] = useState<MeasurementGeometry>(initial);
+      const updateGeometry = (next: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
+        if (next.type !== 'circle' || options?.preserveValues) { setGeometry(next); return; }
+        const start = next.angleStartDeg ?? -180;
+        const end = next.angleEndDeg ?? 180;
+        const turns = Math.round(((start + end) / 2) / 360);
+        setGeometry({ ...next, angleStartDeg: start - turns * 360, angleEndDeg: end - turns * 360,
+          band: Math.max(1, Math.min(500, next.band ?? 1)) });
+      };
+      return <>
+        <ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+          overlays={overlays} roiEnabled={false} onRoiChange={emptyRoi} measurementGeometry={geometry}
+          measurementGeometryEditable onMeasurementGeometryChange={updateGeometry} />
+        <output data-testid="geometry-state">{JSON.stringify(geometry)}</output>
+      </>;
+    };
+    render(<CircleHarness />);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 233.375, clientY: 163.375 }); // radius handle at (64.14, 64.14)
+    fireEvent.mouseMove(stage, { clientX: 241.669, clientY: 171.669 }); // increase radius from 20 to 25 px
+    fireEvent.mouseUp(document.body, { clientX: 241.669, clientY: 171.669 });
+
+    const edited = JSON.parse(screen.getByTestId('geometry-state').textContent!);
+    expect(edited.radius).toBeCloseTo(25, 1);
+    expect(edited.angleStartDeg).toBeCloseTo(-10);
+    expect(edited.angleEndDeg).toBeCloseTo(10);
+    fireEvent.click(screen.getByRole('button', { name: '撤销测量编辑' }));
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!)).toEqual(initial);
   });
 
   it('can focus a polygon ROI with hundreds of thousands of vertices', () => {

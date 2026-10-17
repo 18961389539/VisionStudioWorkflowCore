@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
-import { roiConfigurationIssue } from '../nodeConfigurationState';
+import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
 
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
@@ -604,7 +604,7 @@ export default function ImageViewer({
   /** Search geometry authored in the displayed image coordinate frame. */
   measurementGeometry?: MeasurementGeometry;
   measurementGeometryEditable?: boolean;
-  onMeasurementGeometryChange?: (geometry: MeasurementGeometry) => void;
+  onMeasurementGeometryChange?: (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => void;
   /** 覆盖层按节点筛选时的显示名映射 */
   nodeLabels?: Record<string, string>;
   /** 递增信号：来自属性面板“定位选区”，把视图适配到当前 ROI 区域 */
@@ -628,6 +628,8 @@ export default function ImageViewer({
   const [brushWidth, setBrushWidth] = useState(20);
   const [measurementDraft, setMeasurementDraft] = useState<MeasurementGeometry>();
   const [geometryDrawMode, setGeometryDrawMode] = useState(false);
+  const [roiUndoEntry, setRoiUndoEntry] = useState<{ previous?: VisionRoi; afterFingerprint: string }>();
+  const [measurementUndoEntry, setMeasurementUndoEntry] = useState<{ previous: MeasurementGeometry; afterFingerprint: string }>();
   // 像素化（最近邻）默认开：放大即真实像素方块；开关可切回平滑插值
   const [pixelated, setPixelated] = useState(readPixelated);
   useEffect(() => { persistPixelated(pixelated); }, [pixelated]);
@@ -673,6 +675,7 @@ export default function ImageViewer({
       gestureStart.current = undefined;
       roiDrag.current = undefined;
       setRoiDragOffset(undefined);
+      setRoiUndoEntry(undefined);
     }
   }, [roiEnabled]);
   useEffect(() => {
@@ -682,6 +685,8 @@ export default function ImageViewer({
     setBrushPreview(undefined);
     setMeasurementDraft(undefined);
     setGeometryDrawMode(false);
+    setRoiUndoEntry(undefined);
+    setMeasurementUndoEntry(undefined);
     geometryGestureStart.current = undefined;
     geometryDrag.current = undefined;
     polygonPoints.current = [];
@@ -693,9 +698,47 @@ export default function ImageViewer({
     if (measurementGeometryEditable) return;
     setGeometryDrawMode(false);
     setMeasurementDraft(undefined);
+    setMeasurementUndoEntry(undefined);
     geometryGestureStart.current = undefined;
     geometryDrag.current = undefined;
   }, [measurementGeometryEditable]);
+
+  const commitRoiEdit = (next?: VisionRoi) => {
+    if (parameterFingerprint(roi) === parameterFingerprint(next)) return;
+    const entry = { previous: roi, afterFingerprint: parameterFingerprint(next) };
+    setRoiUndoEntry(entry);
+    onRoiChange(next);
+  };
+
+  const undoRoiEdit = () => {
+    if (!roiUndoEntry) return;
+    setRoiUndoEntry(undefined);
+    if (roiUndoEntry.afterFingerprint === parameterFingerprint(roi)) onRoiChange(roiUndoEntry.previous);
+  };
+
+  const committedMeasurementGeometry = (geometry: MeasurementGeometry): MeasurementGeometry => {
+    if (geometry.type === 'line') return geometry;
+    const start = geometry.angleStartDeg ?? -180;
+    const end = geometry.angleEndDeg ?? 180;
+    const turns = Math.round(((start + end) / 2) / 360);
+    return { ...geometry, angleStartDeg: start - turns * 360, angleEndDeg: end - turns * 360,
+      band: clamp(geometry.band ?? 1, 1, 500) };
+  };
+
+  const commitMeasurementEdit = (next: MeasurementGeometry) => {
+    if (!measurementGeometry || !onMeasurementGeometryChange) return;
+    const expected = committedMeasurementGeometry(next);
+    const entry = { previous: measurementGeometry, afterFingerprint: parameterFingerprint(expected) };
+    setMeasurementUndoEntry(entry);
+    onMeasurementGeometryChange(next);
+  };
+
+  const undoMeasurementEdit = () => {
+    if (!measurementUndoEntry || !measurementGeometry || !onMeasurementGeometryChange) return;
+    setMeasurementUndoEntry(undefined);
+    if (measurementUndoEntry.afterFingerprint === parameterFingerprint(measurementGeometry))
+      onMeasurementGeometryChange(measurementUndoEntry.previous, { preserveValues: true });
+  };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -860,13 +903,7 @@ export default function ImageViewer({
     brushStroke.current = undefined;
     setBrushPreview(undefined);
     setDraft(undefined);
-    onRoiChange({ type: 'Brush', strokes: [...active.baseStrokes, active.activeStroke] });
-  };
-
-  const undoBrushStroke = () => {
-    if (roi?.type !== 'Brush') return;
-    const strokes = roi.strokes.slice(0, -1);
-    onRoiChange(strokes.length > 0 ? { type: 'Brush', strokes } : undefined);
+    commitRoiEdit({ type: 'Brush', strokes: [...active.baseStrokes, active.activeStroke] });
   };
 
   const onPointerDown = () => {
@@ -1037,7 +1074,7 @@ export default function ImageViewer({
       const next = measurementDraft;
       if (next && onMeasurementGeometryChange && (next.type === 'line'
         ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
-        : next.radius >= 1)) onMeasurementGeometryChange(next);
+        : next.radius >= 1)) commitMeasurementEdit(next);
       setMeasurementDraft(undefined);
       setGeometryDrawMode(false);
       return;
@@ -1047,7 +1084,7 @@ export default function ImageViewer({
       const next = measurementDraft;
       if (next && onMeasurementGeometryChange && (next.type === 'line'
         ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
-        : next.radius >= 1)) onMeasurementGeometryChange(next);
+        : next.radius >= 1)) commitMeasurementEdit(next);
       setMeasurementDraft(undefined);
       return;
     }
@@ -1063,15 +1100,15 @@ export default function ImageViewer({
           actualWidth, actualHeight, active.moveBounds)
         : draft;
       if (next && (next.type !== 'Rectangle' || (next.width >= 2 && next.height >= 2)) && (next.type !== 'Circle' || next.radius >= 1)) {
-        onRoiChange(next);
+        commitRoiEdit(next);
       }
       setRoiDragOffset(undefined);
       setDraft(undefined);
       return;
     }
     if (gestureStart.current && draft) {
-      if (draft.type === 'Rectangle' && draft.width >= 2 && draft.height >= 2) onRoiChange(draft);
-      if (draft.type === 'Circle' && draft.radius >= 1) onRoiChange(draft);
+      if (draft.type === 'Rectangle' && draft.width >= 2 && draft.height >= 2) commitRoiEdit(draft);
+      if (draft.type === 'Circle' && draft.radius >= 1) commitRoiEdit(draft);
     }
     gestureStart.current = undefined;
     setDraft(undefined);
@@ -1120,7 +1157,7 @@ export default function ImageViewer({
 
   const commitPolygon = () => {
     if (tool !== 'polygon' || polygonPoints.current.length < 3) return;
-    onRoiChange({ type: 'Polygon', points: polygonPoints.current });
+    commitRoiEdit({ type: 'Polygon', points: polygonPoints.current });
     polygonPoints.current = [];
     setDraft(undefined);
   };
@@ -1130,7 +1167,7 @@ export default function ImageViewer({
     brushStroke.current = undefined;
     setBrushPreview(undefined);
     setDraft(undefined);
-    onRoiChange(undefined);
+    commitRoiEdit(undefined);
   };
 
   useEffect(() => {
@@ -1197,6 +1234,9 @@ export default function ImageViewer({
   const visibleOverlays = useMemo(
     () => (overlayFilter.length === 0 ? overlays : overlays.filter((overlay) => overlay.nodeId && overlayFilter.includes(overlay.nodeId))),
     [overlays, overlayFilter]);
+  const roiUndoAvailable = Boolean(roiUndoEntry && roiUndoEntry.afterFingerprint === parameterFingerprint(roi));
+  const measurementUndoAvailable = Boolean(measurementUndoEntry && measurementGeometry
+    && measurementUndoEntry.afterFingerprint === parameterFingerprint(measurementGeometry));
 
   return (
     <div className="vision-viewer">
@@ -1228,7 +1268,8 @@ export default function ImageViewer({
               disabled={!roiEnabled} onChange={(value) => setBrushWidth(clamp(Number(value ?? 1), 1, 512))} />
             <span>px</span>
           </span>}
-          {showRoiTools && roi?.type === 'Brush' && <Button size="small" disabled={!roiEnabled} onClick={undoBrushStroke}>撤销笔迹</Button>}
+          {showRoiTools && roiUndoAvailable && <Button size="small" onClick={undoRoiEdit}
+            title="撤销最近一次在画布上完成的选区编辑">{roi?.type === 'Brush' ? '撤销笔迹' : '撤销选区编辑'}</Button>}
           {measurementGeometry && measurementGeometryEditable && (measurementGeometry.type === 'line'
             || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false) && <>
             <span className="viewer-toolbar-divider" />
@@ -1242,6 +1283,8 @@ export default function ImageViewer({
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}
+          {measurementUndoAvailable && <Button size="small" onClick={undoMeasurementEdit}
+            title="撤销最近一次在画布上完成的卡尺几何编辑">撤销测量编辑</Button>}
           <Button size="small" onClick={fit}>适应窗口</Button>
           <Button size="small" onClick={oneToOne}>原始比例</Button>
           {showRoiTools && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}

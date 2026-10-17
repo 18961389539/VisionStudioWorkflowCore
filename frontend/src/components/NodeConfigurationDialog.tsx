@@ -444,7 +444,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (normalizedDeterminant > 2e-3) return undefined;
     return '当前圆弧的理论测点分布接近直线，可能触发退化圆拟合。请扩大角度覆盖；单纯增加卡尺数量不能替代更宽的圆弧。';
   })();
-  const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
+  const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
     if (locked || searchLineInputEdge) return;
     if (geometry.type === 'line') {
       setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y,
@@ -456,7 +456,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const normalizedStartAngle = startAngle - wholeTurns * 360;
       const normalizedEndAngle = endAngle - wholeTurns * 360;
       setDraft(current => ({ ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
-        angleStartDeg: normalizedStartAngle, angleEndDeg: normalizedEndAngle, radialBand: Math.max(1, Math.min(500, geometry.band ?? 1)) }));
+        angleStartDeg: options?.preserveValues ? startAngle : normalizedStartAngle,
+        angleEndDeg: options?.preserveValues ? endAngle : normalizedEndAngle,
+        radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
   const imageInputSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;
