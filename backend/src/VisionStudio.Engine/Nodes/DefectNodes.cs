@@ -155,6 +155,8 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
             ["minDifference"] = stats.Min, ["maxDifference"] = stats.Max, ["outputType"] = "real"
         };
         double? aboveFraction = null;
+        VisionRegion? changedRegion = null;
+        long changedPixels = 0;
         if (threshold > 0)
         {
             using var diffMat = JLVisionImages.ToMat(difference);
@@ -162,7 +164,25 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
             var above = pixels.Count(v => Math.Abs(v) >= threshold);
             aboveFraction = pixels.Length == 0 ? 0 : (double)above / pixels.Length;
             summary["threshold"] = threshold; summary["aboveThresholdFraction"] = aboveFraction;
+            // Thresholded change region (8-connected objects) so downstream region
+            // tools can consume the difference directly instead of re-thresholding.
+            var mask = pixels.Select(v => Math.Abs(v) >= threshold ? (byte)255 : (byte)0).ToArray();
+            changedRegion = ImageDifferenceMetrics.RegionFromMask(mask, source.Width, source.Height);
+            changedPixels = above;
+            summary["changedPixelCount"] = changedPixels;
+            summary["changedComponents"] = changedRegion.Components.Count;
         }
+        // Global SSIM similarity summary on the grayscale inputs (whole-image
+        // statistics; 1 = identical). Complements the pixel-difference statistics.
+        double similarity;
+        using (var currentGray = RecognitionImageHelpers.ToGray8(source.Mat))
+        using (var referenceGray = RecognitionImageHelpers.ToGray8(reference.Mat))
+        {
+            currentGray.GetArray(out byte[] currentBytes);
+            referenceGray.GetArray(out byte[] referenceBytes);
+            similarity = ImageDifferenceMetrics.GlobalSsim(currentBytes, referenceBytes);
+        }
+        summary["similarity"] = similarity;
         var result = DefectNodeHelpers.ImageResult(difference, summary);
         foreach (var (key, value) in new Dictionary<string, VisionValue>
         {
@@ -170,6 +190,12 @@ public sealed class ImageDifferenceNode : IVisionNodeExecutor
             ["min"] = VisionValue.Double(stats.Min), ["max"] = VisionValue.Double(stats.Max)
         }) outputs[key] = value;
         if (aboveFraction is not null) outputs["aboveThresholdFraction"] = VisionValue.Double(aboveFraction.Value);
+        outputs["similarity"] = VisionValue.Double(similarity);
+        if (changedRegion is not null)
+        {
+            outputs["region"] = VisionValue.Region(changedRegion);
+            outputs["changedPixelCount"] = VisionValue.Integer(changedPixels);
+        }
         var merged = new Dictionary<string, VisionValue>(result.Outputs);
         foreach (var pair in outputs) merged[pair.Key] = pair.Value;
         return ValueTask.FromResult(result with { Outputs = merged });

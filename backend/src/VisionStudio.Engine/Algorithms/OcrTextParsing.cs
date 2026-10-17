@@ -16,6 +16,23 @@ public static class OcrTextParsing
         return whitelist;
     }
 
+    /// <summary>Character blacklist validation (mirror of the whitelist rules). A
+    /// character cannot be both allowed and forbidden; that conflict is rejected by
+    /// the caller so it fails before the engine starts.</summary>
+    public static string ValidateBlacklist(string blacklist)
+    {
+        if (blacklist.Length == 0) return string.Empty;
+        if (blacklist.Any(char.IsControl)) throw new InvalidOperationException("OCR blacklist must not contain control characters.");
+        if (blacklist.Length > 256) throw new InvalidOperationException("OCR blacklist must be at most 256 characters.");
+        return blacklist;
+    }
+
+    public static void EnsureNoWhitelistBlacklistConflict(string whitelist, string blacklist)
+    {
+        var conflict = whitelist.Intersect(blacklist).FirstOrDefault();
+        if (conflict != default) throw new InvalidOperationException($"OCR character '{conflict}' cannot be in both whitelist and blacklist.");
+    }
+
     public sealed record OcrChar(string Text, double X, double Y, double Width, double Height);
 
     /// <summary>

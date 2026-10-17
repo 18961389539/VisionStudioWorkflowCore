@@ -31,10 +31,24 @@ public static class CalibrationViewAnalysis
     /// faithful than a raw homography fit which absorbs pose error.
     /// </summary>
     public static ViewStat AnalyzeWithCamera(IReadOnlyList<IReadOnlyList<double>> objectPoints, IReadOnlyList<IReadOnlyList<double>> imagePoints, int imageWidth, int imageHeight, double fx, double fy, double cx, double cy)
+        => AnalyzeWithCamera(objectPoints, imagePoints, imageWidth, imageHeight, fx, fy, cx, cy, null);
+
+    /// <summary>Distortion-aware variant: when OpenCV Brown-Conrady coefficients are
+    /// supplied (k1,k2,p1,p2[,k3[,k4,k5,k6 rational]]), projected points are distorted
+    /// before comparison, so the per-view RMS reflects the full legacy model instead of
+    /// the pinhole part only. Native JLVision polynomial models pass null (their
+    /// coefficients are not Brown-Conrady and must not be reinterpreted).</summary>
+    public static ViewStat AnalyzeWithCamera(IReadOnlyList<IReadOnlyList<double>> objectPoints, IReadOnlyList<IReadOnlyList<double>> imagePoints, int imageWidth, int imageHeight, double fx, double fy, double cx, double cy, double[]? distCoeffs)
     {
         var baseline = Analyze(objectPoints, imagePoints, imageWidth, imageHeight);
         if (baseline.ReprojectionRms is null || !(fx > 0) || !(fy > 0)) return baseline;
-        var h = EstimateHomography(objectPoints, imagePoints);
+        // With distortion coefficients, pose estimation must run on undistorted
+        // observations: estimating the homography from distorted points lets it
+        // absorb the distortion, and applying the model again would double-count it.
+        var effectivePoints = distCoeffs is { Length: >= 4 }
+            ? imagePoints.Select(pt => UndistortPoint(pt[0], pt[1], fx, fy, cx, cy, distCoeffs)).ToArray()
+            : imagePoints;
+        var h = EstimateHomography(objectPoints, effectivePoints);
         if (h is null) return baseline;
         // Hn = K^-1 H, columns scaled so |r1| = 1
         double[] Col(int c) => [(h[c] / fx), (h[3 + c] / fy), h[6 + c]];
@@ -60,10 +74,43 @@ public static class CalibrationViewAnalysis
             var camY = r1[1] * x + r2[1] * y + translation[1];
             var camZ = r1[2] * x + r2[2] * y + translation[2];
             if (camZ <= 1e-12) return baseline;
-            var u = fx * camX / camZ + cx; var v = fy * camY / camZ + cy;
+            var xn = camX / camZ; var yn = camY / camZ;
+            if (distCoeffs is { Length: >= 4 })
+            {
+                var k1 = distCoeffs[0]; var k2 = distCoeffs[1]; var p1 = distCoeffs[2]; var p2 = distCoeffs[3];
+                var k3 = distCoeffs.Length >= 5 ? distCoeffs[4] : 0d;
+                var rr2 = xn * xn + yn * yn; var rr4 = rr2 * rr2; var rr6 = rr4 * rr2;
+                var radial = 1 + k1 * rr2 + k2 * rr4 + k3 * rr6;
+                if (distCoeffs.Length >= 8)
+                    radial /= 1 + distCoeffs[5] * rr2 + distCoeffs[6] * rr4 + distCoeffs[7] * rr6;
+                var xd = xn * radial + 2 * p1 * xn * yn + p2 * (rr2 + 2 * xn * xn);
+                var yd = yn * radial + p1 * (rr2 + 2 * yn * yn) + 2 * p2 * xn * yn;
+                xn = xd; yn = yd;
+            }
+            var u = fx * xn + cx; var v = fy * yn + cy;
             errors[i] = Math.Sqrt(Math.Pow(u - imagePoints[i][0], 2) + Math.Pow(v - imagePoints[i][1], 2));
         }
         return baseline with { ReprojectionRms = Math.Sqrt(errors.Average(e => e * e)), ReprojectionMax = errors.Max() };
+    }
+
+    /// <summary>Iteratively invert Brown-Conrady distortion for one observed point,
+    /// returning the equivalent pinhole pixel coordinates.</summary>
+    private static double[] UndistortPoint(double u, double v, double fx, double fy, double cx, double cy, double[] d)
+    {
+        var k1 = d[0]; var k2 = d[1]; var p1 = d[2]; var p2 = d[3];
+        var k3 = d.Length >= 5 ? d[4] : 0d;
+        var xd = (u - cx) / fx; var yd = (v - cy) / fy;
+        var xn = xd; var yn = yd;
+        for (var iteration = 0; iteration < 10; iteration++)
+        {
+            var rr2 = xn * xn + yn * yn; var rr4 = rr2 * rr2; var rr6 = rr4 * rr2;
+            var radial = 1 + k1 * rr2 + k2 * rr4 + k3 * rr6;
+            if (d.Length >= 8) radial /= 1 + d[5] * rr2 + d[6] * rr4 + d[7] * rr6;
+            if (Math.Abs(radial) < 1e-12) break;
+            xn = (xd - (2 * p1 * xn * yn + p2 * (rr2 + 2 * xn * xn))) / radial;
+            yn = (yd - (p1 * (rr2 + 2 * yn * yn) + 2 * p2 * xn * yn)) / radial;
+        }
+        return [fx * xn + cx, fy * yn + cy];
     }
 
     private static double[]? EstimateHomography(IReadOnlyList<IReadOnlyList<double>> objectPoints, IReadOnlyList<IReadOnlyList<double>> imagePoints)

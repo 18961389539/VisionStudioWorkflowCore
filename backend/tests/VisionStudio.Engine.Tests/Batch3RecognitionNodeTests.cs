@@ -137,6 +137,13 @@ public sealed class Batch3RecognitionNodeTests
         var mask = ((VisionImage)result.Outputs["mask"].Value!).Mat;
         Assert.Equal(new Size(60, 40), mask.Size());
         Assert.Equal((byte)2, mask.At<byte>(20, 30));
+        // Batch D: colour overlay, per-class geometry and confidence reporting
+        var overlay = ((VisionImage)result.Outputs["overlay"].Value!).Mat;
+        Assert.Equal(new Size(60, 40), overlay.Size());
+        Assert.Equal(3, overlay.Channels());
+        Assert.Contains("centroidX", result.Outputs["classes"].Require<string>("classes"));
+        Assert.True(result.Outputs.ContainsKey("meanConfidence"));
+        Assert.True(result.Outputs.ContainsKey("lowConfidenceFraction"));
     }
 
     [Fact]

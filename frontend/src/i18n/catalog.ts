@@ -79,6 +79,7 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Character Blacklist': '?????', 'Low Confidence Threshold': '?????', 'Threshold Mode': '????', 'Manual Threshold': '????', 'Otsu Auto (spatial maps)': 'Otsu ???????',
   'Lower Percentile': '下百分位（%）', 'Upper Percentile': '上百分位（%）',
   'Region Canvas Width': '区域画布宽度', 'Region Canvas Height': '区域画布高度', 'Boundary Side': '边界侧',
   'Contour Points JSON': '轮廓点列 JSON', 'Closed Contour': '闭合轮廓', 'Wall Samples': '壁厚采样数', 'Wall Start Angle': '壁厚采样起始角度',
@@ -246,6 +247,7 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  overlay: '?????', similarity: '?????? SSIM?', changedPixelCount: '?????', meanConfidence: '?????', lowConfidenceFraction: '???????', worstViewIndex: '??????',
   threshold: '阈值',
   pixelCount: '像素数', binsJson: '256 级频数 JSON', cdfJson: '累计分布 JSON', median: '中位灰度',
   entropy: '灰度熵（bit）', percentileLow: '下百分位灰度', percentileHigh: '上百分位灰度',

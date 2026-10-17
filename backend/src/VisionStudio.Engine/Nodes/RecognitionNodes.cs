@@ -131,6 +131,8 @@ public sealed class OcrNode : IVisionNodeExecutor
             _ => throw new InvalidOperationException($"Unsupported OCR oem '{oemName}'. Supported: default, lstm, legacy, combined.")
         };
         var whitelist = OcrTextParsing.ValidateWhitelist(node.GetString("whitelist", string.Empty));
+        var blacklist = OcrTextParsing.ValidateBlacklist(node.GetString("blacklist", string.Empty));
+        OcrTextParsing.EnsureNoWhitelistBlacklistConflict(whitelist, blacklist);
         var dpi = node.GetInt("dpi", 0);
         if (dpi is not 0 && dpi is < 70 or > 1200) throw new InvalidOperationException("OCR dpi must be 0 (auto) or between 70 and 1200.");
         var scale = node.GetDouble("upscale", 1);
@@ -179,6 +181,7 @@ public sealed class OcrNode : IVisionNodeExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 using var engine = new TesseractOCR.Engine(resolvedDataPath, language, oem);
                 if (whitelist.Length > 0) engine.SetVariable("tessedit_char_whitelist", whitelist);
+                if (blacklist.Length > 0) engine.SetVariable("tessedit_char_blacklist", blacklist);
                 if (dpi > 0) engine.SetVariable("user_defined_dpi", dpi);
                 using var image = TesseractPixImage.LoadFromMemory(encoded);
                 using var page = engine.Process(image, psm);
@@ -205,7 +208,7 @@ public sealed class OcrNode : IVisionNodeExecutor
                         ["chars"] = VisionValue.String(JsonSerializer.Serialize(chars.Select(ch => new { text = ch.Text, x = ch.X, y = ch.Y, width = ch.Width, height = ch.Height }))),
                         ["result"] = VisionValue.String(JsonSerializer.Serialize(new { text, confidence, language, psm = psmName, oem = oemName, wordCount = words.Length, words }))
                     },
-                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length }));
+                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length, ["lowConfidenceWordCount"] = allWords.Length - words.Length, ["blacklist"] = blacklist.Length > 0 }));
             }
             catch (Exception ex) when (ex is not (InvalidOperationException or OperationCanceledException))
             {

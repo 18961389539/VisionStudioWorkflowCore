@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "beefd5bc46da315abf9059d73a1ea5c92b63d68f71fbb4cbb317497272587b97",
+  "hash": "792b9dc47af8ea7e07da2b0673a0429d72b32822ab50c94729190d0225943eae",
   "items": [
     {
       "type": "image.acquire",
@@ -665,6 +665,11 @@
           "required": false
         },
         {
+          "name": "worstViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -697,7 +702,7 @@
           "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views. viewStats reports per-view point coverage and (for planar boards) homography reprojection RMS/max so a single bad view can be found and removed; maxViewRms and maxRms optionally gate acceptance.",
+      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views. viewStats reports per-view point coverage and (for planar boards) homography and camera-pose reprojection RMS/max so a single bad view can be found and removed; worstViewIndex identifies the worst pose-reprojection view and the summary flags an outlier view (pose RMS > 3x median and > 0.5 px). maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model or calibration wizard is provided.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2485,6 +2490,21 @@
           "required": false
         },
         {
+          "name": "similarity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        },
+        {
+          "name": "changedPixelCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2528,10 +2548,10 @@
           "min": 0,
           "max": 65535,
           "step": 1,
-          "description": "When > 0, also report the fraction of pixels whose absolute difference reaches this value."
+          "description": "When > 0, also report the fraction of pixels whose absolute difference reaches this value, the changed-pixel count and an 8-connected change region for downstream region tools."
         }
       ],
-      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences, normalized mode reports the illumination ratio in [-1,1]. Mean/stdDev/min/max are always reported; no automatic alignment is performed (use defect.referenceCompare for registration and grading).",
+      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences, normalized mode reports the illumination ratio in [-1,1]. Mean/stdDev/min/max and a global SSIM-style similarity (whole-image statistics, 1 = identical) are always reported; when threshold > 0 the thresholded change region and changed-pixel count are also emitted. No automatic alignment is performed (use defect.referenceCompare for registration and grading).",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -5092,9 +5112,26 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.01
+        },
+        {
+          "name": "thresholdMode",
+          "label": "Threshold Mode",
+          "type": "select",
+          "defaultValue": "manual",
+          "options": [
+            {
+              "label": "Manual Threshold",
+              "value": "manual"
+            },
+            {
+              "label": "Otsu Auto (spatial maps)",
+              "value": "otsu"
+            }
+          ],
+          "description": "Otsu derives the effective threshold from the spatial anomaly map distribution (suggestedThreshold); scalar outputs always use the manual threshold."
         }
       ],
-      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above threshold (isAnomaly follows the peak).",
+      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the manual threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above the effective threshold (isAnomaly follows the peak). thresholdMode=otsu uses the Otsu threshold of the map itself as the effective threshold.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5492,6 +5529,11 @@
           "required": true
         },
         {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
           "name": "classes",
           "dataType": "String",
           "required": true
@@ -5510,6 +5552,16 @@
           "name": "dominantFraction",
           "dataType": "Double",
           "required": false
+        },
+        {
+          "name": "meanConfidence",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lowConfidenceFraction",
+          "dataType": "Double",
+          "required": true
         },
         {
           "name": "next",
@@ -5608,9 +5660,19 @@
           "max": 1000000,
           "step": 0.01,
           "description": "Used only when the output has one channel; multi-class output uses per-pixel argmax."
+        },
+        {
+          "name": "lowConfidenceThreshold",
+          "label": "Low Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01,
+          "description": "Fraction of pixels whose winning score is below this value is reported as lowConfidenceFraction."
         }
       ],
-      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions plus per-class statistics (classes JSON: pixel count, image fraction, mean winning score) and the dominant class.",
+      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions, a colour overlay tinted per non-background class, per-class statistics (classes JSON: pixel count, image fraction, mean winning score, bounding box and centroid in source pixels), the dominant class, mean winning score and low-confidence pixel fraction. No instance segmentation is performed.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -12064,6 +12126,13 @@
           "type": "text",
           "defaultValue": "",
           "description": "Optional allowed characters, e.g. 0123456789 for numeric fields. Control characters are rejected."
+        },
+        {
+          "name": "blacklist",
+          "label": "Character Blacklist",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional forbidden characters (tessedit_char_blacklist). A character cannot be in both whitelist and blacklist."
         },
         {
           "name": "dpi",

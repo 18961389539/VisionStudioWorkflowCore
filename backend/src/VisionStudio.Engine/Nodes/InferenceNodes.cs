@@ -256,19 +256,61 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
             labels[y * width + x] = label;
             bestScores[y * width + x] = winningScore;
         }
-        // Per-class reporting (ViDi/HALCON DL segmentation style): area, image fraction
-        // and mean winning score per class actually present in the mask.
-        var classStats = InferenceStats.SegmentationClasses(labels, bestScores, channels == 1 ? 2 : channels)
+        // Per-class reporting (ViDi/HALCON DL segmentation style): area, image fraction,
+        // mean winning score, bounding box and centroid per class present in the mask.
+        // Box/centroid are scaled from model resolution to source pixels.
+        var lowConfidenceThreshold = node.GetDouble("lowConfidenceThreshold", 0.5);
+        if (!double.IsFinite(lowConfidenceThreshold)) throw new InvalidOperationException("lowConfidenceThreshold must be finite.");
+        var classCountTotal = channels == 1 ? 2 : channels;
+        var boxStats = InferenceStats.SegmentationClassBoxes(labels, bestScores, classCountTotal, width, height)
             .Where(s => s.PixelCount > 0).ToArray();
+        var classStats = boxStats.Select(s => new InferenceStats.ClassStat(s.ClassId, s.PixelCount, s.Fraction, s.MeanScore)).ToArray();
         var dominant = classStats.OrderByDescending(s => s.PixelCount).FirstOrDefault();
+        var scaleX = (double)source.Width / width; var scaleY = (double)source.Height / height;
+        var meanConfidence = bestScores.Length == 0 ? 0 : bestScores.Average(v => (double)v);
+        var lowConfidenceFraction = bestScores.Length == 0 ? 0 : (double)bestScores.Count(v => v < lowConfidenceThreshold) / bestScores.Length;
         var mask = new Mat();
         try { JLVisionOperators.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest); }
         catch { mask.Dispose(); throw; }
+        // Colour overlay: source image tinted per non-background class with the
+        // deterministic palette, so a human can see where each class landed.
+        var overlay = new Mat();
+        try
+        {
+            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
+            else if (source.Channels() == 3) source.CopyTo(overlay);
+            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
+            else throw new InvalidOperationException($"Segmentation overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
+            mask.GetArray(out byte[] maskBytes);
+            overlay.GetArray(out Vec3b[] basePixels);
+            for (var i = 0; i < maskBytes.Length; i++)
+            {
+                var label = maskBytes[i];
+                if (label == 0) continue;
+                var color = InferenceStats.SegmentationColorBgr(label);
+                var px = basePixels[i];
+                basePixels[i] = new Vec3b(
+                    (byte)Math.Clamp((px.Item0 + color.B) / 2, 0, 255),
+                    (byte)Math.Clamp((px.Item1 + color.G) / 2, 0, 255),
+                    (byte)Math.Clamp((px.Item2 + color.R) / 2, 0, 255));
+            }
+            overlay.SetArray(basePixels);
+        }
+        catch { overlay.Dispose(); throw; }
         var segOutputs = new Dictionary<string, VisionValue>
         {
             ["mask"] = VisionValue.Image(VisionImage.Own(mask)),
-            ["classes"] = VisionValue.String(JsonSerializer.Serialize(classStats.Select(s => new { classId = s.ClassId, pixelCount = s.PixelCount, fraction = s.Fraction, meanScore = s.MeanScore }))),
-            ["classCount"] = VisionValue.Integer(classStats.Length)
+            ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
+            ["classes"] = VisionValue.String(JsonSerializer.Serialize(boxStats.Select(s => new
+            {
+                classId = s.ClassId, pixelCount = s.PixelCount, fraction = s.Fraction, meanScore = s.MeanScore,
+                x = Math.Round(s.X * scaleX, 2), y = Math.Round(s.Y * scaleY, 2),
+                width = Math.Round(s.Width * scaleX, 2), height = Math.Round(s.Height * scaleY, 2),
+                centroidX = Math.Round(s.CentroidX * scaleX, 2), centroidY = Math.Round(s.CentroidY * scaleY, 2)
+            }))),
+            ["classCount"] = VisionValue.Integer(classStats.Length),
+            ["meanConfidence"] = VisionValue.Double(meanConfidence),
+            ["lowConfidenceFraction"] = VisionValue.Double(lowConfidenceFraction)
         };
         if (dominant is not null)
         {
@@ -276,7 +318,7 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
             segOutputs["dominantFraction"] = VisionValue.Double(dominant.Fraction);
         }
         return ValueTask.FromResult(new NodeExecutorResult(segOutputs,
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["classChannels"] = channels, ["maskWidth"] = mask.Width, ["maskHeight"] = mask.Height, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["classChannels"] = channels, ["maskWidth"] = source.Width, ["maskHeight"] = source.Height, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction, ["meanConfidence"] = meanConfidence, ["lowConfidenceFraction"] = lowConfidenceFraction, ["lowConfidenceThreshold"] = lowConfidenceThreshold }));
     }
 }
 
@@ -325,8 +367,15 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         else if (shape.Length == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] > 0) { mapHeight = (int)shape[1]; mapWidth = (int)shape[2]; }
         else throw new InvalidOperationException($"Anomaly output must be a single scalar tensor (for example [1] or [1,1]) or an anomaly map [1,1,H,W] / [1,H,W]; received [{string.Join(',', shape)}].");
         if (values.Length != mapWidth * mapHeight) throw new InvalidOperationException("Anomaly map element count does not match its shape.");
-        var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, threshold);
+        var thresholdMode = node.GetString("thresholdMode", "manual").Trim().ToLowerInvariant();
+        if (thresholdMode is not ("manual" or "otsu")) throw new InvalidOperationException("Anomaly thresholdMode must be manual or otsu.");
         var suggestedThreshold = InferenceStats.OtsuThreshold(values);
+        // Otsu auto-threshold (HALCON DL threshold aid as an operating mode, not only a
+        // suggestion): the effective threshold drives isAnomaly/areaFraction. Scalar
+        // outputs keep the manual threshold because one value has no distribution.
+        var effectiveThreshold = thresholdMode == "otsu" ? suggestedThreshold : threshold;
+        var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, effectiveThreshold);
+        threshold = effectiveThreshold;
         var normalized = InferenceStats.NormalizeMap(values);
         using var mapMat = new Mat(mapHeight, mapWidth, MatType.CV_8UC1);
         mapMat.SetArray(normalized);

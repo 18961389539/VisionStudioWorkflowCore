@@ -5,6 +5,52 @@ namespace VisionStudio.Engine.Algorithms;
 public static class InferenceStats
 {
     public sealed record ClassStat(int ClassId, int PixelCount, double Fraction, double MeanScore);
+    public sealed record ClassBoxStat(int ClassId, int PixelCount, double Fraction, double MeanScore, int X, int Y, int Width, int Height, double CentroidX, double CentroidY);
+
+    /// <summary>Per-class area/score plus bounding box and centroid (in label-map pixels).
+    /// Segmentation inspection needs to know where a class is, not only how much of it
+    /// exists (HALCON/ViDi segmentation reports region geometry per class).</summary>
+    public static ClassBoxStat[] SegmentationClassBoxes(byte[] labels, float[] bestScores, int classCount, int width, int height)
+    {
+        if (labels.Length != bestScores.Length || labels.Length != width * height)
+            throw new InvalidOperationException("Segmentation label/score buffers must match width*height.");
+        var stats = SegmentationClasses(labels, bestScores, classCount);
+        var minX = new int[classCount]; var minY = new int[classCount];
+        var maxX = new int[classCount]; var maxY = new int[classCount];
+        var sumX = new double[classCount]; var sumY = new double[classCount];
+        Array.Fill(minX, int.MaxValue); Array.Fill(minY, int.MaxValue);
+        Array.Fill(maxX, -1); Array.Fill(maxY, -1);
+        for (var i = 0; i < labels.Length; i++)
+        {
+            var c = labels[i];
+            if (c >= classCount) continue;
+            var x = i % width; var y = i / width;
+            if (x < minX[c]) minX[c] = x;
+            if (y < minY[c]) minY[c] = y;
+            if (x > maxX[c]) maxX[c] = x;
+            if (y > maxY[c]) maxY[c] = y;
+            sumX[c] += x; sumY[c] += y;
+        }
+        return stats.Select(s => s.PixelCount == 0
+            ? new ClassBoxStat(s.ClassId, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            : new ClassBoxStat(s.ClassId, s.PixelCount, s.Fraction, s.MeanScore,
+                minX[s.ClassId], minY[s.ClassId], maxX[s.ClassId] - minX[s.ClassId] + 1, maxY[s.ClassId] - minY[s.ClassId] + 1,
+                sumX[s.ClassId] / s.PixelCount, sumY[s.ClassId] / s.PixelCount)).ToArray();
+    }
+
+    /// <summary>Deterministic BGR palette for segmentation overlays. Class 0 is the
+    /// background and is never tinted; other classes cycle a fixed colour table.</summary>
+    public static (byte B, byte G, byte R) SegmentationColorBgr(int classId)
+    {
+        (byte B, byte G, byte R)[] palette =
+        [
+            (0, 0, 0), (0, 0, 255), (0, 200, 0), (255, 0, 0), (0, 220, 255),
+            (255, 0, 200), (255, 200, 0), (180, 180, 180), (80, 120, 255), (60, 255, 160),
+            (200, 80, 255), (120, 255, 255)
+        ];
+        if (classId <= 0) return palette[0];
+        return palette[1 + (classId - 1) % (palette.Length - 1)];
+    }
     public sealed record AnomalyMapStat(double Min, double Max, double Mean, double Peak, int PeakX, int PeakY, double AreaFraction);
     public sealed record YoloCandidate(double CenterX, double CenterY, double Width, double Height, double Score, int ClassId);
 
