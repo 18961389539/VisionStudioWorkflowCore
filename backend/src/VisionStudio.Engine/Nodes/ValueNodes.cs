@@ -1,5 +1,4 @@
 using VisionStudio.Abstractions;
-
 namespace VisionStudio.Engine.Nodes;
 
 /// <summary>
@@ -11,29 +10,22 @@ namespace VisionStudio.Engine.Nodes;
 public sealed class ValueNumberNode : IVisionNodeExecutor
 {
     public string Type => "value.number";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var value = node.GetDouble("value", 0);
-        if (!double.IsFinite(value))
-            throw new InvalidOperationException("value.number requires a finite value.");
+        cancellationToken.ThrowIfCancellationRequested();
+        var value = CoordinateValidation.RequireFinite(node.GetDouble("value", 0), "value");
         const double longUpperExclusive = 9_223_372_036_854_775_808d;
-        if (value >= longUpperExclusive || value < -longUpperExclusive)
-            throw new InvalidOperationException("value.number is outside the supported 64-bit integer range.");
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["value"] = VisionValue.Double(value),
-                ["integer"] = VisionValue.Integer((long)Math.Round(value, MidpointRounding.AwayFromZero))
-            },
-            new Dictionary<string, object?> { ["value"] = value }));
+        if (value >= longUpperExclusive || value < -longUpperExclusive) throw new InvalidOperationException("value.number is outside the supported 64-bit integer range.");
+        var rounded = Math.Round(value, MidpointRounding.AwayFromZero);
+        if (!double.IsFinite(rounded)) throw new InvalidOperationException("value.number rounding produced a non-finite value.");
+        var integer = (long)rounded; var isInteger = Math.Abs(value - rounded) < 1e-12;
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("integer", integer), ("isInteger", isInteger));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["value"] = VisionValue.Double(value), ["integer"] = VisionValue.Integer(integer), ["isInteger"] = VisionValue.Boolean(isInteger), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["diagnostics"] = diag }));
     }
 }
-
 public sealed class ValueArithmeticNode : IVisionNodeExecutor
 {
     public string Type => "value.arithmetic";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         var a = context.RequireNumber("a");
@@ -74,9 +66,10 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
         if (!double.IsFinite(result))
             throw new InvalidOperationException("value.arithmetic result is not finite.");
 
+        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("b", b), ("op", operation), ("result", result));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["result"] = VisionValue.Double(result) },
-            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["b"] = b, ["result"] = result }));
+            new Dictionary<string, VisionValue> { ["result"] = VisionValue.Double(result), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["b"] = b, ["result"] = result, ["diagnostics"] = diag }));
     }
 
     private static double Clamp(NodeDefinition node, double value)
@@ -90,53 +83,32 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
         return Math.Clamp(value, minimum, maximum);
     }
 }
-
 public sealed class ValueRangeNode : IVisionNodeExecutor
 {
     public string Type => "value.range";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var value = context.RequireNumber("value");
-        var min = node.GetDouble("min", 0);
-        var max = node.GetDouble("max", 100);
+        cancellationToken.ThrowIfCancellationRequested();
+        var value = CoordinateValidation.RequireFinite(context.RequireNumber("value"), "value");
+        var min = CoordinateValidation.RequireFinite(node.GetDouble("min", 0), "min");
+        var max = CoordinateValidation.RequireFinite(node.GetDouble("max", 100), "max");
         var invert = node.GetBool("invert", false);
-        if (!double.IsFinite(value) || !double.IsFinite(min) || !double.IsFinite(max))
-            throw new InvalidOperationException("value.range requires a finite value and finite bounds.");
-
-        if (min > max)
-            throw new InvalidOperationException($"value.range minimum {min} is greater than maximum {max}. Swap the bounds or correct the configuration.");
-        var inside = value >= min && value <= max;
-        var pass = invert ? !inside : inside;
-        var deviation = value > max ? value - max : value < min ? value - min : 0d;
-        var clamped = Math.Clamp(value, min, max);
-
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["pass"] = VisionValue.Boolean(pass),
-                ["deviation"] = VisionValue.Double(deviation),
-                ["clamped"] = VisionValue.Double(clamped)
-            },
-            new Dictionary<string, object?>
-            {
-                ["value"] = value,
-                ["min"] = min,
-                ["max"] = max,
-                ["invert"] = invert,
-                ["pass"] = pass,
-                ["deviation"] = deviation,
-                ["clamped"] = clamped
-            }));
+        var swapped = min > max; var lower = Math.Min(min, max); var upper = Math.Max(min, max);
+        var inside = value >= lower && value <= upper; var pass = invert ? !inside : inside;
+        var margin = inside ? Math.Min(value - lower, upper - value) : -Math.Min(Math.Abs(value - lower), Math.Abs(value - upper));
+        CoordinateValidation.RequireFinite(margin, "range.margin");
+        var deviation = value > upper ? value - upper : value < lower ? value - lower : 0d;
+        var clamped = Math.Clamp(value, lower, upper);
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("lower", lower), ("upper", upper), ("inside", inside), ("pass", pass), ("invert", invert), ("boundsSwapped", swapped), ("margin", margin), ("deviation", deviation), ("clamped", clamped));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["inside"] = VisionValue.Boolean(inside), ["margin"] = VisionValue.Double(margin), ["deviation"] = VisionValue.Double(deviation), ["clamped"] = VisionValue.Double(clamped), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["min"] = lower, ["max"] = upper, ["invert"] = invert, ["pass"] = pass, ["deviation"] = deviation, ["clamped"] = clamped, ["diagnostics"] = diag }));
     }
 }
-
 public sealed class LogicBooleanNode : IVisionNodeExecutor
 {
     public string Type => "logic.boolean";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var a = context.Require<bool>("a");
         var operation = node.GetString("op", "and").Trim().ToLowerInvariant();
 
@@ -161,8 +133,9 @@ public sealed class LogicBooleanNode : IVisionNodeExecutor
                 throw new InvalidOperationException($"logic.boolean operation '{operation}' is not supported.");
         }
 
+        var diag = CoordinateValidation.Diagnostics(Type, ("a", a), ("op", operation), ("result", result), ("usesB", usedB));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["result"] = VisionValue.Boolean(result) },
-            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["result"] = result, ["usesB"] = usedB }));
+            new Dictionary<string, VisionValue> { ["result"] = VisionValue.Boolean(result), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["result"] = result, ["usesB"] = usedB, ["diagnostics"] = diag }));
     }
 }

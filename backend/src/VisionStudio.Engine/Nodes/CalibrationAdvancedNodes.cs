@@ -42,13 +42,64 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             objects.Add(view.ObjectPoints.Select(p => new Point3f((float)p[0], (float)p[1], (float)p[2])).ToArray());
             images.Add(ip);
         }
+        // Per-view quality reporting before trusting the model: point coverage plus,
+        // for planar boards, a homography reprojection error per view. A single bad
+        // view (mis-detected corners) is the most common cause of a poor calibration,
+        // and a global RMS alone hides it.
+        var viewStats = request.Views.Select((view, index) =>
+        {
+            var stat = CalibrationViewAnalysis.Analyze(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight);
+            return new { index, pointCount = stat.PointCount, coverageX = Math.Round(stat.CoverageX, 4), coverageY = Math.Round(stat.CoverageY, 4), reprojectionRms = stat.ReprojectionRms, reprojectionMax = stat.ReprojectionMax };
+        }).ToArray();
+        var maxViewRms = node.GetDouble("maxViewRms", 0);
+        if (!double.IsFinite(maxViewRms) || maxViewRms < 0) throw new InvalidOperationException("maxViewRms must be finite and non-negative (0 disables the per-view gate).");
+        if (maxViewRms > 0)
+        {
+            var bad = viewStats.FirstOrDefault(v => v.reprojectionRms is not null && v.reprojectionRms > maxViewRms);
+            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has planar reprojection RMS {bad.reprojectionRms:0.###} px above maxViewRms {maxViewRms:0.###}; check that view's detected points.");
+        }
         CameraCalibrationModel model;
         try { model = JLVisionCalibration.Calibrate(request, cancellationToken); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"JLVision intrinsic calibration failed: {ex.Message}", ex); }
         var rms = model.Rms;
+        var maxRms = node.GetDouble("maxRms", 0);
+        if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("maxRms must be finite and non-negative (0 disables the model gate).");
+        if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms) }, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
+        var worstViewRms = viewStats.Where(v => v.reprojectionRms is not null).Select(v => v.reprojectionRms!.Value).DefaultIfEmpty(0).Max();
+        // Fuller per-view reprojection through the fitted camera matrix itself:
+        // recover each planar view's pose from K^-1 H and reproject (homography alone
+        // absorbs pose error, so this is the stricter, model-based number).
+        var fx = model.CameraMatrix[0][0]; var fy = model.CameraMatrix[1][1];
+        var cx = model.CameraMatrix[0][2]; var cy = model.CameraMatrix[1][2];
+        var fullViewStats = request.Views.Select((view, index) =>
+        {
+            var pose = CalibrationViewAnalysis.AnalyzeWithCamera(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight, fx, fy, cx, cy, model.DistCoeffs);
+            var homography = viewStats[index];
+            return new
+            {
+                homography.index, homography.pointCount, homography.coverageX, homography.coverageY,
+                homographyRms = homography.reprojectionRms, homographyMax = homography.reprojectionMax,
+                poseReprojectionRms = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionRms,
+                poseReprojectionMax = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionMax
+            };
+        }).ToArray();
+        var worstPoseViewRms = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).DefaultIfEmpty(0).Max();
+        var worstPoseViewIndex = fullViewStats.Where(v => v.poseReprojectionRms is not null).OrderByDescending(v => v.poseReprojectionRms!.Value).Select(v => (int?)v.index).FirstOrDefault();
+        var poseRmsValues = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).OrderBy(v => v).ToArray();
+        var medianPoseRms = poseRmsValues.Length == 0 ? 0d : poseRmsValues.Length % 2 == 1 ? poseRmsValues[poseRmsValues.Length / 2] : (poseRmsValues[poseRmsValues.Length / 2 - 1] + poseRmsValues[poseRmsValues.Length / 2]) / 2d;
+        // Outlier view: pose RMS more than 3x the median (and above 0.5 px) - the view
+        // to inspect/remove first, as mature calibrators flag suspect views.
+        var outlierViewIndex = medianPoseRms > 0 && worstPoseViewRms > Math.Max(0.5, 3 * medianPoseRms) ? worstPoseViewIndex : null;
+        var outputs = new Dictionary<string, VisionValue>
+        {
+            ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms),
+            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(fullViewStats))
+        };
+        if (viewStats.Any(v => v.reprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
+        if (worstPoseViewIndex is not null) outputs["worstViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
     }
 }
 
@@ -91,6 +142,15 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         var samples = request.Samples;
         if (samples is null || samples.Count < 4) throw new InvalidOperationException("2D hand-eye calibration requires at least four robot/vision pose pairs.");
         if (samples.Any(s => s is null || !Finite(s.Robot) || !Finite(s.Vision))) throw new InvalidOperationException("Robot and vision pose coordinates and angles must be finite, and each sample must be non-null.");
+        // Reject exact duplicate robot poses — they add no observability and inflate false confidence.
+        for (var i = 0; i < samples.Count; i++)
+        for (var j = i + 1; j < samples.Count; j++)
+        {
+            if (Math.Abs(samples[i].Robot.X - samples[j].Robot.X) < 1e-9
+                && Math.Abs(samples[i].Robot.Y - samples[j].Robot.Y) < 1e-9
+                && Math.Abs(Normalize(samples[i].Robot.ThetaDeg) - Normalize(samples[j].Robot.ThetaDeg)) < 1e-6)
+                throw new InvalidOperationException($"Hand-eye samples {i} and {j} share the same robot pose; teach distinct robot poses.");
+        }
         var mode = node.GetString("mode", "eyeInHand").Trim();
         if (!mode.Equals("eyeInHand", StringComparison.OrdinalIgnoreCase) && !mode.Equals("eyeToHand", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Mode must be eyeInHand or eyeToHand.");
         var robotAngles = samples.Select(s => Normalize(s.Robot.ThetaDeg)).ToArray();
@@ -121,13 +181,47 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         CheckObservability(samples,x,mode);
         var errors = Residuals(samples,x,mode); var translationRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i]*errors[3*i]+errors[3*i+1]*errors[3*i+1])); var angleRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i+2]*errors[3*i+2]))/50;
         if (!double.IsFinite(translationRms) || translationRms > 1e6) throw new InvalidOperationException("Hand-eye solve did not converge to a finite solution.");
+        // Per-sample residual report (translation hypot + angle degrees) so operators can
+        // drop a bad pose pair the way mature hand-eye tools highlight worst samples.
+        var sampleResiduals = Enumerable.Range(0, samples.Count).Select(i => new
+        {
+            index = i,
+            translationError = Math.Sqrt(errors[3 * i] * errors[3 * i] + errors[3 * i + 1] * errors[3 * i + 1]),
+            angleErrorDeg = Math.Abs(errors[3 * i + 2] / 50) * 180 / Math.PI,
+            robot = new { x = samples[i].Robot.X, y = samples[i].Robot.Y, thetaDeg = samples[i].Robot.ThetaDeg },
+            vision = new { x = samples[i].Vision.X, y = samples[i].Vision.Y, thetaDeg = samples[i].Vision.ThetaDeg }
+        }).ToArray();
+        var maxTranslationError = sampleResiduals.Max(s => s.translationError);
+        var maxAngleErrorDeg = sampleResiduals.Max(s => s.angleErrorDeg);
+        var worstSampleIndex = sampleResiduals.OrderByDescending(s => s.translationError).Select(s => s.index).First();
+        var maxTranslation = node.GetDouble("maxTranslationError", 0);
+        var maxAngle = node.GetDouble("maxAngleErrorDeg", 0);
+        if (!double.IsFinite(maxTranslation) || maxTranslation < 0) throw new InvalidOperationException("maxTranslationError must be finite and non-negative (0 disables).");
+        if (!double.IsFinite(maxAngle) || maxAngle < 0) throw new InvalidOperationException("maxAngleErrorDeg must be finite and non-negative (0 disables).");
+        if (maxTranslation > 0 && maxTranslationError > maxTranslation)
+            throw new InvalidOperationException($"Hand-eye sample {worstSampleIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslation:0.####}; remove or re-teach that pose pair.");
+        if (maxAngle > 0 && maxAngleErrorDeg > maxAngle)
+            throw new InvalidOperationException($"Hand-eye max angle residual {maxAngleErrorDeg:0.####} deg exceeds maxAngleErrorDeg {maxAngle:0.####}; remove the worst pose pair and re-solve.");
         var theta=Normalize(x[2]*180/Math.PI); var pose = new VisionPose2D(x[0],x[1],theta);
         var radians=theta*Math.PI/180; var sourceFrame=node.GetString("sourceFrame","Camera");
         var defaultTargetFrame=mode.Equals("eyeInHand",StringComparison.OrdinalIgnoreCase)?"RobotTool":"RobotBase";
         var targetFrame=node.GetString("targetFrame",defaultTargetFrame); if(string.IsNullOrWhiteSpace(targetFrame))targetFrame=defaultTargetFrame;
         var unit=node.GetString("unit","mm");
         var transform=new VisionTransform2D(sourceFrame,targetFrame,unit,Math.Cos(radians),-Math.Sin(radians),x[0],Math.Sin(radians),Math.Cos(radians),x[1],0,0,1,node.GetString("sourceUnit","mm"));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pose"] = VisionValue.Pose(pose), ["transform"] = VisionValue.Transform(transform), ["translationRms"] = VisionValue.Double(translationRms), ["angleRmsDeg"] = VisionValue.Double(angleRms*180/Math.PI) }, new Dictionary<string, object?> { ["mode"] = mode, ["samples"] = samples.Count, ["transform2D"] = "SE(2)", ["sourceFrame"] = sourceFrame, ["targetFrame"] = targetFrame, ["unit"] = unit, ["translationRms"] = translationRms, ["angleRmsDeg"] = angleRms*180/Math.PI, ["scope"] = "planar only; no 3D hand-eye" }));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["pose"] = VisionValue.Pose(pose), ["transform"] = VisionValue.Transform(transform),
+            ["translationRms"] = VisionValue.Double(translationRms), ["angleRmsDeg"] = VisionValue.Double(angleRms*180/Math.PI),
+            ["maxTranslationError"] = VisionValue.Double(maxTranslationError), ["maxAngleErrorDeg"] = VisionValue.Double(maxAngleErrorDeg),
+            ["worstSampleIndex"] = VisionValue.Integer(worstSampleIndex),
+            ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
+        }, new Dictionary<string, object?>
+        {
+            ["mode"] = mode, ["samples"] = samples.Count, ["transform2D"] = "SE(2)", ["sourceFrame"] = sourceFrame, ["targetFrame"] = targetFrame, ["unit"] = unit,
+            ["translationRms"] = translationRms, ["angleRmsDeg"] = angleRms*180/Math.PI,
+            ["maxTranslationError"] = maxTranslationError, ["maxAngleErrorDeg"] = maxAngleErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
+            ["scope"] = "planar only; no 3D hand-eye"
+        }));
     }
     private static bool Finite(VisionPose2D p) => double.IsFinite(p.X)&&double.IsFinite(p.Y)&&double.IsFinite(p.ThetaDeg);
     private static double[] Residuals(List<HandEyeSample> s, double[] x, string mode)

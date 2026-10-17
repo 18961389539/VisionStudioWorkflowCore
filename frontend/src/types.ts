@@ -950,6 +950,59 @@ export type CalibrationVersionSnapshot = {
   result: CalibrationWorkspaceResult;
 };
 
+
+export type CalibrationWizardQuality = {
+  cornerCount: number;
+  expectedCorners: number;
+  coverageX: number;
+  coverageY: number;
+  blurVariance: number;
+  verdict: 'Fail' | 'Warn' | 'Pass';
+  reason: string;
+  guidance: string;
+};
+
+export type CalibrationWizardView = {
+  index: number;
+  enabled: boolean;
+  label: string;
+  quality: CalibrationWizardQuality;
+};
+
+export type CalibrationWizardSession = {
+  sessionId: string;
+  board: {
+    pattern: string;
+    columns: number;
+    rows: number;
+    spacingMm: number;
+    minBlurVariance: number;
+    minCoverage: number;
+    maxGridError: number;
+    saddleThreshold: number;
+  };
+  imageWidth?: number | null;
+  imageHeight?: number | null;
+  views: CalibrationWizardView[];
+  enabledCount: number;
+  model?: unknown;
+  lastSolveSummary?: Record<string, unknown> | null;
+};
+
+export type CalibrationWizardHint = {
+  code: string;
+  message: string;
+  region: string;
+};
+
+export type CalibrationHandEyeResidual = {
+  index: number;
+  translationError: number;
+  angleErrorDeg: number;
+  robot: { x: number; y: number; thetaDeg: number };
+  vision: { x: number; y: number; thetaDeg: number };
+};
+
 export type DeviceConnectionState = 'Disconnected' | 'Connecting' | 'Connected' | 'Reconnecting' | 'Faulted';
 export type DeviceTagQuality = 'Good' | 'Uncertain' | 'Bad' | 'Disconnected';
 export type DeviceTagDataType = 'Boolean' | 'Integer' | 'Double' | 'String';

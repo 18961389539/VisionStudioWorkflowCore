@@ -26,8 +26,22 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         var minArea = node.GetDouble("minArea", 100);
         var maxArea = largestOnly ? 0 : node.GetDouble("maxArea", 0);
         var minCircularity = largestOnly ? 0 : node.GetDouble("minCircularity", 0);
+        var minWidth = largestOnly ? 0 : node.GetDouble("minWidth", 0);
+        var maxWidth = largestOnly ? 0 : node.GetDouble("maxWidth", 0);
+        var minHeight = largestOnly ? 0 : node.GetDouble("minHeight", 0);
+        var maxHeight = largestOnly ? 0 : node.GetDouble("maxHeight", 0);
+        var minRectangularity = largestOnly ? 0 : node.GetDouble("minRectangularity", 0);
+        if (!double.IsFinite(minArea) || minArea < 0 || !double.IsFinite(maxArea) || maxArea < 0 || maxArea > 0 && maxArea < minArea)
+            throw new InvalidOperationException("Blob area filter must satisfy 0 <= minArea <= maxArea (maxArea 0 means unlimited).");
+        if (!double.IsFinite(minCircularity) || minCircularity is < 0 or > 1 || !double.IsFinite(minRectangularity) || minRectangularity is < 0 or > 1)
+            throw new InvalidOperationException("Blob minCircularity and minRectangularity must be between 0 and 1.");
+        if (new[] { minWidth, maxWidth, minHeight, maxHeight }.Any(v => !double.IsFinite(v) || v < 0) ||
+            maxWidth > 0 && maxWidth < minWidth || maxHeight > 0 && maxHeight < minHeight)
+            throw new InvalidOperationException("Blob width/height filters must be non-negative with min <= max (0 means unlimited).");
         var maxCount = largestOnly ? 1 : Math.Clamp(node.GetInt("maxCount", 20), 1, 200);
         var sortBy = largestOnly ? "area" : node.GetString("sortBy", "area").Trim().ToLowerInvariant();
+        if (sortBy is not ("area" or "x" or "lefttoright" or "y" or "toptobottom" or "circularity"))
+            throw new InvalidOperationException($"Unsupported blob sortBy '{sortBy}'. Supported values are 'area', 'x', 'y', and 'circularity'.");
         var descending = largestOnly || node.GetBool("descending", true);
         var roi = node.GetRoi();
 
@@ -58,6 +72,12 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
 
                 JLVisionOperators.MinEnclosingCircle(contour, out Point2f center, out float radius);
                 var rect = JLVisionOperators.BoundingRect(contour);
+                // HALCON select_shape-style multi-feature filtering: bounding-box size
+                // and rectangularity in addition to area/circularity.
+                if (rect.Width < minWidth || maxWidth > 0 && rect.Width > maxWidth) continue;
+                if (rect.Height < minHeight || maxHeight > 0 && rect.Height > maxHeight) continue;
+                var rectangularity = rect.Width * rect.Height > 0 ? area / (rect.Width * rect.Height) : 0;
+                if (rectangularity < minRectangularity) continue;
                 candidates.Add(new VisionDetection(
                     Index: 0,
                     X: rect.X,
@@ -73,6 +93,9 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
 
             IEnumerable<VisionDetection> ordered = sortBy switch
             {
+                "circularity" => descending
+                    ? candidates.OrderByDescending(x => x.Circularity).ThenByDescending(x => x.Area)
+                    : candidates.OrderBy(x => x.Circularity).ThenByDescending(x => x.Area),
                 "x" or "lefttoright" => descending
                     ? candidates.OrderByDescending(x => x.X).ThenByDescending(x => x.Y)
                     : candidates.OrderBy(x => x.X).ThenBy(x => x.Y),

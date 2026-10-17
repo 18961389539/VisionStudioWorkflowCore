@@ -28,9 +28,11 @@ internal static class GrayMorphology
         token.ThrowIfCancellationRequested();
         var outputMat = JLVisionImages.ToMat(output);
         outputMat = PreprocessImageHelpers.ApplyRoiMask(outputMat, applyRoi ? node.GetRoi() : null);
+        var fgRatio = outputMat.Total() > 0 ? (double)JLVisionOperators.CountNonZero(outputMat) / outputMat.Total() : 0;
+        var diag = CoordinateValidation.Diagnostics("image.grayMorphology", ("operation", operation), ("kernelWidth", width), ("kernelHeight", height), ("nonZeroRatio", fgRatio), ("width", outputMat.Width), ("height", outputMat.Height));
         return new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(outputMat)) },
-            new Dictionary<string, object?> { ["operation"] = operation, ["kernelWidth"] = width, ["kernelHeight"] = height, ["algorithmBackend"] = "JLVision" });
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(outputMat)), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["operation"] = operation, ["kernelWidth"] = width, ["kernelHeight"] = height, ["algorithmBackend"] = "JLVision", ["diagnostics"] = diag });
     }
 }
 
@@ -85,6 +87,7 @@ public sealed class GrayHistogramNode : IVisionNodeExecutor
             ["binsJson"] = VisionValue.String(JsonSerializer.Serialize(bins)), ["cdfJson"] = VisionValue.String(JsonSerializer.Serialize(cdf))
         };
         var summary = new Dictionary<string, object?> { ["found"] = count > 0, ["pixelCount"] = count, ["algorithmBackend"] = "JLVision" };
+        outputs["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("found", count > 0), ("pixelCount", count), ("lowPercent", low), ("highPercent", high)));
         if (count > 0)
         {
             var mean = bins.Select((v, i) => (double)v * i).Sum() / count;

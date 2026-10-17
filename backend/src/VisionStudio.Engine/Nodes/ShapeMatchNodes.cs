@@ -11,7 +11,19 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
 {
     public string Type => "match.shape";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-        => ValueTask.FromResult(JLVisionMatching.Execute(context, node, true, cancellationToken));
+    {
+        var engine = node.GetString("engine", "native").Trim().ToLowerInvariant();
+        if (engine is "managedchamfer" or "chamfer")
+            return ValueTask.FromResult(ManagedShapeMatch.Execute(context, node, cancellationToken));
+        if (engine == "auto")
+        {
+            try { return ValueTask.FromResult(JLVisionMatching.Execute(context, node, true, cancellationToken)); }
+            catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or TypeInitializationException)
+            { return ValueTask.FromResult(ManagedShapeMatch.Execute(context, node, cancellationToken)); }
+        }
+        if (engine != "native") throw new InvalidOperationException($"match.shape engine '{engine}' is not supported (native|managedChamfer|auto).");
+        return ValueTask.FromResult(JLVisionMatching.Execute(context, node, true, cancellationToken));
+    }
 }
 
 /// <summary>

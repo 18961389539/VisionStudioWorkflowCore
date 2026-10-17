@@ -93,14 +93,37 @@ public sealed class ImageRegisterNode : IVisionNodeExecutor
         var halfX = (width - 1) / 2d; var halfY = (height - 1) / 2d;
         var centerX = match.Outputs["x"].Require<double>("x") + Math.Abs(c) * halfX + Math.Abs(s) * halfY;
         var centerY = match.Outputs["y"].Require<double>("y") + Math.Abs(s) * halfX + Math.Abs(c) * halfY;
+        // Optional subpixel translation refinement: for near-axis-aligned matches the
+        // correlation peak around the integer match is parabolically interpolated.
+        // Rotated matches keep the integer result (their axis-aligned bounds are not a
+        // valid correlation window), so refinement never silently degrades them.
+        var refineOffsetX = 0d; var refineOffsetY = 0d; var refined = false;
+        if (node.GetBool("subpixelRefine", false) && Math.Abs(match.Outputs["angle"].Require<double>("angle")) <= 5)
+        {
+            using var sceneGray = RecognitionImageHelpers.ToGray8(source.Mat);
+            using var patchGray = RecognitionImageHelpers.ToGray8(patch.Mat);
+            sceneGray.GetArray(out byte[] sceneBytes); patchGray.GetArray(out byte[] patchBytes);
+            var originX = (int)Math.Round(match.Outputs["x"].Require<double>("x"));
+            var originY = (int)Math.Round(match.Outputs["y"].Require<double>("y"));
+            var refinement = RegistrationRefinement.Refine(sceneBytes, source.Width, patchBytes, width, height, originX, originY);
+            if (refinement.PeakScore > 0)
+            {
+                refineOffsetX = refinement.OffsetX; refineOffsetY = refinement.OffsetY; refined = true;
+                centerX += refineOffsetX; centerY += refineOffsetY;
+            }
+        }
         // Inverse of the image-coordinate counterclockwise pose returned by NCC.
         var transform = new VisionTransform2D("CurrentImage", "ReferenceImage", "px", c, -s, x + halfX - c * centerX + s * centerY,
             s, c, y + halfY - s * centerX - c * centerY, 0, 0, 1);
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
-            ["found"] = VisionValue.Boolean(true), ["score"] = match.Outputs["score"], ["transform"] = VisionValue.Transform(transform)
+            ["found"] = VisionValue.Boolean(true), ["score"] = match.Outputs["score"], ["transform"] = VisionValue.Transform(transform),
+            ["angle"] = VisionValue.Double(match.Outputs["angle"].Require<double>("angle")),
+            ["center"] = VisionValue.Point(new VisionPoint2D(centerX, centerY))
         }, new Dictionary<string, object?> { ["found"] = true, ["score"] = match.Outputs["score"].Value, ["transform"] = transform,
+            ["angleDeg"] = match.Outputs["angle"].Require<double>("angle"), ["centerX"] = centerX, ["centerY"] = centerY,
+            ["subpixelRefined"] = refined, ["refineOffsetX"] = refineOffsetX, ["refineOffsetY"] = refineOffsetY,
             ["algorithmBackend"] = "JLVision", ["modelCacheHit"] = match.Summary.GetValueOrDefault("modelCacheHit") }, match.Overlays));
     }
     private static NodeExecutorResult Missing(string reason) => new(new Dictionary<string, VisionValue>

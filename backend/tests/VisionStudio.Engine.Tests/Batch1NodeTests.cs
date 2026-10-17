@@ -466,9 +466,11 @@ public sealed class Batch1NodeTests
         Assert.Equal(50d, (double)inside.Outputs["clamped"].Value!, 6);
         Assert.False((bool)(await Run(new ValueRangeNode(), Number(101), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
         Assert.True((bool)(await Run(new ValueRangeNode(), Number(100), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
-        var reversed = await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}"""));
-        Assert.Contains("greater than maximum", reversed.Message);
+        // Merge reconciliation: main (BatchH) swaps reversed bounds and flags boundsSwapped in diagnostics,
+        // superseding PR #1 reject-reversed-bounds behavior; deviation/clamped outputs from PR #1 are kept.
+        var reversed = await Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}""");
+        Assert.True((bool)reversed.Outputs["inside"].Value!);
+        Assert.Contains("boundsSwapped", (string)reversed.Outputs["diagnostics"].Value!);
         var high = await Run(new ValueRangeNode(), Number(150), """{"min":0,"max":100,"invert":true}""");
         Assert.True((bool)high.Outputs["pass"].Value!);
         Assert.Equal(50d, (double)high.Outputs["deviation"].Value!, 6);

@@ -5,7 +5,7 @@ public static class RegionCatalog
     private static readonly PortDescriptor Exec = new("exec", VisionDataType.Control);
     private static readonly PortDescriptor Next = new("next", VisionDataType.Control);
     private static readonly PortDescriptor Region = new("region", VisionDataType.Region);
-    private static readonly PortDescriptor[] Outputs = [Region, new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), Next];
+    private static readonly PortDescriptor[] Outputs = [Region, new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String, Required: false), Next];
     private static readonly PortDescriptor[] Images = [Exec, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false)];
     private static readonly PortDescriptor[] RangeImages = [Exec, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false), new("region", VisionDataType.Region, Required: false)];
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =

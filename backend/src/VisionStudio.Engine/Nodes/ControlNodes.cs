@@ -1,16 +1,11 @@
-using VisionStudio.Engine.Runtime;
-
+﻿using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Nodes;
-
 public sealed class IfConditionNode : IVisionNodeExecutor
 {
     public string Type => "flow.if";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
-        NodeExecutionContext context,
-        NodeDefinition node,
-        CancellationToken cancellationToken)
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var value = context.RequireNumber("value");
         if (!double.IsFinite(value))
             throw new InvalidOperationException("flow.if requires a finite value.");
@@ -61,8 +56,10 @@ public sealed class IfConditionNode : IVisionNodeExecutor
                 : ApplyThresholdHysteresis(value, compare, op, tolerance, hysteresis, previous);
         }
 
+        var margin = mode == "range" ? Math.Min(value - rangeMin!.Value, rangeMax!.Value - value) : value - compare;
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("threshold", compare), ("operator", op), ("mode", mode.Length == 0 ? "threshold" : mode), ("condition", condition), ("margin", margin));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["condition"] = VisionValue.Boolean(condition) },
+            new Dictionary<string, VisionValue> { ["condition"] = VisionValue.Boolean(condition), ["value"] = VisionValue.Double(value), ["margin"] = VisionValue.Double(margin), ["diagnostics"] = VisionValue.String(diag) },
             new Dictionary<string, object?>
             {
                 ["value"] = Math.Round(value, 3),
@@ -71,7 +68,8 @@ public sealed class IfConditionNode : IVisionNodeExecutor
                 ["mode"] = mode.Length == 0 ? "threshold" : mode,
                 ["tolerance"] = tolerance,
                 ["condition"] = condition,
-                ["hysteresisApplied"] = hysteresisApplied
+                ["hysteresisApplied"] = hysteresisApplied,
+                ["diagnostics"] = diag
             }));
     }
 
@@ -95,55 +93,34 @@ public sealed class IfConditionNode : IVisionNodeExecutor
             ? value >= rangeMin - hysteresis && value <= rangeMax + hysteresis
             : value >= rangeMin + hysteresis && value <= rangeMax - hysteresis;
 }
-
 public sealed class ParallelMarkerNode : IVisionNodeExecutor
 {
     public string Type => "flow.parallel";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
-        NodeExecutionContext context,
-        NodeDefinition node,
-        CancellationToken cancellationToken)
-        => ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>(),
-            new Dictionary<string, object?> { ["branches"] = 2 }));
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var diag = CoordinateValidation.Diagnostics(Type, ("branches", 2), ("marker", "parallel"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["branches"] = 2, ["diagnostics"] = diag }));
+    }
 }
-
 public sealed class JoinNode : IVisionNodeExecutor
 {
     public string Type => "flow.join";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
-        NodeExecutionContext context,
-        NodeDefinition node,
-        CancellationToken cancellationToken)
-        => ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>(),
-            new Dictionary<string, object?> { ["joined"] = true }));
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var diag = CoordinateValidation.Diagnostics(Type, ("joined", true), ("marker", "join"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["joined"] = true, ["diagnostics"] = diag }));
+    }
 }
-
-
 public sealed class ResultDispositionNode : IVisionNodeExecutor
 {
     public string Type => "flow.result";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(
-        NodeExecutionContext context,
-        NodeDefinition node,
-        CancellationToken cancellationToken)
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var pass = context.Require<bool>("pass");
-        var disposition = pass ? "OK" : "NG";
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["pass"] = VisionValue.Boolean(pass),
-                ["disposition"] = VisionValue.String(disposition)
-            },
-            new Dictionary<string, object?>
-            {
-                ["pass"] = pass,
-                ["disposition"] = disposition
-            }));
+        cancellationToken.ThrowIfCancellationRequested();
+        var pass = context.Require<bool>("pass"); var disposition = pass ? "OK" : "NG";
+        var diag = CoordinateValidation.Diagnostics(Type, ("pass", pass), ("disposition", disposition));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["disposition"] = VisionValue.String(disposition), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["pass"] = pass, ["disposition"] = disposition, ["diagnostics"] = diag }));
     }
 }

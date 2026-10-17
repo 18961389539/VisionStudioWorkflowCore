@@ -400,7 +400,9 @@ public sealed class ImageResizeNode : IVisionNodeExecutor
         var method = node.GetString("interpolation", "linear").Trim().ToLowerInvariant();
         var interpolation = method switch { "nearest" => InterpolationFlags.Nearest, "cubic" => InterpolationFlags.Cubic, "area" => InterpolationFlags.Area, "linear" => InterpolationFlags.Linear, _ => throw new InvalidOperationException("Interpolation must be nearest, linear, cubic, or area.") };
         var output = ImageTransformOutput.Create(mat => JLVisionOperators.Resize(source, mat, new Size(width, height), interpolation: interpolation));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = method }));
+        var scaleX = source.Width > 0 ? (double)width / source.Width : 0; var scaleY = source.Height > 0 ? (double)height / source.Height : 0;
+        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("scaleX", scaleX), ("scaleY", scaleY), ("interpolation", method));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["width"] = width, ["height"] = height, ["interpolation"] = method, ["diagnostics"] = diag }));
     }
 }
 
@@ -426,7 +428,8 @@ public sealed class ImageRotateNode : IVisionNodeExecutor
             matrix.Set(1, 2, matrix.At<double>(1, 2) + (height - 1) / 2d - center.Y);
         }
         var output = ImageTransformOutput.Create(mat => JLVisionOperators.WarpAffine(source, mat, matrix, new Size(width, height), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0)));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["angleDeg"] = angle, ["expand"] = expand, ["width"] = width, ["height"] = height }));
+        var diag = CoordinateValidation.Diagnostics(Type, ("inputWidth", source.Width), ("inputHeight", source.Height), ("outputWidth", width), ("outputHeight", height), ("angleDeg", angle), ("normalizedAngleDeg", VisionTransform2D.NormalizeAngleDeg(angle)), ("expand", expand));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["outputWidth"] = VisionValue.Integer(width), ["outputHeight"] = VisionValue.Integer(height), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["angleDeg"] = angle, ["expand"] = expand, ["width"] = width, ["height"] = height, ["diagnostics"] = diag }));
     }
 }
 
