@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "4cf0c48aa591f23d101301db9cbc0b5af35a6f5ed4a20786e48efd099392e677",
+  "hash": "808f7ab949d36bea885bcc187bc6065ac580dedde532349ab2a20e4632b0e8b2",
   "items": [
     {
       "type": "image.acquire",
@@ -32,6 +32,16 @@
         {
           "name": "cameraId",
           "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
           "required": true
         },
         {
@@ -625,6 +635,16 @@
           "required": true
         },
         {
+          "name": "viewStats",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "worstViewRms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -637,9 +657,27 @@
           "type": "textarea",
           "defaultValue": "{}",
           "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence."
+        },
+        {
+          "name": "maxViewRms",
+          "label": "Max Per-View Reprojection RMS (px, 0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100,
+          "step": 0.1
+        },
+        {
+          "name": "maxRms",
+          "label": "Max Model RMS (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views.",
+      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views. viewStats reports per-view point coverage and (for planar boards) homography reprojection RMS/max so a single bad view can be found and removed; maxViewRms and maxRms optionally gate acceptance.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2402,6 +2440,31 @@
           "required": true
         },
         {
+          "name": "mean",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "stdDev",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "min",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "max",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "aboveThresholdFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2421,11 +2484,34 @@
             {
               "label": "Signed image-reference",
               "value": "signed"
+            },
+            {
+              "label": "Normalized (image-ref)/(image+ref)",
+              "value": "normalized"
             }
           ]
+        },
+        {
+          "name": "scale",
+          "label": "Difference Scale",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.001,
+          "max": 1000,
+          "step": 0.1
+        },
+        {
+          "name": "threshold",
+          "label": "Exceedance Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "description": "When > 0, also report the fraction of pixels whose absolute difference reaches this value."
         }
       ],
-      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.",
+      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences, normalized mode reports the illumination ratio in [-1,1]. Mean/stdDev/min/max are always reported; no automatic alignment is performed (use defect.referenceCompare for registration and grading).",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -4817,6 +4903,26 @@
           "required": true
         },
         {
+          "name": "heatmap",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "peakX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "peakY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "areaFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -4919,7 +5025,7 @@
           "step": 0.01
         }
       ],
-      "description": "Run an ONNX anomaly model with a single scalar float32 output tensor; compare its score with the configured threshold.",
+      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above threshold (isAnomaly follows the peak).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5212,6 +5318,22 @@
           "defaultValue": false
         },
         {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "xyxy",
+          "options": [
+            {
+              "label": "Rows [x1,y1,x2,y2,score,class]",
+              "value": "xyxy"
+            },
+            {
+              "label": "YOLO (cx,cy,w,h + class scores)",
+              "value": "yolo"
+            }
+          ]
+        },
+        {
           "name": "coordinates",
           "label": "Coordinate Units",
           "type": "select",
@@ -5226,6 +5348,13 @@
               "value": "pixels"
             }
           ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Enable when the model input was resized preserving aspect with symmetric padding; coordinates are un-padded before mapping to the source."
         },
         {
           "name": "confidenceThreshold",
@@ -5255,7 +5384,7 @@
           "step": 1
         }
       ],
-      "description": "Run an ONNX detector with output rows [x1,y1,x2,y2,score,classId], as [N,6] or [1,N,6]. Coordinates can be normalized or input-image pixels.",
+      "description": "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6]; layout yolo expects YOLOv8-style cx,cy,w,h plus per-class scores as [1,C,N], [1,N,C] or [N,C]. Coordinates can be normalized or input-image pixels, optionally letterboxed. Class-aware NMS is applied.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5288,6 +5417,26 @@
           "name": "mask",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "classes",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "classCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "dominantClass",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "dominantFraction",
+          "dataType": "Double",
+          "required": false
         },
         {
           "name": "next",
@@ -5388,7 +5537,7 @@
           "description": "Used only when the output has one channel; multi-class output uses per-pixel argmax."
         }
       ],
-      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions.",
+      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions plus per-class statistics (classes JSON: pixel count, image fraction, mean winning score) and the dominant class.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5502,6 +5651,16 @@
           "required": false
         },
         {
+          "name": "angle",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -5570,9 +5729,16 @@
           "min": 0.01,
           "max": 1,
           "step": 0.01
+        },
+        {
+          "name": "subpixelRefine",
+          "label": "Subpixel Refinement",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Parabolically refine the match translation to subpixel precision. Applied only when the found angle is within 5 degrees (rotated matches keep the integer result)."
         }
       ],
-      "description": "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform only when found; gate downstream warp on found.",
+      "description": "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform, match angle and patch centre only when found; gate downstream warp on found. Optional subpixel refinement improves translation for near-axis-aligned matches.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -8612,6 +8778,90 @@
           }
         },
         {
+          "name": "minWidth",
+          "label": "Min Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the lower bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "maxWidth",
+          "label": "Max Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the upper bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "minHeight",
+          "label": "Min Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the lower bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "maxHeight",
+          "label": "Max Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the upper bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "minRectangularity",
+          "label": "Min Rectangularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "description": "Area / bounding-box area, 1 = perfect rectangle.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
           "name": "maxCount",
           "label": "Max Count",
           "type": "number",
@@ -8643,6 +8893,10 @@
             {
               "label": "Y (top to bottom)",
               "value": "y"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
             }
           ],
           "visibleWhen": {
@@ -8665,7 +8919,7 @@
           }
         }
       ],
-      "description": "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+      "description": "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
