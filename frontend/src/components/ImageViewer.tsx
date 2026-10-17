@@ -29,8 +29,7 @@ const persistPixelated = (value: boolean) => {
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
-const maxCircleRadius = (center: Point, width: number, height: number) => Math.max(0, Math.min(center.x, center.y, width - center.x, height - center.y));
-const maxCaliperCircleRadius = (center: Point, width: number, height: number) => Math.max(
+const maxInteractiveCircleRadius = (center: Point, width: number, height: number) => Math.max(
   Math.hypot(center.x, center.y), Math.hypot(width - center.x, center.y),
   Math.hypot(center.x, height - center.y), Math.hypot(width - center.x, height - center.y)
 );
@@ -127,18 +126,18 @@ function caliperCircleBandHandles(geometry: Extract<MeasurementGeometry, { type:
   };
 }
 
-function caliperCircleRadiusHandle(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, width: number, height: number): Point {
+function circleRadiusHandle(center: Point, radius: number, width: number, height: number): Point {
   const corners = [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: 0, y: height }, { x: width, y: height }];
   const corner = corners.reduce((farthest, candidate) =>
-    Math.hypot(candidate.x - geometry.center.x, candidate.y - geometry.center.y)
-      >= Math.hypot(farthest.x - geometry.center.x, farthest.y - geometry.center.y) ? candidate : farthest);
-  const dx = corner.x - geometry.center.x;
-  const dy = corner.y - geometry.center.y;
+    Math.hypot(candidate.x - center.x, candidate.y - center.y)
+      >= Math.hypot(farthest.x - center.x, farthest.y - center.y) ? candidate : farthest);
+  const dx = corner.x - center.x;
+  const dy = corner.y - center.y;
   const cornerDistance = Math.hypot(dx, dy);
   if (cornerDistance === 0) return { x: 0, y: 0 };
   return {
-    x: clamp(geometry.center.x + dx / cornerDistance * geometry.radius, 0, width),
-    y: clamp(geometry.center.y + dy / cornerDistance * geometry.radius, 0, height)
+    x: clamp(center.x + dx / cornerDistance * radius, 0, width),
+    y: clamp(center.y + dy / cornerDistance * radius, 0, height)
   };
 }
 
@@ -263,7 +262,7 @@ function clampRoiMove(bounds: RoiMoveBounds, delta: Point, maxW: number, maxH: n
   };
 }
 
-/** 按拖动模式生成新的 ROI：矩形四角缩放 / 圆形按半径 / 多边形整体平移；拖动过程始终限制在图像范围内 */
+/** 按拖动模式编辑 ROI；矩形缩放受图像边界约束，圆形可越界，复杂选区整体移动会保留与画布的交集。 */
 function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, current: Point, maxW: number, maxH: number,
   moveBounds?: RoiMoveBounds): VisionRoi | undefined {
   const dx = current.x - start.x;
@@ -288,8 +287,9 @@ function applyRoiDrag(origin: VisionRoi, mode: RoiDragMode, start: Point, curren
       return { ...origin, x: clampCircleCenter(origin.x + dx, origin.radius, maxW),
         y: clampCircleCenter(origin.y + dy, origin.radius, maxH) };
     }
-    const maxRadius = maxCircleRadius(origin, maxW, maxH);
-    return { ...origin, radius: clamp(Math.hypot(current.x - origin.x, current.y - origin.y), Math.min(2, maxRadius), maxRadius) };
+    const startDistance = Math.hypot(start.x - origin.x, start.y - origin.y);
+    const currentDistance = Math.hypot(current.x - origin.x, current.y - origin.y);
+    return { ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 1, 10_000_000) };
   }
   if (origin.type === 'Brush') {
     if (mode !== 'move') return undefined;
@@ -365,15 +365,14 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
 }
 
 /** 选区控制点：大型多边形均匀抽样，避免编辑复杂 ROI 时创建数十万个控制点。 */
-function RoiHandles({ roi, scale }: { roi: VisionRoi; scale: number }) {
+function RoiHandles({ roi, scale, imageWidth, imageHeight }: { roi: VisionRoi; scale: number; imageWidth: number; imageHeight: number }) {
   if (roi.type === 'Brush') return null;
   const size = 9 / scale;
   const handles: { index: number; point: Point }[] = roi.type === 'Rectangle'
     ? [{ index: 0, point: { x: roi.x, y: roi.y } }, { index: 1, point: { x: roi.x + roi.width, y: roi.y } },
       { index: 2, point: { x: roi.x, y: roi.y + roi.height } }, { index: 3, point: { x: roi.x + roi.width, y: roi.y + roi.height } }]
     : roi.type === 'Circle'
-      ? [{ index: 0, point: { x: roi.x + roi.radius, y: roi.y } }, { index: 1, point: { x: roi.x - roi.radius, y: roi.y } },
-        { index: 2, point: { x: roi.x, y: roi.y - roi.radius } }, { index: 3, point: { x: roi.x, y: roi.y + roi.radius } }]
+      ? [{ index: 0, point: circleRadiusHandle({ x: roi.x, y: roi.y }, roi.radius, imageWidth, imageHeight) }]
       : polygonHandleIndices(roi.points.length).map(index => ({ index, point: roi.points[index] }));
   if (handles.length === 0) return null;
   return <Group listening={false}>
@@ -426,7 +425,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   const arcHandles = editable ? caliperCircleArcHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const bandHandles = editable ? caliperCircleBandHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const radiusHandle = editable && geometry.radiusEditable !== false
-    ? caliperCircleRadiusHandle(geometry, imageWidth, imageHeight) : undefined;
+    ? circleRadiusHandle(geometry.center, geometry.radius, imageWidth, imageHeight) : undefined;
   const boundary = (angleDeg: number) => {
     const radians = angleDeg * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -684,10 +683,8 @@ export default function ImageViewer({
       return undefined;
     }
     if (target.type === 'Circle') {
-      if (near(target.x + target.radius, target.y)) return 'e';
-      if (near(target.x - target.radius, target.y)) return 'w';
-      if (near(target.x, target.y - target.radius)) return 'n';
-      if (near(target.x, target.y + target.radius)) return 's';
+      const handle = circleRadiusHandle({ x: target.x, y: target.y }, target.radius, actualWidth, actualHeight);
+      if (near(handle.x, handle.y)) return 'e';
       return undefined;
     }
     if (target.type === 'Brush') return undefined;
@@ -715,7 +712,7 @@ export default function ImageViewer({
     const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
     const candidates: [MeasurementDragMode, Point][] = [];
     if (target.centerEditable !== false) candidates.push(['center', target.center]);
-    if (target.radiusEditable !== false) candidates.push(['radius', caliperCircleRadiusHandle(target, actualWidth, actualHeight)]);
+    if (target.radiusEditable !== false) candidates.push(['radius', circleRadiusHandle(target.center, target.radius, actualWidth, actualHeight)]);
     if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
     const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
@@ -842,7 +839,7 @@ export default function ImageViewer({
       const end = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
       setMeasurementDraft(measurementGeometry.type === 'line'
         ? { type: 'line', start, end }
-        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxCaliperCircleRadius(start, actualWidth, actualHeight)) });
+        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxInteractiveCircleRadius(start, actualWidth, actualHeight)) });
       return;
     }
     if (geometryDrag.current) {
@@ -925,7 +922,7 @@ export default function ImageViewer({
       const dx = end.x - gestureStart.current.x;
       const dy = end.y - gestureStart.current.y;
       const center = gestureStart.current;
-      setDraft({ type: 'Circle', x: center.x, y: center.y, radius: Math.min(Math.hypot(dx, dy), maxCircleRadius(center, actualWidth, actualHeight)) });
+      setDraft({ type: 'Circle', x: center.x, y: center.y, radius: Math.min(Math.hypot(dx, dy), maxInteractiveCircleRadius(center, actualWidth, actualHeight)) });
     }
   };
 
@@ -961,7 +958,7 @@ export default function ImageViewer({
         ? applyRoiDrag(active.origin, active.mode, { x: 0, y: 0 }, roiDragOffset ?? { x: 0, y: 0 },
           actualWidth, actualHeight, active.moveBounds)
         : draft;
-      if (next && (next.type !== 'Rectangle' || (next.width >= 2 && next.height >= 2)) && (next.type !== 'Circle' || next.radius >= 2)) {
+      if (next && (next.type !== 'Rectangle' || (next.width >= 2 && next.height >= 2)) && (next.type !== 'Circle' || next.radius >= 1)) {
         onRoiChange(next);
       }
       setRoiDragOffset(undefined);
@@ -970,7 +967,7 @@ export default function ImageViewer({
     }
     if (gestureStart.current && draft) {
       if (draft.type === 'Rectangle' && draft.width >= 2 && draft.height >= 2) onRoiChange(draft);
-      if (draft.type === 'Circle' && draft.radius >= 2) onRoiChange(draft);
+      if (draft.type === 'Circle' && draft.radius >= 1) onRoiChange(draft);
     }
     gestureStart.current = undefined;
     setDraft(undefined);
@@ -1177,13 +1174,13 @@ export default function ImageViewer({
                 {roiDragOffset && (roi?.type === 'Brush' || roi?.type === 'Polygon')
                   ? <Group x={roiDragOffset.x} y={roiDragOffset.y}>
                     <RoiShape roi={roi} scale={view.scale} />
-                    {roi.type === 'Polygon' && roiEnabled && <RoiHandles roi={roi} scale={view.scale} />}
+                    {roi.type === 'Polygon' && roiEnabled && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
                   </Group>
                   : <>
                     {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
                     <RoiShape roi={draft} scale={view.scale} draft />
                   </>}
-                {roi && roiEnabled && !draft && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} />}
+                {roi && roiEnabled && !draft && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
               </Group>
             </Layer>
           </Stage>

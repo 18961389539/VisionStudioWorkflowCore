@@ -229,6 +229,40 @@ describe('ImageViewer measurement geometry editing', () => {
     if (result.type === 'circle') expect(result.radius).toBeCloseTo(1, 0);
   });
 
+  it('lets users draw and resize a clipped circular ROI for image crop', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Circle', x: 20, y: 50, radius: 10 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 149.6, clientY: 142.5 }); // visible radius handle
+    fireEvent.mouseMove(stage, { clientX: 249.3, clientY: 205.1 }); // expand to 60 px, clipping the image edge
+    fireEvent.mouseUp(document.body, { clientX: 249.3, clientY: 205.1 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const result = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(result.type).toBe('Circle');
+    if (result.type === 'Circle') expect(result.radius).toBeCloseTo(60, 0);
+  });
+
+  it('lets users draw a one-pixel circular ROI', () => {
+    const onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled onRoiChange={onRoiChange} />);
+    fireEvent.click(screen.getByText('圆形'));
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 130 }); // center (50, 50)
+    fireEvent.mouseMove(stage, { clientX: 202.36, clientY: 130 }); // radius 1 px
+    fireEvent.mouseUp(document.body, { clientX: 202.36, clientY: 130 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const result = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(result.type).toBe('Circle');
+    if (result.type === 'Circle') expect(result.radius).toBeCloseTo(1, 0);
+  });
+
   it('keeps an oversized caliper circle center inside the image when moving it', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 60, angleStartDeg: 0, angleEndDeg: 90 }, onChange);
