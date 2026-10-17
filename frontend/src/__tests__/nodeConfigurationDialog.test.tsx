@@ -141,7 +141,9 @@ describe('ROI reference workspace', () => {
 
     fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
     await waitFor(() => expect(view.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png'));
+    await waitFor(() => expect((view.dialog.getByRole('button', { name: '清除测试 ROI' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(view.dialog.getByRole('button', { name: '清除测试 ROI' }));
+    await waitFor(() => expect((view.dialog.getByRole('radio', { name: '修正结果' }) as HTMLInputElement).disabled).toBe(false));
     fireEvent.click(view.dialog.getByRole('radio', { name: '修正结果' }));
     await waitFor(() => expect(view.dialog.getByTestId('image-url').textContent).toContain('/nodes/test/image'));
 
@@ -154,6 +156,7 @@ describe('ROI reference workspace', () => {
     const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges, onPreview });
     fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
     await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+    await waitFor(() => expect((view.dialog.getByRole('button', { name: '重新设为基准' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(view.dialog.getByRole('button', { name: '重新设为基准' }));
     await waitFor(() => expect(view.dialog.getByText('定位未找到目标')).toBeTruthy());
     expect(view.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png');
