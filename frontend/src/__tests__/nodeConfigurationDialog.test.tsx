@@ -1246,10 +1246,10 @@ describe('caliper geometry input guidance', () => {
     const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
     const edges = [
       { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
-      { id: 'circle-override', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' }
+      { id: 'circle-override', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'CIRCLE' }
     ];
     const circleResult: RunResult = { ...report, nodeReports: [{ nodeId: circleNode.id, nodeType: circleCatalog.type, success: true,
-      durationMs: 1, summary: {}, inputs: { circle: { type: 'Circle', display: '(68, 42, r=24)', value: { x: 68, y: 42, radius: 24 } } } }] };
+      durationMs: 1, summary: {}, inputs: { CIRCLE: { type: 'Circle', display: '(68, 42, r=24)', value: { x: 68, y: 42, radius: 24 } } } }] };
     const onApply = vi.fn();
     const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, circleSource, imageNode], edges, result: circleResult, onApply });
 
@@ -1632,10 +1632,10 @@ describe('caliper geometry input guidance', () => {
     const imageNode: Node = { id: 'line-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
     const edges = [
       { id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
-      { id: 'line-geometry-input', source: geometryNode.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' }
+      { id: 'line-geometry-input', source: geometryNode.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'SEARCHLINE' }
     ];
     const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
-      durationMs: 1, summary: {}, inputs: { searchLine: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
+      durationMs: 1, summary: {}, inputs: { SEARCHLINE: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
         value: { start: { x: 14, y: 22 }, end: { x: 88, y: 46 } } } } }] };
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: lineNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
@@ -1707,11 +1707,11 @@ describe('caliper geometry input guidance', () => {
     const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
     const edges = [
       { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' },
-      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: caliperNode.id, targetHandle: 'transform' }
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: caliperNode.id, targetHandle: 'TRANSFORM' }
     ];
     const transformedResult: RunResult = { ...report, runId: 'transformed-caliper-bounds-run', nodeReports: [
       { nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: true, durationMs: 1, summary: {}, inputs: {
-        transform: { type: 'Transform2D', display: 'translation', value: { sourceUnit: 'px', targetUnit: 'px',
+        TRANSFORM: { type: 'Transform2D', display: 'translation', value: { sourceUnit: 'px', targetUnit: 'px',
           h00: 1, h01: 0, h02: 50, h10: 0, h11: 1, h12: 0, h20: 0, h21: 0, h22: 1 } }
       } }
     ] };

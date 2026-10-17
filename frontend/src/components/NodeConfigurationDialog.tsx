@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
-import type { NodeCatalogItem, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi } from '../types';
+import type { NodeCatalogItem, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi, VisionValueSnapshot } from '../types';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import PropertyPanel from './PropertyPanel';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from './ImageViewer';
@@ -26,6 +26,11 @@ function inputEdge(edges: Edge[], nodeId: string, portName: string) {
 
 function hasInputEdge(edges: Edge[], nodeId: string, portName: string) {
   return Boolean(inputEdge(edges, nodeId, portName));
+}
+
+function inputSnapshotValue(inputs: Record<string, VisionValueSnapshot> | null | undefined, portName: string) {
+  const expected = portName.toLowerCase();
+  return Object.entries(inputs ?? {}).find(([name]) => name.toLowerCase() === expected)?.[1].value;
 }
 
 function outputPortMatches(edge: Edge | undefined, nodeId: string, portName: string) {
@@ -644,7 +649,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     : savedMeasurementReference ? 'saved-reference'
       : cropMeasurementReferenceNodeId ? 'transform-input' : undefined;
   const circleInputSnapshot = circleInputEdge
-    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
+    ? inputSnapshotValue(freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs, 'circle')
     : undefined;
   const connectedCircle = circleInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
   const circleSourceReport = circleInputEdge
@@ -656,7 +661,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const circleInputIsBoundingApproximation = isCaliperCircle && circleSourceNode?.data.typeKey === 'roi.transform'
     && typeof circleSourceRoiType === 'string' && circleSourceRoiType !== 'Circle';
   const searchLineInputSnapshot = searchLineInputEdge
-    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
+    ? inputSnapshotValue(freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs, 'searchLine')
     : undefined;
   const connectedSearchLine = searchLineInputEdge ? connectedSearchLineGeometry(searchLineInputSnapshot) : undefined;
   const canDisplayConnectedSearchLine = Boolean(measurementGeometryType === 'line' && connectedSearchLine && measurementGeometryFrameKind);
@@ -697,7 +702,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]
     : undefined;
   const measurementTransform = transformInputEdge
-    ? rigidPixelTransform(measurementInputReport?.inputs?.transform?.value)
+    ? rigidPixelTransform(inputSnapshotValue(measurementInputReport?.inputs, 'transform'))
     : undefined;
   const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
