@@ -152,15 +152,11 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 var strokes = roi.Strokes ?? [];
                 var minX = int.MaxValue; var minY = int.MaxValue;
                 var maxX = int.MinValue; var maxY = int.MinValue;
-                var padding = 0;
                 var pointIndex = 0;
                 foreach (var stroke in strokes)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);
-                    padding = Math.Max(padding, thickness / 2 + 2);
-                    // Erasers do not add selected pixels, but rasterizing them at the local
-                    // canvas edge changes anti-alias blending. Include their full extent too.
+                    if (stroke.Mode != VisionRoiStrokeMode.Add) continue;
                     foreach (var point in stroke.Points)
                     {
                         if ((pointIndex++ & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
@@ -171,8 +167,42 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                     }
                 }
                 if (minX == int.MaxValue) return default;
-                return ClipBounds(minX - (long)padding, minY - (long)padding,
-                    maxX + (long)padding + 1, maxY + (long)padding + 1, imageSize);
+                var addPadding = strokes.Where(stroke => stroke.Mode == VisionRoiStrokeMode.Add)
+                    .Max(stroke => Math.Clamp((int)Math.Round(stroke.Width), 1, 1024) / 2 + 2);
+                var addLeft = (long)minX - addPadding;
+                var addTop = (long)minY - addPadding;
+                var addRight = (long)maxX + addPadding + 1;
+                var addBottom = (long)maxY + addPadding + 1;
+                var boundsLeft = addLeft; var boundsTop = addTop;
+                var boundsRight = addRight; var boundsBottom = addBottom;
+                foreach (var stroke in strokes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (stroke.Mode != VisionRoiStrokeMode.Erase) continue;
+                    var eraserMinX = int.MaxValue; var eraserMinY = int.MaxValue;
+                    var eraserMaxX = int.MinValue; var eraserMaxY = int.MinValue;
+                    foreach (var point in stroke.Points)
+                    {
+                        if ((pointIndex++ & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        var x = (int)Math.Round(point.X);
+                        var y = (int)Math.Round(point.Y);
+                        eraserMinX = Math.Min(eraserMinX, x); eraserMinY = Math.Min(eraserMinY, y);
+                        eraserMaxX = Math.Max(eraserMaxX, x); eraserMaxY = Math.Max(eraserMaxY, y);
+                    }
+                    var padding = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024) / 2 + 2;
+                    var eraserLeft = (long)eraserMinX - padding;
+                    var eraserTop = (long)eraserMinY - padding;
+                    var eraserRight = (long)eraserMaxX + padding + 1;
+                    var eraserBottom = (long)eraserMaxY + padding + 1;
+                    // Keep the full context of erasers that can change an added pixel, since
+                    // rasterizing the same segment at a clipped canvas edge shifts AA coverage.
+                    // Unrelated erasers are ignored so a remote stroke cannot force a full-image mask.
+                    if (eraserRight <= addLeft || eraserLeft >= addRight
+                        || eraserBottom <= addTop || eraserTop >= addBottom) continue;
+                    boundsLeft = Math.Min(boundsLeft, eraserLeft); boundsTop = Math.Min(boundsTop, eraserTop);
+                    boundsRight = Math.Max(boundsRight, eraserRight); boundsBottom = Math.Max(boundsBottom, eraserBottom);
+                }
+                return ClipBounds(boundsLeft, boundsTop, boundsRight, boundsBottom, imageSize);
             }
             default:
                 throw new InvalidOperationException($"Unsupported crop ROI type '{roi.Type}'.");

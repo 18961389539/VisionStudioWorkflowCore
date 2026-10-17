@@ -305,6 +305,42 @@ public sealed class Batch2ImageNodeTests
     }
 
     [Fact]
+    public async Task CropBrushWithRemoteEraserMatchesFullCanvasRaster()
+    {
+        using var source = new Mat(128, 128, MatType.CV_8UC1);
+        Cv2.Randu(source, Scalar.All(0), Scalar.All(256));
+        var roi = new VisionRoi(VisionRoiType.Brush, Strokes:
+        [
+            new(VisionRoiStrokeMode.Add, 4, [new(10, 10), new(14, 10)]),
+            new(VisionRoiStrokeMode.Erase, 6, [new(108, 108), new(120, 120)])
+        ]);
+        using var fullMask = roi.BuildMask(source.Size());
+        using var fullBinary = new Mat();
+        Cv2.Threshold(fullMask, fullBinary, 0, 255, ThresholdTypes.Binary);
+        using var points = new Mat();
+        Cv2.FindNonZero(fullBinary, points);
+        var bounds = Cv2.BoundingRect(points);
+        using var expectedMask = new Mat(fullBinary, bounds);
+        using var expectedImage = new Mat(source, bounds).Clone();
+        using var outsideMask = new Mat();
+        Cv2.BitwiseNot(expectedMask, outsideMask);
+        expectedImage.SetTo(Scalar.All(0), outsideMask);
+        using var image = VisionImage.Own(source.Clone());
+
+        var result = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(image), ["roi"] = VisionValue.Roi(roi)
+        }), Node("image.crop", "{}"), CancellationToken.None);
+        using var actualImage = ImageFrom(result);
+        using var actualMask = (VisionImage)result.Outputs["roiMask"].Require<IVisionImage>("roiMask");
+
+        Assert.Equal(bounds.X, Convert.ToInt32(result.Summary["x"]));
+        Assert.Equal(bounds.Y, Convert.ToInt32(result.Summary["y"]));
+        Assert.Equal(0d, Cv2.Norm(expectedMask, actualMask.Mat, NormTypes.INF));
+        Assert.Equal(0d, Cv2.Norm(expectedImage, actualImage.Mat, NormTypes.INF));
+    }
+
+    [Fact]
     public async Task CropLocalRasterMatchesFullCanvasForDeterministicMixedRois()
     {
         const int width = 120;
