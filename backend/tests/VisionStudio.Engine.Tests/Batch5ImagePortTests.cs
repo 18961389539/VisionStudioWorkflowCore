@@ -48,6 +48,56 @@ public sealed class Batch5ImagePortTests
     }
 
     [Fact]
+    public async Task ChainedCropsComposeFromTheOriginalImageIntoTheFinalCropFrame()
+    {
+        using var input = VisionImage.Own(new Mat(32, 32, MatType.CV_8UC1, Scalar.All(7)));
+        using var registry = new VisionNodeRegistry();
+        var firstCrop = CropNode("crop-first", 4, 5, 10, 8);
+        var secondCrop = CropNode("crop-second", 3, 2, 5, 4);
+        var compose = new NodeDefinition("compose", "coordinate.transformCompose", null, null, null);
+        registry.Register(BuiltInNodeCatalog.Require(firstCrop.Type), new ImageCropNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require(compose.Type), new ComposeTransformNode(), "builtin");
+        var dispatcher = new VisionNodeDispatcher(registry);
+
+        var first = await dispatcher.ExecuteAsync(firstCrop, new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(input)
+        }, null, default);
+        using var firstImage = Assert.IsType<VisionImage>(first.Outputs["image"].Value);
+        using var firstMask = Assert.IsType<VisionImage>(first.Outputs["roiMask"].Value);
+        var firstTransform = first.Outputs["transform"].Require<VisionTransform2D>("transform");
+
+        var second = await dispatcher.ExecuteAsync(secondCrop, new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(firstImage)
+        }, null, default);
+        using var secondImage = Assert.IsType<VisionImage>(second.Outputs["image"].Value);
+        using var secondMask = Assert.IsType<VisionImage>(second.Outputs["roiMask"].Value);
+        var secondTransform = second.Outputs["transform"].Require<VisionTransform2D>("transform");
+
+        var combined = await dispatcher.ExecuteAsync(compose, new Dictionary<string, VisionValue>
+        {
+            ["transformA"] = VisionValue.Transform(firstTransform),
+            ["transformB"] = VisionValue.Transform(secondTransform)
+        }, null, default);
+        var transform = combined.Outputs["transform"].Require<VisionTransform2D>("transform");
+        var mapped = transform.Apply(new VisionPoint2D(9, 10));
+
+        Assert.Equal((5, 4), (secondImage.Width, secondImage.Height));
+        Assert.Equal(firstTransform.TargetFrame, secondTransform.SourceFrame);
+        Assert.Equal("CurrentImage", transform.SourceFrame);
+        Assert.Equal("image:crop-second:crop", transform.TargetFrame);
+        Assert.Equal(new VisionPoint2D(2, 3), mapped);
+    }
+
+    private static NodeDefinition CropNode(string id, double x, double y, double width, double height)
+    {
+        var parameters = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            JsonSerializer.Serialize(new { roi = new { type = "Rectangle", x, y, width, height } }));
+        return new NodeDefinition(id, "image.crop", null, null, parameters);
+    }
+
+    [Fact]
     public async Task RoiAndContourProperties_RemainStructuredInExecutionReports()
     {
         var roi = new NodeDefinition("roi", "roi.transform", null, null,
