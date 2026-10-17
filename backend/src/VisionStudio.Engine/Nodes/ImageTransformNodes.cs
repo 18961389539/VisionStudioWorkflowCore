@@ -88,8 +88,11 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             VisionRoiType.Brush => "笔刷",
             _ => roi.Type.ToString()
         };
+        var guidance = roi.Type == VisionRoiType.Brush
+            ? "请确认添加笔迹与图像范围有重叠、且未被后续擦除笔迹全部擦除；检查上游位姿/坐标变换。"
+            : "请将 ROI 移入图像范围，或检查上游位姿/坐标变换。";
         return new InvalidOperationException(
-            $"{roiName}裁剪区域在输入图像（{imageSize.Width}×{imageSize.Height}）中没有覆盖任何像素。请将 ROI 移入图像范围，或检查上游位姿/坐标变换。");
+            $"{roiName}裁剪区域在输入图像（{imageSize.Width}×{imageSize.Height}）中没有覆盖任何像素。{guidance}");
     }
 
     private static Rect CandidateRasterBounds(VisionRoi roi, Size imageSize, CancellationToken cancellationToken)
@@ -318,6 +321,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 if (strokes.Count == 0 || strokes.Count > 10_000)
                     throw new InvalidOperationException("笔刷裁剪区域需要 1..10000 笔有效笔迹。");
                 var totalPoints = 0;
+                var hasAddStroke = false;
                 for (var strokeIndex = 0; strokeIndex < strokes.Count; strokeIndex++)
                 {
                     if ((strokeIndex & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
@@ -328,6 +332,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                         || !double.IsFinite(stroke.Width) || stroke.Width <= 0 || stroke.Width > 1024
                         || stroke.Points is null || stroke.Points.Count == 0)
                         throw new InvalidOperationException("笔刷笔迹需要有效模式、1..1024 px 笔宽和至少一个点。");
+                    hasAddStroke |= stroke.Mode == VisionRoiStrokeMode.Add;
                     totalPoints = checked(totalPoints + stroke.Points.Count);
                     if (totalPoints > 500_000)
                         throw new InvalidOperationException("笔刷裁剪区域最多允许 500000 个笔迹点。");
@@ -340,6 +345,8 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                             throw new InvalidOperationException("笔刷点必须为有限坐标，且绝对值不超过 10000000 px。");
                     }
                 }
+                if (!hasAddStroke)
+                    throw new InvalidOperationException("笔刷裁剪区域必须至少包含一笔“添加”笔迹。");
                 break;
             }
         }

@@ -42,6 +42,31 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Fact]
+    public async Task CropRejectsBrushRoiWithoutAnAddStroke()
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source),
+            """{"roi":{"type":"Brush","strokes":[{"mode":"Erase","width":2,"points":[{"x":4,"y":4}]}]}}"""));
+
+        Assert.Contains("必须至少包含一笔“添加”笔迹", error.Message);
+    }
+
+    [Theory]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":2,"points":[{"x":14,"y":14}]}]}}""")]
+    [InlineData("""{"roi":{"type":"Brush","strokes":[{"mode":"Add","width":4,"points":[{"x":5,"y":5}]},{"mode":"Erase","width":4,"points":[{"x":5,"y":5}]}]}}""")]
+    public async Task CropExplainsWhenBrushRoiHasNoPixelsInsideTheImage(string json)
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source), json));
+
+        Assert.Contains("笔刷裁剪区域在输入图像（10×10）中没有覆盖任何像素", error.Message);
+        Assert.Contains("添加笔迹与图像范围有重叠", error.Message);
+        Assert.Contains("后续擦除笔迹全部擦除", error.Message);
+    }
+
     [Theory]
     [InlineData(0.1)]
     [InlineData(0.5)]

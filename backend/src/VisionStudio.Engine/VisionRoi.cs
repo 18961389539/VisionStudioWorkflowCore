@@ -217,6 +217,8 @@ public static class VisionRoiOpenCvExtensions
             if (totalPoints > 500_000) throw new InvalidOperationException("Brush ROI exceeds the 500000-point limit.");
 
             var points = new Point[stroke.Points.Count];
+            var minX = int.MaxValue; var minY = int.MaxValue;
+            var maxX = int.MinValue; var maxY = int.MinValue;
             for (var pointIndex = 0; pointIndex < points.Length; pointIndex++)
             {
                 if ((pointIndex & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
@@ -229,20 +231,52 @@ public static class VisionRoiOpenCvExtensions
                 // Rounding after subtracting an odd origin changes half-pixel ties.
                 points[pointIndex] = new Point(checked(RasterCoordinate(point.X) - offsetPixelX),
                     checked(RasterCoordinate(point.Y) - offsetPixelY));
+                minX = Math.Min(minX, points[pointIndex].X); minY = Math.Min(minY, points[pointIndex].Y);
+                maxX = Math.Max(maxX, points[pointIndex].X); maxY = Math.Max(maxY, points[pointIndex].Y);
             }
-            var color = stroke.Mode == VisionRoiStrokeMode.Add ? Scalar.All(255) : Scalar.All(0);
             var thickness = Math.Clamp((int)Math.Round(stroke.Width), 1, 1024);
             var radius = Math.Max(0, thickness / 2);
+            if (stroke.Mode == VisionRoiStrokeMode.Add)
+            {
+                foreach (var point in points)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Cv2.Circle(target, point, radius, Scalar.All(255), -1, LineTypes.AntiAlias);
+                }
+                for (var index = 1; index < points.Length; index++)
+                {
+                    if ((index & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+                    Cv2.Line(target, points[index - 1], points[index], Scalar.All(255), thickness, LineTypes.AntiAlias);
+                }
+                continue;
+            }
+
+            // Drawing zero with anti-aliasing blends with the existing mask and leaves
+            // faint selected pixels along the eraser edge. Rasterize the eraser coverage
+            // separately, then clear every covered pixel from the accumulated mask.
+            var padding = thickness / 2 + 2;
+            var left = (int)Math.Clamp((long)minX - padding, 0, target.Width);
+            var top = (int)Math.Clamp((long)minY - padding, 0, target.Height);
+            var right = (int)Math.Clamp((long)maxX + padding + 1, 0, target.Width);
+            var bottom = (int)Math.Clamp((long)maxY + padding + 1, 0, target.Height);
+            if (right <= left || bottom <= top) continue;
+
+            var eraserRect = new Rect(left, top, right - left, bottom - top);
+            using var eraserMask = new Mat(eraserRect.Height, eraserRect.Width, MatType.CV_8UC1, Scalar.All(0));
             foreach (var point in points)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Cv2.Circle(target, point, radius, color, -1, LineTypes.AntiAlias);
+                var localPoint = new Point(point.X - left, point.Y - top);
+                Cv2.Circle(eraserMask, localPoint, radius, Scalar.All(255), -1, LineTypes.AntiAlias);
             }
             for (var index = 1; index < points.Length; index++)
             {
                 if ((index & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
-                Cv2.Line(target, points[index - 1], points[index], color, thickness, LineTypes.AntiAlias);
+                Cv2.Line(eraserMask, new Point(points[index - 1].X - left, points[index - 1].Y - top),
+                    new Point(points[index].X - left, points[index].Y - top), Scalar.All(255), thickness, LineTypes.AntiAlias);
             }
+            using var targetRegion = new Mat(target, eraserRect);
+            targetRegion.SetTo(Scalar.All(0), eraserMask);
         }
     }
 
