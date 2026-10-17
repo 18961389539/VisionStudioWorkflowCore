@@ -364,6 +364,8 @@ public sealed class Batch5PrecisionNodeTests
         var spread = Convert.ToDouble(result.Outputs["radiusMax"].Require<double>("radiusMax"))
             - Convert.ToDouble(result.Outputs["radiusMin"].Require<double>("radiusMin"));
         Assert.InRange(spread, 0, 2.5);
+        Assert.Equal(spread, result.Outputs["radiusSpread"].Require<double>("radiusSpread"), 10);
+        Assert.Equal(Math.Round(spread, 3), Convert.ToDouble(result.Summary["radiusSpread"]), 3);
 
         var denseLegacyStep = await Run(new CaliperCircleNode(), Image(image),
             """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"samplingMode":"step","angleStepDeg":0.5,"minContrast":15}""");

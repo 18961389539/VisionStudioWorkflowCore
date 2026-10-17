@@ -243,6 +243,7 @@ public static class Batch5PrecisionCatalog
                 new("radius", VisionDataType.Double, Required: false),
                 new("radiusMin", VisionDataType.Double, Required: false),
                 new("radiusMax", VisionDataType.Double, Required: false),
+                new("radiusSpread", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),

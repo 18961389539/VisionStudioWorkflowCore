@@ -48,6 +48,13 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('exposes the circle radius spread as a typed output', () => {
+    const circle = fallbackCatalogRaw.find(item => item.type === 'measure.caliperCircle')!;
+    expect(circle.outputs.find(output => output.name === 'radiusSpread')).toMatchObject({
+      name: 'radiusSpread', dataType: 'Double', required: false
+    });
+  });
+
   it('explains the UInt16 to byte-gray scaling used by caliper thresholds', () => {
     const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
     for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine', 'measure.caliperCircle']) {

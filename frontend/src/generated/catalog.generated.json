@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "258a4c4dbddb8fe1452996f174a7f986787f74c5449ccb58772a473fb63e740c",
+  "hash": "517d98d77526c1c6f3b9775387e1ee18d9539c4970e07f8b1c317d9aa5ec07f0",
   "items": [
     {
       "type": "image.acquire",
@@ -6060,6 +6060,11 @@
         },
         {
           "name": "radiusMax",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "radiusSpread",
           "dataType": "Double",
           "required": false
         },

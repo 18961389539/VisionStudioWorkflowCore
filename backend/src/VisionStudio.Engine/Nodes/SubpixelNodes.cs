@@ -815,12 +815,13 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     // Roundness/radius extrema must be measured around the fitted center;
                     // using the nominal center would turn a small center offset into false runout.
                     var usedRadii = usedPoints.Select(point => MeasurementMath.Hypot(point.X - circle.X, point.Y - circle.Y)).ToArray();
+                    var radiusSpread = usedRadii.Max() - usedRadii.Min();
                     var rmse = fit.Rmse;
                     outputs["sampleCount"] = VisionValue.Integer(usedPoints.Length);
                     outputs["ignoredCount"] = VisionValue.Integer(fit.IgnoredIndices.Length);
                     summary["fittedRadius"] = Math.Round(circle.Radius, 3);
                     summary["radiusDelta"] = Math.Round(circle.Radius - nominalRadius, 3);
-                    summary["radiusSpread"] = Math.Round(usedRadii.Max() - usedRadii.Min(), 3);
+                    summary["radiusSpread"] = Math.Round(radiusSpread, 3);
                     summary["fitError"] = Math.Round(rmse, 4);
                     summary["fitPoints"] = usedPoints.Length;
                     summary["ignoredByFit"] = fit.IgnoredIndices.Length;
@@ -831,6 +832,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         outputs["radius"] = VisionValue.Double(circle.Radius);
                         outputs["radiusMin"] = VisionValue.Double(usedRadii.Min());
                         outputs["radiusMax"] = VisionValue.Double(usedRadii.Max());
+                        outputs["radiusSpread"] = VisionValue.Double(radiusSpread);
                         outputs["fitError"] = VisionValue.Double(rmse);
                     }
                     overlays.Add(new VisionOverlay("caliper-circle-fit", VisionOverlayType.Circle,
