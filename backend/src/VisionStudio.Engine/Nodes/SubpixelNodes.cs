@@ -802,6 +802,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     ["fitOutlierThreshold"] = fitOutlierThreshold,
                     ["polarity"] = polarity,
                     ["searchDirection"] = searchDirection,
+                    ["refine"] = "parabolic",
                     ["autoGray"] = autoGray,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage"
                 };

@@ -64,6 +64,7 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Equal(160d, Convert.ToDouble(circle.Summary["angleEndDeg"]));
         Assert.Equal(19d, Convert.ToDouble(circle.Summary["minContrast"]));
         Assert.Equal(7, Convert.ToInt32(circle.Summary["sampleWidth"]));
+        Assert.Equal("parabolic", Convert.ToString(circle.Summary["refine"]));
         Assert.Equal(1.5, Convert.ToDouble(circle.Summary["maxRadiusDeviation"]));
         Assert.Equal(0.75, Convert.ToDouble(circle.Summary["fitOutlierThreshold"]));
         (circle.Outputs["image"].Value as IDisposable)?.Dispose();
