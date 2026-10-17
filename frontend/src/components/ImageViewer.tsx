@@ -309,11 +309,15 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
     }
     return inside;
   }
-  let inside = false;
   // Drawing may downsample a very large contour for responsiveness, but selection
   // hit-testing must use the actual ROI. Otherwise thin features omitted from the
   // preview sample cannot be grabbed to move the region used by execution.
-  const pts = roi.points;
+  return pointInsidePolygon(roi.points, point);
+}
+
+function pointInsidePolygon(points: readonly Point[], point: Point): boolean {
+  let inside = false;
+  const pts = points;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const xi = pts[i].x; const yi = pts[i].y; const xj = pts[j].x; const yj = pts[j].y;
     if ((yi > point.y) !== (yj > point.y) && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) inside = !inside;
@@ -1320,8 +1324,11 @@ export default function ImageViewer({
         if (handle === 'w' || handle === 'e') return 'ew-resize';
         if (handle === 'n' || handle === 's') return 'ns-resize';
         if (handle?.startsWith('vertex:')) return 'move';
-        if (tool === 'pan' && (roi.type === 'Rectangle' || roi.type === 'Circle')
-          && pointInsideRoi(roi, imagePoint(cursorScreen))) return 'move';
+        const imageCursor = imagePoint(cursorScreen);
+        if ((roi.type === 'Rectangle' || roi.type === 'Circle') && pointInsideRoi(roi, imageCursor)) return 'move';
+        // Match the visible, cached preview contour without ray-casting every source vertex
+        // on every pointer move; pointer-down still checks the full ROI for exact movement.
+        if (roi.type === 'Polygon' && pointInsidePolygon(polygonPreviewPoints(roi.points), imageCursor)) return 'move';
       }
     }
     return tool === 'pan' ? 'grab' : 'crosshair';
@@ -1354,7 +1361,7 @@ export default function ImageViewer({
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
               roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
-              { value: 'pan', label: <Tooltip title="平移画布；拖动已有选区可移动、缩放或编辑顶点">平移</Tooltip> },
+              { value: 'pan', label: <Tooltip title="平移画布；拖动已有选区可移动，矩形/圆形可缩放，多边形可编辑顶点">平移</Tooltip> },
               { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="拖动绘制矩形，并替换当前选区">矩形</Tooltip> },
               { value: 'circle', disabled: !roiEnabled, label: <Tooltip title="拖动绘制圆形，并替换当前选区">圆形</Tooltip> },
               { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title="逐点绘制多边形，并替换当前选区；双击完成">多边形</Tooltip> },

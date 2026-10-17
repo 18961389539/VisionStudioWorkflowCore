@@ -1003,6 +1003,18 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('ew-resize');
   });
 
+  it('shows a move cursor over the visible interior of a polygon ROI', () => {
+    const roi: VisionRoi = { type: 'Polygon', points: [
+      { x: 30, y: 30 }, { x: 70, y: 30 }, { x: 70, y: 70 }, { x: 30, y: 70 }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={emptyRoi} />);
+
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 200, clientY: 130 }); // image center
+
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('move');
+  });
+
   it('keeps the drawing cursor when a brush tool takes priority over ROI handles', () => {
     const roi: VisionRoi = { type: 'Rectangle', x: 30, y: 30, width: 30, height: 24 };
     render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
