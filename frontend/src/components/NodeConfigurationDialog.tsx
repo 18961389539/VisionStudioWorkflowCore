@@ -993,6 +993,37 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
+  const fitMeasurementGeometryToImage = () => {
+    if (locked || !measurementGeometry || !measurementImageFrameReady || showCurrentMeasurementImage) return;
+    const width = measurementGeometryFrameKind === 'saved-reference' ? savedMeasurementReference?.width : imageViewerSource.width;
+    const height = measurementGeometryFrameKind === 'saved-reference' ? savedMeasurementReference?.height : imageViewerSource.height;
+    if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height)) return;
+    if (measurementGeometry.type === 'line') {
+      const dx = measurementGeometry.end.x - measurementGeometry.start.x;
+      const dy = measurementGeometry.end.y - measurementGeometry.start.y;
+      const currentLength = Math.hypot(dx, dy);
+      const direction = currentLength > 1e-6 ? { x: dx / currentLength, y: dy / currentLength } : { x: 1, y: 0 };
+      const availableLength = Math.min(width / Math.max(Math.abs(direction.x), 1e-6),
+        height / Math.max(Math.abs(direction.y), 1e-6));
+      const length = Math.max(2, availableLength * 0.625);
+      const center = { x: width / 2, y: height / 2 };
+      const tangent = { x: -direction.y, y: direction.x };
+      const availableSpan = Math.min(width / Math.max(Math.abs(tangent.x), 1e-6),
+        height / Math.max(Math.abs(tangent.y), 1e-6)) * 0.625;
+      const profileSpan = measurementGeometry.profileSpan !== undefined && measurementGeometry.profileSpan > 0
+        ? Math.min(measurementGeometry.profileSpan, availableSpan) : measurementGeometry.profileSpan;
+      updateMeasurementGeometry({ ...measurementGeometry,
+        start: { x: center.x - direction.x * length / 2, y: center.y - direction.y * length / 2 },
+        end: { x: center.x + direction.x * length / 2, y: center.y + direction.y * length / 2 },
+        ...(profileSpan === undefined ? {} : { profileSpan }) });
+      return;
+    }
+    const minDimension = Math.min(width, height);
+    const band = Math.max(1, Math.min(measurementGeometry.band ?? 8, minDimension * 0.15));
+    const maxRadius = Math.max(1, minDimension / 2 - band - 1);
+    const radius = Math.max(1, Math.min(minDimension / 4.8, maxRadius));
+    updateMeasurementGeometry({ ...measurementGeometry, center: { x: width / 2, y: height / 2 }, radius, band });
+  };
   const imageInputSourceId = inputEdge(edges, node.id, 'image')?.source;
   const roiSourceNode = roiInputEdge ? nodes.find((item) => item.id === roiInputEdge.source) : undefined;
   const roiSourceDebugImageId = roiInputEdge
@@ -1532,6 +1563,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           {imageSource === 'output' && imageOutputPorts.length > 1 && <Select size="small" aria-label="输出图像端口"
             value={imageOutputPortName} style={{ minWidth: 110 }} options={imageOutputPorts.map((entry) => ({ value: entry.portName, label: entry.portName }))}
             onChange={setImageOutputPortName} />}
+          {canEditMeasurementGeometry && measurementGeometry && measurementImageFrameReady && !showCurrentMeasurementImage
+            && !(measurementGeometry.type === 'circle' && circleInputEdge) && <Button size="small" disabled={locked}
+              onClick={fitMeasurementGeometryToImage}
+              title="将搜索线或标称圆居中并缩放到当前几何图像内；必要时收窄沿边缘跨度或径向搜索带，保留阈值、极性、数量和圆弧设置。">
+              适配几何到图像
+            </Button>}
         </div>
         <div className="node-image-provenance"><span>{displayImageSource.label}</span>
           {imageCatalogLoading && <span>正在加载节点图像…</span>}

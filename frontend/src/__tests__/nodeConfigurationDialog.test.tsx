@@ -822,6 +822,56 @@ describe('measurement ROI image coverage preflight', () => {
     });
 });
 
+describe('caliper geometry fitting', () => {
+  it.each(['measure.caliper', 'measure.caliperLine'])('fits the %s search line into the loaded image', async (type) => {
+    const item = fallbackCatalog.find(candidate => candidate.type === type)!;
+    const caliperNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: {
+      typeKey: type, label: item.displayName, inputs: item.inputs,
+      parameters: type === 'measure.caliperLine' ? { edgeLength: 200 } : {}
+    } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: caliperNode, catalogItem: item, nodes: [caliperNode, imageNode], edges, result: report });
+
+    const geometry = await dialog.findByTestId('line-geometry');
+    expect(geometry.getAttribute('data-start-x')).toBe('120');
+    expect(geometry.getAttribute('data-end-x')).toBe('520');
+    fireEvent.click(dialog.getByRole('button', { name: '适配几何到图像' }));
+    await waitFor(() => {
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('18.75');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-start-y')).toBe('50');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-end-x')).toBe('81.25');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-end-y')).toBe('50');
+      if (type === 'measure.caliperLine') expect(dialog.getByTestId('line-geometry').getAttribute('data-profile-span')).toBe('62.5');
+    });
+  });
+
+  it('centers the nominal circle, limits an oversized search band, and preserves its arc', async () => {
+    const item = fallbackCatalog.find(candidate => candidate.type === 'measure.caliperCircle')!;
+    const caliperNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: {
+      typeKey: item.type, label: item.displayName, inputs: item.inputs, parameters: { radialBand: 60 }
+    } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: caliperNode, catalogItem: item, nodes: [caliperNode, imageNode], edges, result: report });
+
+    const geometry = await dialog.findByTestId('circle-geometry');
+    expect(geometry.getAttribute('data-center-x')).toBe('320');
+    expect(geometry.getAttribute('data-radius')).toBe('100');
+    expect(geometry.getAttribute('data-band')).toBe('60');
+    fireEvent.click(dialog.getByRole('button', { name: '适配几何到图像' }));
+    await waitFor(() => {
+      const fitted = dialog.getByTestId('circle-geometry');
+      expect(fitted.getAttribute('data-center-x')).toBe('50');
+      expect(fitted.getAttribute('data-center-y')).toBe('50');
+      expect(Number(fitted.getAttribute('data-radius'))).toBeCloseTo(100 / 4.8, 4);
+      expect(fitted.getAttribute('data-band')).toBe('15');
+      expect(fitted.getAttribute('data-angle-start')).toBe('-180');
+      expect(fitted.getAttribute('data-angle-end')).toBe('180');
+    });
+  });
+});
+
 describe('caliper geometry input guidance', () => {
   const mountCropFrameMeasurement = (sourceType: string, targetType: string, outputPort: string, inputPort: string, separateGeometryFrame: boolean) => {
     const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
