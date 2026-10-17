@@ -6,9 +6,10 @@ namespace VisionStudio.Engine.Algorithms;
 
 /// <summary>
 /// Guided camera-intrinsics session: accumulate board views with quality gates,
-/// accept/reject, then solve with the existing JLVision calibrator. This is the
-/// backend half of a HALCON-style Calibration Assistant slice — not a full product
-/// (no live camera preview, no fisheye, no auto-pose planner).
+/// accept/reject, then solve with the existing JLVision calibrator. Supports
+/// export/import of the full session document (views + results). Live preview and
+/// disk persistence live in the API layer. No fisheye/telecentric model; pose
+/// hints are rule-based occupancy suggestions, not an auto planner.
 /// </summary>
 public static class CalibrationIntrinsicsWizard
 {
@@ -38,6 +39,20 @@ public static class CalibrationIntrinsicsWizard
         int EnabledCount,
         CameraCalibrationModel? Model,
         object? LastSolveSummary);
+
+    /// <summary>Durable export of a wizard session (views with points + optional solve result).</summary>
+    public sealed record SessionDocument(
+        string FormatVersion,
+        string SessionId,
+        BoardConfig Board,
+        int? ImageWidth,
+        int? ImageHeight,
+        IReadOnlyList<ViewEntry> Views,
+        CameraCalibrationModel? Model,
+        object? LastSolveSummary)
+    {
+        public const string CurrentVersion = "intrinsics-wizard-v1";
+    }
 
     public sealed class Session
     {
@@ -181,6 +196,47 @@ public static class CalibrationIntrinsicsWizard
             }
         }
 
+        
+        public SessionDocument ExportDocument()
+        {
+            lock (_gate)
+            {
+                return new SessionDocument(
+                    SessionDocument.CurrentVersion,
+                    SessionId,
+                    Board,
+                    _imageWidth,
+                    _imageHeight,
+                    _views.Select(CloneEntry).ToArray(),
+                    _model,
+                    _lastSolveSummary);
+            }
+        }
+
+        /// <summary>Replace all views from an imported document (same board + image size).</summary>
+        public SessionState ImportViews(IReadOnlyList<ViewEntry> views, CameraCalibrationModel? model, object? lastSolveSummary)
+        {
+            ArgumentNullException.ThrowIfNull(views);
+            lock (_gate)
+            {
+                if (views.Count > 100) throw new InvalidOperationException("Calibration view budget exceeded (100).");
+                _views.Clear();
+                _nextIndex = 0;
+                foreach (var entry in views)
+                {
+                    if (entry.View.ObjectPoints is null || entry.View.ImagePoints is null
+                        || entry.View.ObjectPoints.Count != entry.View.ImagePoints.Count || entry.View.ObjectPoints.Count == 0)
+                        throw new InvalidOperationException($"Imported view '{entry.Label}' is empty or mismatched.");
+                    var index = entry.Index >= 0 ? entry.Index : _nextIndex;
+                    if (index >= _nextIndex) _nextIndex = index + 1;
+                    _views.Add(new ViewEntry(index, entry.Enabled, entry.Label, entry.Quality, CloneView(entry.View)));
+                }
+                _model = model;
+                _lastSolveSummary = lastSolveSummary;
+                return SnapshotUnlocked();
+            }
+        }
+
         private SessionState SnapshotUnlocked() => new(
             SessionId,
             Board,
@@ -228,6 +284,29 @@ public static class CalibrationIntrinsicsWizard
             var session = new Session(id, board);
             if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Failed to allocate a wizard session id.");
             return session;
+        }
+
+        /// <summary>Restore a session from an exported document, preserving session id when free.</summary>
+        public Session CreateFromDocument(SessionDocument document)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+            if (!string.Equals(document.FormatVersion, SessionDocument.CurrentVersion, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Unsupported wizard document version '{document.FormatVersion}'; expected '{SessionDocument.CurrentVersion}'.");
+            var id = string.IsNullOrWhiteSpace(document.SessionId) ? Guid.NewGuid().ToString("N") : document.SessionId.Trim();
+            if (_sessions.ContainsKey(id))
+                id = Guid.NewGuid().ToString("N");
+            var session = new Session(id, document.Board);
+            if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Failed to allocate a wizard session id.");
+            if (document.ImageWidth is int w && document.ImageHeight is int h)
+                session.SetImageSize(w, h);
+            session.ImportViews(document.Views ?? Array.Empty<ViewEntry>(), document.Model, document.LastSolveSummary);
+            return session;
+        }
+
+        public void Put(Session session)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+            _sessions[session.SessionId] = session;
         }
 
         public Session Get(string sessionId) =>

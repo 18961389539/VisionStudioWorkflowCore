@@ -142,6 +142,42 @@ public static class CalibrationEndpoints
             { throw new ApiValidationException(ex.Message, ex); }
         });
 
+        app.MapPost("/api/calibration/wizard/sessions/import", (CalibrationWizardImportRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.ImportDocument(request)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.import", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/preview", async (string sessionId, CalibrationWizardPreviewRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.PreviewFromCameraAsync(sessionId, request, ct)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException or TimeoutException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.preview", "calibration");
+
+        app.MapGet("/api/calibration/wizard/sessions/{sessionId}/hints", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.Hints(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+        });
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/disable-outliers", (string sessionId, CalibrationWizardDisableOutliersRequest? request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.DisableOutliers(sessionId, request ?? new CalibrationWizardDisableOutliersRequest())); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.disable-outliers", "calibration");
+
+        app.MapPost("/api/calibration/wizard/handeye/solve", async (CalibrationHandEyeSolveRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.SolveHandEyeAsync(request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.handeye", "calibration");
+
         return app;
     }
 }

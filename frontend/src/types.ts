@@ -989,6 +989,20 @@ export type CalibrationWizardSession = {
   lastSolveSummary?: Record<string, unknown> | null;
 };
 
+export type CalibrationWizardHint = {
+  code: string;
+  message: string;
+  region: string;
+};
+
+export type CalibrationHandEyeResidual = {
+  index: number;
+  translationError: number;
+  angleErrorDeg: number;
+  robot: { x: number; y: number; thetaDeg: number };
+  vision: { x: number; y: number; thetaDeg: number };
+};
+
 export type DeviceConnectionState = 'Disconnected' | 'Connecting' | 'Connected' | 'Reconnecting' | 'Faulted';
 export type DeviceTagQuality = 'Good' | 'Uncertain' | 'Bad' | 'Disconnected';
 export type DeviceTagDataType = 'Boolean' | 'Integer' | 'Double' | 'String';

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
 import CalibrationIntrinsicsWizard from './CalibrationIntrinsicsWizard';
+import CalibrationHandEyeWizard from './CalibrationHandEyeWizard';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -305,6 +306,17 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             label: '相机内参向导',
             children: (
               <CalibrationIntrinsicsWizard
+                canApplyToSelectedNode={canApplyToSelectedNode}
+                selectedNodeType={selectedNodeType}
+                onApplyToSelectedNode={onApplyToSelectedNode}
+              />
+            )
+          },
+          {
+            key: 'handeye',
+            label: '手眼向导',
+            children: (
+              <CalibrationHandEyeWizard
                 canApplyToSelectedNode={canApplyToSelectedNode}
                 selectedNodeType={selectedNodeType}
                 onApplyToSelectedNode={onApplyToSelectedNode}

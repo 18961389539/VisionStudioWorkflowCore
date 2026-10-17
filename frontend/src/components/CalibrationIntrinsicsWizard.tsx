@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
-import type { CalibrationWizardSession } from '../types';
+import type { CalibrationWizardHint, CalibrationWizardSession } from '../types';
 
 type Props = {
   canApplyToSelectedNode: boolean;
   selectedNodeType?: string;
   onApplyToSelectedNode: (parameters: Record<string, unknown>) => void;
 };
+
+type CameraListItem = { id: string; name?: string; acquisition?: { acquisitionState?: string } };
 
 const stepTitles = ['标定板设置', '采集 / 导入视图', '审核视图', '求解内参', '导出应用'];
 
@@ -24,17 +26,45 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [imageWidth, setImageWidth] = useState<number | null>(null);
   const [imageHeight, setImageHeight] = useState<number | null>(null);
   const [importJson, setImportJson] = useState('');
+  const [documentJson, setDocumentJson] = useState('');
   const [solveSummary, setSolveSummary] = useState<Record<string, unknown>>();
   const [maxViewRms, setMaxViewRms] = useState(0);
   const [maxRms, setMaxRms] = useState(0);
+  const [hints, setHints] = useState<CalibrationWizardHint[]>([]);
+  const [cameras, setCameras] = useState<CameraListItem[]>([]);
+  const [cameraId, setCameraId] = useState<string>();
+  const [previewUrl, setPreviewUrl] = useState<string>();
+  const [previewQuality, setPreviewQuality] = useState<string>();
+  const [viewStatsRows, setViewStatsRows] = useState<Record<string, unknown>[]>([]);
 
   const enabledCount = session?.enabledCount ?? 0;
   const guidance = useMemo(() => {
-    if (!session?.views.length) return '上传标定板图像或粘贴 detectBoard 累积的 calibrationDataJson。目标：8–20 张、覆盖视场边缘并带倾角变化。';
+    if (!session?.views.length) return '上传标定板图像、从相机刷新检测，或粘贴 detectBoard 累积的 calibrationDataJson。目标：8–20 张、覆盖视场边缘并带倾角变化。';
     const fails = session.views.filter((v) => v.quality.verdict === 'Fail').length;
     const warns = session.views.filter((v) => v.quality.verdict === 'Warn').length;
-    return `已收录 ${session.views.length} 张（启用 ${enabledCount}）。失败 ${fails} · 警告 ${warns}。启用满 3 张即可求解。`;
+    return `已收集 ${session.views.length} 张（启用 ${enabledCount}）。失败 ${fails} · 警告 ${warns}。启用满 3 张即可求解。会话会持久化到服务器 data/calibration-wizard。`;
   }, [session, enabledCount]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch('/api/cameras');
+        if (response.ok) {
+          const list = await response.json() as CameraListItem[];
+          setCameras(list);
+          if (!cameraId && list[0]) setCameraId(list[0].id);
+        }
+      } catch { setCameras([]); }
+    })();
+  }, []);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const refresh = async (next: CalibrationWizardSession) => {
+    setSession(next);
+  };
 
   const createSession = async () => {
     setBusy(true);
@@ -48,14 +78,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       if (!response.ok) throw new Error(data.error ?? '创建向导会话失败');
       setSession(data);
       setSolveSummary(undefined);
+      setViewStatsRows([]);
+      setHints([]);
       setStep(1);
-      messageApi.success('内参标定向导会话已创建');
+      messageApi.success('内参标定向导会话已创建（已落盘）');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '创建失败'); }
     finally { setBusy(false); }
-  };
-
-  const refresh = async (next: CalibrationWizardSession) => {
-    setSession(next);
   };
 
   const uploadImages = async (files: File[]) => {
@@ -75,6 +103,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         current = data;
       }
       await refresh(current);
+      await loadHints(current.sessionId);
       setStep(2);
       messageApi.success(`已处理 ${files.length} 张图像`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '上传失败'); }
@@ -92,9 +121,62 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导入失败');
       await refresh(data);
+      await loadHints(data.sessionId);
       setStep(2);
       messageApi.success('已导入标定视图 JSON');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '导入失败'); }
+    finally { setBusy(false); }
+  };
+
+  const importDocument = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch('/api/calibration/wizard/sessions/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentJson })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? '会话文档导入失败');
+      setSession(data);
+      setSolveSummary((data.lastSolveSummary as Record<string, unknown> | null) ?? undefined);
+      setStep(data.views?.length ? 2 : 1);
+      await loadHints(data.sessionId);
+      messageApi.success('已从会话文档恢复（含视图与结果）');
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '导入失败'); }
+    finally { setBusy(false); }
+  };
+
+  const loadHints = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(sessionId)}/hints`);
+      if (!response.ok) return;
+      const data = await response.json();
+      setHints(Array.isArray(data.hints) ? data.hints : []);
+    } catch { /* ignore */ }
+  };
+
+  const previewCamera = async (addIfAccepted: boolean) => {
+    if (!session) return messageApi.warning('请先创建会话');
+    if (!cameraId) return messageApi.warning('请选择相机');
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/preview`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cameraId, addIfAccepted, label: `cam-${cameraId}` })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? '相机预览检测失败');
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (typeof data.previewJpegBase64 === 'string') {
+        const bytes = Uint8Array.from(atob(data.previewJpegBase64), (c) => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+        setPreviewUrl(url);
+      }
+      setPreviewQuality(`${data.quality?.verdict ?? '?'}: ${data.quality?.reason ?? ''}`);
+      if (data.session) await refresh(data.session);
+      if (Array.isArray(data.hints)) setHints(data.hints);
+      messageApi.success(addIfAccepted && data.found ? '已检测并接受当前帧' : (data.found ? '检测成功（未写入会话）' : '未检测到标定板'));
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '预览失败'); }
     finally { setBusy(false); }
   };
 
@@ -108,6 +190,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '更新失败');
       await refresh(data);
+      await loadHints(data.sessionId);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '更新失败'); }
     finally { setBusy(false); }
   };
@@ -120,7 +203,24 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '删除失败');
       await refresh(data);
+      await loadHints(data.sessionId);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '删除失败'); }
+    finally { setBusy(false); }
+  };
+
+  const disableOutliers = async () => {
+    if (!session) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/disable-outliers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ useSolveOutlier: true })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? '禁用离群失败');
+      await refresh(data);
+      messageApi.success('已禁用求解标记的离群/最差视图，请重新求解');
+      setStep(3);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '操作失败'); }
     finally { setBusy(false); }
   };
 
@@ -136,9 +236,30 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
       setSession(data.session);
       setSolveSummary(data.result);
+      if (Array.isArray(data.hints)) setHints(data.hints);
+      const statsRaw = data.result?.viewStats;
+      if (typeof statsRaw === 'string') {
+        try { setViewStatsRows(JSON.parse(statsRaw)); } catch { setViewStatsRows([]); }
+      } else { setViewStatsRows([]); }
       setStep(4);
       messageApi.success(`求解完成 · RMS ${Number(data.result?.rms ?? 0).toFixed(4)} px`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '求解失败'); }
+    finally { setBusy(false); }
+  };
+
+  const exportDocument = async () => {
+    if (!session) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? '导出失败');
+      const text = typeof data.documentJson === 'string' ? data.documentJson : JSON.stringify(data.document, null, 2);
+      setDocumentJson(text);
+      if (Array.isArray(data.hints)) setHints(data.hints);
+      await navigator.clipboard?.writeText(text).catch(() => undefined);
+      messageApi.success('已导出完整会话文档（含视图点与结果），可复制保存');
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '导出失败'); }
     finally { setBusy(false); }
   };
 
@@ -174,9 +295,14 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       <Steps size="small" current={step} items={stepTitles.map((title) => ({ title }))} style={{ marginBottom: 16 }}
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-        message="相机内参向导（实用切片）"
-        description="质量门控（清晰度 / 覆盖率 / 角点完整性）→ 接受/拒绝视图 → 求解 RMS / 最差视图 / 离群视图 → 导出到节点。不是完整 HALCON Calibration Assistant（无实时相机预览、无鱼眼、无自动姿态规划）。" />
+        message="相机内参向导（Batch F）"
+        description="会话落盘 + 导出/导入完整文档 · 相机刷新检测预览 · 规则姿态提示 · 离群一键禁用 · 导出到节点。鱼眼/远心：当前 JLVision 仅支持多项式针孔，已跳过。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
+      {hints.length > 0 && (
+        <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+          message="建议下一姿态（规则提示，非自动规划）"
+          description={<ul style={{ margin: 0, paddingLeft: 18 }}>{hints.map((h) => <li key={h.code}>{h.message}</li>)}</ul>} />
+      )}
 
       {step === 0 && (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -193,12 +319,32 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
             <InputNumber addonBefore="高" min={16} value={imageHeight ?? undefined} onChange={(v) => setImageHeight(v == null ? null : Number(v))} placeholder="可选" />
           </Space>
           <Button type="primary" loading={busy} onClick={createSession}>创建向导会话</Button>
+          <Input.TextArea rows={4} value={documentJson} onChange={(e) => setDocumentJson(e.target.value)}
+            placeholder="或粘贴完整会话 documentJson（intrinsics-wizard-v1）以恢复上次进度" />
+          <Button loading={busy} disabled={!documentJson.trim()} onClick={() => void importDocument()}>从会话文档恢复</Button>
         </Space>
       )}
 
       {step === 1 && session && (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Typography.Text code>session {session.sessionId}</Typography.Text>
+          <Space wrap>
+            <Select
+              style={{ minWidth: 220 }}
+              placeholder="选择相机"
+              value={cameraId}
+              onChange={setCameraId}
+              options={cameras.map((c) => ({ value: c.id, label: `${c.id}${c.acquisition?.acquisitionState ? ` (${c.acquisition.acquisitionState})` : ''}` }))}
+            />
+            <Button loading={busy} onClick={() => void previewCamera(false)}>刷新检测预览</Button>
+            <Button type="primary" loading={busy} onClick={() => void previewCamera(true)}>检测并接受当前帧</Button>
+          </Space>
+          {previewUrl && (
+            <div>
+              <Typography.Text type="secondary">{previewQuality}</Typography.Text>
+              <div><img src={previewUrl} alt="board preview" style={{ maxWidth: '100%', maxHeight: 320, border: '1px solid #ddd' }} /></div>
+            </div>
+          )}
           <Upload.Dragger multiple accept="image/*" disabled={busy} beforeUpload={() => false}
             onChange={(info) => {
               const files = info.fileList.map((f) => f.originFileObj).filter(Boolean) as File[];
@@ -223,7 +369,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
               { title: '标签', dataIndex: 'label', width: 140 },
               { title: '启用', width: 70, render: (_: unknown, row) => (
                 <Button size="small" type={row.enabled ? 'primary' : 'default'} onClick={() => void setEnabled(row.index, !row.enabled)}>
-                  {row.enabled ? '是' : '否'}
+                  {row.enabled ? '开' : '关'}
                 </Button>
               ) },
               { title: '质量', width: 90, render: (_: unknown, row) => <Tag color={verdictColor(row.quality.verdict)}>{row.quality.verdict}</Tag> },
@@ -255,14 +401,27 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {solveSummary && (
             <Alert type="success" showIcon message={`RMS ${Number(solveSummary.rms ?? 0).toFixed(4)} px · 启用视图 ${String(solveSummary.enabledViews ?? enabledCount)}`}
-              description={`最差视图索引: ${String(solveSummary.worstViewIndex ?? '—')} · 离群: ${String((solveSummary.nodeSummary as Record<string, unknown> | undefined)?.outlierViewIndex ?? '无')}`} />
+              description={`最差视图索引 ${String(solveSummary.worstViewIndex ?? '无')} · 离群: ${String((solveSummary.nodeSummary as Record<string, unknown> | undefined)?.outlierViewIndex ?? '无')}`} />
           )}
-          <Space>
+          {viewStatsRows.length > 0 && (
+            <Table size="small" pagination={false} rowKey={(r) => String(r.index)} dataSource={viewStatsRows}
+              columns={[
+                { title: 'view', dataIndex: 'index', width: 60 },
+                { title: 'covX', render: (_: unknown, r) => Number(r.coverageX ?? 0).toFixed(2) },
+                { title: 'covY', render: (_: unknown, r) => Number(r.coverageY ?? 0).toFixed(2) },
+                { title: 'H-RMS', render: (_: unknown, r) => r.homographyRms == null ? '-' : Number(r.homographyRms).toFixed(3) },
+                { title: 'Pose-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
+              ]} />
+          )}
+          <Space wrap>
+            <Button danger loading={busy} onClick={() => void disableOutliers()}>禁用离群/最差视图</Button>
+            <Button loading={busy} onClick={() => void exportDocument()}>导出完整会话文档</Button>
             <Button type="primary" loading={busy} disabled={!canApplyToSelectedNode} onClick={applyModel}>
               应用到所选节点{selectedNodeType ? `（${selectedNodeType}）` : ''}
             </Button>
             <Button onClick={() => setStep(2)}>返回审核</Button>
           </Space>
+          {documentJson && <Input.TextArea rows={5} value={documentJson} readOnly />}
         </Space>
       )}
     </div>
