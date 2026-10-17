@@ -63,6 +63,46 @@ public sealed class Batch3RecognitionNodeTests
         finally { vision.Dispose(); }
     }
 
+    [Fact]
+    public async Task BarcodeRoiRestrictsSearchAndReturnsPreviewOverlays()
+    {
+        var left = new MultiFormatWriter().encode("IN-ROI", BarcodeFormat.QR_CODE, 220, 220);
+        var right = new MultiFormatWriter().encode("OUTSIDE-ROI", BarcodeFormat.QR_CODE, 220, 220);
+        using var source = new Mat(260, 520, MatType.CV_8UC1, Scalar.All(255));
+        for (var y = 0; y < 220; y++)
+        for (var x = 0; x < 220; x++)
+        {
+            source.Set(y + 20, x + 20, left[x, y] ? (byte)0 : (byte)255);
+            source.Set(y + 20, x + 280, right[x, y] ? (byte)0 : (byte)255);
+        }
+
+        var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", Inputs(source),
+            """{"mode":"qr","preprocess":"none","tryInverted":false,"roi":{"type":"Rectangle","x":0,"y":0,"width":260,"height":260}}""");
+
+        Assert.Equal(1, checked((int)result.Outputs["count"].Require<long>("count")));
+        Assert.Equal("IN-ROI", result.Outputs["text"].Require<string>("text"));
+        var overlays = result.Overlays ?? [];
+        Assert.NotEmpty(overlays);
+        Assert.All(overlays, point => Assert.InRange(point.X!.Value, 0, 260));
+        Assert.Equal(true, result.Summary["roiApplied"]);
+    }
+
+    [Fact]
+    public async Task BarcodeAutoModeRetriesInvertedSymbols()
+    {
+        var matrix = new MultiFormatWriter().encode("INVERTED-DM", BarcodeFormat.DATA_MATRIX, 260, 180);
+        using var source = new Mat(matrix.Height, matrix.Width, MatType.CV_8UC1);
+        for (var y = 0; y < matrix.Height; y++)
+        for (var x = 0; x < matrix.Width; x++) source.Set(y, x, matrix[x, y] ? (byte)255 : (byte)0);
+
+        var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", Inputs(source),
+            """{"mode":"2d","multiple":false,"preprocess":"auto","tryInverted":true}""");
+
+        Assert.Equal("INVERTED-DM", result.Outputs["text"].Require<string>("text"));
+        Assert.Equal(true, result.Summary["inverted"]);
+        Assert.True(Convert.ToInt32(result.Summary["attempts"]) > 1);
+    }
+
     [Theory]
     [InlineData("+eng")]
     [InlineData("eng+")]

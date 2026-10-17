@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "8d8be1f9daebccb1a493658f5454679d46a16edb96050fd9868877837b1c31a1",
+  "hash": "09d9b3a23c331aab78751c70e3a96c45d22da29aade6ec624c4c921a7c543a12",
   "items": [
     {
       "type": "image.acquire",
@@ -13777,13 +13777,73 @@
           "label": "Decode Multiple",
           "type": "boolean",
           "defaultValue": true
+        },
+        {
+          "name": "preprocess",
+          "label": "Preprocessing",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic fallback",
+              "value": "auto"
+            },
+            {
+              "label": "Original only",
+              "value": "none"
+            },
+            {
+              "label": "Otsu threshold",
+              "value": "otsu"
+            },
+            {
+              "label": "Adaptive threshold",
+              "value": "adaptive"
+            }
+          ],
+          "description": "Automatic tries original grayscale, Otsu, and adaptive threshold images."
+        },
+        {
+          "name": "tryInverted",
+          "label": "Try Inverted Polarity",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Retries with inverted pixels when no normal-polarity code is found; multi-code mode also searches inverted pixels."
+        },
+        {
+          "name": "adaptiveBlockSize",
+          "label": "Adaptive Window Size",
+          "type": "number",
+          "defaultValue": 31,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "description": "Odd local window size; reduced automatically for small images."
+        },
+        {
+          "name": "adaptiveConstant",
+          "label": "Adaptive Threshold Offset",
+          "type": "number",
+          "defaultValue": 10,
+          "min": -100,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "name": "maxResults",
+          "label": "Maximum Results",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
         }
       ],
-      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.",
+      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes using ZXing.Net. Supports an image ROI, threshold fallback passes, optional inverted-polarity retries, and multiple symbols. Results include decoded text, format, source-image points, and the preprocessing pass; detected points are drawn on the image preview. text/format expose the first result.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": false,
+        "supportsRoi": true,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
