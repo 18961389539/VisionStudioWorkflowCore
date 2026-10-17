@@ -582,7 +582,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 233  # fcaea6b independent recipes + POST /api/recipes + GET /api/workflows (saved-workflow picker); prior base: 235 + POST /api/workflows/{id}/overwrite (Q05 administrator force-overwrite: authorized + reason + audit)
+expected_routes = 235  # 0e88314 caliper diagnostics: 233 + GET /api/runs/{runId}/nodes/{nodeId}/caliper-diagnostics + GET /api/runs/{runId}/nodes/{nodeId}/caliper-edge-diagnostics; prior: fcaea6b independent recipes + POST /api/recipes + GET /api/workflows (saved-workflow picker)
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
