@@ -18,9 +18,13 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
         var source = context.RequireImage("image");
         var columns = node.GetInt("columns", 7); var rows = node.GetInt("rows", 6); var spacing = node.GetDouble("spacingMm", 10);
         var error = node.GetDouble("maxGridError", 2); var pattern = node.GetString("pattern", "chessboard");
+        var minBlur = node.GetDouble("minBlurVariance", 0); var minCoverage = node.GetDouble("minCoverage", 0);
+        var rejectWeak = node.GetBool("rejectWeakViews", false);
         if (columns is < 2 or > 30 || rows is < 2 or > 30 || rows * columns < 6 || !double.IsFinite(spacing) || spacing <= 0 || spacing > 10000 || !double.IsFinite(error) || error is < .1 or > 20)
             throw new InvalidOperationException("Board needs 2..30 rows/columns, at least six points, positive spacing <=10000 mm and grid error 0.1..20 px.");
         if (pattern is not ("chessboard" or "circles")) throw new InvalidOperationException("Board pattern must be chessboard or circles.");
+        if (!double.IsFinite(minBlur) || minBlur < 0) throw new InvalidOperationException("minBlurVariance must be finite and non-negative (0 disables).");
+        if (!double.IsFinite(minCoverage) || minCoverage is < 0 or > 1) throw new InvalidOperationException("minCoverage must be in 0..1 (0 disables).");
         var request = new CameraCalibrationRequest(source.Width, source.Height, []);
         if (context.TryGetValue("calibrationDataJson", out var previous))
         {
@@ -35,6 +39,12 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
         var points = new List<VisionPoint2D>();
         using var native = JLVisionImages.FromMat(source.Mat); using var channels = native.CountChannels();
         using var gray = channels.I == 1 ? native.CopyImage() : native.Rgb1ToGray();
+        using var blurGray = new Mat();
+        if (source.Mat.Channels() == 1) source.Mat.CopyTo(blurGray);
+        else if (source.Mat.Channels() == 3) Cv2.CvtColor(source.Mat, blurGray, ColorConversionCodes.BGR2GRAY);
+        else if (source.Mat.Channels() == 4) Cv2.CvtColor(source.Mat, blurGray, ColorConversionCodes.BGRA2GRAY);
+        else throw new InvalidOperationException("Board detection requires 1, 3, or 4 channel images.");
+        var blurVariance = CalibrationViewQuality.LaplacianVariance(blurGray);
         if (pattern == "chessboard")
         {
             var contrast = node.GetDouble("saddleThreshold", 10);
@@ -43,7 +53,7 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
             using (ys) using (xs)
             {
                 candidateCount = ys.Length;
-                if (ys.Length > 3600) return ValueTask.FromResult(Result(null, "too-many-candidates"));
+                if (ys.Length > 3600) return ValueTask.FromResult(Result(null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage)));
                 for (var i = 0; i < ys.Length; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -73,30 +83,58 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
             using (ys) using (xs)
             {
                 candidateCount = ys.Length;
-                if (ys.Length > 900) return ValueTask.FromResult(Result(null, "too-many-candidates"));
+                if (ys.Length > 900) return ValueTask.FromResult(Result(null, "too-many-candidates", CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage)));
                 for (var i = 0; i < ys.Length; i++) points.Add(new(xs[i].D, ys[i].D));
             }
         }
         cancellationToken.ThrowIfCancellationRequested();
         var ordered = BoardLattice.Order(points, columns, rows, error, cancellationToken);
-        if (ordered is null) return ValueTask.FromResult(Result(null, "incomplete-or-inconsistent-grid"));
-        if (request.Views.Count >= 100) throw new InvalidOperationException("Calibration view budget exceeded (100).");
-        var objects = Enumerable.Range(0, rows * columns).Select(i => new List<double> { i % columns * spacing, i / columns * spacing, 0 }).ToList();
-        var view = new CameraCalibrationView(objects, ordered.Select(p => new List<double> { p.X, p.Y }).ToList());
-        request.Views.Add(view);
-        return ValueTask.FromResult(Result(view, null));
+        CameraCalibrationView? view = null;
+        string? reason = ordered is null ? "incomplete-or-inconsistent-grid" : null;
+        CalibrationViewQuality.Report? quality = null;
+        if (ordered is not null)
+        {
+            var objects = Enumerable.Range(0, rows * columns).Select(i => new List<double> { i % columns * spacing, i / columns * spacing, 0 }).ToList();
+            view = new CameraCalibrationView(objects, ordered.Select(p => new List<double> { p.X, p.Y }).ToList());
+            quality = CalibrationViewQuality.Evaluate(view.ImagePoints, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage);
+            if (rejectWeak && quality.Verdict == CalibrationViewQuality.Verdict.Fail)
+            {
+                reason = quality.Reason;
+                view = null;
+            }
+            else
+            {
+                if (request.Views.Count >= 100) throw new InvalidOperationException("Calibration view budget exceeded (100).");
+                request.Views.Add(view);
+            }
+        }
+        else
+        {
+            quality = CalibrationViewQuality.Evaluate(null, source.Width, source.Height, rows * columns, blurVariance, minBlur, minCoverage);
+        }
+        return ValueTask.FromResult(Result(view, reason, quality));
 
-        NodeExecutorResult Result(CameraCalibrationView? view, string? reason)
+        NodeExecutorResult Result(CameraCalibrationView? accepted, string? failReason, CalibrationViewQuality.Report? report)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(view is not null), ["count"] = VisionValue.Integer(view?.ImagePoints.Count ?? 0),
-                ["calibrationDataJson"] = VisionValue.String(JsonSerializer.Serialize(request)) };
-            if (view is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(view));
-            var overlays = view?.ImagePoints.Select((p, i) => new VisionOverlay($"board-{i}", VisionOverlayType.Circle, X: p[0], Y: p[1], Radius: 3, Label: i.ToString())).ToArray();
+            var outputs = new Dictionary<string, VisionValue> { ["found"] = VisionValue.Boolean(accepted is not null), ["count"] = VisionValue.Integer(accepted?.ImagePoints.Count ?? 0),
+                ["calibrationDataJson"] = VisionValue.String(JsonSerializer.Serialize(request)),
+                ["blurVariance"] = VisionValue.Double(blurVariance) };
+            if (accepted is not null) outputs["viewJson"] = VisionValue.String(JsonSerializer.Serialize(accepted));
+            if (report is not null)
+            {
+                outputs["coverageX"] = VisionValue.Double(report.CoverageX);
+                outputs["coverageY"] = VisionValue.Double(report.CoverageY);
+                outputs["quality"] = VisionValue.String(report.Verdict.ToString());
+            }
+            var overlays = accepted?.ImagePoints.Select((p, i) => new VisionOverlay($"board-{i}", VisionOverlayType.Circle, X: p[0], Y: p[1], Radius: 3, Label: i.ToString())).ToArray();
             outputs["image"] = VisionValue.Image(source.CloneOwned());
-            return new(outputs, new Dictionary<string, object?> { ["found"] = view is not null, ["count"] = view?.ImagePoints.Count ?? 0,
+            return new(outputs, new Dictionary<string, object?> { ["found"] = accepted is not null, ["count"] = accepted?.ImagePoints.Count ?? 0,
                 ["views"] = request.Views.Count, ["pattern"] = pattern, ["candidateCount"] = candidateCount, ["gridCandidates"] = points.Count,
-                ["reason"] = reason, ["algorithmBackend"] = "JLVision" }, overlays);
+                ["reason"] = failReason, ["blurVariance"] = blurVariance,
+                ["coverageX"] = report?.CoverageX, ["coverageY"] = report?.CoverageY, ["quality"] = report?.Verdict.ToString(),
+                ["qualityReason"] = report?.Reason, ["guidance"] = report?.Guidance,
+                ["rejectWeakViews"] = rejectWeak, ["algorithmBackend"] = "JLVision" }, overlays);
         }
     }
 

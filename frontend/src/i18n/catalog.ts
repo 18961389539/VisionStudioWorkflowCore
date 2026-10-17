@@ -192,6 +192,11 @@ const parameterNames: Record<string, string> = {
   Timeout: '超时时间', 'Timeout (ms)': '超时时间（毫秒）', 'Transforms JSON': '坐标变换 JSON', 'Trigger Before Grab': '采集前触发',
   Unit: '单位', 'Wait For Complete': '等待执行完成', Width: '宽度', X: 'X 坐标', 'X Tag': 'X 标签', 'X Translation': 'X 平移量',
   Y: 'Y 坐标', 'Y Tag': 'Y 标签', 'Y Translation': 'Y 平移量'
+  'Min Blur Variance (0=off)': '最小清晰度方差（0=关闭）',
+  'Min Coverage Fraction (0=off)': '最小覆盖率（0=关闭）',
+  'Reject Weak Views': '拒绝弱视图',
+  'Max Sample Translation Error (0=off)': '单样本平移残差上限（0=关闭）',
+  'Max Sample Angle Error deg (0=off)': '单样本角度残差上限（度，0=关闭）',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -312,6 +317,15 @@ export const portNames: Record<string, string> = {
   withinTolerance: '在公差内', inPosition: '已到位', targetReady: '目标就绪', busy: '忙碌', complete: '已完成',
   execute: '执行', commandId: '指令号', attempts: '尝试次数', handshakeError: '握手异常', ack: '已应答',
   target: '机器人目标', edgeCount: '边缘数', waitMs: '等待时长', skewUs: '触发偏差', traceId: '追溯号'
+  blurVariance: '清晰度方差',
+  coverageX: 'X 向覆盖率',
+  coverageY: 'Y 向覆盖率',
+  viewStats: '各视图统计 JSON',
+  worstViewRms: '最差视图 RMS',
+  maxTranslationError: '最大平移残差',
+  maxAngleErrorDeg: '最大角度残差',
+  worstSampleIndex: '最差样本索引',
+  sampleResidualsJson: '逐样本残差 JSON',
 };
 
 const descriptions: Record<string, string> = {
@@ -354,7 +368,7 @@ const descriptions: Record<string, string> = {
   'region.toDetections': '每个区域对象生成一个检测目标，保留像素面积、重心和包围几何，可连接目标筛选、排序和逐目标循环。不自动拆分或重排对象。',
   'region.transform': '采用与仿射变换图像相同的像素坐标约定，以最近邻变换区域，保留对象和孔洞，裁剪到输出边界并移除空对象。',
   'measure.lineSpacing': '沿线段 A 均匀采样，按法向或指定角度与线段 B 求交，输出绝对间距的均值、极值和总体标准差。无交叠时 found=false；输入来自找线节点，本节点不直接寻找图像边缘。',
-  'calibration.detectBoard': '使用 JLVision 提取完整、独立的棋盘格内角点或对称圆点阵，并验证投影网格。需恰好检出行数×列数个候选点。可串联累计最多 100 个视图，输出连接相机内参标定；标定需多个姿态不同的视图。',
+  'calibration.detectBoard': '使用 JLVision 提取完整孤立棋盘格内角点或对称圆点阵，并验证投影格子。报告清晰度（Laplacian 方差）、覆盖率与 Pass/Warn/Fail 质量结论及采集建议；可选 minBlurVariance/minCoverage，开启 rejectWeakViews 时不追加失败视图。可累积最多 100 张视图供内参标定或标定向导使用。',
   'Grayscale flat-field correction: (image-dark)/(bright-dark)*target. Auto target is mean bright-dark. All gain pixels must exceed minGain. References must match dimensions; byte output clips, real output preserves range.': '按（图像−暗场）÷（亮场−暗场）×目标灰度进行校正；彩色转灰度。自动目标取明暗场差值均值。每个像素增益须超过最小值；参考图尺寸一致。8 位输出截断，浮点输出保留数值范围。',
   'Detect local bright/dark deviations using JLVision dynamic threshold. Background comes from the input or a local mean with an odd window. Connect image or domainImage; optional region further limits detection. Output objects are not split.': '与输入背景图或局部均值比较，检测亮暗缺陷。普通图像与限定域图像只连接一个；可再用区域限制检测范围。输出区域需通过连通域节点拆分目标。',
   'Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.': '对已对齐的灰度图进行差分；输出为浮点图，带符号模式保留负值。输入须先完成定位对齐，曝光变化也会产生差异。',
@@ -409,7 +423,7 @@ const descriptions: Record<string, string> = {
   'inference.detection': 'ONNX 目标检测：支持 xyxy 行格式和 YOLO（cx,cy,w,h+类别分）布局，可选 Letterbox 反填充映射，类别感知 NMS。',
   'inference.segmentation': 'ONNX 语义分割：输出标签掩膜，并逐类统计像素数、面积占比和平均获胜分数，给出主导类别。',
   'inference.anomaly': 'ONNX 异常检测：标量分数直接判阈值；空间异常图还会输出归一化热力图、峰值位置和超阈值面积占比。',
-  'calibration.cameraIntrinsics': '相机内参标定：逐视图报告点覆盖和（平面板）重投影 RMS/最大值，可按逐视图或模型 RMS 门限拒绝坏视图；无向导界面。',
+  'calibration.cameraIntrinsics': '相机内参标定：报告每视图覆盖与（平面板）投影 RMS/最大值，可用单视图与模型 RMS 门限拒绝差视图。支持标定工作区向导会话累积视图。无鱼眼/远心模型。',
   'image.difference': '图像差分：绝对/有符号/归一化三种模式，可缩放，始终输出均值/标准差/极值；设门限后还输出超阈值像素占比。',
   'measure.blobs': '多斑点分析：面积、圆度、宽高、矩形度多特征组合筛选（HALCON select_shape 式），可按面积/X/Y/圆度排序。',
   'recognition.ocr': 'Tesseract 5 文字识别：支持页面分割/引擎模式、字符白名单、DPI、放大与二值化预处理、矩形 ROI，并输出逐词框和置信度；低置信词可过滤。不支持字体训练。',
@@ -425,6 +439,7 @@ const descriptions: Record<string, string> = {
   'robot.j4TcpCompensation': '补偿 J4 旋转中心或 TCP 偏心，输出补偿后的机器人目标，不会直接向硬件发送指令。',
   'robot.currentPose': '从机器人管理器读取当前平面位姿和通用握手状态。',
   'robot.guidance2d': '根据已转换到 RobotBase（或其他机器人坐标系）的位姿创建通用二维机器人目标。'
+  'calibration.handEye2D': '平面 SE(2) 手眼标定：输出位姿与可组合变换，报告平移/角度 RMS 与逐样本残差、最差样本索引；可选残差门限；拒绝重复机器人位姿。不含三维手眼。',
 };
 
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
@@ -575,8 +590,8 @@ const parameterDescriptions: Record<string, string> = {
   'inference.detection.letterbox': 'Letterbox 输入：模型输入是等比缩放加对称填充时开启，否则坐标映射会偏移。',
   'inference.anomaly.threshold': '异常门限：标量输出直接比较；异常图按峰值判定，并统计超门限面积。',
   'image.register.subpixelRefine': '亚像素细化：对相关峰做抛物线插值；仅匹配角度在 5° 内时生效，旋转匹配保持整数结果。',
-  'calibration.cameraIntrinsics.maxViewRms': '逐视图重投影 RMS 上限（0 为关）：某视图超限会报错并指出视图序号，先检查该视图角点。',
-  'calibration.cameraIntrinsics.maxRms': '模型 RMS 上限（0 为关）：整体标定误差超限时拒绝该模型。',
+  'calibration.cameraIntrinsics.maxViewRms': '单视图平面投影 RMS 上限（0 关闭）；某视图超限会报错并指出视图号，请检查该视图角点。',
+  'calibration.cameraIntrinsics.maxRms': '模型 RMS 上限（0 关闭）；整体标定误差超限时拒绝该模型。',
   'measure.blobs.minRectangularity': '最小矩形度：面积/外接框面积，细长或 L 形目标该值低。',
   'measure.blobs.minWidth': '最小外接框宽度（像素，0 为不限）。',
   'feature.edge.subpixel': '亚像素链点：沿局部梯度方向抛物线细化链点并写入 chains JSON（每链最多 200 点）；关时只给长度/外接框。',
@@ -587,6 +602,11 @@ const parameterDescriptions: Record<string, string> = {
   'defect.referenceCompare.variationWindow': '变差估计窗口（奇数）：计算参考图局部标准差的邻域大小。',
   'inference.detection.layout.yolov5': 'YOLOv5 布局：含 objectness 通道，最终分数 = objectness × 类别分。', 'measure.blobs.maxWidth': '最大外接框宽度（像素，0 为不限）。',
   'measure.blobs.minHeight': '最小外接框高度（像素，0 为不限）。', 'measure.blobs.maxHeight': '最大外接框高度（像素，0 为不限）。'
+  'calibration.detectBoard.minBlurVariance': '最小 Laplacian 方差门限（0 关闭）。过低表示模糊，标定向导默认建议约 40。',
+  'calibration.detectBoard.minCoverage': '角点包络相对图像宽高的最小覆盖率（0 关闭）。过小的远处靶标会被拒绝。',
+  'calibration.detectBoard.rejectWeakViews': '开启后，清晰度/覆盖率/角点完整性失败的视图不追加到 calibrationDataJson。',
+  'calibration.handEye2D.maxTranslationError': '单样本平移残差上限（0 关闭）。超过则指出最差样本并拒绝求解结果。',
+  'calibration.handEye2D.maxAngleErrorDeg': '单样本角度残差上限（度，0 关闭）。',
 };
 
 const statusNames: Record<string, string> = {

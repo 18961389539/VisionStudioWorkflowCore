@@ -142,6 +142,15 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         var samples = request.Samples;
         if (samples is null || samples.Count < 4) throw new InvalidOperationException("2D hand-eye calibration requires at least four robot/vision pose pairs.");
         if (samples.Any(s => s is null || !Finite(s.Robot) || !Finite(s.Vision))) throw new InvalidOperationException("Robot and vision pose coordinates and angles must be finite, and each sample must be non-null.");
+        // Reject exact duplicate robot poses — they add no observability and inflate false confidence.
+        for (var i = 0; i < samples.Count; i++)
+        for (var j = i + 1; j < samples.Count; j++)
+        {
+            if (Math.Abs(samples[i].Robot.X - samples[j].Robot.X) < 1e-9
+                && Math.Abs(samples[i].Robot.Y - samples[j].Robot.Y) < 1e-9
+                && Math.Abs(Normalize(samples[i].Robot.ThetaDeg) - Normalize(samples[j].Robot.ThetaDeg)) < 1e-6)
+                throw new InvalidOperationException($"Hand-eye samples {i} and {j} share the same robot pose; teach distinct robot poses.");
+        }
         var mode = node.GetString("mode", "eyeInHand").Trim();
         if (!mode.Equals("eyeInHand", StringComparison.OrdinalIgnoreCase) && !mode.Equals("eyeToHand", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Mode must be eyeInHand or eyeToHand.");
         var robotAngles = samples.Select(s => Normalize(s.Robot.ThetaDeg)).ToArray();
@@ -172,13 +181,47 @@ public sealed class PlanarHandEyeCalibrationNode : IVisionNodeExecutor
         CheckObservability(samples,x,mode);
         var errors = Residuals(samples,x,mode); var translationRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i]*errors[3*i]+errors[3*i+1]*errors[3*i+1])); var angleRms = Math.Sqrt(Enumerable.Range(0,samples.Count).Average(i=>errors[3*i+2]*errors[3*i+2]))/50;
         if (!double.IsFinite(translationRms) || translationRms > 1e6) throw new InvalidOperationException("Hand-eye solve did not converge to a finite solution.");
+        // Per-sample residual report (translation hypot + angle degrees) so operators can
+        // drop a bad pose pair the way mature hand-eye tools highlight worst samples.
+        var sampleResiduals = Enumerable.Range(0, samples.Count).Select(i => new
+        {
+            index = i,
+            translationError = Math.Sqrt(errors[3 * i] * errors[3 * i] + errors[3 * i + 1] * errors[3 * i + 1]),
+            angleErrorDeg = Math.Abs(errors[3 * i + 2] / 50) * 180 / Math.PI,
+            robot = new { x = samples[i].Robot.X, y = samples[i].Robot.Y, thetaDeg = samples[i].Robot.ThetaDeg },
+            vision = new { x = samples[i].Vision.X, y = samples[i].Vision.Y, thetaDeg = samples[i].Vision.ThetaDeg }
+        }).ToArray();
+        var maxTranslationError = sampleResiduals.Max(s => s.translationError);
+        var maxAngleErrorDeg = sampleResiduals.Max(s => s.angleErrorDeg);
+        var worstSampleIndex = sampleResiduals.OrderByDescending(s => s.translationError).Select(s => s.index).First();
+        var maxTranslation = node.GetDouble("maxTranslationError", 0);
+        var maxAngle = node.GetDouble("maxAngleErrorDeg", 0);
+        if (!double.IsFinite(maxTranslation) || maxTranslation < 0) throw new InvalidOperationException("maxTranslationError must be finite and non-negative (0 disables).");
+        if (!double.IsFinite(maxAngle) || maxAngle < 0) throw new InvalidOperationException("maxAngleErrorDeg must be finite and non-negative (0 disables).");
+        if (maxTranslation > 0 && maxTranslationError > maxTranslation)
+            throw new InvalidOperationException($"Hand-eye sample {worstSampleIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslation:0.####}; remove or re-teach that pose pair.");
+        if (maxAngle > 0 && maxAngleErrorDeg > maxAngle)
+            throw new InvalidOperationException($"Hand-eye max angle residual {maxAngleErrorDeg:0.####} deg exceeds maxAngleErrorDeg {maxAngle:0.####}; remove the worst pose pair and re-solve.");
         var theta=Normalize(x[2]*180/Math.PI); var pose = new VisionPose2D(x[0],x[1],theta);
         var radians=theta*Math.PI/180; var sourceFrame=node.GetString("sourceFrame","Camera");
         var defaultTargetFrame=mode.Equals("eyeInHand",StringComparison.OrdinalIgnoreCase)?"RobotTool":"RobotBase";
         var targetFrame=node.GetString("targetFrame",defaultTargetFrame); if(string.IsNullOrWhiteSpace(targetFrame))targetFrame=defaultTargetFrame;
         var unit=node.GetString("unit","mm");
         var transform=new VisionTransform2D(sourceFrame,targetFrame,unit,Math.Cos(radians),-Math.Sin(radians),x[0],Math.Sin(radians),Math.Cos(radians),x[1],0,0,1,node.GetString("sourceUnit","mm"));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pose"] = VisionValue.Pose(pose), ["transform"] = VisionValue.Transform(transform), ["translationRms"] = VisionValue.Double(translationRms), ["angleRmsDeg"] = VisionValue.Double(angleRms*180/Math.PI) }, new Dictionary<string, object?> { ["mode"] = mode, ["samples"] = samples.Count, ["transform2D"] = "SE(2)", ["sourceFrame"] = sourceFrame, ["targetFrame"] = targetFrame, ["unit"] = unit, ["translationRms"] = translationRms, ["angleRmsDeg"] = angleRms*180/Math.PI, ["scope"] = "planar only; no 3D hand-eye" }));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+        {
+            ["pose"] = VisionValue.Pose(pose), ["transform"] = VisionValue.Transform(transform),
+            ["translationRms"] = VisionValue.Double(translationRms), ["angleRmsDeg"] = VisionValue.Double(angleRms*180/Math.PI),
+            ["maxTranslationError"] = VisionValue.Double(maxTranslationError), ["maxAngleErrorDeg"] = VisionValue.Double(maxAngleErrorDeg),
+            ["worstSampleIndex"] = VisionValue.Integer(worstSampleIndex),
+            ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
+        }, new Dictionary<string, object?>
+        {
+            ["mode"] = mode, ["samples"] = samples.Count, ["transform2D"] = "SE(2)", ["sourceFrame"] = sourceFrame, ["targetFrame"] = targetFrame, ["unit"] = unit,
+            ["translationRms"] = translationRms, ["angleRmsDeg"] = angleRms*180/Math.PI,
+            ["maxTranslationError"] = maxTranslationError, ["maxAngleErrorDeg"] = maxAngleErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
+            ["scope"] = "planar only; no 3D hand-eye"
+        }));
     }
     private static bool Finite(VisionPose2D p) => double.IsFinite(p.X)&&double.IsFinite(p.Y)&&double.IsFinite(p.ThetaDeg);
     private static double[] Residuals(List<HandEyeSample> s, double[] x, string mode)

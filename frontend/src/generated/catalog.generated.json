@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "792b9dc47af8ea7e07da2b0673a0429d72b32822ab50c94729190d0225943eae",
+  "hash": "e7bc3b4cab54fdc089fdf8e10e3b24415db256d961fc87761be3251194683956",
   "items": [
     {
       "type": "image.acquire",
@@ -567,6 +567,26 @@
           "required": true
         },
         {
+          "name": "maxTranslationError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxAngleErrorDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sampleResidualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -594,7 +614,25 @@
           "label": "Pose Pairs JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs."
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses."
+        },
+        {
+          "name": "maxTranslationError",
+          "label": "Max Sample Translation Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001
+        },
+        {
+          "name": "maxAngleErrorDeg",
+          "label": "Max Sample Angle Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 180,
+          "step": 0.01
         },
         {
           "name": "sourceFrame",
@@ -622,7 +660,7 @@
           "defaultValue": "mm"
         }
       ],
-      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Outputs a Pose2D and composable Transform2D. This node does not implement 3D hand-eye calibration.",
+      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Reports translation/angle RMS plus per-sample residuals, worst sample index, and optional residual gates. Rejects duplicate robot poses. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -681,7 +719,7 @@
           "label": "Views JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence."
+          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence. Prefer the Calibration Wizard (Devices → Calibration → Intrinsics) to accumulate and gate views."
         },
         {
           "name": "maxViewRms",
@@ -702,7 +740,7 @@
           "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views. viewStats reports per-view point coverage and (for planar boards) homography and camera-pose reprojection RMS/max so a single bad view can be found and removed; worstViewIndex identifies the worst pose-reprojection view and the summary flags an outlier view (pose RMS > 3x median and > 0.5 px). maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model or calibration wizard is provided.",
+      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views. viewStats reports per-view coverage and planar/camera-pose reprojection RMS/max; worstViewIndex and outlierViewIndex flag suspect views. maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -753,6 +791,26 @@
           "name": "calibrationDataJson",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "blurVariance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "coverageX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -863,9 +921,33 @@
           "min": 0.1,
           "max": 255,
           "step": 0.1
+        },
+        {
+          "name": "minBlurVariance",
+          "label": "Min Blur Variance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1
+        },
+        {
+          "name": "minCoverage",
+          "label": "Min Coverage Fraction (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "rejectWeakViews",
+          "label": "Reject Weak Views",
+          "type": "boolean",
+          "defaultValue": false
         }
       ],
-      "description": "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Require exactly rows*columns candidates and a consistent projective lattice. Append a view to optional calibrationDataJson (maximum 100 views), then connect it to cameraIntrinsics. Use varied views; missing boards return found=false without appending.",
+      "description": "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Reports blurVariance (Laplacian), coverage, and a Pass/Warn/Fail quality verdict with guidance. Optional minBlurVariance/minCoverage gates plus rejectWeakViews skip appending failed views. Append up to 100 views into calibrationDataJson for cameraIntrinsics or the Calibration Wizard.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
