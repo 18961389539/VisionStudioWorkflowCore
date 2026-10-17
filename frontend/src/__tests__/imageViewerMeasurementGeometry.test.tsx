@@ -11,15 +11,18 @@ vi.mock('react-konva', async () => {
   return {
     Stage: React.forwardRef((props: Record<string, any>, ref: React.ForwardedRef<any>) => {
       const pointer = React.useRef<{ x: number; y: number } | undefined>(undefined);
-      React.useImperativeHandle(ref, () => ({ getPointerPosition: () => pointer.current }));
-      const dispatch = (handler?: (event: unknown) => void) => (event: any) => {
+      const setPointer = (event: any) => {
         const touch = event.touches?.[0] ?? event.changedTouches?.[0];
         pointer.current = { x: touch?.clientX ?? event.clientX, y: touch?.clientY ?? event.clientY };
+      };
+      React.useImperativeHandle(ref, () => ({ getPointerPosition: () => pointer.current, setPointersPositions: setPointer }));
+      const dispatch = (handler?: (event: unknown) => void) => (event: any) => {
+        setPointer(event);
         handler?.(event);
       };
       return <div data-testid="stage" onMouseDown={dispatch(props.onMouseDown)} onMouseMove={dispatch(props.onMouseMove)}
         onMouseUp={dispatch(props.onMouseUp)} onTouchStart={dispatch(props.onTouchStart)} onTouchMove={dispatch(props.onTouchMove)}
-        onTouchEnd={dispatch(props.onTouchEnd)} onClick={dispatch(props.onClick)}>{props.children}</div>;
+        onTouchEnd={dispatch(props.onTouchEnd)} onClick={dispatch(props.onClick)} onMouseLeave={props.onMouseLeave}>{props.children}</div>;
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
@@ -117,6 +120,43 @@ describe('ImageViewer measurement geometry editing', () => {
 
     expect(onRoiChange).toHaveBeenCalledOnce();
     expect(onRoiChange.mock.calls[0][0]).toEqual({ type: 'Rectangle', x: 35, y: 35, width: 15, height: 15 });
+  });
+
+  it('continues drawing a crop ROI when the pointer moves outside the viewer', () => {
+    const onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled onRoiChange={onRoiChange} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: '矩形' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 }); // image (10,10)
+    fireEvent.mouseLeave(stage);
+    fireEvent.mouseMove(document.body, { clientX: 450, clientY: 130 }); // beyond canvas; clamps to image edge (100,50)
+    fireEvent.mouseUp(document.body, { clientX: 450, clientY: 130 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const drawn = onRoiChange.mock.calls[0][0] as Extract<VisionRoi, { type: 'Rectangle' }>;
+    expect(drawn.type).toBe('Rectangle');
+    expect(drawn.x).toBeCloseTo(10);
+    expect(drawn.y).toBeCloseTo(10);
+    expect(drawn.width).toBeCloseTo(90);
+    expect(drawn.height).toBeCloseTo(40);
+  });
+
+  it('continues dragging caliper geometry when the pointer leaves the viewer', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, onChange);
+    const stage = screen.getByTestId('stage');
+
+    fireEvent.mouseDown(stage, { clientX: 105.6, clientY: 35.6 }); // start handle
+    fireEvent.mouseLeave(stage);
+    fireEvent.mouseMove(document.body, { clientX: 450, clientY: 35.6 }); // continue dragging outside the canvas
+    fireEvent.mouseUp(document.body, { clientX: 450, clientY: 35.6 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const edited = onChange.mock.calls[0][0] as Extract<MeasurementGeometry, { type: 'line' }>;
+    expect(edited.start.x).toBeGreaterThan(100);
+    expect(edited.start.y).toBeCloseTo(10);
   });
 
   it('undoes the last caliper geometry drag', () => {

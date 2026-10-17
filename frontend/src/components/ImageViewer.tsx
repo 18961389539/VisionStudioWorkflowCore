@@ -733,6 +733,7 @@ export default function ImageViewer({
   const lastFocusTick = useRef(focusTick ?? 0);
   const pointerUpHandler = useRef<() => void>(() => undefined);
   const pointerCancelHandler = useRef<() => void>(() => undefined);
+  const pointerMoveHandler = useRef<() => void>(() => undefined);
   const { image, failed } = useHtmlImage(previewUrl);
   const actualWidth = imageWidth || image?.naturalWidth || 0;
   const actualHeight = imageHeight || image?.naturalHeight || 0;
@@ -1246,15 +1247,25 @@ export default function ImageViewer({
 
   useEffect(() => { pointerUpHandler.current = onPointerUp; });
   useEffect(() => { pointerCancelHandler.current = onPointerCancel; });
+  useEffect(() => { pointerMoveHandler.current = onPointerMove; });
   useEffect(() => {
     const releaseInteraction = () => pointerUpHandler.current();
     const cancelInteraction = () => pointerCancelHandler.current();
+    const moveOutsideViewer = (event: MouseEvent) => {
+      if (!(panStart.current || roiDrag.current || brushStroke.current || geometryDrag.current
+        || gestureStart.current || geometryGestureStart.current)) return;
+      if (event.target instanceof Element && hostRef.current?.contains(event.target)) return;
+      stageRef.current?.setPointersPositions?.(event);
+      pointerMoveHandler.current();
+    };
     // Konva's stage only receives mouse/touch end while the pointer is over the viewer.
-    // Listen on document as well so drags released over a toolbar or outside the canvas commit.
+    // Track mouse drags outside the canvas and listen for release over a toolbar or elsewhere.
+    document.addEventListener('mousemove', moveOutsideViewer);
     document.addEventListener('mouseup', releaseInteraction);
     document.addEventListener('touchend', releaseInteraction);
     document.addEventListener('touchcancel', cancelInteraction);
     return () => {
+      document.removeEventListener('mousemove', moveOutsideViewer);
       document.removeEventListener('mouseup', releaseInteraction);
       document.removeEventListener('touchend', releaseInteraction);
       document.removeEventListener('touchcancel', cancelInteraction);
@@ -1455,7 +1466,7 @@ export default function ImageViewer({
             onTouchEnd={onPointerUp}
             onClick={onClick}
             onDblClick={commitPolygon}
-            onMouseLeave={() => { setCursor(undefined); panStart.current = undefined; if (brushStroke.current) finishBrushStroke(); }}
+            onMouseLeave={() => { setCursor(undefined); }}
           >
             <Layer imageSmoothingEnabled={!pixelated}>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
