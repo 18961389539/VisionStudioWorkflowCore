@@ -26,6 +26,16 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('explains that caliper projection widths are normalized to odd values', () => {
+    const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
+    for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine', 'measure.caliperCircle']) {
+      const sampleWidth = translated.find(item => item.type === type)?.parameters.find(parameter => parameter.name === 'sampleWidth');
+      expect(sampleWidth?.description).toContain('必须为奇数');
+      expect(sampleWidth?.description).toContain('输入偶数会向上调整');
+      expect(sampleWidth?.description).toContain('4→5');
+    }
+  });
+
   it('exposes a configurable minimum valid-caliper gate for line and circle fits', () => {
     const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
     for (const type of ['measure.caliperLine', 'measure.caliperCircle']) {

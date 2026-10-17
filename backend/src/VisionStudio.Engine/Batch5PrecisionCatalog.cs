@@ -140,7 +140,7 @@ public static class Batch5PrecisionCatalog
                 new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
-                    Description: "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
+                    Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
@@ -191,7 +191,8 @@ public static class Batch5PrecisionCatalog
                 new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
                 new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line"),
-                new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling"),
+                new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
+                    Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling"),
                 new("polarity", "Polarity", "select", "Any", Options:
                 [
@@ -281,7 +282,8 @@ public static class Batch5PrecisionCatalog
                     new("First from Start", "firstfromstart"),
                     new("First from End", "firstfromend")
                 ], Group: "Sampling"),
-                new("sampleWidth", "Projection Length", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling"),
+                new("sampleWidth", "Projection Length", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling",
+                    Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."),
                 new("maxRadiusDeviation", "Max Radius Deviation (0=off)", "number", 0, 0, 5000, 1, Unit: "px", Group: "Sampling",
                     Description: "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."),
                 new("minValidCalipers", "Minimum Valid Calipers", "number", 3, 3, 361, 1, Group: "Fit",
