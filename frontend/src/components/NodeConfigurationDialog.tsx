@@ -12,6 +12,7 @@ import { cloneParameters, configurationIssues, configurationParameters, cropRoiO
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
+import { normalizeCaliperCircleArc } from '../caliperCircleSampling';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
@@ -894,12 +895,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     } else {
       const startAngle = geometry.angleStartDeg ?? -180;
       const endAngle = geometry.angleEndDeg ?? 180;
-      const wholeTurns = Math.round(((startAngle + endAngle) / 2) / 360);
-      const normalizedStartAngle = startAngle - wholeTurns * 360;
-      const normalizedEndAngle = endAngle - wholeTurns * 360;
+      const normalizedArc = normalizeCaliperCircleArc(startAngle, endAngle);
       setDraft(current => ({ ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
-        angleStartDeg: options?.preserveValues ? startAngle : normalizedStartAngle,
-        angleEndDeg: options?.preserveValues ? endAngle : normalizedEndAngle,
+        angleStartDeg: options?.preserveValues ? startAngle : normalizedArc.start,
+        angleEndDeg: options?.preserveValues ? endAngle : normalizedArc.end,
         radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };

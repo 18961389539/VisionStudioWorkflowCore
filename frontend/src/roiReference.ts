@@ -2,6 +2,7 @@ import type { NodeParameters } from './nodeConfigurationState';
 import { parameterFingerprint, roiConfigurationIssue } from './nodeConfigurationState';
 import type { OverlayPoint, VisionRoi } from './types';
 import type { Edge, Node } from '@xyflow/react';
+import { normalizeCaliperCircleArc } from './caliperCircleSampling';
 
 const coordinateParameters: Record<string, string[]> = {
   'image.acquire': ['cameraId'],
@@ -228,9 +229,9 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
       const rotation = -referenceAngleDelta(previous, Number(parameters.baseThetaDeg ?? 0));
       const start = Number(current.angleStartDeg ?? -180) + rotation;
       const end = Number(current.angleEndDeg ?? 180) + rotation;
-      const turns = Math.round((start + end) / 720) * 360;
+      const normalizedArc = normalizeCaliperCircleArc(start, end);
       geometry = { centerX: center.x, centerY: center.y,
-        angleStartDeg: start - turns, angleEndDeg: end - turns };
+        angleStartDeg: normalizedArc.start, angleEndDeg: normalizedArc.end };
     } else if (['measure.caliper', 'measure.caliperline', 'feature.edgesubpixel'].includes(type)
       && !edges.some(edge => edge.target === node.id && portNameIs(edge.targetHandle, 'searchLine'))) {
       const start = move(Number(current.startX ?? 120), Number(current.startY ?? 240));

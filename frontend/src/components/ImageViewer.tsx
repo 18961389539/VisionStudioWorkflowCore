@@ -4,6 +4,9 @@ import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Te
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
+import { buildCaliperCircleAngles, circleArcSpan, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
+
+export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
 type ViewState = { scale: number; x: number; y: number };
@@ -82,44 +85,6 @@ function clampCaliperCircleCenter(center: Point, radius: number, band: number, w
   return { x: nearest.x + dx * fraction, y: nearest.y + dy * fraction };
 }
 
-function circleArcSpan(start: number, end: number) {
-  const rawSpan = end - start;
-  if (Math.abs(rawSpan) < 1e-9) return { span: 0, fullCircle: false };
-  let span = rawSpan % 360;
-  if (Math.abs(span) < 1e-9) return { span: 360, fullCircle: true };
-  if (span < 0) span += 360;
-  return { span, fullCircle: false };
-}
-
-/** Match the backend caliper-circle sampling rules so the editable preview shows the actual search rays. */
-export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>): number[] {
-  const start = geometry.angleStartDeg ?? -180;
-  const end = geometry.angleEndDeg ?? 180;
-  const { span, fullCircle } = circleArcSpan(start, end);
-  if (span === 0) return [start];
-
-  let count: number;
-  let effectiveStep: number;
-  if (geometry.samplingMode === 'step') {
-    effectiveStep = clamp(geometry.angleStepDeg ?? 5, 0.5, 45);
-    const intervalCount = span / effectiveStep;
-    const nearestIntervalCount = Math.round(intervalCount);
-    const reachesEnd = nearestIntervalCount > 0
-      && Math.abs(nearestIntervalCount * effectiveStep - span) <= 1e-9;
-    count = fullCircle && reachesEnd ? nearestIntervalCount : Math.floor(intervalCount) + 1;
-    const maximumCount = fullCircle ? 360 : 361;
-    if (count > maximumCount) {
-      effectiveStep = span / (fullCircle ? maximumCount : maximumCount - 1);
-      count = maximumCount;
-    }
-  } else {
-    count = Math.round(clamp(geometry.caliperCount ?? 72, 3, 361));
-    effectiveStep = fullCircle ? span / count : span / (count - 1);
-  }
-
-  return Array.from({ length: count }, (_, index) => start + index * effectiveStep);
-}
-
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
 const MAX_POLYGON_HANDLES = 32;
@@ -151,11 +116,13 @@ function polygonHandleIndices(pointCount: number): number[] {
 function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
   const start = geometry.angleStartDeg ?? -180;
   const { span, fullCircle } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
-  if (width <= 0 || height <= 0) return undefined;
+  if (width <= 0 || height <= 0 || !Number.isFinite(start) || !Number.isFinite(span)) return undefined;
+  const normalizedStart = normalizeCaliperAngle(start);
+  const normalizedEnd = normalizedStart + span;
   const offset = (HANDLE_HIT + 4) / scale;
   const smallCircle = geometry.radius * scale < HANDLE_HIT * 3;
   const atAngle = (angleDeg: number, radius: number): Point => {
-    const radians = angleDeg * Math.PI / 180;
+    const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
     return {
       x: clamp(geometry.center.x + Math.max(0, radius) * Math.cos(radians), 0, width),
       y: clamp(geometry.center.y + Math.max(0, radius) * Math.sin(radians), 0, height)
@@ -172,13 +139,13 @@ function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 
     const innerArcRadius = Math.max(0, innerBandHandleRadius - offset);
     const hasInnerSpace = innerArcRadius * scale >= HANDLE_HIT * 1.5;
     return {
-      start: atAngle(start, hasInnerSpace ? innerArcRadius : outerBandHandleRadius + offset),
-      end: atAngle(start + span, hasInnerSpace ? outerBandHandleRadius + offset : outerBandHandleRadius + offset * 2)
+      start: atAngle(normalizedStart, hasInnerSpace ? innerArcRadius : outerBandHandleRadius + offset),
+      end: atAngle(normalizedEnd, hasInnerSpace ? outerBandHandleRadius + offset : outerBandHandleRadius + offset * 2)
     };
   }
   return {
-    start: atAngle(start, geometry.radius + (smallCircle ? offset : -offset)),
-    end: atAngle(start + span, geometry.radius + offset * (smallCircle ? 2 : 1))
+    start: atAngle(normalizedStart, geometry.radius + (smallCircle ? offset : -offset)),
+    end: atAngle(normalizedEnd, geometry.radius + offset * (smallCircle ? 2 : 1))
   };
 }
 
@@ -542,12 +509,12 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   const radiusHandle = editable && geometry.radiusEditable !== false
     ? circleRadiusHandle(geometry.center, geometry.radius, imageWidth, imageHeight) : undefined;
   const boundary = (angleDeg: number) => {
-    const radians = angleDeg * Math.PI / 180;
+    const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
       geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
   };
   const firstSpoke = boundary(angles[0] ?? start);
-  const firstSpokeAngle = (angles[0] ?? start) * Math.PI / 180;
+  const firstSpokeAngle = normalizeCaliperAngle(angles[0] ?? start) * Math.PI / 180;
   const labelOffset = 7 / scale;
   const labelNormalX = -Math.sin(firstSpokeAngle) * labelOffset;
   const labelNormalY = Math.cos(firstSpokeAngle) * labelOffset;
@@ -559,7 +526,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     </>}
     <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16" strokeWidth={2.5 / scale} />
     {angles.map((angleDeg, index) => {
-      const radians = angleDeg * Math.PI / 180;
+      const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
       const points = [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
         geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
       return index === 0
@@ -572,8 +539,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     <Text x={firstSpoke[2] + labelDirectionX * 7 / scale + labelNormalX} y={firstSpoke[3] + labelDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
       fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
     {!fullCircle && span > 0 && <>
-      <Line points={boundary(start)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
-      <Line points={boundary(start + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+      <Line points={boundary(normalizeCaliperAngle(start))} stroke="#fa8c16" strokeWidth={1.5 / scale} />
+      <Line points={boundary(normalizeCaliperAngle(start) + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     </>}
     <Line points={[geometry.center.x - handleRadius * 1.7, geometry.center.y, geometry.center.x + handleRadius * 1.7, geometry.center.y]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     <Line points={[geometry.center.x, geometry.center.y - handleRadius * 1.7, geometry.center.x, geometry.center.y + handleRadius * 1.7]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
@@ -741,8 +708,8 @@ export default function ImageViewer({
     if (geometry.type === 'line') return geometry;
     const start = geometry.angleStartDeg ?? -180;
     const end = geometry.angleEndDeg ?? 180;
-    const turns = Math.round(((start + end) / 2) / 360);
-    return { ...geometry, angleStartDeg: start - turns * 360, angleEndDeg: end - turns * 360,
+    const normalizedArc = normalizeCaliperCircleArc(start, end);
+    return { ...geometry, angleStartDeg: normalizedArc.start, angleEndDeg: normalizedArc.end,
       band: clamp(geometry.band ?? 1, 1, 500) };
   };
 
@@ -1035,8 +1002,11 @@ export default function ImageViewer({
         const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
         setMeasurementDraft({ ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 1, 10_000_000) });
       } else if (mode === 'angleStart' || mode === 'angleEnd') {
-        const startAngle = origin.angleStartDeg ?? -180;
-        const arcEndAngle = startAngle + circleArcSpan(startAngle, origin.angleEndDeg ?? 180).span;
+        const rawStartAngle = origin.angleStartDeg ?? -180;
+        const rawEndAngle = origin.angleEndDeg ?? 180;
+        const normalizedArc = normalizeCaliperCircleArc(rawStartAngle, rawEndAngle);
+        const startAngle = Math.abs(rawStartAngle) <= 1_000_000 ? rawStartAngle : normalizedArc.start;
+        const arcEndAngle = startAngle + circleArcSpan(rawStartAngle, rawEndAngle).span;
         const pointerAngle = Math.atan2(current.y - origin.center.y, current.x - origin.center.x) * 180 / Math.PI;
         const lower = mode === 'angleStart' ? arcEndAngle - 359.5 : startAngle + 0.5;
         const upper = mode === 'angleStart' ? arcEndAngle - 0.5 : startAngle + 359.5;

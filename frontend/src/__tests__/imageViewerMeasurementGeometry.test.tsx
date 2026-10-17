@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
+import { circleArcSpan, normalizeCaliperCircleArc, normalizeCaliperAngle } from '../caliperCircleSampling';
 import type { VisionOverlay, VisionRoi } from '../types';
 
 vi.mock('react-konva', async () => {
@@ -296,6 +297,28 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(denseAngles.at(-1)).toBe(179);
 
     expect(buildCaliperCircleAngles({ ...base, angleStartDeg: 0, angleEndDeg: 0 })).toEqual([0]);
+  });
+
+  it.each(['count', 'step'])('keeps %s-mode preview rays stable for very large finite angles', samplingMode => {
+    const start = 1e18;
+    const geometry: Extract<MeasurementGeometry, { type: 'circle' }> = {
+      type: 'circle', center: { x: 50, y: 50 }, radius: 20,
+      angleStartDeg: start, angleEndDeg: start + 256, samplingMode,
+      caliperCount: 72, angleStepDeg: 256 / 71
+    };
+    const angles = buildCaliperCircleAngles(geometry);
+    expect(angles).toHaveLength(72);
+    expect(new Set(angles.map(angle => Math.round(normalizeCaliperAngle(angle) * 10_000))).size).toBe(72);
+
+    const overflowing = buildCaliperCircleAngles({ ...geometry, samplingMode: 'count',
+      angleStartDeg: -1e308, angleEndDeg: 1e308, caliperCount: 72 });
+    expect(overflowing).toHaveLength(72);
+    expect(overflowing.every(Number.isFinite)).toBe(true);
+    const normalizedArc = normalizeCaliperCircleArc(-1e308, 1e308);
+    const originalSpan = circleArcSpan(-1e308, 1e308).span;
+    expect(normalizedArc.start).toBeGreaterThanOrEqual(-180);
+    expect(normalizedArc.start).toBeLessThan(180);
+    expect(normalizedArc.end - normalizedArc.start).toBeCloseTo(originalSpan, 7);
   });
 
   it('includes both partial-arc endpoints in count mode and stops at the last fixed step in legacy mode', () => {

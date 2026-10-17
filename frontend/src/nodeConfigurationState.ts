@@ -1,5 +1,6 @@
 import type { NodeCatalogItem, WorkflowPayload } from './types';
 import { validateParameterValues } from './validation';
+import { buildCaliperCircleAngles } from './caliperCircleSampling';
 
 export type NodeParameters = Record<string, unknown>;
 
@@ -314,27 +315,16 @@ export function configurationIssues(
       ? parameters.samplingMode.toLowerCase()
       : parameters.angleStepDeg !== undefined ? 'step' : 'count';
     let availableCalipers: number | undefined;
-    if (!zeroSpan && mode === 'count') {
+    if (!zeroSpan && angleStart !== undefined && angleEnd !== undefined && mode === 'count') {
       const count = validNumericParameter('caliperCount');
-      if (count !== undefined) availableCalipers = roundedParameter(count, 3, 361);
-    } else if (!zeroSpan && mode === 'step' && angleStart !== undefined && angleEnd !== undefined) {
-      const rawSpan = angleEnd - angleStart;
-      let span = rawSpan % 360;
-      const fullCircle = Math.abs(rawSpan) >= 1e-9 && Math.abs(span) < 1e-9;
-      if (fullCircle) span = 360;
-      else if (span < 0) span += 360;
+      if (count !== undefined) availableCalipers = buildCaliperCircleAngles({
+        angleStartDeg: angleStart, angleEndDeg: angleEnd, samplingMode: 'count', caliperCount: roundedParameter(count, 3, 361)
+      }).length;
+    } else if (!zeroSpan && angleStart !== undefined && angleEnd !== undefined && mode === 'step') {
       const requestedStep = validNumericParameter('angleStepDeg');
-      if (requestedStep !== undefined) {
-        const step = Math.max(0.5, Math.min(45, requestedStep));
-        const intervalCount = span / step;
-        const nearestIntervalCount = Math.round(intervalCount);
-        const reachesEnd = nearestIntervalCount > 0
-          && Math.abs(nearestIntervalCount * step - span) <= 1e-9;
-        const count = fullCircle && reachesEnd
-          ? nearestIntervalCount
-          : Math.floor(intervalCount) + 1;
-        availableCalipers = Math.min(count, fullCircle ? 360 : 361);
-      }
+      if (requestedStep !== undefined) availableCalipers = buildCaliperCircleAngles({
+        angleStartDeg: angleStart, angleEndDeg: angleEnd, samplingMode: 'step', angleStepDeg: requestedStep
+      }).length;
     }
 
     const minimumValid = validNumericParameter('minValidCalipers');
