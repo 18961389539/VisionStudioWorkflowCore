@@ -12,7 +12,7 @@ import { cloneParameters, configurationIssues, configurationParameters, cropRoiO
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
-import { normalizeCaliperCircleArc } from '../caliperCircleSampling';
+import { effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
@@ -696,6 +696,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     ? measurementGeometryType === 'line'
       ? { type: 'line', start: connectedSearchLine?.start ?? { x: geometryNumber('startX', 120), y: geometryNumber('startY', 240) },
         end: connectedSearchLine?.end ?? { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
+        profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)),
         ...(catalogItem.type === 'measure.caliperLine' ? { profileSpan: Math.max(0, geometryNumber('edgeLength', 0)),
           profileCount: geometryNumber('caliperCount', 9) } : {}) }
       : { type: 'circle', center: connectedCircle ? { x: connectedCircle.x, y: connectedCircle.y }

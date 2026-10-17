@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
-import { circleArcSpan, normalizeCaliperCircleArc, normalizeCaliperAngle } from '../caliperCircleSampling';
+import { circleArcSpan, effectiveSampleWidth, normalizeCaliperCircleArc, normalizeCaliperAngle } from '../caliperCircleSampling';
 import type { VisionOverlay, VisionRoi } from '../types';
 
 vi.mock('react-konva', async () => {
@@ -25,7 +25,9 @@ vi.mock('react-konva', async () => {
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Arrow: () => <span data-testid="search-arrow" />,
     Image: () => null,
-    Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('roi-brush-stroke-')
+    Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('measurement-profile-band-')
+      ? <span data-testid="measurement-profile-band" data-band-index={name.slice('measurement-profile-band-'.length)} data-points={points?.join(',')} />
+      : name?.startsWith('roi-brush-stroke-')
       ? <span data-testid="roi-brush-stroke" data-mode={name.slice('roi-brush-stroke-'.length)}
         data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
       : stroke === '#ff4d4f'
@@ -202,6 +204,18 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
     expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
+  it('shows the effective projection-width band for each line caliper', () => {
+    const width = effectiveSampleWidth(4);
+    expect(width).toBe(5);
+    imageView({ type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 },
+      profileSpan: 20, profileCount: 3, profileWidth: width }, vi.fn());
+
+    const bands = screen.getAllByTestId('measurement-profile-band');
+    expect(bands).toHaveLength(3);
+    const points = bands[0].getAttribute('data-points')!.split(',').map(Number);
+    expect(points).toEqual([20, 42.5, 80, 42.5, 80, 37.5, 20, 37.5]);
   });
 
   it('resizes the caliper profile span from its visible image handles', () => {

@@ -12,7 +12,7 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
     default: ({ previewUrl, showRoiTools, roiEnabled, roiTargetLabel, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
       previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
       roiTargetLabel?: string;
-      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number }
+      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number; profileWidth?: number }
         | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
       measurementGeometryEditable?: boolean;
       onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
@@ -25,7 +25,7 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
           data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
         {measurementGeometry?.type === 'line' && <span data-testid="line-geometry" data-start-x={measurementGeometry.start.x}
           data-start-y={measurementGeometry.start.y} data-end-x={measurementGeometry.end.x} data-end-y={measurementGeometry.end.y}
-          data-profile-span={measurementGeometry.profileSpan}
+          data-profile-span={measurementGeometry.profileSpan} data-profile-width={measurementGeometry.profileWidth}
           data-editable={Boolean(measurementGeometryEditable)} />}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && measurementGeometry.profileSpan !== undefined
@@ -1485,7 +1485,10 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('20'));
     fireEvent.change(dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'sampleWidth')!.label }),
       { target: { value: '7' } });
-    await waitFor(() => expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('70'));
+    await waitFor(() => {
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('70');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-profile-width')).toBe('7');
+    });
 
     fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
     await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(2));

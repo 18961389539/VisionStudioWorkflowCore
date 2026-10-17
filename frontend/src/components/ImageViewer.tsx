@@ -16,7 +16,7 @@ type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | 
 type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
-  | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
+  | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number; profileWidth?: number }
   | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
       caliperCount?: number; samplingMode?: string; angleStepDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
 
@@ -470,8 +470,21 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const count = geometry.profileCount === undefined ? 0 : Math.round(clamp(geometry.profileCount, 3, 101));
     const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
     const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
+    const apertureCount = geometry.profileWidth === undefined ? 0 : Math.max(1, count);
+    const halfProfileWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
     const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry) : undefined;
     return <Group listening={false}>
+      {apertureCount > 0 && Array.from({ length: apertureCount }, (_, index) => {
+        const offset = apertureCount === 1 ? 0 : (index / (apertureCount - 1) - 0.5) * span;
+        const offsetX = tangent.x * offset, offsetY = tangent.y * offset;
+        const halfX = tangent.x * halfProfileWidth, halfY = tangent.y * halfProfileWidth;
+        return <Line key={`profile-band-${index}`} name={`measurement-profile-band-${index}`} closed
+          points={[geometry.start.x + offsetX + halfX, geometry.start.y + offsetY + halfY,
+            geometry.end.x + offsetX + halfX, geometry.end.y + offsetY + halfY,
+            geometry.end.x + offsetX - halfX, geometry.end.y + offsetY - halfY,
+            geometry.start.x + offsetX - halfX, geometry.start.y + offsetY - halfY]}
+          fill="#91d5ff" opacity={0.16} stroke="#91d5ff" strokeWidth={0.5 / scale} />;
+      })}
       {count > 0 && Array.from({ length: count }, (_, index) => {
         const offset = count === 1 ? 0 : (index / (count - 1) - 0.5) * span;
         const x = tangent.x * offset, y = tangent.y * offset;

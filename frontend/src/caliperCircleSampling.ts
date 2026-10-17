@@ -31,6 +31,12 @@ export function normalizeCaliperAngle(angle: number) {
   return normalized < 0 ? normalized + 360 : normalized;
 }
 
+export function effectiveSampleWidth(value: number, fallback = 5) {
+  const finiteValue = Number.isFinite(value) ? value : fallback;
+  const rounded = Math.max(1, Math.min(99, Math.floor(finiteValue + 0.5)));
+  return rounded % 2 === 0 ? Math.min(99, rounded + 1) : rounded;
+}
+
 /** Return an equivalent, bounded arc while preserving its clockwise span. */
 export function normalizeCaliperCircleArc(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end)) return { start, end };
