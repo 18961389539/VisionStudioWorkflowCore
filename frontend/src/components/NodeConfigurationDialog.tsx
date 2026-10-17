@@ -702,9 +702,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const measurementInputReport = transformInputEdge
     ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]
     : undefined;
-  const measurementTransform = transformInputEdge
-    ? rigidPixelTransform(inputSnapshotValue(measurementInputReport?.inputs, 'transform'))
+  const measurementTransformValue = transformInputEdge
+    ? inputSnapshotValue(measurementInputReport?.inputs, 'transform')
     : undefined;
+  const measurementTransform = transformInputEdge
+    ? rigidPixelTransform(measurementTransformValue)
+    : undefined;
+  const measurementTransformInvalid = Boolean(transformInputEdge && measurementInputReport
+    && measurementTransformValue !== undefined && !measurementTransform);
   const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
     : measurementGeometry);
@@ -714,6 +719,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const measurementBoundsWidth = transformInputEdge ? measurementInputImageEntry?.width : imageViewerSource.width;
   const measurementBoundsHeight = transformInputEdge ? measurementInputImageEntry?.height : imageViewerSource.height;
   const transformedBoundsPreflightUnavailable = Boolean(transformInputEdge && measurementGeometry && measurementImageFrameReady
+    && !measurementTransformInvalid
     && (!mappedMeasurementGeometry || !measurementInputImageEntry || measurementInputImageEntry.width <= 0 || measurementInputImageEntry.height <= 0));
   const measurementBoundsContext = transformInputEdge
     ? '已按本次有效运行的刚性 transform 映射到测量输入图像后估算；'
@@ -1431,6 +1437,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             : <span>图像处理链中存在非矩形裁剪，选区外像素会清零，可能形成伪边缘；多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像。请在当前图像坐标系提供完整 ROI 掩膜，或调整流程避免将裁剪边界当作真实边缘。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
+        {measurementTransformInvalid && <Alert showIcon type="warning" title="当前 transform 不符合卡尺测量要求"
+          description="本提示依据最近一次运行报告中的实际输入。卡尺只接受有限、方向保持的 px→px 刚性变换（平移和旋转）；缩放、剪切、透视、镜像或非像素单位会导致测量失败。请改用刚性像素变换，或让测量几何直接使用当前图像坐标。" />}
         {transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
           description="当前节点的有效运行报告或测量图尺寸尚不可用。预检不会用基准图坐标冒充当前图像坐标；先运行一次上游定位与变换，再检查变换后的卡尺范围。" />}
         {caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}

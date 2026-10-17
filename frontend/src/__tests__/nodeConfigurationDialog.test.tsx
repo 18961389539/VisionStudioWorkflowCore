@@ -1748,6 +1748,28 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(dialog.queryByText('搜索线完全位于图像外')).toBeNull());
   });
 
+  it('explains when the latest caliper input transform is not rigid pixel-to-pixel', () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'invalid-transform-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type,
+      label: '单点卡尺', inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 90, endY: 20 } } };
+    const transformNode: Node = { id: 'affine-transform', position: { x: 0, y: 0 }, data: { typeKey: 'calibration.planar', label: '平面标定' } };
+    const edges = [{ id: 'transform-input', source: transformNode.id, sourceHandle: 'transform',
+      target: caliperNode.id, targetHandle: 'transform' }];
+    const resultWithAffineTransform: RunResult = { ...report, runId: 'non-rigid-caliper-run', nodeReports: [
+      { nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: false, durationMs: 1,
+        summary: {}, error: 'Measurement transform must be a finite, orientation-preserving rigid px-to-px transform (translation and rotation only).',
+        inputs: { transform: { type: 'Transform2D', display: 'affine', value: { sourceUnit: 'px', targetUnit: 'px',
+          h00: 1.2, h01: 0, h02: 5, h10: 0, h11: 1, h12: 0, h20: 0, h21: 0, h22: 1 } } } }
+    ] };
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, transformNode], edges,
+      result: resultWithAffineTransform });
+
+    expect(dialog.getByText('当前 transform 不符合卡尺测量要求')).toBeTruthy();
+    expect(dialog.getByText(/最近一次运行报告中的实际输入/)).toBeTruthy();
+    expect(dialog.queryByText('暂时无法预估变换后的图像边界')).toBeNull();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('checks a transformed single-caliper line against the current measurement image', async () => {
     const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
     const caliperNode: Node = { id: 'transformed-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '单点卡尺',
