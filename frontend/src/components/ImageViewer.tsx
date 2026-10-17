@@ -1109,9 +1109,28 @@ export default function ImageViewer({
 
   const cursorStyle = useMemo(() => {
     if (geometryDrawMode) return 'crosshair';
-    if (tool === 'pan') return panStart.current ? 'grabbing' : 'grab';
-    return 'crosshair';
-  }, [geometryDrawMode, tool, view]); // view forces cursor refresh during pan
+    if (panStart.current || roiDrag.current || geometryDrag.current) return 'grabbing';
+    if (cursorScreen) {
+      if (measurementGeometryEditable && measurementGeometry) {
+        const handle = hitMeasurementHandle(measurementGeometry, cursorScreen);
+        if (handle === 'radius') return 'nwse-resize';
+        if (handle === 'innerBand' || handle === 'outerBand') return 'ns-resize';
+        if (handle) return 'move';
+      }
+      if (roi && roiEnabled && tool !== 'brush' && tool !== 'eraser') {
+        const handle = hitRoiHandle(roi, cursorScreen);
+        if (handle === 'nw' || handle === 'se') return 'nwse-resize';
+        if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
+        if (handle === 'w' || handle === 'e') return 'ew-resize';
+        if (handle === 'n' || handle === 's') return 'ns-resize';
+        if (handle?.startsWith('vertex:')) return 'move';
+        if (tool === 'pan' && (roi.type === 'Rectangle' || roi.type === 'Circle')
+          && pointInsideRoi(roi, imagePoint(cursorScreen))) return 'move';
+      }
+    }
+    return tool === 'pan' ? 'grab' : 'crosshair';
+  }, [actualHeight, actualWidth, cursorScreen, geometryDrawMode, measurementGeometry, measurementGeometryEditable,
+    roi, roiEnabled, tool, view]);
 
   // 覆盖层按节点筛选：不选=显示全部；选了=只显示所选节点的覆盖层
   const overlayNodeIds = useMemo(() => {

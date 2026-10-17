@@ -474,6 +474,12 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('shows an edit cursor over the caliper search-line endpoints', () => {
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, vi.fn());
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 200, clientY: 35.6 }); // end (50, 10)
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('move');
+  });
+
   it('moves a clipped search line without snapping it fully inside the image', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: -20, y: 50 }, end: { x: 80, y: 50 } }, onChange);
@@ -618,6 +624,25 @@ describe('ImageViewer measurement geometry editing', () => {
       expect(resized.width).toBeCloseTo(34);
       expect(resized.height).toBeCloseTo(24);
     }
+  });
+
+  it('shows a resize cursor while hovering a rectangle edge handle', () => {
+    const roi: VisionRoi = { type: 'Rectangle', x: 30, y: 30, width: 30, height: 24 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={emptyRoi} />);
+
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 223.6, clientY: 111.12 });
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('ew-resize');
+  });
+
+  it('keeps the drawing cursor when a brush tool takes priority over ROI handles', () => {
+    const roi: VisionRoi = { type: 'Rectangle', x: 30, y: 30, width: 30, height: 24 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={emptyRoi} />);
+    fireEvent.click(screen.getByText('笔刷'));
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 223.6, clientY: 111.12 });
+
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('crosshair');
   });
 
   it('moves a brush ROI by dragging a painted pixel and clamps its strokes to the image', () => {
