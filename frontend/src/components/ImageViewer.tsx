@@ -57,16 +57,17 @@ function caliperLineProfileWidthHandle(geometry: Extract<MeasurementGeometry, { 
 
 function clipSegmentToImage(start: Point, end: Point, width: number, height: number): { start: Point; end: Point } | undefined {
   if (width <= 0 || height <= 0) return undefined;
+  const maxX = width - 1, maxY = height - 1;
   const dx = end.x - start.x, dy = end.y - start.y;
   let enter = 0, leave = 1;
-  for (const [p, q] of [[-dx, start.x], [dx, width - start.x], [-dy, start.y], [dy, height - start.y]]) {
+  for (const [p, q] of [[-dx, start.x], [dx, maxX - start.x], [-dy, start.y], [dy, maxY - start.y]]) {
     if (p === 0) { if (q < 0) return undefined; continue; }
     const ratio = q / p;
     if (p < 0) enter = Math.max(enter, ratio); else leave = Math.min(leave, ratio);
     if (enter > leave) return undefined;
   }
-  return { start: { x: start.x + dx * enter, y: start.y + dy * enter },
-    end: { x: start.x + dx * leave, y: start.y + dy * leave } };
+  return { start: { x: clamp(start.x + dx * enter, 0, maxX), y: clamp(start.y + dy * enter, 0, maxY) },
+    end: { x: clamp(start.x + dx * leave, 0, maxX), y: clamp(start.y + dy * leave, 0, maxY) } };
 }
 
 function caliperCircleProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, angles: readonly number[],
@@ -87,9 +88,9 @@ function caliperCircleProfileWidthHandle(geometry: Extract<MeasurementGeometry, 
       { x: center.x + outer * direction.x, y: center.y + outer * direction.y }, width, height);
     if (!clipped) continue;
     const midpoint = { x: (clipped.start.x + clipped.end.x) / 2, y: (clipped.start.y + clipped.end.y) / 2 };
-    const point = { x: clamp(midpoint.x + normal.x * halfWidth, 0, width),
-      y: clamp(midpoint.y + normal.y * halfWidth, 0, height) };
-    const margin = Math.min(point.x, width - point.x, point.y, height - point.y);
+    const point = { x: clamp(midpoint.x + normal.x * halfWidth, 0, width - 1),
+      y: clamp(midpoint.y + normal.y * halfWidth, 0, height - 1) };
+    const margin = Math.min(point.x, width - 1 - point.x, point.y, height - 1 - point.y);
     if (!selected || margin > selected.margin) selected = { point, angle, margin };
   }
   return selected && { point: selected.point, angle: selected.angle };

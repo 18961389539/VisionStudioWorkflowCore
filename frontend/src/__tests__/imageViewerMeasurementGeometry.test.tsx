@@ -425,6 +425,15 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'circle', profileWidth: 15 });
   });
 
+  it('clips the radial-caliper width handle to the last pixel center like runtime sampling', () => {
+    imageView({ type: 'circle', center: { x: 80, y: 50 }, radius: 30, band: 20,
+      angleStartDeg: 0, angleEndDeg: 0, samplingMode: 'count', caliperCount: 3, profileWidth: 5 }, vi.fn());
+
+    const handle = screen.getByTestId('measurement-profile-width');
+    expect(Number(handle.getAttribute('data-x'))).toBeCloseTo(94.5, 5);
+    expect(Number(handle.getAttribute('data-y'))).toBeCloseTo(52.5, 5);
+  });
+
   it('keeps distinct angle handles on a full circle and lets users drag it into an arc', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
