@@ -599,8 +599,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const poseSource = nodes.find(item => item.id === poseEdge?.source);
   const poseSourceParameters = (poseSource?.data.parameters ?? {}) as NodeParameters;
   const referenceBindings = parameterFingerprint({
-    inputs: edges.filter(edge => edge.target === node.id && ['currentPose', 'debugImage'].includes(edge.targetHandle ?? ''))
-      .map(edge => ({ port: edge.targetHandle, source: edge.source, sourcePort: edge.sourceHandle })).sort((a, b) => String(a.port).localeCompare(String(b.port))),
+    inputs: edges.filter(edge => edge.target === node.id && ['currentpose', 'debugimage'].includes((edge.targetHandle ?? '').toLowerCase()))
+      .map(edge => ({ port: edge.targetHandle?.toLowerCase(), source: edge.source, sourcePort: edge.sourceHandle?.toLowerCase() }))
+      .sort((a, b) => `${a.port}:${a.source}:${a.sourcePort}`.localeCompare(`${b.port}:${b.source}:${b.sourcePort}`)),
     imageFrame: imageFrameFingerprint(debugImageSourceId, nodes, edges),
     poseSource: poseSourceFingerprint(poseEdge?.source, nodes, edges),
     modelOrigin: ['trainedModelHash', 'trainedOriginX', 'trainedOriginY', 'trainedPoseOffsetX', 'trainedPoseOffsetY', 'trainingOriginMode', 'trainingOriginX', 'trainingOriginY']

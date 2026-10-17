@@ -109,6 +109,20 @@ describe('ROI reference workspace', () => {
     expect(reopened.dialog.getByRole('button', { name: '清除测试 ROI' })).toBeTruthy();
   });
 
+  it('keeps a saved ROI reference valid when equivalent imported input handles change casing', async () => {
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges,
+      onPreview: vi.fn(async () => capture) });
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByRole('button', { name: '重新设为基准' })).toBeTruthy());
+
+    const caseVariantEdges = edges.map(edge => ({ ...edge, targetHandle: edge.targetHandle?.toUpperCase(),
+      sourceHandle: edge.sourceHandle?.toUpperCase() }));
+    view.rerender(<NodeConfigurationDialog {...view.props} edges={caseVariantEdges} />);
+
+    expect(view.dialog.queryByText(/图像或定位来源、模型原点已变化/)).toBeNull();
+    expect((view.dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('hides the previous corrected ROI overlay after the base ROI changes', async () => {
     const captureWithOverlay: RunResult = { ...capture, overlays: [
       { id: 'roi-transform-corrected-shape', nodeId: 'test', type: 'Circle', x: 132, y: 63, radius: 9 }
@@ -1550,7 +1564,7 @@ describe('caliper geometry input guidance', () => {
     const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '卡尺测量',
       inputs: caliperCatalog.inputs, parameters: { roi: { type: 'Rectangle', x: 2, y: 3, width: 20, height: 15 } } } };
     const imageNode: Node = { id: 'caliper-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
-    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'IMAGE' }];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: caliperNode.id, portName: 'image', width: 100, height: 100 }, { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
     ] }) })));

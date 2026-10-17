@@ -95,9 +95,11 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     const node = nodes.find((x) => x.id === selectedId);
     if (!node) return undefined;
     const imagePorts = new Set(((node.data?.inputs ?? []) as PortDescriptor[])
-      .filter((port) => port.dataType === 'Image').map((port) => port.name));
+      .filter((port) => ['image', 'domainimage'].includes(String(port.dataType ?? '').toLowerCase()))
+      .map((port) => port.name.toLowerCase()));
     if (imagePorts.size === 0) return undefined;
-    const edge = edges.find((item) => item.target === selectedId && item.targetHandle && imagePorts.has(item.targetHandle));
+    const edge = edges.find((item) => item.target === selectedId && item.targetHandle
+      && imagePorts.has(item.targetHandle.toLowerCase()));
     return edge ? { nodeId: edge.source, portName: edge.sourceHandle } : undefined;
   }, [edges, nodes, selectedId]);
 
