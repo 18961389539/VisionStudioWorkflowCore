@@ -159,6 +159,7 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<OnnxSegmentationNode>(),
             services.GetRequiredService<OnnxAnomalyNode>(),
             services.GetRequiredService<OnnxInstanceSegmentationNode>(),
+            services.GetRequiredService<OnnxPoseNode>(),
             services.GetRequiredService<CameraIntrinsicCalibrationNode>(),
             services.GetRequiredService<ImageUndistortNode>(),
             services.GetRequiredService<PlanarHandEyeCalibrationNode>(),

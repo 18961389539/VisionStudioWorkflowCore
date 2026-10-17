@@ -197,7 +197,7 @@ public static class InferenceStats
     /// then crop to the box (in proto / input pixels) and bilinear-resize into an output buffer of outH×outW.
     /// Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).
     /// </summary>
-    public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, int inputWidth, int inputHeight, int outWidth, int outHeight, float maskThreshold = 0.5f)
+    public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, int inputWidth, int inputHeight, int outWidth, int outHeight, float maskThreshold = 0.5f, bool letterbox = false)
     {
         if (prototypes.Length != maskDim * protoH * protoW) throw new InvalidOperationException("Prototype buffer size does not match maskDim*protoH*protoW.");
         if (coeffs.Length != maskDim) throw new InvalidOperationException("Mask coefficient count must equal maskDim.");
@@ -223,7 +223,9 @@ public static class InferenceStats
         for (var x = 0; x < protoW; x++)
             if (x < left || x >= right || y < top || y >= bottom) proto[y * protoW + x] = 0;
 
-        // Nearest upsample proto -> input size, then map input -> out (caller may already be source size)
+        // Nearest upsample proto -> input size, then map input -> out (caller may already be source size).
+        // When letterbox=true, out is source resolution and samples through Ultralytics-style pad undoing
+        // (same math as detection MapX/MapY), not a naive stretch.
         var inputMask = new float[inputHeight * inputWidth];
         for (var y = 0; y < inputHeight; y++)
         for (var x = 0; x < inputWidth; x++)
@@ -233,15 +235,110 @@ public static class InferenceStats
             inputMask[y * inputWidth + x] = proto[py * protoW + px];
         }
         var result = new byte[outHeight * outWidth];
-        for (var y = 0; y < outHeight; y++)
-        for (var x = 0; x < outWidth; x++)
+        if (letterbox)
         {
-            var ix = Math.Clamp((int)((double)x * inputWidth / outWidth), 0, inputWidth - 1);
-            var iy = Math.Clamp((int)((double)y * inputHeight / outHeight), 0, inputHeight - 1);
-            result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
+            var lbScale = Math.Min((double)inputWidth / outWidth, (double)inputHeight / outHeight);
+            var padX = (inputWidth - outWidth * lbScale) / 2.0;
+            var padY = (inputHeight - outHeight * lbScale) / 2.0;
+            for (var y = 0; y < outHeight; y++)
+            for (var x = 0; x < outWidth; x++)
+            {
+                var ix = Math.Clamp((int)(x * lbScale + padX), 0, inputWidth - 1);
+                var iy = Math.Clamp((int)(y * lbScale + padY), 0, inputHeight - 1);
+                result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
+            }
+        }
+        else
+        {
+            for (var y = 0; y < outHeight; y++)
+            for (var x = 0; x < outWidth; x++)
+            {
+                var ix = Math.Clamp((int)((double)x * inputWidth / outWidth), 0, inputWidth - 1);
+                var iy = Math.Clamp((int)((double)y * inputHeight / outHeight), 0, inputHeight - 1);
+                result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
+            }
         }
         return result;
     }
+
+
+    public sealed record YoloPoseCandidate(
+        double CenterX, double CenterY, double Width, double Height,
+        double Score, int ClassId, double[] Keypoints);
+
+    /// <summary>
+    /// Decode YOLO pose raw head (YOLOv8/YOLO26 with nms=None): channels are
+    /// cx,cy,w,h + class scores + numKeypoints*keypointDims (usually x,y,conf).
+    /// Typical COCO: [1,56,8400] = 4+1+17*3. Accepts [1,C,N], [1,N,C], [N,C].
+    /// </summary>
+    public static YoloPoseCandidate[] DecodeYoloPose(float[] values, IReadOnlyList<int> shape, int numKeypoints = 17, int keypointDims = 3)
+    {
+        if (numKeypoints < 1) throw new InvalidOperationException("numKeypoints must be positive.");
+        if (keypointDims is < 2 or > 3) throw new InvalidOperationException("keypointDims must be 2 (x,y) or 3 (x,y,conf).");
+        var kptChannels = numKeypoints * keypointDims;
+        int channels, count; bool channelsFirst;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] >= 4 + 1 + kptChannels && shape[2] > 0) { channels = shape[1]; count = shape[2]; channelsFirst = true; }
+        else if (shape.Count == 3 && shape[0] == 1 && shape[2] >= 4 + 1 + kptChannels && shape[1] > 0) { channels = shape[2]; count = shape[1]; channelsFirst = false; }
+        else if (shape.Count == 2 && shape[1] >= 4 + 1 + kptChannels && shape[0] > 0) { channels = shape[1]; count = shape[0]; channelsFirst = false; }
+        else throw new InvalidOperationException($"YOLO-Pose raw output must have shape [1,C,N], [1,N,C] or [N,C] with C>=4+classes+{kptChannels}; received [{string.Join(',', shape)}].");
+        if (values.Length != channels * count) throw new InvalidOperationException("YOLO-Pose tensor element count does not match its shape.");
+        var classCount = channels - 4 - kptChannels;
+        if (classCount < 1) throw new InvalidOperationException("YOLO-Pose output must include at least one class score channel.");
+        float At(int n, int c) => channelsFirst ? values[c * count + n] : values[n * channels + c];
+        var result = new YoloPoseCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var bestClass = 0; var bestScore = double.NegativeInfinity;
+            for (var c = 0; c < classCount; c++)
+            {
+                var score = At(n, 4 + c);
+                if (score > bestScore) { bestScore = score; bestClass = c; }
+            }
+            var kpts = new double[kptChannels];
+            for (var k = 0; k < kptChannels; k++) kpts[k] = At(n, 4 + classCount + k);
+            result[n] = new(At(n, 0), At(n, 1), At(n, 2), At(n, 3), bestScore, bestClass, kpts);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Decode YOLO26 pose end-to-end / NMS-free rows: [x1,y1,x2,y2,score,class, kpt...].
+    /// Typical COCO: [1,300,57] = 6+17*3. Accepts [1,N,C], [N,C].
+    /// </summary>
+    public static YoloPoseCandidate[] DecodeYoloPoseXyxy(float[] values, IReadOnlyList<int> shape, int numKeypoints = 17, int keypointDims = 3)
+    {
+        if (numKeypoints < 1) throw new InvalidOperationException("numKeypoints must be positive.");
+        if (keypointDims is < 2 or > 3) throw new InvalidOperationException("keypointDims must be 2 (x,y) or 3 (x,y,conf).");
+        var kptChannels = numKeypoints * keypointDims;
+        var expected = 6 + kptChannels;
+        int count, channels;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] >= expected) { count = shape[1]; channels = shape[2]; }
+        else if (shape.Count == 2 && shape[0] > 0 && shape[1] >= expected) { count = shape[0]; channels = shape[1]; }
+        else throw new InvalidOperationException($"YOLO-Pose end-to-end output must have shape [1,N,{expected}+] or [N,{expected}+]; received [{string.Join(',', shape)}].");
+        if (values.Length != count * channels) throw new InvalidOperationException("YOLO-Pose tensor element count does not match its shape.");
+        var result = new YoloPoseCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var o = n * channels;
+            var x1 = values[o]; var y1 = values[o + 1]; var x2 = values[o + 2]; var y2 = values[o + 3];
+            var score = values[o + 4];
+            var classId = (int)MathF.Round(values[o + 5]);
+            var kpts = new double[kptChannels];
+            for (var k = 0; k < kptChannels; k++) kpts[k] = values[o + 6 + k];
+            var cx = (x1 + x2) / 2.0; var cy = (y1 + y2) / 2.0;
+            var w = Math.Abs(x2 - x1); var h = Math.Abs(y2 - y1);
+            result[n] = new(cx, cy, w, h, score, classId, kpts);
+        }
+        return result;
+    }
+
+    /// <summary>COCO-17 skeleton edges (0-based indices), Ultralytics order.</summary>
+    public static readonly (int A, int B)[] Coco17Skeleton =
+    [
+        (15, 13), (13, 11), (16, 14), (14, 12), (11, 12), (5, 11), (6, 12),
+        (5, 6), (5, 7), (6, 8), (7, 9), (8, 10), (1, 2), (0, 1), (0, 2),
+        (1, 3), (2, 4), (3, 5), (4, 6)
+    ];
 
     /// <summary>
     /// Interpret a YOLO26 semantic class-map tensor as per-pixel class IDs.

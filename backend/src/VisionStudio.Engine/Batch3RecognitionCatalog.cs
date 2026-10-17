@@ -23,6 +23,22 @@ public static class Batch3RecognitionCatalog
         new("crop", "Center Crop After Resize", "boolean", false)
     ];
 
+
+    /// <summary>ONNX preprocess defaults tuned for Ultralytics YOLO exports (imgsz=640).</summary>
+    private static readonly ParameterDescriptor[] OnnxYoloParameters =
+    [
+        new("modelPath", "ONNX Model File", "text", string.Empty),
+        new("outputName", "Output Name", "text", string.Empty, Description: "Optional ONNX output/layer name; leave empty for the model's default output."),
+        new("inputWidth", "Input Width", "number", 640, 1, 4096, 1, Unit: "px"),
+        new("inputHeight", "Input Height", "number", 640, 1, 4096, 1, Unit: "px"),
+        new("scale", "Normalization Scale", "number", 0.00392156862745, -100, 100, 0.0001),
+        new("meanB", "Mean B", "number", 0, -255, 255, 1),
+        new("meanG", "Mean G", "number", 0, -255, 255, 1),
+        new("meanR", "Mean R", "number", 0, -255, 255, 1),
+        new("swapRB", "Swap Red and Blue", "boolean", true, Description: "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."),
+        new("crop", "Center Crop After Resize", "boolean", false)
+    ];
+
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         new("recognition.barcode", "Barcode / QR Decode", "Recognition", [Exec, Image],
@@ -73,7 +89,7 @@ public static class Batch3RecognitionCatalog
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("inference.instanceSegmentation", "ONNX Instance Segmentation (YOLO-Seg)", "Inference", [Exec, Image],
             [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("mask", VisionDataType.Image), new("overlay", VisionDataType.Image), new("instances", VisionDataType.String), new("result", VisionDataType.String), Next],
-            [.. OnnxParameters,
+            [.. OnnxYoloParameters,
                 new("protoOutputName", "Prototype Output Name", "text", string.Empty, Description: "Second ONNX output (mask prototypes). Leave empty with outputName empty to use the model's first two outputs in order."),
                 new("layout", "Output Layout", "select", "yolo26-seg", Options: [new("YOLO26 / YOLOv8-Seg dual head", "yolo26-seg")], Description: "Expects detection tensor [1,4+nc+32,N] and prototypes [1,32,H,W] (mask dim may differ)."),
                 new("coordinates", "Coordinate Units", "select", "pixels", Options: [new("Input Pixels", "pixels"), new("Normalized 0-1", "normalized")]),
@@ -82,8 +98,23 @@ public static class Batch3RecognitionCatalog
                 new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01),
                 new("maskThreshold", "Mask Threshold", "number", 0.5, 0, 1, 0.01),
                 new("maxCount", "Max Instances", "number", 100, 1, 1000, 1)],
-            "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not pose/OBB. Embedded-NMS exports are unsupported—use raw dual-head ONNX.", "builtin",
-            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
+            "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box; letterbox-aware remap to source), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not OBB. For keypoints use inference.pose. Embedded-NMS / single-tensor e2e seg exports are unsupported—use raw dual-head ONNX.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+        new("inference.pose", "ONNX Pose (YOLO-Pose)", "Inference", [Exec, Image],
+            [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("keypoints", VisionDataType.String), new("overlay", VisionDataType.Image), new("result", VisionDataType.String), Next],
+            [.. OnnxYoloParameters,
+                new("layout", "Output Layout", "select", "yolo", Options: [new("YOLO raw (YOLOv8/YOLO26 nms=None)", "yolo"), new("YOLO26 end-to-end xyxy+kpts", "xyxy")], Description: "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57]."),
+                new("coordinates", "Coordinate Units", "select", "pixels", Options: [new("Input Pixels", "pixels"), new("Normalized 0-1", "normalized")]),
+                new("letterbox", "Letterboxed Input", "boolean", true, Description: "Default on: Ultralytics letterbox preprocess and coordinate un-padding."),
+                new("numKeypoints", "Keypoint Count", "number", 17, 1, 128, 1, Description: "COCO pose uses 17. Must match the exported model."),
+                new("keypointDims", "Keypoint Dims", "number", 3, 2, 3, 1, Description: "3 = x,y,conf (Ultralytics default); 2 = x,y only."),
+                new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01),
+                new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01),
+                new("keypointThreshold", "Keypoint Draw Threshold", "number", 0.5, 0, 1, 0.01, Description: "Keypoints / skeleton bones below this confidence are skipped on the overlay."),
+                new("drawSkeleton", "Draw COCO Skeleton", "boolean", true, Description: "When numKeypoints=17, draw the standard COCO-17 skeleton on the overlay."),
+                new("maxCount", "Max Poses", "number", 100, 1, 1000, 1)],
+            "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
         new("inference.anomaly", "ONNX Anomaly Score", "Inference", [Exec, Image],
             [new("score", VisionDataType.Double), new("isAnomaly", VisionDataType.Boolean), new("heatmap", VisionDataType.Image, Required: false), new("peakX", VisionDataType.Double, Required: false), new("peakY", VisionDataType.Double, Required: false), new("areaFraction", VisionDataType.Double, Required: false), new("suggestedThreshold", VisionDataType.Double, Required: false), new("result", VisionDataType.String), Next],
             [.. OnnxParameters, new("threshold", "Anomaly Threshold", "number", 0.5, -1000000, 1000000, 0.01), new("thresholdMode", "Threshold Mode", "select", "manual", Options: [new("Manual Threshold", "manual"), new("Otsu Auto (spatial maps)", "otsu")], Description: "Otsu derives the effective threshold from the spatial anomaly map distribution (suggestedThreshold); scalar outputs always use the manual threshold.")],

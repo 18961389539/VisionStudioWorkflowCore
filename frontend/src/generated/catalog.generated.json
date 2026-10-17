@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "bcc0c3897ead57851a8fe14b5cb702701cb5d61830ebfe0b72548cdc4576f6a3",
+  "hash": "f6e7ad75c0d6c4663eab7c9b29278a9139f28a0acd44642e71f0709d9bab993a",
   "items": [
     {
       "type": "image.acquire",
@@ -5687,7 +5687,7 @@
           "name": "inputWidth",
           "label": "Input Width",
           "type": "number",
-          "defaultValue": 224,
+          "defaultValue": 640,
           "min": 1,
           "max": 4096,
           "step": 1,
@@ -5697,7 +5697,7 @@
           "name": "inputHeight",
           "label": "Input Height",
           "type": "number",
-          "defaultValue": 224,
+          "defaultValue": 640,
           "min": 1,
           "max": 4096,
           "step": 1,
@@ -5743,8 +5743,8 @@
           "name": "swapRB",
           "label": "Swap Red and Blue",
           "type": "boolean",
-          "defaultValue": false,
-          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
         },
         {
           "name": "crop",
@@ -5832,11 +5832,259 @@
           "step": 1
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not pose/OBB. Embedded-NMS exports are unsupported—use raw dual-head ONNX.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box; letterbox-aware remap to source), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not OBB. For keypoints use inference.pose. Embedded-NMS / single-tensor e2e seg exports are unsupported—use raw dual-head ONNX.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.pose",
+      "displayName": "ONNX Pose (YOLO-Pose)",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "keypoints",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "yolo",
+          "options": [
+            {
+              "label": "YOLO raw (YOLOv8/YOLO26 nms=None)",
+              "value": "yolo"
+            },
+            {
+              "label": "YOLO26 end-to-end xyxy+kpts",
+              "value": "xyxy"
+            }
+          ],
+          "description": "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57]."
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "pixels",
+          "options": [
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            },
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            }
+          ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on: Ultralytics letterbox preprocess and coordinate un-padding."
+        },
+        {
+          "name": "numKeypoints",
+          "label": "Keypoint Count",
+          "type": "number",
+          "defaultValue": 17,
+          "min": 1,
+          "max": 128,
+          "step": 1,
+          "description": "COCO pose uses 17. Must match the exported model."
+        },
+        {
+          "name": "keypointDims",
+          "label": "Keypoint Dims",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 2,
+          "max": 3,
+          "step": 1,
+          "description": "3 = x,y,conf (Ultralytics default); 2 = x,y only."
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "NMS IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "keypointThreshold",
+          "label": "Keypoint Draw Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Keypoints / skeleton bones below this confidence are skipped on the overlay."
+        },
+        {
+          "name": "drawSkeleton",
+          "label": "Draw COCO Skeleton",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "When numKeypoints=17, draw the standard COCO-17 skeleton on the overlay."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Poses",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        }
+      ],
+      "description": "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,

@@ -386,7 +386,7 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
 /// YOLO26 / YOLOv8 instance segmentation ONNX: dual outputs
 /// (1) boxes+scores+mask coeffs [1, 4+nc+32, N] and (2) prototypes [1, 32, mh, mw].
 /// Emits detections, a combined class-id mask (last instance wins on overlap), overlay and instance JSON.
-/// Does not embed NMS in the graph; class-aware NMS runs here. Pose/OBB heads are not supported.
+/// Does not embed NMS in the graph; class-aware NMS runs here. OBB heads are not supported; use inference.pose for keypoints.
 /// </summary>
 public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
 {
@@ -505,7 +505,7 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                 var instanceMask = InferenceStats.ComposeYoloSegMask(
                     protoValues, maskDim, protoH, protoW, c.MaskCoeffs,
                     boxInInputL, boxInInputT, boxInInputR, boxInInputB,
-                    inputWidth, inputHeight, source.Width, source.Height, maskThreshold);
+                    inputWidth, inputHeight, source.Width, source.Height, maskThreshold, letterbox);
                 var area = 0;
                 for (var p = 0; p < instanceMask.Length; p++)
                 {
@@ -551,6 +551,212 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
         var areaA = (a.Right - a.Left) * (a.Bottom - a.Top);
         var areaB = (b.Right - b.Left) * (b.Bottom - b.Top);
         return intersection / (areaA + areaB - intersection + 1e-9);
+    }
+}
+
+
+/// <summary>
+/// YOLO26 / YOLOv8 pose ONNX.
+/// layout=yolo: raw head [1,4+nc+K*D,N] (typical COCO [1,56,8400]).
+/// layout=xyxy: YOLO26 end-to-end NMS-free rows [1,N,6+K*D] (typical [1,300,57] = box+score+class+17*(x,y,conf)).
+/// Emits detections, keypoints JSON, and an overlay (boxes + keypoints + optional COCO skeleton).
+/// </summary>
+public sealed class OnnxPoseNode : IVisionNodeExecutor
+{
+    public string Type => "inference.pose";
+
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = context.RequireImage("image").Mat;
+        if (node.GetBool("crop", false))
+            throw new InvalidOperationException("Pose with crop=true is unsupported. Set crop=false.");
+        using var net = OnnxInferenceHelpers.LoadNet(node);
+        var modelPath = OnnxInferenceHelpers.ResolvePath(node);
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        cancellationToken.ThrowIfCancellationRequested();
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var shape = OnnxInferenceHelpers.Shape(output);
+        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "pose");
+        var layout = node.GetString("layout", "yolo").Trim().ToLowerInvariant();
+        if (layout is "yolo26") layout = "yolo";
+        if (layout is "yolo26-e2e" or "end2end") layout = "xyxy";
+        if (layout is not ("yolo" or "xyxy"))
+            throw new InvalidOperationException($"Unsupported pose layout '{layout}'. Supported values are 'yolo' (raw) and 'xyxy' (YOLO26 end-to-end).");
+        var numKeypoints = Math.Clamp(node.GetInt("numKeypoints", 17), 1, 128);
+        var keypointDims = Math.Clamp(node.GetInt("keypointDims", 3), 2, 3);
+        var threshold = node.GetDouble("confidenceThreshold", 0.25);
+        var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
+        var keypointThreshold = node.GetDouble("keypointThreshold", 0.5);
+        var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
+        if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !double.IsFinite(keypointThreshold) || keypointThreshold is < 0 or > 1)
+            throw new InvalidOperationException("Pose thresholds must be finite values from 0 to 1.");
+        var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
+        if (coordinates is not ("normalized" or "pixels"))
+            throw new InvalidOperationException($"Unsupported coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
+        var letterbox = node.GetBool("letterbox", true);
+        var drawSkeleton = node.GetBool("drawSkeleton", true);
+        var inputWidth = node.GetInt("inputWidth", 640);
+        var inputHeight = node.GetInt("inputHeight", 640);
+        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("inputWidth/inputHeight must be positive.");
+
+        InferenceStats.YoloPoseCandidate[] decoded = layout == "yolo"
+            ? InferenceStats.DecodeYoloPose(values, shape, numKeypoints, keypointDims)
+            : InferenceStats.DecodeYoloPoseXyxy(values, shape, numKeypoints, keypointDims);
+
+        double MapX(double inputX)
+        {
+            if (!letterbox) return inputX * source.Width / inputWidth;
+            var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+            return (inputX - (inputWidth - source.Width * scale) / 2) / scale;
+        }
+        double MapY(double inputY)
+        {
+            if (!letterbox) return inputY * source.Height / inputHeight;
+            var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+            return (inputY - (inputHeight - source.Height * scale) / 2) / scale;
+        }
+
+        var scored = new List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)>();
+        for (var i = 0; i < decoded.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var c = decoded[i];
+            if (!double.IsFinite(c.Score) || c.Score < threshold) continue;
+            if (!double.IsFinite(c.CenterX) || !double.IsFinite(c.CenterY) || !double.IsFinite(c.Width) || !double.IsFinite(c.Height) || c.Width < 0 || c.Height < 0)
+                throw new InvalidOperationException($"Pose row {i} has non-finite or negative box geometry.");
+            if (c.ClassId < 0) throw new InvalidOperationException($"Pose row {i} has a negative classId.");
+            double x1 = c.CenterX - c.Width / 2, y1 = c.CenterY - c.Height / 2;
+            double x2 = c.CenterX + c.Width / 2, y2 = c.CenterY + c.Height / 2;
+            if (coordinates == "normalized")
+            {
+                x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight;
+            }
+            var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, source.Width);
+            var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, source.Height);
+            var right = Math.Clamp(Math.Max(MapX(x1), MapX(x2)), 0, source.Width);
+            var bottom = Math.Clamp(Math.Max(MapY(y1), MapY(y2)), 0, source.Height);
+            if (right <= left || bottom <= top) continue;
+
+            var mappedKpts = new double[c.Keypoints.Length];
+            for (var k = 0; k < numKeypoints; k++)
+            {
+                var baseIdx = k * keypointDims;
+                var kx = c.Keypoints[baseIdx];
+                var ky = c.Keypoints[baseIdx + 1];
+                var kc = keypointDims == 3 ? c.Keypoints[baseIdx + 2] : 1.0;
+                if (coordinates == "normalized") { kx *= inputWidth; ky *= inputHeight; }
+                mappedKpts[baseIdx] = MapX(kx);
+                mappedKpts[baseIdx + 1] = MapY(ky);
+                if (keypointDims == 3) mappedKpts[baseIdx + 2] = kc;
+            }
+            scored.Add((left, top, right, bottom, c.Score, c.ClassId, mappedKpts));
+        }
+
+        var kept = new List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)>();
+        foreach (var candidate in scored.OrderByDescending(x => x.Score))
+        {
+            if (kept.Any(x => x.ClassId == candidate.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
+            kept.Add(candidate);
+            if (kept.Count == maxCount) break;
+        }
+
+        var detections = new List<VisionDetection>();
+        var posePayload = new List<object>();
+        for (var i = 0; i < kept.Count; i++)
+        {
+            var (left, top, right, bottom, score, classId, kpts) = kept[i];
+            var w = right - left; var h = bottom - top;
+            detections.Add(new VisionDetection(i, left, top, w, h, w * h, 0, 0,
+                new VisionCircle((left + right) / 2, (top + bottom) / 2, Math.Sqrt(w * w + h * h) / 2),
+                new VisionRectangle2D(left, top, w, h), score, classId));
+            var points = new List<object>(numKeypoints);
+            for (var k = 0; k < numKeypoints; k++)
+            {
+                var baseIdx = k * keypointDims;
+                points.Add(new
+                {
+                    index = k,
+                    x = kpts[baseIdx],
+                    y = kpts[baseIdx + 1],
+                    conf = keypointDims == 3 ? kpts[baseIdx + 2] : 1.0
+                });
+            }
+            posePayload.Add(new { index = i, classId, score, x1 = left, y1 = top, x2 = right, y2 = bottom, keypoints = points });
+        }
+
+        var overlay = BuildPoseOverlay(source, kept, numKeypoints, keypointDims, keypointThreshold, drawSkeleton);
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["detections"] = VisionValue.Detections(detections.ToArray()),
+                ["count"] = VisionValue.Integer(detections.Count),
+                ["keypoints"] = VisionValue.String(JsonSerializer.Serialize(posePayload)),
+                ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, numKeypoints, keypointDims, outputShape = shape, poses = posePayload }))
+            },
+            new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["letterbox"] = letterbox, ["numKeypoints"] = numKeypoints, ["keypointDims"] = keypointDims, ["outputShape"] = shape }));
+    }
+
+    private static double BoxIoU(
+        (double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts) a,
+        (double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts) b)
+    {
+        var iw = Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left));
+        var ih = Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
+        var intersection = iw * ih;
+        var areaA = (a.Right - a.Left) * (a.Bottom - a.Top);
+        var areaB = (b.Right - b.Left) * (b.Bottom - b.Top);
+        return intersection / (areaA + areaB - intersection + 1e-9);
+    }
+
+    private static Mat BuildPoseOverlay(
+        Mat source,
+        List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)> poses,
+        int numKeypoints, int keypointDims, double keypointThreshold, bool drawSkeleton)
+    {
+        var overlay = new Mat();
+        try
+        {
+            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
+            else if (source.Channels() == 3) source.CopyTo(overlay);
+            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
+            else throw new InvalidOperationException($"Pose overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
+
+            foreach (var pose in poses)
+            {
+                var color = InferenceStats.SegmentationColorBgr(pose.ClassId + 1);
+                var scalar = new Scalar(color.B, color.G, color.R);
+                Cv2.Rectangle(overlay,
+                    new Point((int)Math.Round(pose.Left), (int)Math.Round(pose.Top)),
+                    new Point((int)Math.Round(pose.Right), (int)Math.Round(pose.Bottom)),
+                    scalar, 2, LineTypes.AntiAlias);
+
+                Point?[] pts = new Point?[numKeypoints];
+                for (var k = 0; k < numKeypoints; k++)
+                {
+                    var baseIdx = k * keypointDims;
+                    var conf = keypointDims == 3 ? pose.Kpts[baseIdx + 2] : 1.0;
+                    if (conf < keypointThreshold || !double.IsFinite(pose.Kpts[baseIdx]) || !double.IsFinite(pose.Kpts[baseIdx + 1])) continue;
+                    var pt = new Point((int)Math.Round(pose.Kpts[baseIdx]), (int)Math.Round(pose.Kpts[baseIdx + 1]));
+                    pts[k] = pt;
+                    Cv2.Circle(overlay, pt, 3, scalar, -1, LineTypes.AntiAlias);
+                }
+
+                if (drawSkeleton && numKeypoints == 17)
+                {
+                    foreach (var (a, b) in InferenceStats.Coco17Skeleton)
+                    {
+                        if (a >= numKeypoints || b >= numKeypoints) continue;
+                        if (pts[a] is not { } pa || pts[b] is not { } pb) continue;
+                        Cv2.Line(overlay, pa, pb, scalar, 2, LineTypes.AntiAlias);
+                    }
+                }
+            }
+            return overlay;
+        }
+        catch { overlay.Dispose(); throw; }
     }
 }
 

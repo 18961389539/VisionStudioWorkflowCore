@@ -381,6 +381,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<OnnxSegmentationNode>();
         services.AddSingleton<OnnxAnomalyNode>();
         services.AddSingleton<OnnxInstanceSegmentationNode>();
+        services.AddSingleton<OnnxPoseNode>();
         services.AddSingleton<CameraIntrinsicCalibrationNode>();
         services.AddSingleton<ImageUndistortNode>();
         services.AddSingleton<PlanarHandEyeCalibrationNode>();
