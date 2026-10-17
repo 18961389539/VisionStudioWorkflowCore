@@ -280,7 +280,8 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                     var point = SubpixelEdgeCore.Locate(start, end, edge.Position);
                     outputs["point"] = VisionValue.Point(point);
                     outputs["strength"] = VisionValue.Double(edge.Strength);
-                    outputs["fitError"] = VisionValue.Double(edge.FitError);
+                    if (double.IsFinite(edge.FitError) && edge.FitError >= 0)
+                        outputs["fitError"] = VisionValue.Double(edge.FitError);
                 }
 
                 var overlays = new List<VisionOverlay>();
@@ -301,7 +302,7 @@ public sealed class EdgeSubpixelNode : IVisionNodeExecutor
                         ["reason"] = edge.Reason,
                         ["position"] = edge.Found ? Math.Round(edge.Position, 4) : null,
                         ["strength"] = edge.Found ? Math.Round(edge.Strength, 3) : null,
-                        ["fitError"] = edge.Found && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
+                        ["fitError"] = edge.Found && double.IsFinite(edge.FitError) && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
                         ["sampleCount"] = edge.SampleCount,
                         ["polarity"] = polarity,
                         ["direction"] = direction,

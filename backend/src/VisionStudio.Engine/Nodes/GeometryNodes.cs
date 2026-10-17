@@ -226,7 +226,8 @@ public sealed class CaliperNode : IVisionNodeExecutor
                     edgePoint = SubpixelEdgeCore.Locate(start, end, edge.Position);
                     outputs["point"] = VisionValue.Point(edgePoint.Value);
                     outputs["strength"] = VisionValue.Double(edge.Strength);
-                    outputs["fitError"] = VisionValue.Double(edge.FitError);
+                    if (double.IsFinite(edge.FitError) && edge.FitError >= 0)
+                        outputs["fitError"] = VisionValue.Double(edge.FitError);
                     overlays.Add(new VisionOverlay("caliper-edge", VisionOverlayType.Point,
                         X: edgePoint.Value.X, Y: edgePoint.Value.Y, Stroke: "#f5222d", StrokeWidth: 3));
                     overlays.Add(new VisionOverlay("caliper-label", VisionOverlayType.Text,
@@ -242,7 +243,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
                         ["x"] = edge.Found ? Math.Round(edgePoint!.Value.X, 4) : null,
                         ["y"] = edge.Found ? Math.Round(edgePoint!.Value.Y, 4) : null,
                         ["strength"] = edge.Found ? Math.Round(edge.Strength, 3) : null,
-                        ["fitError"] = edge.Found && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
+                        ["fitError"] = edge.Found && double.IsFinite(edge.FitError) && edge.FitError >= 0 ? Math.Round(edge.FitError, 4) : null,
                         ["sampleCount"] = edge.SampleCount,
                         ["polarity"] = polarity,
                         ["direction"] = direction,

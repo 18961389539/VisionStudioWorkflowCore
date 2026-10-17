@@ -37,6 +37,27 @@ public sealed class Batch5CaliperRegressionTests
         Assert.Contains("must be one of", error.Message);
     }
 
+    [Theory]
+    [InlineData("measure.caliper")]
+    [InlineData("feature.edgeSubpixel")]
+    public async Task SinglePointEdgeNodesOmitUnavailableEndpointFitError(string type)
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(20));
+        using (var bright = new Mat(image, new Rect(2, 0, 62, 64))) bright.SetTo(Scalar.All(220));
+        using var input = VisionImage.Own(image.Clone());
+        IVisionNodeExecutor executor = type == "measure.caliper" ? new CaliperNode() : new EdgeSubpixelNode();
+        var parameters = type == "measure.caliper"
+            ? """{"startX":0,"startY":32,"endX":40,"endY":32,"sampleWidth":1,"edgeThreshold":20,"polarity":"rising","refine":"parabolic"}"""
+            : """{"startX":0,"startY":32,"endX":40,"endY":32,"sampleWidth":1,"minContrast":20,"polarity":"rising","refine":"parabolic"}""";
+
+        var result = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(input)), Node(type, parameters), CancellationToken.None);
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]), Convert.ToString(result.Summary["reason"]));
+        Assert.Null(result.Summary["fitError"]);
+        Assert.False(result.Outputs.ContainsKey("fitError"));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
     [Fact]
     public async Task PixelConstantTransformCanDriveCaliperMeasurement()
     {
