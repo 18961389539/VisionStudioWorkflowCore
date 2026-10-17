@@ -53,6 +53,7 @@ public sealed class EdgeNode : IVisionNodeExecutor
             throw new InvalidOperationException("Edge thresholds must satisfy 0 <= lowThreshold <= highThreshold <= 255.");
         var blurSize = node.GetInt("blurSize", 0);
         if (blurSize is not (0 or 3 or 5 or 7)) throw new InvalidOperationException("blurSize must be 0, 3, 5, or 7.");
+        var subpixel = node.GetBool("subpixel", false);
         var roi = node.GetRoi();
 
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
@@ -67,12 +68,29 @@ public sealed class EdgeNode : IVisionNodeExecutor
         // chains, not only a pixel count. Contours over the binary edge image give
         // deterministic chain lengths and bounding boxes for debugging.
         JLVisionOperators.FindContours(edges, out Point[][] contours, out _, RetrievalModes.List, ContourApproximationModes.ApproxNone);
-        var chains = contours.Select(c => new
+        // Optional XLD-like subpixel chains: refine contour points along the local
+        // gradient (parabolic peak interpolation). Points are stride-sampled and capped
+        // per chain so JSON stays bounded on dense edge maps.
+        byte[]? grayBytes = null;
+        if (subpixel) analysis.GetArray(out grayBytes);
+        var chains = contours.Select(c =>
         {
-            length = c.Length,
-            x = c.Length == 0 ? 0 : c.Min(p => p.X), y = c.Length == 0 ? 0 : c.Min(p => p.Y),
-            width = c.Length == 0 ? 0 : c.Max(p => p.X) - c.Min(p => p.X) + 1,
-            height = c.Length == 0 ? 0 : c.Max(p => p.Y) - c.Min(p => p.Y) + 1
+            object? points = null;
+            if (subpixel && grayBytes is not null && c.Length > 0)
+            {
+                var stride = Math.Max(1, (int)Math.Ceiling(c.Length / 200d));
+                points = c.Where((_, i) => i % stride == 0)
+                    .Select(pt => { var refined = SubpixelEdgeRefinement.Refine(grayBytes, analysis.Width, analysis.Height, pt.X, pt.Y); return new { x = Math.Round(refined.X, 3), y = Math.Round(refined.Y, 3) }; })
+                    .ToArray();
+            }
+            return new
+            {
+                length = c.Length,
+                x = c.Length == 0 ? 0 : c.Min(p => p.X), y = c.Length == 0 ? 0 : c.Min(p => p.Y),
+                width = c.Length == 0 ? 0 : c.Max(p => p.X) - c.Min(p => p.X) + 1,
+                height = c.Length == 0 ? 0 : c.Max(p => p.Y) - c.Min(p => p.Y) + 1,
+                points
+            };
         }).OrderByDescending(c => c.length).ToArray();
         var longest = chains.Length == 0 ? 0 : chains[0].length;
         cancellationToken.ThrowIfCancellationRequested();
@@ -89,7 +107,7 @@ public sealed class EdgeNode : IVisionNodeExecutor
             new Dictionary<string, object?>
             {
                 ["lowThreshold"] = low, ["highThreshold"] = high, ["blurSize"] = blurSize,
-                ["edgePixels"] = edgePixels, ["chainCount"] = chains.Length, ["longestChain"] = longest,
+                ["edgePixels"] = edgePixels, ["chainCount"] = chains.Length, ["longestChain"] = longest, ["subpixel"] = subpixel,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             }));
     }
@@ -177,7 +195,8 @@ public sealed class LineNode : IVisionNodeExecutor
             {
                 x1 = f.Fit.Line.Start.X, y1 = f.Fit.Line.Start.Y, x2 = f.Fit.Line.End.X, y2 = f.Fit.Line.End.Y,
                 length = f.Fit.Line.Length, angleDeg = f.Fit.AngleDeg, rmsError = f.Fit.RmsError,
-                maxError = f.Fit.MaxError, inlierPoints = f.Fit.InlierCount, segments = f.Segments
+                maxError = f.Fit.MaxError, inlierPoints = f.Fit.InlierCount, segments = f.Segments,
+                confidence = LineConfidence(f.Fit)
             })))
         };
         var overlays = new List<VisionOverlay>();
@@ -188,6 +207,7 @@ public sealed class LineNode : IVisionNodeExecutor
             outputs["length"] = VisionValue.Double(best.Line.Length);
             outputs["angle"] = VisionValue.Double(best.AngleDeg);
             outputs["rmsError"] = VisionValue.Double(best.RmsError);
+            outputs["confidence"] = VisionValue.Double(LineConfidence(best));
             for (var i = 0; i < ordered.Length; i++)
             {
                 overlays.Add(VisionGeometryHelpers.OverlayLine($"line-result-{i}", ordered[i].Fit.Line, i == 0 ? "#13c2c2" : "#597ef7", i == 0 ? 2.5 : 1.5));
@@ -207,6 +227,10 @@ public sealed class LineNode : IVisionNodeExecutor
     }
 
     private static double Distance(Point a, Point b) => Math.Sqrt(Math.Pow(b.X - a.X, 2) + Math.Pow(b.Y - a.Y, 2));
+
+    /// <summary>Fit quality in [0,1]: inlier support discounted by RMS error.</summary>
+    internal static double LineConfidence(GeometryFitting.LineFit fit)
+        => Math.Clamp((double)fit.InlierCount / Math.Max(1, fit.PointCount) * Math.Exp(-fit.RmsError / 3d), 0, 1);
 }
 
 public sealed class CircleNode : IVisionNodeExecutor
@@ -245,7 +269,7 @@ public sealed class CircleNode : IVisionNodeExecutor
         using var edges = new Mat();
         JLVisionOperators.Canny(analysis, edges, 50, 150);
         edges.GetArray(out byte[] edgePixels);
-        var refined = new List<(VisionCircle Circle, double? Rms, int Inliers)>();
+        var refined = new List<(VisionCircle Circle, double? Rms, int Inliers, double CoverageDeg, double Confidence)>();
         foreach (var candidate in circles.Take(25))
         {
             var points = new List<VisionPoint2D>();
@@ -265,13 +289,15 @@ public sealed class CircleNode : IVisionNodeExecutor
                     var fit = GeometryFitting.FitCircle(points);
                     if (fit.Circle.Radius >= minRadius * 0.5 && fit.Circle.Radius <= maxRadius * 1.5 && fit.InlierCount >= 8)
                     {
-                        refined.Add((fit.Circle, fit.RmsError, fit.InlierCount));
+                        var coverage = SubpixelEdgeRefinement.AngularCoverageDeg(points, fit.Circle.X, fit.Circle.Y);
+                        var confidence = Math.Clamp((double)fit.InlierCount / Math.Max(1, points.Count) * Math.Exp(-fit.RmsError / 3d), 0, 1);
+                        refined.Add((fit.Circle, fit.RmsError, fit.InlierCount, coverage, confidence));
                         continue;
                     }
                 }
                 catch (InvalidOperationException) { /* fall back to the Hough candidate below */ }
             }
-            refined.Add((new VisionCircle(cx, cy, candidate.Radius), null, 0));
+            refined.Add((new VisionCircle(cx, cy, candidate.Radius), null, 0, 0, 0));
         }
         var ordered = refined.OrderByDescending(c => c.Inliers).ThenBy(c => c.Rms ?? double.MaxValue).Take(maxCircles).ToArray();
         var outputs = new Dictionary<string, VisionValue>
@@ -279,7 +305,7 @@ public sealed class CircleNode : IVisionNodeExecutor
             ["image"] = VisionValue.Image(sourceImage),
             ["found"] = VisionValue.Boolean(ordered.Length > 0),
             ["count"] = VisionValue.Integer(ordered.Length),
-            ["circles"] = VisionValue.String(JsonSerializer.Serialize(ordered.Select(c => new { x = c.Circle.X, y = c.Circle.Y, radius = c.Circle.Radius, rmsError = c.Rms, inliers = c.Inliers })))
+            ["circles"] = VisionValue.String(JsonSerializer.Serialize(ordered.Select(c => new { x = c.Circle.X, y = c.Circle.Y, radius = c.Circle.Radius, rmsError = c.Rms, inliers = c.Inliers, coverageDeg = c.CoverageDeg, confidence = c.Confidence })))
         };
         var overlays = new List<VisionOverlay>();
         if (ordered.Length > 0)
@@ -289,6 +315,8 @@ public sealed class CircleNode : IVisionNodeExecutor
             outputs["center"] = VisionValue.Point(new VisionPoint2D(best.Circle.X, best.Circle.Y));
             outputs["radius"] = VisionValue.Double(best.Circle.Radius);
             if (best.Rms is not null) outputs["rmsError"] = VisionValue.Double(best.Rms.Value);
+            outputs["coverageDeg"] = VisionValue.Double(best.CoverageDeg);
+            outputs["confidence"] = VisionValue.Double(best.Confidence);
             for (var i = 0; i < ordered.Length; i++)
             {
                 overlays.Add(new VisionOverlay($"circle-result-{i}", VisionOverlayType.Circle, X: ordered[i].Circle.X, Y: ordered[i].Circle.Y, Radius: ordered[i].Circle.Radius, Stroke: i == 0 ? "#52c41a" : "#597ef7", StrokeWidth: i == 0 ? 2.5 : 1.5));
