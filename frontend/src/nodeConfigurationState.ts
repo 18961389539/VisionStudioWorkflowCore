@@ -136,8 +136,11 @@ export function roiConfigurationIssue(value: unknown, label: string, maxBrushWid
 
 function brushSelectionIsExactlyErased(strokes: unknown[]): boolean {
   if (strokes.length !== 2) return false;
-  const add = strokes.find((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Add') as Record<string, unknown> | undefined;
-  const erase = strokes.find((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Erase') as Record<string, unknown> | undefined;
+  const addIndex = strokes.findIndex((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Add');
+  const eraseIndex = strokes.findIndex((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Erase');
+  if (addIndex < 0 || eraseIndex <= addIndex) return false;
+  const add = strokes[addIndex] as Record<string, unknown>;
+  const erase = strokes[eraseIndex] as Record<string, unknown>;
   if (!add || !erase || typeof add.width !== 'number' || !Number.isFinite(add.width)
     || typeof erase.width !== 'number' || !Number.isFinite(erase.width)
     || add.width <= 0 || add.width > 1024 || erase.width <= 0 || erase.width > 1024

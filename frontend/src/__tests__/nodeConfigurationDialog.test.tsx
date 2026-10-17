@@ -396,6 +396,22 @@ describe('crop workspace with a connected ROI', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
+  it('keeps preview enabled when an add stroke restores the same path after erasing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const restoredBrushCropNode: Node = { ...cropNode, data: { ...cropNode.data, parameters: { roi: { type: 'Brush', strokes: [
+      { mode: 'Erase', width: 4, points: [{ x: 5, y: 5 }, { x: 9, y: 5 }] },
+      { mode: 'Add', width: 4, points: [{ x: 5, y: 5 }, { x: 9, y: 5 }] }
+    ] } } } };
+    const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
+    const onPreview = vi.fn(async () => result);
+    const { dialog } = mount({ node: restoredBrushCropNode, catalogItem: cropCatalog, nodes: [restoredBrushCropNode, imageNode], edges, result, onPreview });
+
+    await waitFor(() => expect(dialog.queryByText(/笔刷裁剪区域被同轨迹、同笔宽的擦除笔迹完全覆盖/)).toBeNull());
+    expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('does not project an upstream ROI overlay onto a different image coordinate frame', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'processed', portName: 'image', width: 80, height: 80 }

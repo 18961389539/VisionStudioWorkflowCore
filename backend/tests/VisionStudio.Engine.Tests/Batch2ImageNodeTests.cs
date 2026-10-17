@@ -67,6 +67,22 @@ public sealed class Batch2ImageNodeTests
         Assert.Contains("后续擦除笔迹全部擦除", error.Message);
     }
 
+    [Fact]
+    public async Task CropAppliesBrushStrokesInOrderSoALaterAddRestoresTheSelectedArea()
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(90));
+
+        var result = await RunImage(new ImageCropNode(), Image(source),
+            """{"roi":{"type":"Brush","strokes":[{"mode":"Erase","width":4,"points":[{"x":5,"y":5},{"x":9,"y":5}]},{"mode":"Add","width":4,"points":[{"x":5,"y":5},{"x":9,"y":5}]}]}}""");
+
+        using var cropped = ImageFrom(result);
+        using var mask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        Assert.True(Convert.ToInt32(result.Summary["selectedPixels"]) > 0);
+        Assert.True(Cv2.CountNonZero(mask.Mat) > 0);
+        Assert.InRange(cropped.Width, 1, source.Width);
+        Assert.InRange(cropped.Height, 1, source.Height);
+    }
+
     [Theory]
     [InlineData(0.1)]
     [InlineData(0.5)]

@@ -74,6 +74,10 @@ describe('node configuration snapshots', () => {
       { mode: 'Add', width: 4, points: [{ x: 0.5, y: 5 }] },
       { mode: 'Erase', width: 4, points: [{ x: 0.6, y: 5 }] }
     ] }, 100, 80)).toBeUndefined();
+    expect(cropRoiOutsideImageIssue({ type: 'Brush', strokes: [
+      { mode: 'Erase', width: 4, points: [{ x: 5, y: 5 }, { x: 9, y: 5 }] },
+      { mode: 'Add', width: 4, points: [{ x: 5, y: 5 }, { x: 9, y: 5 }] }
+    ] }, 100, 80)).toBeUndefined();
     expect(cropRoiOutsideImageIssue({ type: 'Circle', x: 99, y: 20, radius: 8 }, 100, 80)).toBeUndefined();
     expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 120, y: 10, width: 8, height: 12 }, 0, 80)).toBeUndefined();
 
