@@ -152,6 +152,38 @@ function transformSourceLineage(nodes: Node[], edges: Edge[], sourceId: string |
   return sourceId ? visit(sourceId) : [];
 }
 
+function geometrySourceImageFrameNodeIds(geometryEdge: Edge | undefined, nodes: Node[], edges: Edge[], catalogItems: NodeCatalogItem[], visited = new Set<string>()): string[] {
+  if (!geometryEdge || visited.has(geometryEdge.source)) return [];
+  visited.add(geometryEdge.source);
+  const source = nodes.find((item) => item.id === geometryEdge.source);
+  const type = String(source?.data.typeKey ?? '').toLowerCase();
+  const sourceCatalog = catalogItems.find((item) => item.type.toLowerCase() === type);
+  if (type === 'measure.fitline' || type === 'measure.fitcircle') {
+    const pointPorts = new Set(sourceCatalog?.inputs.filter((port) => port.dataType.toLowerCase() === 'point2d')
+      .map((port) => port.name.toLowerCase()));
+    return edges.filter((edge) => edge.target === geometryEdge.source && pointPorts.has(String(edge.targetHandle ?? '').toLowerCase()))
+      .flatMap((edge) => geometrySourceImageFrameNodeIds(edge, nodes, edges, catalogItems, new Set(visited)));
+  }
+  const output = sourceCatalog?.outputs.find((port) => port.name.toLowerCase() === String(geometryEdge.sourceHandle ?? '').toLowerCase());
+  if (output?.dataType.toLowerCase() !== 'circle' && output?.dataType.toLowerCase() !== 'line2d') return [];
+  const inputPort = type === 'roi.transform' ? 'debugImage' : 'image';
+  const frameSource = edges.find((edge) => edge.target === geometryEdge.source && edge.targetHandle?.toLowerCase() === inputPort.toLowerCase())?.source;
+  return frameSource ? [frameSource] : [];
+}
+
+function transformMappedImageFrameNodeIds(transformNodes: Node[], edges: Edge[]) {
+  return [...new Set(transformNodes.flatMap((node) => {
+    const type = String(node.data.typeKey ?? '').toLowerCase();
+    if (type === 'image.crop') return [node.id];
+    const targetPort = type === 'roi.transform' ? 'debugImage'
+      : type === 'image.register' ? 'reference'
+        : type === 'match.shape' ? 'image' : undefined;
+    if (!targetPort) return [];
+    const target = edges.find((edge) => edge.target === node.id && edge.targetHandle?.toLowerCase() === targetPort.toLowerCase());
+    return target ? [target.source] : [];
+  }))];
+}
+
 function connectedCircleGeometry(value: unknown): { x: number; y: number; radius: number } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const circle = value as Record<string, unknown>;
@@ -407,12 +439,28 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'transform')
     : undefined;
   const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
-  const correctedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
+  const connectedGeometryEdge = circleInputEdge ?? searchLineInputEdge;
+  const connectedGeometryImageFrameNodeIds = geometrySourceImageFrameNodeIds(connectedGeometryEdge, nodes, edges, catalogItems);
+  const transformMappedImageFrames = transformMappedImageFrameNodeIds(transformLineageNodes, edges);
+  const connectedGeometryAlreadyInMappedFrame = Boolean(connectedGeometryImageFrameNodeIds.length && transformInputEdge
+    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformMappedImageFrames.some((mappedFrameNodeId) =>
+      imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, mappedFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
+  const directCorrectedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
     && circleSourceNode?.data.typeKey === 'roi.transform'
     && transformLineageNodes.some((source) => source.id === circleInputEdge.source));
+  const correctedCircleTransformConflict = directCorrectedCircleTransformConflict
+    || isCaliperCircle && connectedGeometryAlreadyInMappedFrame;
+  const correctedSearchLineTransformConflict = Boolean(searchLineInputEdge && transformInputEdge && connectedGeometryAlreadyInMappedFrame);
+  const measurementGeometryTransformConflict = correctedCircleTransformConflict || correctedSearchLineTransformConflict;
   const correctedCircleTransformMessage = correctedCircleTransformConflict
-    ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
+    ? directCorrectedCircleTransformConflict
+      ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
+      : '上游圆已经处于 transform 的目标图像坐标系，再传入 transform 会重复映射。请断开 transform，或改接基准图像坐标的圆；当前已阻止测试运行。'
     : undefined;
+  const correctedSearchLineTransformMessage = correctedSearchLineTransformConflict
+    ? '上游搜索线已经处于 transform 的目标图像坐标系，再传入 transform 会重复映射。请断开 transform，或改接基准图像坐标的搜索线；当前已阻止测试运行。'
+    : undefined;
+  const measurementGeometryTransformConflictMessage = correctedCircleTransformMessage ?? correctedSearchLineTransformMessage;
   const referenceTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'roi.transform'
     && typeof (source.data.parameters as NodeParameters | undefined)?.referenceImage === 'string'
     && Boolean((source.data.parameters as NodeParameters).referenceImage));
@@ -818,7 +866,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     setImageSource('input');
   };
   const runPreview = async () => {
-    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || correctedCircleTransformConflict) return;
+    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || measurementGeometryTransformConflict) return;
     if (isShapeMatch) { setShapeWorkspaceTab('search'); setShapeImageKind(undefined); setRegionEditMode('search'); }
     setTrainingView(false);
     setShowSavedTrainingImage(false);
@@ -1269,17 +1317,20 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           description={caliperLineBoundsNotice.description} />}
         {caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
           description={caliperSearchLineBoundsNotice.description} />}
-        {searchLineInputEdge && <Alert showIcon type="info"
-          title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
-          description={transformInputEdge
+        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict ? 'error' : 'info'}
+          title={correctedSearchLineTransformConflict ? '上游几何已处于变换目标坐标系'
+            : `搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
+          description={correctedSearchLineTransformMessage ?? (transformInputEdge
             ? connectedSearchLine && measurementGeometryFrameKind
               ? `蓝色线显示运行报告中的上游基准搜索线；它会在执行时经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”变换到当前图像。几何仅在匹配的基准图像上只读显示。`
               : `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
             : connectedSearchLine
               ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
-              : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。'} />}
+              : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。')} />}
         {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict ? 'error' : transformInputEdge ? 'warning' : 'info'}
-          title={correctedCircleTransformConflict ? '定位修正圆不能再次应用 transform' : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
+          title={correctedCircleTransformConflict ? directCorrectedCircleTransformConflict
+            ? '定位修正圆不能再次应用 transform' : '上游几何已处于变换目标坐标系'
+            : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
           description={correctedCircleTransformMessage ?? (transformInputEdge
             ? connectedCircle && measurementGeometryFrameKind
               ? `圆心和标称半径锁定为运行报告中的上游基准圆；图像预览显示对应基准图像，可拖动圆弧和搜索带手柄，变换会在执行时映射到当前图像。`
@@ -1396,10 +1447,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       footer={<div className="node-configuration-footer">
         <span>{dirty ? '修改已暂存；取消或关闭将丢弃本次修改' : '参数与当前流程一致'}{previewBusy ? ' · 测试中' : ''}</span>
         <div>
-          <Tooltip title={correctedCircleTransformMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
+          <Tooltip title={measurementGeometryTransformConflictMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
             <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
               onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
-              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || correctedCircleTransformConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryTransformConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>

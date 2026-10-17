@@ -585,6 +585,93 @@ describe('crop workspace with a connected ROI', () => {
 });
 
 describe('caliper geometry input guidance', () => {
+  it.each([
+    ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine'],
+    ['circle', 'feature.circle', 'measure.caliperCircle', 'circle', 'circle']
+  ])('blocks a connected current-image %s from being transformed a second time', (geometryLabel, sourceType, targetType, outputPort, inputPort) => {
+    const sourceCatalog = fallbackCatalog.find(item => item.type === sourceType)!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === targetType)!;
+    const geometryNode: Node = { id: 'geometry', position: { x: 0, y: 0 }, data: {
+      typeKey: sourceType, label: `当前图像${geometryLabel}`, inputs: sourceCatalog.inputs, parameters: {}
+    } };
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetType, label: '卡尺测量', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const transformNode: Node = { id: 'transform', position: { x: 0, y: 0 }, data: {
+      typeKey: 'roi.transform', label: '定位修正 ROI', parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 }
+    } };
+    const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      { id: 'geometry-image', source: imageNode.id, sourceHandle: 'image', target: geometryNode.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: imageNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'transform-image', source: imageNode.id, sourceHandle: 'image', target: transformNode.id, targetHandle: 'debugImage' },
+      { id: 'geometry-input', source: geometryNode.id, sourceHandle: outputPort, target: measurementNode.id, targetHandle: inputPort },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: measurementNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, geometryNode, transformNode, imageNode], edges });
+
+    expect(dialog.getByText('上游几何已处于变换目标坐标系')).toBeTruthy();
+    expect(dialog.getByText(/断开 transform，或改接基准图像坐标/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('allows a connected search line measured in a separate reference image to follow the ROI transform', () => {
+    const sourceCatalog = fallbackCatalog.find(item => item.type === 'feature.line')!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const geometryNode: Node = { id: 'reference-line', position: { x: 0, y: 0 }, data: {
+      typeKey: sourceCatalog.type, label: '基准图像直线', inputs: sourceCatalog.inputs, parameters: {}
+    } };
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetCatalog.type, label: '卡尺找线', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const transformNode: Node = { id: 'transform', position: { x: 0, y: 0 }, data: {
+      typeKey: 'roi.transform', label: '定位修正 ROI', parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 }
+    } };
+    const referenceImage: Node = { id: 'reference-image', position: { x: 0, y: 0 }, data: { label: '基准图像' } };
+    const currentImage: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      { id: 'geometry-image', source: referenceImage.id, sourceHandle: 'image', target: geometryNode.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: currentImage.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'transform-image', source: currentImage.id, sourceHandle: 'image', target: transformNode.id, targetHandle: 'debugImage' },
+      { id: 'geometry-input', source: geometryNode.id, sourceHandle: 'line', target: measurementNode.id, targetHandle: 'searchLine' },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: measurementNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, geometryNode, transformNode, referenceImage, currentImage], edges });
+
+    expect(dialog.queryByText('上游几何已处于变换目标坐标系')).toBeNull();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('blocks a search line from the cropped image when the crop transform is connected too', () => {
+    const sourceCatalog = fallbackCatalog.find(item => item.type === 'feature.line')!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const geometryNode: Node = { id: 'geometry', position: { x: 0, y: 0 }, data: {
+      typeKey: sourceCatalog.type, label: '裁剪图像直线', inputs: sourceCatalog.inputs, parameters: {}
+    } };
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetCatalog.type, label: '卡尺找线', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const sourceImage: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '输入图像' } };
+    const edges = [
+      { id: 'crop-image', source: sourceImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'geometry-image', source: cropNode.id, sourceHandle: 'image', target: geometryNode.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: cropNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'geometry-input', source: geometryNode.id, sourceHandle: 'line', target: measurementNode.id, targetHandle: 'searchLine' },
+      { id: 'transform-input', source: cropNode.id, sourceHandle: 'transform', target: measurementNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, geometryNode, cropNode, sourceImage], edges });
+
+    expect(dialog.getByText('上游几何已处于变换目标坐标系')).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('edits transformed search geometry over the saved ROI reference image', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
