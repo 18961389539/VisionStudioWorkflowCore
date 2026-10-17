@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
 import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
@@ -29,6 +29,14 @@ const persistPixelated = (value: boolean) => {
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: readonly OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
+const brushPathCache = new WeakMap<readonly OverlayPoint[], number[]>();
+function brushPath(points: readonly OverlayPoint[]): number[] {
+  const cached = brushPathCache.get(points);
+  if (cached) return cached;
+  const path = flatten(points);
+  brushPathCache.set(points, path);
+  return path;
+}
 const MAX_POLYGON_PREVIEW_POINTS = 8192;
 const polygonPreviewCache = new WeakMap<readonly Point[], readonly Point[]>();
 function polygonPreviewPoints(points: readonly Point[]): readonly Point[] {
@@ -359,6 +367,27 @@ function OverlayShape({ overlay, scale }: { overlay: VisionOverlay; scale: numbe
   }
 }
 
+const BrushStrokeLine = memo(function BrushStrokeLine({ item, stroke }: { item: VisionRoiBrushStroke; stroke: string }) {
+  return <Line name={`roi-brush-stroke-${item.mode.toLowerCase()}`} points={brushPath(item.points)} stroke={stroke}
+    strokeWidth={item.width} lineCap="round" lineJoin="round" opacity={item.mode === 'Add' ? 0.28 : 1}
+    globalCompositeOperation={item.mode === 'Erase' ? 'destination-out' : 'source-over'} />;
+});
+
+const BrushStrokeList = memo(function BrushStrokeList({ strokes, stroke }: {
+  strokes: readonly VisionRoiBrushStroke[]; stroke: string;
+}) {
+  return <>{strokes.map((item, index) => <BrushStrokeLine key={index} item={item} stroke={stroke} />)}</>;
+});
+
+const BrushRoiShape = memo(function BrushRoiShape({ strokes, activeStroke, stroke = '#ff4d4f' }: {
+  strokes: readonly VisionRoiBrushStroke[]; activeStroke?: VisionRoiBrushStroke; stroke?: string;
+}) {
+  return <Group listening={false}>
+    <BrushStrokeList strokes={strokes} stroke={stroke} />
+    {activeStroke && <BrushStrokeLine item={activeStroke} stroke={stroke} />}
+  </Group>;
+});
+
 function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: number; draft?: boolean }) {
   if (!roi) return null;
   const stroke = draft ? '#ffd666' : '#ff4d4f';
@@ -367,12 +396,7 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
     return <Rect listening={false} x={roi.x} y={roi.y} width={roi.width} height={roi.height} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
   if (roi.type === 'Circle')
     return <Circle listening={false} x={roi.x} y={roi.y} radius={roi.radius} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
-  if (roi.type === 'Brush')
-    return <Group listening={false}>
-      {roi.strokes.map((item, index) => <Line key={index} points={flatten(item.points)} stroke={stroke}
-        strokeWidth={item.width} lineCap="round" lineJoin="round" opacity={item.mode === 'Add' ? 0.28 : 1}
-        globalCompositeOperation={item.mode === 'Erase' ? 'destination-out' : 'source-over'} />)}
-    </Group>;
+  if (roi.type === 'Brush') return <BrushRoiShape strokes={roi.strokes} stroke={stroke} />;
   const previewPoints = polygonPreviewPoints(roi.points);
   return <Line listening={false} points={flatten(previewPoints)} closed={roi.points.length >= 3 && !draft} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
 }
@@ -558,7 +582,8 @@ export default function ImageViewer({
   const roiDrag = useRef<{ mode: RoiDragMode; origin: VisionRoi; start: Point; moveBounds?: RoiMoveBounds } | undefined>(undefined);
   const [roiDragOffset, setRoiDragOffset] = useState<Point>();
   const polygonPoints = useRef<OverlayPoint[]>([]);
-  const brushStroke = useRef<{ roi: Extract<VisionRoi, { type: 'Brush' }> } | undefined>(undefined);
+  const brushStroke = useRef<{ baseStrokes: VisionRoiBrushStroke[]; activeStroke: VisionRoiBrushStroke } | undefined>(undefined);
+  const [brushPreview, setBrushPreview] = useState<VisionRoiBrushStroke>();
   const lastFocusTick = useRef(focusTick ?? 0);
   const pointerUpHandler = useRef<() => void>(() => undefined);
   const pointerCancelHandler = useRef<() => void>(() => undefined);
@@ -585,6 +610,7 @@ export default function ImageViewer({
     if (!roiEnabled) {
       setTool('pan');
       setDraft(undefined);
+      setBrushPreview(undefined);
       polygonPoints.current = [];
       brushStroke.current = undefined;
       gestureStart.current = undefined;
@@ -596,6 +622,7 @@ export default function ImageViewer({
     setOverlayFilter([]);
     setCursor(undefined);
     setDraft(undefined);
+    setBrushPreview(undefined);
     setMeasurementDraft(undefined);
     setGeometryDrawMode(false);
     geometryGestureStart.current = undefined;
@@ -750,35 +777,29 @@ export default function ImageViewer({
   };
 
   const beginBrushStroke = (point: Point, mode: VisionRoiBrushStroke['mode']) => {
-    const strokes = roi?.type === 'Brush' ? roi.strokes : [];
-    const next: Extract<VisionRoi, { type: 'Brush' }> = {
-      type: 'Brush',
-      strokes: [...strokes, { mode, width: brushWidth, points: [point, point] }]
-    };
-    brushStroke.current = { roi: next };
-    setDraft(next);
+    const activeStroke = { mode, width: brushWidth, points: [point, point] };
+    brushStroke.current = { baseStrokes: roi?.type === 'Brush' ? roi.strokes : [], activeStroke };
+    setDraft(undefined);
+    setBrushPreview(activeStroke);
   };
 
   const extendBrushStroke = (point: Point) => {
     const active = brushStroke.current;
     if (!active) return;
-    const strokes = active.roi.strokes.slice();
-    const lastIndex = strokes.length - 1;
-    const last = strokes[lastIndex];
-    const previous = last.points[last.points.length - 1];
+    const previous = active.activeStroke.points[active.activeStroke.points.length - 1];
     if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.35) return;
-    strokes[lastIndex] = { ...last, points: [...last.points, point] };
-    const next = { type: 'Brush' as const, strokes };
-    brushStroke.current = { roi: next };
-    setDraft(next);
+    const activeStroke = { ...active.activeStroke, points: [...active.activeStroke.points, point] };
+    brushStroke.current = { ...active, activeStroke };
+    setBrushPreview(activeStroke);
   };
 
   const finishBrushStroke = () => {
     const active = brushStroke.current;
     if (!active) return;
     brushStroke.current = undefined;
+    setBrushPreview(undefined);
     setDraft(undefined);
-    onRoiChange(active.roi);
+    onRoiChange({ type: 'Brush', strokes: [...active.baseStrokes, active.activeStroke] });
   };
 
   const undoBrushStroke = () => {
@@ -994,6 +1015,7 @@ export default function ImageViewer({
     roiDrag.current = undefined;
     setRoiDragOffset(undefined);
     brushStroke.current = undefined;
+    setBrushPreview(undefined);
     setDraft(undefined);
     setMeasurementDraft(undefined);
     setGeometryDrawMode(false);
@@ -1036,6 +1058,7 @@ export default function ImageViewer({
   const clearRoi = () => {
     polygonPoints.current = [];
     brushStroke.current = undefined;
+    setBrushPreview(undefined);
     setDraft(undefined);
     onRoiChange(undefined);
   };
@@ -1050,6 +1073,7 @@ export default function ImageViewer({
         setRoiDragOffset(undefined);
         polygonPoints.current = [];
         brushStroke.current = undefined;
+        setBrushPreview(undefined);
         setDraft(undefined);
         setMeasurementDraft(undefined);
         setGeometryDrawMode(false);
@@ -1085,7 +1109,7 @@ export default function ImageViewer({
           {showRoiTools && <Segmented
             size="small"
             value={tool}
-            onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; gestureStart.current = undefined;
+            onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; setBrushPreview(undefined); gestureStart.current = undefined;
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
               roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
@@ -1190,10 +1214,17 @@ export default function ImageViewer({
                     {roi.type === 'Polygon' && roiEnabled && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
                   </Group>
                   : <>
-                    {draft?.type !== 'Brush' && <RoiShape roi={roi} scale={view.scale} />}
-                    <RoiShape roi={draft} scale={view.scale} draft />
+                    {brushPreview || roi?.type === 'Brush'
+                      ? <>
+                        <BrushRoiShape strokes={roi?.type === 'Brush' ? roi.strokes : []} activeStroke={brushPreview} />
+                        {draft?.type !== 'Brush' && <RoiShape roi={draft} scale={view.scale} draft />}
+                      </>
+                      : <>
+                        <RoiShape roi={roi} scale={view.scale} />
+                        <RoiShape roi={draft} scale={view.scale} draft />
+                      </>}
                   </>}
-                {roi && roiEnabled && !draft && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
+                {roi && roiEnabled && !draft && !brushPreview && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
               </Group>
             </Layer>
           </Stage>

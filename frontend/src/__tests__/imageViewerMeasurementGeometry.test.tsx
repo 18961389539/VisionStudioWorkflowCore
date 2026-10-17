@@ -5,6 +5,7 @@ import type { VisionOverlay, VisionRoi } from '../types';
 
 vi.mock('react-konva', async () => {
   const React = await import('react');
+  let brushStrokeRenderId = 0;
   return {
     Stage: React.forwardRef((props: Record<string, any>, ref: React.ForwardedRef<any>) => {
       const pointer = React.useRef<{ x: number; y: number } | undefined>(undefined);
@@ -22,8 +23,11 @@ vi.mock('react-konva', async () => {
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Arrow: () => <span data-testid="search-arrow" />,
     Image: () => null,
-    Line: ({ points, stroke }: { points?: number[]; stroke?: string }) => stroke === '#ff4d4f'
-      ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
+    Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('roi-brush-stroke-')
+      ? <span data-testid="roi-brush-stroke" data-mode={name.slice('roi-brush-stroke-'.length)}
+        data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
+      : stroke === '#ff4d4f'
+        ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
     Circle: () => null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
@@ -572,6 +576,46 @@ describe('ImageViewer measurement geometry editing', () => {
       { mode: 'Add', width: 10, points: [{ x: 5, y: 10 }, { x: 25, y: 10 }] },
       { mode: 'Erase', width: 4, points: [{ x: 15, y: 10 }] }
     ] });
+  });
+
+  it('keeps completed brush paths stable while drawing and commits the active stroke losslessly', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Brush', strokes: [
+      { mode: 'Add', width: 6, points: [{ x: 10, y: 10 }, { x: 15, y: 10 }] },
+      { mode: 'Erase', width: 2, points: [{ x: 12, y: 10 }] }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const completedAdd = screen.getAllByTestId('roi-brush-stroke')[0];
+    const initialRenderId = completedAdd.getAttribute('data-render-id');
+    fireEvent.click(screen.getByText('笔刷'));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 59.2 }); // image (20, 20)
+    expect(screen.getAllByTestId('roi-brush-stroke')).toHaveLength(3);
+    expect(screen.getAllByTestId('roi-brush-stroke')[0].getAttribute('data-render-id')).toBe(initialRenderId);
+
+    fireEvent.mouseMove(stage, { clientX: 152.8, clientY: 59.2 }); // image (30, 20)
+    expect(screen.getAllByTestId('roi-brush-stroke')[0].getAttribute('data-render-id')).toBe(initialRenderId);
+    expect(screen.getAllByTestId('roi-brush-stroke')[2].getAttribute('data-point-count')).toBe('3');
+    fireEvent.mouseUp(document.body, { clientX: 152.8, clientY: 59.2 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const committed = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(committed.type).toBe('Brush');
+    if (committed.type === 'Brush') {
+      expect(committed.strokes.slice(0, 2)).toEqual(roi.strokes);
+      expect(committed.strokes).toHaveLength(3);
+      const active = committed.strokes[2];
+      expect(active.mode).toBe('Add');
+      expect(active.width).toBe(20);
+      expect(active.points).toHaveLength(3);
+      expect(active.points[0].x).toBeCloseTo(20);
+      expect(active.points[0].y).toBeCloseTo(20);
+      expect(active.points[1]).toEqual(active.points[0]);
+      expect(active.points[2].x).toBeCloseTo(30);
+      expect(active.points[2].y).toBeCloseTo(20);
+    }
   });
 
   it('does not start a brush move from a pixel erased by a later stroke', () => {

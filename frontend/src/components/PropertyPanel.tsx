@@ -78,12 +78,16 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
     );
   }
   if (roi.type === 'Brush') {
-    const addCount = roi.strokes.filter((stroke) => stroke.mode === 'Add').length;
-    const eraseCount = roi.strokes.filter((stroke) => stroke.mode === 'Erase').length;
-    const lastBrush = [...roi.strokes].reverse().find((stroke) => stroke.mode === 'Add');
+    let addCount = 0;
+    let eraseCount = 0;
+    let lastBrushWidth: number | undefined;
+    for (const stroke of roi.strokes) {
+      if (stroke.mode === 'Add') { addCount++; lastBrushWidth = stroke.width; }
+      else eraseCount++;
+    }
     return <div className="roi-grid">
       <Tag color="red">笔刷</Tag>
-      <span className="roi-polygon-note">{addCount} 笔 · {eraseCount} 次擦除{lastBrush ? ` · 笔宽 ${lastBrush.width}px` : ''}</span>
+      <span className="roi-polygon-note">{addCount} 笔 · {eraseCount} 次擦除{lastBrushWidth !== undefined ? ` · 笔宽 ${lastBrushWidth}px` : ''}</span>
     </div>;
   }
   return (
