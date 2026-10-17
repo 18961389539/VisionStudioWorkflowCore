@@ -375,6 +375,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
     : undefined;
   const connectedCircle = circleInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
+  const circleSourceReport = circleInputEdge && (!resultStale || Boolean(preview))
+    ? displayedResult?.nodeReports.filter((report) => report.nodeId === circleInputEdge.source).slice(-1)[0]
+    : undefined;
+  const circleSourceParameters = (circleSourceNode?.data.parameters ?? {}) as NodeParameters;
+  const circleSourceRoiType = circleSourceReport?.summary.roiType
+    ?? (circleSourceParameters.roi as VisionRoi | undefined)?.type;
+  const circleInputIsBoundingApproximation = isCaliperCircle && circleSourceNode?.data.typeKey === 'roi.transform'
+    && typeof circleSourceRoiType === 'string' && circleSourceRoiType !== 'Circle';
   const searchLineInputSnapshot = searchLineInputEdge && (!resultStale || Boolean(preview))
     ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
     : undefined;
@@ -1031,6 +1039,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : connectedCircle
               ? '圆心和标称半径锁定为本次运行的上游输入；可在图像上拖动蓝/紫圆弧端点和青/绿搜索带手柄，调整本节点的搜索范围。'
               : '上游 circle 会覆盖本节点的圆心和标称半径参数；运行此节点以读取本次使用的圆，之后可在图像上调整圆弧和搜索带。')} />}
+        {circleInputIsBoundingApproximation && <Alert showIcon type="warning" title="上游提供的是 ROI 包围圆"
+          description={`定位修正节点的 ROI 类型为 ${circleSourceRoiType}；其 circle 端口输出包围圆，不是圆拟合结果。请核对圆心和半径，并按实际尺寸设置径向搜索带；若目标需要精确圆心/半径，请连接圆检测或圆拟合节点。`} />}
         {!searchLineInputEdge && !circleInputEdge && transformInputEdge && <Alert showIcon type="info"
           title={`几何将按变换跟随：${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}`}
           description={canEditMeasurementGeometry

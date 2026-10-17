@@ -1080,6 +1080,38 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label })).toBeTruthy();
   });
 
+  it.each([
+    ['Rectangle', true],
+    ['Circle', false]
+  ])('explains whether a %s ROI transform supplies a bounding circle to the circle caliper', (roiType, isBoundingApproximation) => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 20, centerY: 30, radius: 10 } } };
+    const roiNode: Node = { id: 'corrected-roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { roi: roiType === 'Circle' ? { type: 'Circle', x: 30, y: 25, radius: 25 }
+        : { type: 'Rectangle', x: 10, y: 10, width: 40, height: 30 } } } };
+    const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-geometry-input', source: roiNode.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' }
+    ];
+    const resultWithBoundingCircle: RunResult = { ...report, nodeReports: [
+      { nodeId: roiNode.id, nodeType: 'roi.transform', success: true, durationMs: 1,
+        summary: { roiType, boundingRadius: 25 } },
+      { nodeId: circleNode.id, nodeType: circleCatalog.type, success: true, durationMs: 1, summary: {},
+        inputs: { circle: { type: 'Circle', display: '(30, 25, r=25)', value: { x: 30, y: 25, radius: 25 } } } }
+    ] };
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, roiNode, imageNode], edges,
+      result: resultWithBoundingCircle });
+
+    if (isBoundingApproximation) {
+      expect(dialog.getByText('上游提供的是 ROI 包围圆')).toBeTruthy();
+      expect(dialog.getByText(/ROI 类型为 Rectangle；其 circle 端口输出包围圆，不是圆拟合结果/)).toBeTruthy();
+    } else {
+      expect(dialog.queryByText('上游提供的是 ROI 包围圆')).toBeNull();
+    }
+  });
+
   it('detects a repeated circle correction inside a composed transform chain', () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
