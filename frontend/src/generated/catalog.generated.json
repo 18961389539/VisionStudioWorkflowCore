@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "f6e7ad75c0d6c4663eab7c9b29278a9139f28a0acd44642e71f0709d9bab993a",
+  "hash": "f7066e4be45af65de8258080f77a9c22c77b2a879ebbf1dd9eeee4128b81167c",
   "items": [
     {
       "type": "image.acquire",
@@ -719,7 +719,7 @@
           "label": "Views JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence. Prefer the Calibration Wizard (Devices → Calibration → Intrinsics) to accumulate and gate views."
+          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence. Prefer the Calibration Wizard / Hand-Eye Wizard (Devices → Calibration → Intrinsics) to accumulate and gate views."
         },
         {
           "name": "maxViewRms",
@@ -988,6 +988,16 @@
           "required": true
         },
         {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1056,7 +1066,7 @@
           "description": "Four or more image/world point pairs. Nine points are recommended for MVP validation."
         }
       ],
-      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame.",
+      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -1614,13 +1624,33 @@
           "required": true
         },
         {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "determinant",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility. For image geometry, compose roi.transform (ReferenceImage→CurrentImage) as A with image.crop (CurrentImage→CropImage) as B.",
+      "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1643,6 +1673,41 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1654,14 +1719,16 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Frame the transform maps from; must be non-empty."
         },
         {
           "name": "targetFrame",
           "label": "Target Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Frame the transform maps to; must be non-empty."
         },
         {
           "name": "unit",
@@ -1723,7 +1790,7 @@
           "group": "Rigid Transform"
         }
       ],
-      "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames.",
+      "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1761,13 +1828,28 @@
           "required": true
         },
         {
+          "name": "dx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "dy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Distance between two points only when frame and unit match.",
+      "description": "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1790,6 +1872,31 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1805,7 +1912,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Finite X coordinate in the selected frame and unit."
         },
         {
           "name": "y",
@@ -1816,14 +1924,16 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Finite Y coordinate in the selected frame and unit."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Point"
+          "group": "Point",
+          "description": "Named coordinate frame the point belongs to; must be non-empty."
         },
         {
           "name": "unit",
@@ -1842,12 +1952,17 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
-          "group": "Point"
+          "group": "Point",
+          "description": "Engineering unit of X/Y; downstream frame/unit checks compare against this value."
         }
       ],
-      "description": "Create a constant coordinate-aware reference point.",
+      "description": "Create a constant coordinate-aware reference point with strict finite-value, frame and unit validation. Emits the point plus scalar x/y, frame, unit and a JSON diagnostics payload for downstream debugging.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1867,6 +1982,36 @@
         {
           "name": "pose",
           "dataType": "CoordinatePose2D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
           "required": true
         },
         {
@@ -1936,7 +2081,7 @@
           "group": "Pose"
         }
       ],
-      "description": "Create a constant frame-aware 2D pose.",
+      "description": "Create a constant frame-aware 2D pose with strict finite-value, frame and unit validation. Emits the pose plus scalar x/y/theta, frame, unit, normalized angle (in diagnostics) and a JSON diagnostics payload.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1959,6 +2104,26 @@
           "required": true
         },
         {
+          "name": "transformCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "frameCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "frames",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1974,7 +2139,7 @@
           "description": "Static rigid transforms. Runtime dynamic transforms can still be composed as normal workflow data."
         }
       ],
-      "description": "Build a bidirectional frame graph and resolve transforms by named frame path.",
+      "description": "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2002,13 +2167,33 @@
           "required": true
         },
         {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "determinant",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Invert a Transform2D and swap source/target frame and units.",
+      "description": "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2036,6 +2221,36 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2050,7 +2265,7 @@
           "group": "Frames"
         }
       ],
-      "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
+      "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2083,6 +2298,26 @@
           "required": true
         },
         {
+          "name": "hopCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2104,7 +2339,7 @@
           "group": "Resolve"
         }
       ],
-      "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
+      "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2137,13 +2372,38 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
+      "description": "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2176,13 +2436,43 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
+      "description": "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2225,13 +2515,33 @@
           "required": true
         },
         {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
+      "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2274,13 +2584,28 @@
           "required": true
         },
         {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
+      "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point through a validated Transform2D. Rejects non-finite points and singular transforms; emits frame, unit and JSON diagnostics alongside the point.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2313,13 +2638,43 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform X/Y and local orientation into a named target frame.",
+      "description": "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -4928,13 +5283,33 @@
           "required": true
         },
         {
+          "name": "signedAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lineALength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lineBLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Acute angle between two Line2D values in degrees.",
+      "description": "Acute (0-90 deg) and signed (-180..180 deg) angle between two non-degenerate Line2D values, with both line lengths, parallel/perpendicular flags in JSON diagnostics, and overlay lines for visual debugging.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4975,13 +5350,58 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinSegments",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Intersect two infinite Line2D values and return Point2D.",
+      "parameters": [
+        {
+          "name": "parallelTolerance",
+          "label": "Parallel Tolerance",
+          "type": "number",
+          "defaultValue": 1E-09,
+          "min": 0,
+          "max": 0.1,
+          "step": 1E-09,
+          "group": "Validation",
+          "description": "Minimum |determinant| below which lines are rejected as parallel/coincident instead of returning an unstable point."
+        },
+        {
+          "name": "requireWithinSegments",
+          "label": "Require Within Segments",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "When true, reject intersections that lie outside either finite segment; when false, intersect the infinite lines."
+        }
+      ],
+      "description": "Intersect two Line2D values with strict parallel/degenerate validation. Reports the point, segment parameters (withinSegments), inter-line angle and a JSON diagnostics payload; optionally requires the crossing to lie inside both finite segments.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5022,13 +5442,43 @@
           "required": true
         },
         {
+          "name": "dx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "dy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "midX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "midY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Euclidean distance between two Point2D values.",
+      "description": "Euclidean distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Non-finite inputs are rejected deterministically instead of propagating NaN downstream.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -14757,6 +15207,16 @@
           "required": true
         },
         {
+          "name": "eccentricity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14819,7 +15279,7 @@
           "group": "Rotation"
         }
       ],
-      "description": "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
+      "description": "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -14969,6 +15429,21 @@
           "required": true
         },
         {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15044,7 +15519,7 @@
           "group": "Pick Offset"
         }
       ],
-      "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
+      "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame). Validates frame, finite pose/offsets and guidance mode; pick offset is applied in pose-local coordinates. Emits frame, unit and JSON diagnostics. Does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

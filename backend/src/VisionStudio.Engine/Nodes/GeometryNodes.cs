@@ -508,69 +508,57 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
 public sealed class IntersectionNode : IVisionNodeExecutor
 {
     public string Type => "geometry.intersection";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var a = context.Require<VisionLine2D>("lineA");
-        var b = context.Require<VisionLine2D>("lineB");
-        var x1 = a.Start.X; var y1 = a.Start.Y; var x2 = a.End.X; var y2 = a.End.Y;
-        var x3 = b.Start.X; var y3 = b.Start.Y; var x4 = b.End.X; var y4 = b.End.Y;
-        var denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-        if (Math.Abs(denominator) < 1e-9)
-            throw new InvalidOperationException("Lines are parallel or coincident; intersection is undefined.");
-
-        var determinantA = x1 * y2 - y1 * x2;
-        var determinantB = x3 * y4 - y3 * x4;
-        var x = (determinantA * (x3 - x4) - (x1 - x2) * determinantB) / denominator;
-        var y = (determinantA * (y3 - y4) - (y1 - y2) * determinantB) / denominator;
-        var point = new VisionPoint2D(x, y);
-
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["point"] = VisionValue.Point(point) },
-            new Dictionary<string, object?> { ["x"] = Math.Round(x, 3), ["y"] = Math.Round(y, 3) },
-            [new VisionOverlay("intersection", VisionOverlayType.Point, X: x, Y: y, Stroke: "#eb2f96", StrokeWidth: 3)]));
+        cancellationToken.ThrowIfCancellationRequested();
+        var a = context.Require<VisionLine2D>("lineA"); var b = context.Require<VisionLine2D>("lineB");
+        var lenA = CoordinateValidation.RequireLine(a, "lineA"); var lenB = CoordinateValidation.RequireLine(b, "lineB");
+        var tolerance = node.GetDouble("parallelTolerance", 1e-9);
+        if (!double.IsFinite(tolerance) || tolerance < 0 || tolerance > 0.1) throw new InvalidOperationException("geometry.intersection parallelTolerance must be finite and in [0, 0.1].");
+        var requireWithin = node.GetBool("requireWithinSegments", false);
+        var x1=a.Start.X; var y1=a.Start.Y; var x2=a.End.X; var y2=a.End.Y; var x3=b.Start.X; var y3=b.Start.Y; var x4=b.End.X; var y4=b.End.Y;
+        var denominator=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4);
+        if (!double.IsFinite(denominator)) throw new InvalidOperationException("geometry.intersection produced a non-finite denominator.");
+        if (Math.Abs(denominator) < Math.Max(tolerance, 1e-12)) throw new InvalidOperationException("Lines are parallel or coincident; intersection is undefined.");
+        var detA=x1*y2-y1*x2; var detB=x3*y4-y3*x4;
+        var x=(detA*(x3-x4)-(x1-x2)*detB)/denominator; var y=(detA*(y3-y4)-(y1-y2)*detB)/denominator;
+        CoordinateValidation.RequireFinite(x, "intersection.x"); CoordinateValidation.RequireFinite(y, "intersection.y");
+        var tA = lenA < 1e-12 ? 0 : ((x-x1)*(x2-x1)+(y-y1)*(y2-y1))/(lenA*lenA);
+        var tB = lenB < 1e-12 ? 0 : ((x-x3)*(x4-x3)+(y-y3)*(y4-y3))/(lenB*lenB);
+        var within = tA >= -1e-9 && tA <= 1+1e-9 && tB >= -1e-9 && tB <= 1+1e-9;
+        if (requireWithin && !within) throw new InvalidOperationException($"geometry.intersection lies outside the finite segments (tA={tA:0.###}, tB={tB:0.###}); disable requireWithinSegments for infinite lines.");
+        var angle = VisionGeometryHelpers.NormalizeAngleDifference(a.AngleDeg, b.AngleDeg);
+        var point=new VisionPoint2D(x,y);
+        var diag=CoordinateValidation.Diagnostics(Type,("x",x),("y",y),("tA",tA),("tB",tB),("withinSegments",within),("angleDeg",angle),("lineALength",lenA),("lineBLength",lenB));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.Point(point)},{"x",VisionValue.Double(x)},{"y",VisionValue.Double(y)},{"withinSegments",VisionValue.Boolean(within)},{"angleDeg",VisionValue.Double(angle)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"x",Math.Round(x,3)},{"y",Math.Round(y,3)},{"withinSegments",within},{"diagnostics",diag}},[new VisionOverlay("intersection",VisionOverlayType.Point,X:x,Y:y,Stroke:"#eb2f96",StrokeWidth:3)]));
     }
 }
-
 public sealed class DistanceNode : IVisionNodeExecutor
 {
     public string Type => "geometry.distance";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var a = context.Require<VisionPoint2D>("pointA");
-        var b = context.Require<VisionPoint2D>("pointB");
-        var dx = b.X - a.X;
-        var dy = b.Y - a.Y;
-        var distance = Math.Sqrt(dx * dx + dy * dy);
-        var line = new VisionLine2D(a, b);
-
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["distance"] = VisionValue.Double(distance) },
-            new Dictionary<string, object?> { ["distance"] = Math.Round(distance, 3) },
-            [
-                VisionGeometryHelpers.OverlayLine("distance-line", line, "#722ed1", 1.5),
-                new VisionOverlay("distance-label", VisionOverlayType.Text, Label: $"D={distance:0.00}px", X: (a.X + b.X) / 2 + 5, Y: (a.Y + b.Y) / 2 - 5, Stroke: "#b37feb", StrokeWidth: 1)
-            ]));
+        cancellationToken.ThrowIfCancellationRequested();
+        var a=CoordinateValidation.RequireFinitePoint(context.Require<VisionPoint2D>("pointA"),"pointA"); var b=CoordinateValidation.RequireFinitePoint(context.Require<VisionPoint2D>("pointB"),"pointB");
+        var dx=CoordinateValidation.RequireFinite(b.X-a.X,"distance.dx"); var dy=CoordinateValidation.RequireFinite(b.Y-a.Y,"distance.dy");
+        var distance=Math.Sqrt(dx*dx+dy*dy); if (!double.IsFinite(distance)) throw new InvalidOperationException("geometry.distance produced a non-finite distance.");
+        var midX=(a.X+b.X)/2; var midY=(a.Y+b.Y)/2; var angle=Math.Atan2(dy,dx)*180/Math.PI; CoordinateValidation.RequireFinite(angle,"distance.angleDeg");
+        var line=new VisionLine2D(a,b);
+        var diag=CoordinateValidation.Diagnostics(Type,("distance",distance),("dx",dx),("dy",dy),("midX",midX),("midY",midY),("angleDeg",angle),("coincident",distance<1e-12));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"distance",VisionValue.Double(distance)},{"dx",VisionValue.Double(dx)},{"dy",VisionValue.Double(dy)},{"midX",VisionValue.Double(midX)},{"midY",VisionValue.Double(midY)},{"angleDeg",VisionValue.Double(angle)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"distance",Math.Round(distance,3)},{"diagnostics",diag}},[VisionGeometryHelpers.OverlayLine("distance-line",line,"#722ed1",1.5),new VisionOverlay("distance-label",VisionOverlayType.Text,Label:$"D={distance:0.00}px",X:midX+5,Y:midY-5,Stroke:"#b37feb",StrokeWidth:1)]));
     }
 }
-
 public sealed class AngleNode : IVisionNodeExecutor
 {
     public string Type => "geometry.angle";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var a = context.Require<VisionLine2D>("lineA");
-        var b = context.Require<VisionLine2D>("lineB");
-        var angle = VisionGeometryHelpers.NormalizeAngleDifference(a.AngleDeg, b.AngleDeg);
-
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["angle"] = VisionValue.Double(angle) },
-            new Dictionary<string, object?> { ["angleDeg"] = Math.Round(angle, 3), ["lineA"] = Math.Round(a.AngleDeg, 3), ["lineB"] = Math.Round(b.AngleDeg, 3) },
-            [
-                VisionGeometryHelpers.OverlayLine("angle-a", a, "#1677ff", 1.5),
-                VisionGeometryHelpers.OverlayLine("angle-b", b, "#fa541c", 1.5)
-            ]));
+        cancellationToken.ThrowIfCancellationRequested();
+        var a=context.Require<VisionLine2D>("lineA"); var b=context.Require<VisionLine2D>("lineB");
+        var lenA=CoordinateValidation.RequireLine(a,"lineA"); var lenB=CoordinateValidation.RequireLine(b,"lineB");
+        var angle=VisionGeometryHelpers.NormalizeAngleDifference(a.AngleDeg,b.AngleDeg); CoordinateValidation.RequireFinite(angle,"angle");
+        var signed=VisionTransform2D.NormalizeAngleDeg(b.AngleDeg-a.AngleDeg);
+        var diag=CoordinateValidation.Diagnostics(Type,("angleDeg",angle),("signedAngleDeg",signed),("lineAAngleDeg",a.AngleDeg),("lineBAngleDeg",b.AngleDeg),("lineALength",lenA),("lineBLength",lenB),("parallel",angle<1e-9),("perpendicular",Math.Abs(angle-90)<1e-9));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"angle",VisionValue.Double(angle)},{"signedAngleDeg",VisionValue.Double(signed)},{"lineALength",VisionValue.Double(lenA)},{"lineBLength",VisionValue.Double(lenB)},{"diagnostics",VisionValue.String(diag)}},new Dictionary<string,object?>{{"angleDeg",Math.Round(angle,3)},{"lineA",Math.Round(a.AngleDeg,3)},{"lineB",Math.Round(b.AngleDeg,3)},{"diagnostics",diag}},[VisionGeometryHelpers.OverlayLine("angle-a",a,"#1677ff",1.5),VisionGeometryHelpers.OverlayLine("angle-b",b,"#fa541c",1.5)]));
     }
 }
