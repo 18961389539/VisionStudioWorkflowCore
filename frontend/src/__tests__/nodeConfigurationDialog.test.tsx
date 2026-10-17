@@ -690,6 +690,30 @@ describe('ROI input coordinate frame guidance', () => {
   });
 });
 
+describe('measurement ROI image coverage preflight', () => {
+  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'])(
+    'blocks %s when its local ROI cannot cover any input pixel', async type => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+        { nodeId: 'measurement', portName: 'image', width: 100, height: 80 },
+        { nodeId: 'source', portName: 'image', width: 100, height: 80 }
+      ] }) })));
+      const measurementCatalog = fallbackCatalog.find(item => item.type === type)!;
+      const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+        typeKey: type, label: '卡尺测量', inputs: measurementCatalog.inputs,
+        parameters: { roi: { type: 'Rectangle', x: 120, y: 12, width: 20, height: 30 } }
+      } };
+      const imageNode: Node = { id: 'source', position: { x: 0, y: 0 }, data: { typeKey: 'image.synthetic', label: '场景图像' } };
+      const edges = [{ id: 'measurement-image', source: imageNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' }];
+      const onPreview = vi.fn(async () => report);
+      const { dialog } = mount({ node: measurementNode, catalogItem: measurementCatalog,
+        nodes: [measurementNode, imageNode], edges, result: report, onPreview });
+
+      expect(await dialog.findByText(/测量 ROI 与当前输入图像（100×80）没有像素交集/)).toBeTruthy();
+      expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(onPreview).not.toHaveBeenCalled();
+    });
+});
+
 describe('caliper geometry input guidance', () => {
   const mountCropFrameMeasurement = (sourceType: string, targetType: string, outputPort: string, inputPort: string, separateGeometryFrame: boolean) => {
     const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;

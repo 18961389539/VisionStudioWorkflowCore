@@ -177,13 +177,16 @@ function brushSelectionIsExactlyErased(strokes: unknown[]): boolean {
   return true;
 }
 
-/** Preflight a local crop ROI when the current input image dimensions are known.
+/** Preflight an ROI when its target image dimensions are known.
  * For curved and rasterized regions this intentionally detects only definite misses,
  * leaving borderline anti-aliased pixels to the backend rasterizer. */
-export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: number): string | undefined {
+function roiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: number, purpose: 'crop' | 'measurement'): string | undefined {
   if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth < 1 || imageHeight < 1
     || !value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const roi = value as Record<string, unknown>;
+  const noIntersection = () => purpose === 'crop'
+    ? `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`
+    : `测量 ROI 与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
   const isFiniteNumber = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item);
   const finite = (...items: unknown[]) => items.every(isFiniteNumber);
   let minX: number; let minY: number; let maxX: number; let maxY: number;
@@ -197,7 +200,7 @@ export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, ima
     const right = Math.max(0, Math.min(imageWidth, Math.ceil(x + width)));
     const bottom = Math.max(0, Math.min(imageHeight, Math.ceil(y + height)));
     if (right > left && bottom > top) return undefined;
-    return `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+    return noIntersection();
   }
   if (roi.type === 'Circle' && finite(roi.x, roi.y, roi.radius) && (roi.radius as number) > 0) {
     const x = roi.x as number; const y = roi.y as number; const radius = roi.radius as number;
@@ -238,10 +241,22 @@ export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, ima
   // two-pixel margin so this preflight never rejects a region that could touch a pixel.
   const margin = roi.type === 'Brush' ? 0 : 2;
   if (maxX < -margin || maxY < -margin || minX > imageWidth - 1 + margin || minY > imageHeight - 1 + margin)
-    return `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+    return noIntersection();
   if (roi.type === 'Brush' && Array.isArray(roi.strokes) && brushSelectionIsExactlyErased(roi.strokes))
-    return '笔刷裁剪区域被同轨迹、同笔宽的擦除笔迹完全覆盖，预览会失败；请调整擦除笔迹或重新添加选区。';
+    return purpose === 'crop'
+      ? '笔刷裁剪区域被同轨迹、同笔宽的擦除笔迹完全覆盖，预览会失败；请调整擦除笔迹或重新添加选区。'
+      : '笔刷测量 ROI 被同轨迹、同笔宽的擦除笔迹完全覆盖，卡尺无法采样；请调整擦除笔迹或重新添加选区。';
   return undefined;
+}
+
+/** Preflight a local crop ROI when the current input image dimensions are known. */
+export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: number): string | undefined {
+  return roiOutsideImageIssue(value, imageWidth, imageHeight, 'crop');
+}
+
+/** Preflight a local measurement ROI when the current input image dimensions are known. */
+export function measurementRoiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: number): string | undefined {
+  return roiOutsideImageIssue(value, imageWidth, imageHeight, 'measurement');
 }
 
 export function configurationIssues(

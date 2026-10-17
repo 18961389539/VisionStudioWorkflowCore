@@ -8,7 +8,7 @@ import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from 
 import NodeExecutionResult from './NodeExecutionResult';
 import SplitHandle from './SplitHandle';
 import { runImageEntryForPort, useRunImages } from '../useRunImages';
-import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
@@ -642,6 +642,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
     const imageExtentIssue = cropRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
+    if (imageExtentIssue) issues.push(imageExtentIssue);
+  }
+  if (measurementNodeTypes.includes(catalogItem.type) && !connectedRoiInput && !resultStale && imageSource === 'input'
+    && previewNodeId === node.id && selectedInputAvailable) {
+    const imageExtentIssue = measurementRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
     if (imageExtentIssue) issues.push(imageExtentIssue);
   }
   const measurementGeometryType = isCaliperCircle ? 'circle'

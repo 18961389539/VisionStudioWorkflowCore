@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
-import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, hydrateNodeParameters, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, hydrateNodeParameters, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
 import type { NodeCatalogItem, WorkflowPayload } from '../types';
 
 describe('node configuration snapshots', () => {
@@ -91,6 +91,16 @@ describe('node configuration snapshots', () => {
 
     const excessivePolygon = { type: 'Polygon', points: Array(500_001).fill({ x: 10, y: 10 }) };
     expect(configurationIssues(crop, { roi: excessivePolygon }).join(' ')).toContain('多边形最多支持 500000 个顶点');
+  });
+
+  it('preflights measurement ROIs against the measured image while preserving valid clipped regions', () => {
+    expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 100, y: 10, width: 8, height: 12 }, 100, 80))
+      .toContain('测量 ROI 与当前输入图像（100×80）没有像素交集');
+    expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, 100, 80))
+      .toContain('没有像素交集');
+    expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: -3, y: 10, width: 8, height: 12 }, 100, 80)).toBeUndefined();
+    expect(measurementRoiOutsideImageIssue({ type: 'Circle', x: 120, y: 20, radius: 8 }, 100, 80)).toContain('没有像素交集');
+    expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 120, y: 10, width: 8, height: 12 }, 0, 80)).toBeUndefined();
   });
 
   it('preflights polygon, coordinate, clutter, and node-specific brush limits before preview', () => {
