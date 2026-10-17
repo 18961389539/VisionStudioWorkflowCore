@@ -1748,6 +1748,34 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(dialog.queryByText('搜索线完全位于图像外')).toBeNull());
   });
 
+  it('warns before the first run when a transform source uses engineering units', () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'engineering-unit-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type,
+      label: '单点卡尺', inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 90, endY: 20 } } };
+    const transformNode: Node = { id: 'constant-transform', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformConstant',
+      label: '固定坐标变换', parameters: { unit: 'mm' } } };
+    const edges = [{ id: 'transform-input', source: transformNode.id, sourceHandle: 'transform',
+      target: caliperNode.id, targetHandle: 'transform' }];
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, transformNode], edges });
+
+    expect(dialog.getByText('transform 来源可能不适用于卡尺')).toBeTruthy();
+    expect(dialog.getByText(/当前配置的单位不是 px/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('does not show a unit warning for a pixel constant transform', () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'pixel-unit-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type,
+      label: '单点卡尺', inputs: caliperCatalog.inputs, parameters: { startX: 10, startY: 20, endX: 90, endY: 20 } } };
+    const transformNode: Node = { id: 'pixel-transform', position: { x: 0, y: 0 }, data: { typeKey: 'coordinate.transformConstant',
+      label: '像素刚性变换', parameters: { unit: 'px' } } };
+    const edges = [{ id: 'transform-input', source: transformNode.id, sourceHandle: 'transform',
+      target: caliperNode.id, targetHandle: 'transform' }];
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, transformNode], edges });
+
+    expect(dialog.queryByText('transform 来源可能不适用于卡尺')).toBeNull();
+  });
+
   it('explains when the latest caliper input transform is not rigid pixel-to-pixel', () => {
     const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
     const caliperNode: Node = { id: 'invalid-transform-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type,

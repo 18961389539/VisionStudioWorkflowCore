@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "6dd45e54b3498db05b01eb1feb1bb3a0bb4771f531e461148c7aad0f09bafcda",
+  "hash": "d1125c9628122d21bcc7f3aeff8989438905a9ac82cf88f2c0e0dee9ca703945",
   "items": [
     {
       "type": "image.acquire",
@@ -1525,6 +1525,10 @@
           "defaultValue": "mm",
           "options": [
             {
+              "label": "Pixels (px)",
+              "value": "px"
+            },
+            {
               "label": "mm",
               "value": "mm"
             },
@@ -1537,7 +1541,8 @@
               "value": "m"
             }
           ],
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Use px for image-space transforms used by image.warpAffine or caliper measurement; use mm/cm/m for engineering coordinates."
         },
         {
           "name": "x",
@@ -1573,7 +1578,7 @@
           "group": "Rigid Transform"
         }
       ],
-      "description": "Create a rigid 2D transform between named engineering coordinate frames.",
+      "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

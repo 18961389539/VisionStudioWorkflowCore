@@ -36,4 +36,13 @@ describe('alignment and per-object region tools', () => {
     expect(graph.edges).toContainEqual(expect.objectContaining({ source: 'gate', sourceHandle: 'true', target: 'warp' }));
     expect(graph.edges).toContainEqual(expect.objectContaining({ source: 'gate', sourceHandle: 'false', target: 'missing' }));
   });
+
+  it('offers a localized pixel unit for constant transforms used in image-space workflows', () => {
+    const constantTransform = localizeCatalog(fallbackCatalogRaw, 'zh').find(item => item.type === 'coordinate.transformConstant')!;
+    const unit = constantTransform.parameters.find(parameter => parameter.name === 'unit')!;
+
+    expect(unit.options).toContainEqual({ label: '像素 (px)', value: 'px' });
+    expect(unit.description).toContain('连接卡尺测量');
+    expect(constantTransform.description).toContain('图像像素坐标系');
+  });
 });

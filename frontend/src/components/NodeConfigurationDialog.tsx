@@ -710,6 +710,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     : undefined;
   const measurementTransformInvalid = Boolean(transformInputEdge && measurementInputReport
     && measurementTransformValue !== undefined && !measurementTransform);
+  const potentiallyIncompatibleTransformSource = transformLineageNodes.find((source) => {
+    const type = String(source.data.typeKey ?? '').toLowerCase();
+    const parameters = (source.data.parameters ?? {}) as NodeParameters;
+    if (type === 'calibration.planar') return true;
+    if (type === 'coordinate.transformconstant') return String(parameters.unit ?? 'mm') !== 'px';
+    if (type === 'calibration.handeye2d')
+      return String(parameters.sourceUnit ?? 'mm') !== 'px' || String(parameters.unit ?? 'mm') !== 'px';
+    return false;
+  });
+  const measurementTransformSourceNotice = transformInputEdge && !measurementTransform && !measurementTransformInvalid
+    && potentiallyIncompatibleTransformSource
+    ? String(potentiallyIncompatibleTransformSource.data.typeKey ?? '').toLowerCase() === 'calibration.planar'
+      ? `“${String(potentiallyIncompatibleTransformSource.data.label ?? potentiallyIncompatibleTransformSource.id)}”输出像素到物理坐标的平面标定矩阵，通常包含单位换算或透视；卡尺只接受 px→px 刚性变换。请在像素图像上直接测量，或改用纯平移/旋转的像素变换。`
+      : `“${String(potentiallyIncompatibleTransformSource.data.label ?? potentiallyIncompatibleTransformSource.id)}”当前配置的单位不是 px；卡尺只接受 px→px 刚性变换。请将变换设为像素单位，或让测量几何直接使用当前图像坐标。`
+    : undefined;
   const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
     : measurementGeometry);
@@ -1439,6 +1454,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {measurementTransformInvalid && <Alert showIcon type="warning" title="当前 transform 不符合卡尺测量要求"
           description="本提示依据最近一次运行报告中的实际输入。卡尺只接受有限、方向保持的 px→px 刚性变换（平移和旋转）；缩放、剪切、透视、镜像或非像素单位会导致测量失败。请改用刚性像素变换，或让测量几何直接使用当前图像坐标。" />}
+        {measurementTransformSourceNotice && <Alert showIcon type="info" title="transform 来源可能不适用于卡尺"
+          description={measurementTransformSourceNotice} />}
         {transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
           description="当前节点的有效运行报告或测量图尺寸尚不可用。预检不会用基准图坐标冒充当前图像坐标；先运行一次上游定位与变换，再检查变换后的卡尺范围。" />}
         {caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}

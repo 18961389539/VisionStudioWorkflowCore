@@ -38,6 +38,27 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task PixelConstantTransformCanDriveCaliperMeasurement()
+    {
+        var transformResult = await new ConstantTransformNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()),
+            Node("coordinate.transformConstant", """{"sourceFrame":"ReferenceImage","targetFrame":"CurrentImage","unit":"px","x":2,"y":0,"angleDeg":0}"""),
+            CancellationToken.None);
+        var transform = transformResult.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.Equal("px", transform.SourceUnit);
+        Assert.Equal("px", transform.TargetUnit);
+
+        using var image = VisionImage.Own(MakeEdgeImage(0));
+        var inputs = Inputs(image);
+        inputs["transform"] = VisionValue.Transform(transform);
+        var result = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(inputs),
+            Node("measure.caliper", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"edgeThreshold":30}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperLineAndCircleSummariesExposeEffectiveSearchSettings()
     {
         using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));

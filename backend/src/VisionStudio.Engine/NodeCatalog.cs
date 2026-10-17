@@ -601,12 +601,15 @@ public static class BuiltInNodeCatalog
             [
                 new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Frames"),
                 new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Frames"),
-                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Frames"),
+                new("unit", "Unit", "select", "mm", Options:
+                [
+                    new("Pixels (px)", "px"), new("mm", "mm"), new("cm", "cm"), new("m", "m")
+                ], Group: "Frames", Description: "Use px for image-space transforms used by image.warpAffine or caliper measurement; use mm/cm/m for engineering coordinates."),
                 new("x", "X Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
                 new("y", "Y Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
                 new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform")
             ],
-            "Create a rigid 2D transform between named engineering coordinate frames.",
+            "Create a rigid 2D transform between named engineering or pixel coordinate frames.",
             "builtin"),
         new(
             "coordinate.transformInverse",

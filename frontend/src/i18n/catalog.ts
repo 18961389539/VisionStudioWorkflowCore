@@ -207,6 +207,7 @@ export function canonicalParameterGroup(group?: string): string {
 }
 
 const optionNames: Record<string, string> = {
+  'Pixels (px)': '像素 (px)',
   Inner: '内侧', Outer: '外侧',
   'HSV (degrees, 0-1, 0-1)': 'HSV（角度、0–1、0–1）', 'sRGB (0-1)': 'sRGB（归一化 0–1）', 'CIELAB (D65)': 'CIELAB（D65 白点）',
   'Equals': '完全相等', 'Contains': '包含文本', 'Starts With': '以前缀开头', 'Ends With': '以后缀结尾',
@@ -377,7 +378,7 @@ const descriptions: Record<string, string> = {
   'image.synthetic': '生成 1280×960 测试图像；圆、矩形和线段组成的图案保持固定尺寸，可按样本序号平移/旋转，或用固定随机种子生成可复现的位置。',
   'calibration.planar': '通过最小二乘平面单应性，将像素坐标转换到指定的目标坐标系。',
   'coordinate.transformCompose': '组合 A：S→M 与 B：M→T，生成 S→T，并检查坐标系和单位是否兼容。定位修正 ROI 与裁剪串联时，A 接 roi.transform，B 接 image.crop。',
-  'coordinate.transformConstant': '在指定的工程坐标系之间创建二维刚性变换。',
+  'coordinate.transformConstant': '在指定的工程坐标系或图像像素坐标系之间创建二维刚性变换。',
   'coordinate.distance': '仅当坐标系和单位一致时，计算两个坐标点之间的距离。',
   'coordinate.point': '创建固定的坐标系参考点。', 'coordinate.pose': '创建固定的二维坐标系位姿。',
   'coordinate.frameTree': '构建双向坐标系图，并按命名路径解析坐标变换。',
@@ -412,6 +413,7 @@ const descriptions: Record<string, string> = {
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'coordinate.transformConstant.unit': '处理图像坐标或连接卡尺测量时选“像素 (px)”；工程坐标变换使用 mm、cm 或 m。卡尺要求最终变换为 px→px，且只包含平移和旋转。',
   'image.synthetic.placementMode': '固定模式保持图案在基准位置；按序移动按“样本序号 × 位移/角度步长”生成位置；固定种子随机可复现；每次运行随机会重新生成位移和角度，并自动避开画幅边界。按序和固定种子模式越界时会把图案整体平移进画幅。',
   'image.synthetic.sampleIndex': '从 0 开始的样本序号。相同模式、参数和序号会生成相同图像；切换序号可生成不同位置或角度。图案越界时会整体平移到画幅内；只有旋转后图案本身放不进画幅时才会报错。',
   'image.synthetic.offsetStepX': '每增加一个样本序号，图案沿 X 方向移动的像素数；可设负数向左移动。',
