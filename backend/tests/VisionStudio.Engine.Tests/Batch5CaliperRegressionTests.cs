@@ -126,6 +126,23 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLine_AutoSpanCanLeaveTooFewProfilesWhenSearchLineExtendsFarBeyondImage()
+    {
+        using var image = MakeEdgeImage(0);
+        using var input = VisionImage.Own(image.Clone());
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliperLine", """{"startX":-200,"startY":64,"endX":328,"endY":64,"caliperCount":9,"minValidCalipers":3,"sampleWidth":1,"minContrast":30}"""),
+            CancellationToken.None);
+
+        Assert.False(Convert.ToBoolean(result.Summary["found"]));
+        Assert.Equal("too-few-edge-points", result.Summary["reason"]);
+        Assert.Equal(8, Convert.ToInt32(result.Summary["profilesOutsideImage"]));
+        Assert.Equal(1, Convert.ToInt32(result.Summary["profilesIntersectingImage"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperLine_ClipsIntersectingProfilesAfterTheirOffsetsCrossTheInputCoordinateLimit()
     {
         using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));

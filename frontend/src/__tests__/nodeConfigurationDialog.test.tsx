@@ -1053,6 +1053,30 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
   });
 
+  it('warns when the automatic caliper span leaves too few profiles inside the image', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线',
+      inputs: lineCatalog.inputs, parameters: { startX: -200, startY: 64, endX: 328, endY: 64,
+        caliperCount: 9, minValidCalipers: 3, sampleWidth: 1 } } };
+    const imageNode: Node = { id: 'line-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    const lineResult: RunResult = { ...report, runId: 'caliper-span-run', nodeReports: [
+      { nodeId: lineNode.id, nodeType: lineCatalog.type, success: true, durationMs: 1, summary: {} }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: lineNode.id, portName: 'image', width: 128, height: 128 },
+      { nodeId: imageNode.id, portName: 'image', width: 128, height: 128 }
+    ] }) })));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: lineResult });
+
+    expect(await dialog.findByText('图像边界可能导致卡尺数量不足')).toBeTruthy();
+    expect(dialog.getByText(/8\/9 条剖面完全位于图像外/)).toBeTruthy();
+    expect(dialog.getByText(/最多剩余 1 条可采样，当前拟合至少需要 3 条有效卡尺/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole('button', { name: '模拟调整采样跨度' }));
+    await waitFor(() => expect(dialog.queryByText('图像边界可能导致卡尺数量不足')).toBeNull());
+  });
+
   it('warns against applying a pose transform twice to an already corrected circle', () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',

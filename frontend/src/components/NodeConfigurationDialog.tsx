@@ -24,6 +24,32 @@ const cropMaskFrameChangingNodeTypes = new Set([
   'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
 ]);
 
+function clipLineToImage(start: { x: number; y: number }, end: { x: number; y: number }, width: number, height: number) {
+  if (width <= 0 || height <= 0) return undefined;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let t0 = 0;
+  let t1 = 1;
+  const clip = (p: number, q: number) => {
+    if (Math.abs(p) < 1e-15) return q >= 0;
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      t0 = Math.max(t0, r);
+    } else {
+      if (r < t0) return false;
+      t1 = Math.min(t1, r);
+    }
+    return t0 <= t1;
+  };
+  if (!clip(-dx, start.x) || !clip(dx, width - 1 - start.x)
+    || !clip(-dy, start.y) || !clip(dy, height - 1 - start.y) || t0 > t1) return undefined;
+  return {
+    start: { x: Math.max(0, Math.min(width - 1, start.x + t0 * dx)), y: Math.max(0, Math.min(height - 1, start.y + t0 * dy)) },
+    end: { x: Math.max(0, Math.min(width - 1, start.x + t1 * dx)), y: Math.max(0, Math.min(height - 1, start.y + t1 * dy)) }
+  };
+}
+
 type Props = {
   node: Node;
   catalogItem: NodeCatalogItem;
@@ -457,6 +483,44 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     // Keep the authoring preview aligned with the backend's minimum normalized circle-fit spread.
     if (normalizedDeterminant > 2e-3) return undefined;
     return '当前圆弧的理论测点分布接近直线，可能触发退化圆拟合。请扩大角度覆盖；单纯增加卡尺数量不能替代更宽的圆弧。';
+  })();
+  const caliperLineBoundsNotice = (() => {
+    if (catalogItem.type !== 'measure.caliperLine' || transformInputEdge || measurementGeometry?.type !== 'line'
+      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
+      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0) return undefined;
+    const dx = measurementGeometry.end.x - measurementGeometry.start.x;
+    const dy = measurementGeometry.end.y - measurementGeometry.start.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 2) return undefined;
+    const count = Math.max(3, Math.min(101, Math.floor(geometryNumber('caliperCount', 9) + 0.5)));
+    const requestedSpan = geometryNumber('edgeLength', 0);
+    const span = requestedSpan > 0 ? Math.max(0, Math.min(10000, requestedSpan)) : length;
+    const tangent = { x: -dy / length, y: dx / length };
+    let outside = 0;
+    let tooShortAfterClip = 0;
+    for (let index = 0; index < count; index++) {
+      const offset = (index / (count - 1) - 0.5) * span;
+      const delta = { x: tangent.x * offset, y: tangent.y * offset };
+      const clipped = clipLineToImage(
+        { x: measurementGeometry.start.x + delta.x, y: measurementGeometry.start.y + delta.y },
+        { x: measurementGeometry.end.x + delta.x, y: measurementGeometry.end.y + delta.y },
+        imageViewerSource.width, imageViewerSource.height
+      );
+      if (!clipped) { outside++; continue; }
+      if (Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y) < 2) tooShortAfterClip++;
+    }
+    if (outside === 0 && tooShortAfterClip === 0) return undefined;
+    const minimum = Math.max(3, Math.min(101, Math.floor(geometryNumber('minValidCalipers', 3) + 0.5)));
+    const potentiallyAvailable = count - outside - tooShortAfterClip;
+    const detail = [
+      outside > 0 ? `${outside}/${count} 条剖面完全位于图像外` : '',
+      tooShortAfterClip > 0 ? `${tooShortAfterClip} 条剖面裁切后短于 2 px` : ''
+    ].filter(Boolean).join('，');
+    return {
+      type: potentiallyAvailable < minimum ? 'warning' as const : 'info' as const,
+      title: potentiallyAvailable < minimum ? '图像边界可能导致卡尺数量不足' : '部分卡尺位于图像边界外',
+      description: `${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请缩短跨度或调整搜索线位置。`
+    };
   })();
   const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
     if (locked || searchLineInputEdge) return;
@@ -1021,6 +1085,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : <span>图像处理链中存在非矩形裁剪，选区外像素会清零，可能形成伪边缘；多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像。请在当前图像坐标系提供完整 ROI 掩膜，或调整流程避免将裁剪边界当作真实边缘。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
+        {caliperLineBoundsNotice && <Alert showIcon type={caliperLineBoundsNotice.type} title={caliperLineBoundsNotice.title}
+          description={caliperLineBoundsNotice.description} />}
         {searchLineInputEdge && <Alert showIcon type="info"
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge
