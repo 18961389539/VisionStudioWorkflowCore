@@ -859,6 +859,36 @@ describe('caliper geometry input guidance', () => {
     expect(onApply.mock.calls[0][0]).toMatchObject({ centerX: 20, centerY: 30, radius: 10, radialBand: 14, angleStartDeg: -10, angleEndDeg: 90 });
   });
 
+  it('uses the current workflow circle after a changed local preview fails', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { radialBand: 6 } } };
+    const circleSource: Node = { id: 'circle-source', position: { x: 0, y: 0 }, data: { typeKey: 'geometry.circle', label: '上游拟合圆' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'circle-override', source: circleSource.id, sourceHandle: 'circle', target: circleNode.id, targetHandle: 'circle' }
+    ];
+    const withCircle = (x: number, y: number, radius: number): RunResult => ({ ...report, nodeReports: [{ nodeId: circleNode.id,
+      nodeType: circleCatalog.type, success: true, durationMs: 1, summary: {},
+      inputs: { circle: { type: 'Circle', display: `(${x}, ${y}, r=${radius})`, value: { x, y, radius } } } }] });
+    const onPreview = vi.fn().mockResolvedValueOnce(withCircle(22, 28, 12)).mockRejectedValueOnce(new Error('local preview failed'));
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, circleSource, imageNode], edges,
+      result: withCircle(68, 42, 24), onPreview });
+
+    await waitFor(() => expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('68'));
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('22'));
+    fireEvent.change(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radialBand')!.label }),
+      { target: { value: '12' } });
+    await waitFor(() => expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('68'));
+
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dialog.getByText('本次节点测试未完成')).toBeTruthy());
+    expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('68');
+  });
+
   it('allows arc and search-band edits for a connected circle in the saved transform reference frame', async () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
@@ -945,6 +975,37 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.queryByText(/请修正参数后再运行或应用/)).toBeNull();
     fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
     await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+  });
+
+  it('uses the current workflow search line after a changed local preview fails', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: {} } };
+    const lineSource: Node = { id: 'line-source', position: { x: 0, y: 0 }, data: { typeKey: 'feature.line', label: '上游搜索线' } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [
+      { id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'line-override', source: lineSource.id, sourceHandle: 'line', target: lineNode.id, targetHandle: 'searchLine' }
+    ];
+    const withLine = (start: { x: number; y: number }, end: { x: number; y: number }): RunResult => ({ ...report, nodeReports: [{ nodeId: lineNode.id,
+      nodeType: lineCatalog.type, success: true, durationMs: 1, summary: {},
+      inputs: { searchLine: { type: 'Line2D', display: 'search line', value: { start, end } } } }] });
+    const onPreview = vi.fn().mockResolvedValueOnce(withLine({ x: 20, y: 30 }, { x: 60, y: 30 }))
+      .mockRejectedValueOnce(new Error('local preview failed'));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, lineSource, imageNode], edges,
+      result: withLine({ x: 70, y: 42 }, { x: 90, y: 42 }), onPreview });
+
+    await waitFor(() => expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('70'));
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('20'));
+    fireEvent.change(dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'sampleWidth')!.label }),
+      { target: { value: '7' } });
+    await waitFor(() => expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('70'));
+
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(dialog.getByText('本次节点测试未完成')).toBeTruthy());
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('70');
   });
 
   it('blocks preview and identifies endpoints when the local search line is too short', () => {

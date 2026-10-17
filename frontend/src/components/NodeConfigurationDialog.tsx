@@ -413,7 +413,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   }, [preview]);
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
-  const connectedRoiOverlayResult = preview && !previewError && preview.fingerprint === draftFingerprint
+  const freshInputResult = preview && !previewError && preview.fingerprint === draftFingerprint
     ? preview.result : !resultStale ? result : undefined;
   const matchReport = (searchPreview?.result ?? result)?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
   const matchStale = Boolean(previewError) || (searchPreview ? searchPreview.fingerprint !== draftFingerprint : resultStale || dirty);
@@ -436,20 +436,20 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const measurementGeometryFrameKind = !transformInputEdge ? 'current'
     : savedMeasurementReference ? 'saved-reference'
       : cropMeasurementReferenceNodeId ? 'transform-input' : undefined;
-  const circleInputSnapshot = circleInputEdge && (!resultStale || Boolean(preview))
-    ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
+  const circleInputSnapshot = circleInputEdge
+    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.circle?.value
     : undefined;
   const connectedCircle = circleInputEdge ? connectedCircleGeometry(circleInputSnapshot) : undefined;
-  const circleSourceReport = circleInputEdge && (!resultStale || Boolean(preview))
-    ? displayedResult?.nodeReports.filter((report) => report.nodeId === circleInputEdge.source).slice(-1)[0]
+  const circleSourceReport = circleInputEdge
+    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === circleInputEdge.source).slice(-1)[0]
     : undefined;
   const circleSourceParameters = (circleSourceNode?.data.parameters ?? {}) as NodeParameters;
   const circleSourceRoiType = circleSourceReport?.summary.roiType
     ?? (circleSourceParameters.roi as VisionRoi | undefined)?.type;
   const circleInputIsBoundingApproximation = isCaliperCircle && circleSourceNode?.data.typeKey === 'roi.transform'
     && typeof circleSourceRoiType === 'string' && circleSourceRoiType !== 'Circle';
-  const searchLineInputSnapshot = searchLineInputEdge && (!resultStale || Boolean(preview))
-    ? displayedResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
+  const searchLineInputSnapshot = searchLineInputEdge
+    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs?.searchLine?.value
     : undefined;
   const connectedSearchLine = searchLineInputEdge ? connectedSearchLineGeometry(searchLineInputSnapshot) : undefined;
   const canDisplayConnectedSearchLine = Boolean(measurementGeometryType === 'line' && connectedSearchLine && measurementGeometryFrameKind);
@@ -655,9 +655,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges)
       || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)
       || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
-  const connectedRoiInputOverlays = connectedRoiOverlayResult && roiInputEdge && imageSource === 'input'
+  const connectedRoiInputOverlays = freshInputResult && roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
-    ? (connectedRoiOverlayResult.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
+    ? (freshInputResult.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
     : [];
   // Measurement nodes pass the input image through unchanged, so their own result overlays
   // remain aligned when users switch to the input image to edit measurement geometry.
