@@ -33,8 +33,8 @@ vi.mock('react-konva', async () => {
         data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
       : stroke === '#ff4d4f'
         ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
-    Circle: ({ name }: { name?: string }) => name?.startsWith('measurement-profile-span-') || name === 'measurement-profile-width'
-      || name?.startsWith('caliper-circle-angle-') ? <span data-testid={name} /> : null,
+    Circle: ({ name, x, y }: { name?: string; x?: number; y?: number }) => name?.startsWith('measurement-profile-span-') || name === 'measurement-profile-width'
+      || name?.startsWith('caliper-circle-angle-') ? <span data-testid={name} data-x={x} data-y={y} /> : null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
@@ -282,9 +282,26 @@ describe('ImageViewer measurement geometry editing', () => {
       angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 3, profileWidth: 5 }, onChange);
     expect(screen.getByTestId('measurement-profile-width')).toBeTruthy();
     const stage = screen.getByTestId('stage');
-    fireEvent.mouseDown(stage, { clientX: 247.2, clientY: 135.9 }); // width handle at image (70, 52.5)
-    fireEvent.mouseMove(stage, { clientX: 247.2, clientY: 147.7 }); // widen from 5 px to 15 px
-    fireEvent.mouseUp(document.body, { clientX: 247.2, clientY: 147.7 });
+    fireEvent.mouseDown(stage, { clientX: 229.6, clientY: 167.6 }); // most visible width handle at 45°
+    fireEvent.mouseMove(stage, { clientX: 221.3, clientY: 176 }); // widen from 5 px to 15 px along its normal
+    fireEvent.mouseUp(document.body, { clientX: 221.3, clientY: 176 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'circle', profileWidth: 15 });
+  });
+
+  it('keeps the radial-caliper width handle on a visible spoke when the first caliper is outside the image', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 80 }, radius: 70, band: 20,
+      angleStartDeg: 0, angleEndDeg: 270, samplingMode: 'count', caliperCount: 4, profileWidth: 5 }, onChange);
+    const handle = screen.getByTestId('measurement-profile-width');
+    expect(Number(handle.getAttribute('data-x'))).toBeCloseTo(52.5, 5);
+    expect(Number(handle.getAttribute('data-y'))).toBeCloseTo(15, 5);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 206.9, clientY: 47.4 }); // selected visible spoke at 270°
+    fireEvent.mouseMove(stage, { clientX: 218.7, clientY: 47.4 }); // drag along its normal to widen to 15 px
+    fireEvent.mouseUp(document.body, { clientX: 218.7, clientY: 47.4 });
 
     expect(onChange).toHaveBeenCalledOnce();
     expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'circle', profileWidth: 15 });
