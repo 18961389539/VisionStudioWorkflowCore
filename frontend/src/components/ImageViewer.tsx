@@ -181,7 +181,8 @@ function polygonHandleIndices(pointCount: number): number[] {
   return indices;
 }
 
-function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
+function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number)
+  : { start?: Point; end?: Point } | undefined {
   const start = geometry.angleStartDeg ?? -180;
   const { span, fullCircle } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
   if (width <= 0 || height <= 0 || !Number.isFinite(start) || !Number.isFinite(span)) return undefined;
@@ -189,20 +190,29 @@ function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 
   const normalizedEnd = normalizedStart + span;
   const offset = (HANDLE_HIT + 4) / scale;
   const smallCircle = geometry.radius * scale < HANDLE_HIT * 3;
-  const atAngle = (angleDeg: number, radius: number): Point => {
+  const band = Math.max(0, geometry.band ?? 0);
+  const innerRadius = Math.max(0, geometry.radius - band);
+  const outerRadius = Math.max(0, geometry.radius + band);
+  const atAngle = (angleDeg: number, radius: number): Point | undefined => {
     const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
-    return {
-      x: clamp(geometry.center.x + Math.max(0, radius) * Math.cos(radians), 0, width),
-      y: clamp(geometry.center.y + Math.max(0, radius) * Math.sin(radians), 0, height)
-    };
+    const direction = { x: Math.cos(radians), y: Math.sin(radians) };
+    const desiredRadius = Math.max(0, radius);
+    const clipped = clipSegmentToImage(
+      { x: geometry.center.x + Math.min(desiredRadius, innerRadius) * direction.x,
+        y: geometry.center.y + Math.min(desiredRadius, innerRadius) * direction.y },
+      { x: geometry.center.x + Math.max(desiredRadius, outerRadius) * direction.x,
+        y: geometry.center.y + Math.max(desiredRadius, outerRadius) * direction.y }, width, height);
+    if (!clipped) return undefined;
+    const radialDistance = (point: Point) => (point.x - geometry.center.x) * direction.x
+      + (point.y - geometry.center.y) * direction.y;
+    const visibleStart = radialDistance(clipped.start), visibleEnd = radialDistance(clipped.end);
+    const handleRadius = clamp(desiredRadius, Math.min(visibleStart, visibleEnd), Math.max(visibleStart, visibleEnd));
+    return { x: geometry.center.x + handleRadius * direction.x, y: geometry.center.y + handleRadius * direction.y };
   };
   if (fullCircle || span === 0) {
     // Coincident arc endpoints need distinct handles. Keep them clear of both radial-band
     // controls and the center marker so a full circle can be changed into an arc directly.
-    const band = Math.max(0, geometry.band ?? 0);
-    const innerRadius = Math.max(0, geometry.radius - band);
     const innerBandHandleRadius = Math.max(innerRadius, innerRadius * scale < HANDLE_HIT * 3 ? offset : 0);
-    const outerRadius = geometry.radius + band;
     const outerBandHandleRadius = Math.max(outerRadius, outerRadius * scale < HANDLE_HIT * 3 ? offset * 2 : 0);
     const innerArcRadius = Math.max(0, innerBandHandleRadius - offset);
     const hasInnerSpace = innerArcRadius * scale >= HANDLE_HIT * 1.5;
@@ -664,10 +674,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       {radiusHandle && <Circle x={radiusHandle.x} y={radiusHandle.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {profileWidthHandle && <Circle name="measurement-profile-width" x={profileWidthHandle.point.x} y={profileWidthHandle.point.y} radius={handleRadius}
         fill="#eb2f96" stroke="#fff" strokeWidth={1.5 / scale} />}
-      {arcHandles && <>
-        <Circle name="caliper-circle-angle-start" x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
-        <Circle name="caliper-circle-angle-end" x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
-      </>}
+      {arcHandles?.start && <Circle name="caliper-circle-angle-start" x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />}
+      {arcHandles?.end && <Circle name="caliper-circle-angle-end" x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />}
       {bandHandles && <>
         <Circle x={bandHandles.inner.x} y={bandHandles.inner.y} radius={handleRadius} fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle x={bandHandles.outer.x} y={bandHandles.outer.y} radius={handleRadius} fill="#52c41a" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -973,7 +981,8 @@ export default function ImageViewer({
     if (target.centerEditable !== false) candidates.push(['center', target.center]);
     if (target.radiusEditable !== false) candidates.push(['radius', circleRadiusHandle(target.center, target.radius, actualWidth, actualHeight)]);
     if (widthHandle) candidates.push(['profileWidth', widthHandle.point]);
-    if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
+    if (arcHandles?.start) candidates.push(['angleStart', arcHandles.start]);
+    if (arcHandles?.end) candidates.push(['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
     const closest = closestHandle(candidates, screen, view);
     if (closest) return closest;

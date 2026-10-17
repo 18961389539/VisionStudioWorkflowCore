@@ -507,6 +507,32 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('clips a radial arc handle along its spoke so dragging at the image edge preserves its angle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 80, y: 50 }, radius: 40, band: 20,
+      angleStartDeg: 45, angleEndDeg: 135, samplingMode: 'count', caliperCount: 5 }, onChange);
+
+    const handle = screen.getByTestId('caliper-circle-angle-start');
+    expect(Number(handle.getAttribute('data-x'))).toBeCloseTo(99, 5);
+    expect(Number(handle.getAttribute('data-y'))).toBeCloseTo(69, 5);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 315.64, clientY: 174.84 }); // clipped 45° spoke at image (99, 69)
+    fireEvent.mouseMove(stage, { clientX: 315.64, clientY: 174.84 }); // zero-distance drag must not rotate the arc
+    fireEvent.mouseUp(document.body, { clientX: 315.64, clientY: 174.84 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'circle', angleStartDeg: 45, angleEndDeg: 135 });
+  });
+
+  it('omits radial arc handles when their search spokes do not intersect the image', () => {
+    imageView({ type: 'circle', center: { x: 150, y: 50 }, radius: 30, band: 5,
+      angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 5 }, vi.fn());
+
+    expect(screen.queryByTestId('caliper-circle-angle-start')).toBeNull();
+    expect(screen.queryByTestId('caliper-circle-angle-end')).toBeNull();
+  });
+
   it('keeps a full-circle angle handle separate from the radial-band handle', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
