@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "517d98d77526c1c6f3b9775387e1ee18d9539c4970e07f8b1c317d9aa5ec07f0",
+  "hash": "6e8a172f70eb51191aeb0d4efa36af50edb3f951e06b0f240f6cbcf44a356f3b",
   "items": [
     {
       "type": "image.acquire",
@@ -3579,7 +3579,7 @@
           "step": 2,
           "unit": "px",
           "group": "Sampling",
-          "description": "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the expected edge; larger values smooth local noise but may merge nearby features."
         },
         {
           "name": "minContrast",
@@ -6272,7 +6272,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."
         },
         {
           "name": "maxRadiusDeviation",
@@ -6485,7 +6486,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "edgeThreshold",
@@ -6708,7 +6710,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "minContrast",
@@ -11056,6 +11059,10 @@
             {
               "label": "1D Barcodes",
               "value": "1d"
+            },
+            {
+              "label": "2D Codes (DataMatrix/PDF417/Aztec)",
+              "value": "2d"
             }
           ]
         },
@@ -11072,7 +11079,7 @@
           "defaultValue": true
         }
       ],
-      "description": "Decode QR Code and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points.",
+      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

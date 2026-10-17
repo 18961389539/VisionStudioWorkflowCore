@@ -12,7 +12,7 @@ using TesseractPixImage = TesseractOCR.Pix.Image;
 
 namespace VisionStudio.Engine.Nodes;
 
-/// <summary>Decodes all supported QR and common one-dimensional formats from a real image.</summary>
+/// <summary>Decodes QR, DataMatrix/PDF417/Aztec and common one-dimensional formats from a real image.</summary>
 public sealed class BarcodeDecodeNode : IVisionNodeExecutor
 {
     private static readonly BarcodeFormat[] OneDimensionalFormats =
@@ -20,6 +20,14 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
         BarcodeFormat.EAN_8, BarcodeFormat.EAN_13, BarcodeFormat.UPC_A,
         BarcodeFormat.UPC_E, BarcodeFormat.ITF, BarcodeFormat.CODABAR
+    ];
+
+    // Industrial 2D symbologies (HALCON find_data_code_2d / Cognex DataMan staples).
+    // Previously only QR was offered, so ECC200 DataMatrix parts could not be read at all.
+    private static readonly BarcodeFormat[] TwoDimensionalFormats =
+    [
+        BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX,
+        BarcodeFormat.PDF_417, BarcodeFormat.AZTEC
     ];
 
     public string Type => "recognition.barcode";
@@ -30,15 +38,16 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         var source = context.RequireImage("image").Mat;
         using var gray = RecognitionImageHelpers.ToGray8(source);
         var mode = node.GetString("mode", "all").Trim().ToLowerInvariant();
-        if (mode is not ("all" or "qr" or "1d"))
-            throw new InvalidOperationException($"Unsupported barcode mode '{mode}'. Supported modes are 'all', 'qr', and '1d'.");
+        if (mode is not ("all" or "qr" or "1d" or "2d"))
+            throw new InvalidOperationException($"Unsupported barcode mode '{mode}'. Supported modes are 'all', 'qr', '1d', and '2d'.");
         var tryHarder = node.GetBool("tryHarder", true);
         var multiple = node.GetBool("multiple", true);
         var formats = mode switch
         {
             "qr" => [BarcodeFormat.QR_CODE],
             "1d" => OneDimensionalFormats,
-            "all" => [.. OneDimensionalFormats, BarcodeFormat.QR_CODE],
+            "2d" => TwoDimensionalFormats,
+            "all" => [.. OneDimensionalFormats, .. TwoDimensionalFormats],
             _ => throw new InvalidOperationException($"Unsupported barcode mode '{mode}'.")
         };
 
@@ -50,8 +59,7 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         var decoded = multiple ? reader.DecodeMultiple(luminance) : Wrap(reader.Decode(luminance));
         cancellationToken.ThrowIfCancellationRequested();
         var results = (decoded ?? System.Array.Empty<ZXing.Result>())
-            .Where(x => mode != "qr" || x.BarcodeFormat == BarcodeFormat.QR_CODE)
-            .Where(x => mode != "1d" || x.BarcodeFormat != BarcodeFormat.QR_CODE)
+            .Where(x => formats.Contains(x.BarcodeFormat))
             .Select(x => new BarcodeResult(
                 x.Text,
                 x.BarcodeFormat.ToString(),
@@ -64,7 +72,9 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             ["count"] = VisionValue.Integer(results.Length),
             ["results"] = VisionValue.String(json)
         };
-        if (results.Length == 1)
+        // Always expose the first result: with multiple=true the optional
+        // text/format ports previously vanished, breaking downstream text.match.
+        if (results.Length >= 1)
         {
             outputs["text"] = VisionValue.String(results[0].Text);
             outputs["format"] = VisionValue.String(results[0].Format);

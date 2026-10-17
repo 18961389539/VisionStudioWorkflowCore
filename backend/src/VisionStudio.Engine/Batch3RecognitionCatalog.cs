@@ -27,8 +27,8 @@ public static class Batch3RecognitionCatalog
     [
         new("recognition.barcode", "Barcode / QR Decode", "Recognition", [Exec, Image],
             [new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("results", VisionDataType.String), new("text", VisionDataType.String, Required: false), new("format", VisionDataType.String, Required: false), Next],
-            [new("mode", "Formats", "select", "all", Options: [new("All Supported", "all"), new("QR Code", "qr"), new("1D Barcodes", "1d")]), new("tryHarder", "Try Harder", "boolean", true), new("multiple", "Decode Multiple", "boolean", true)],
-            "Decode QR Code and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points.", "builtin",
+            [new("mode", "Formats", "select", "all", Options: [new("All Supported", "all"), new("QR Code", "qr"), new("1D Barcodes", "1d"), new("2D Codes (DataMatrix/PDF417/Aztec)", "2d")]), new("tryHarder", "Try Harder", "boolean", true), new("multiple", "Decode Multiple", "boolean", true)],
+            "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.", "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("recognition.ocr", "OCR", "Recognition", [Exec, Image],
             [new("text", VisionDataType.String), new("confidence", VisionDataType.Double), new("result", VisionDataType.String), Next],
