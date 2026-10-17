@@ -484,6 +484,45 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     if (normalizedDeterminant > 2e-3) return undefined;
     return '当前圆弧的理论测点分布接近直线，可能触发退化圆拟合。请扩大角度覆盖；单纯增加卡尺数量不能替代更宽的圆弧。';
   })();
+  const caliperCircleBoundsNotice = (() => {
+    if (catalogItem.type !== 'measure.caliperCircle' || transformInputEdge || measurementGeometry?.type !== 'circle'
+      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
+      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0
+      || !Number.isFinite(measurementGeometry.center.x) || !Number.isFinite(measurementGeometry.center.y)
+      || Math.abs(measurementGeometry.center.x) > 10_000_000 || Math.abs(measurementGeometry.center.y) > 10_000_000
+      || !Number.isFinite(measurementGeometry.radius) || measurementGeometry.radius <= 0 || measurementGeometry.radius > 10_000_000) return undefined;
+    const width = imageViewerSource.width;
+    const height = imageViewerSource.height;
+    const band = Math.max(1, Math.min(500, geometryNumber('radialBand', 8)));
+    const innerRadius = Math.max(0, measurementGeometry.radius - band);
+    const outerRadius = measurementGeometry.radius + band;
+    const angles = buildCaliperCircleAngles(measurementGeometry);
+    let outside = 0;
+    let tooShortAfterClip = 0;
+    for (const angle of angles) {
+      const radians = angle * Math.PI / 180;
+      const direction = { x: Math.cos(radians), y: Math.sin(radians) };
+      const start = { x: measurementGeometry.center.x + direction.x * innerRadius,
+        y: measurementGeometry.center.y + direction.y * innerRadius };
+      const end = { x: measurementGeometry.center.x + direction.x * outerRadius,
+        y: measurementGeometry.center.y + direction.y * outerRadius };
+      const clipped = clipLineToImage(start, end, width, height);
+      if (!clipped) { outside++; continue; }
+      if (Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y) < 2) tooShortAfterClip++;
+    }
+    if (outside === 0 && tooShortAfterClip === 0) return undefined;
+    const minimum = Math.max(3, Math.min(361, Math.floor(geometryNumber('minValidCalipers', 3) + 0.5)));
+    const potentiallyAvailable = angles.length - outside - tooShortAfterClip;
+    const detail = [
+      outside > 0 ? `${outside}/${angles.length} 条径向剖面完全位于图像外` : '',
+      tooShortAfterClip > 0 ? `${tooShortAfterClip} 条径向剖面裁切后短于 2 px` : ''
+    ].filter(Boolean).join('，');
+    return {
+      type: potentiallyAvailable < minimum ? 'warning' as const : 'info' as const,
+      title: potentiallyAvailable < minimum ? '图像边界可能导致圆卡尺不足' : '部分圆卡尺位于图像边界外',
+      description: `${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请调整标称圆位置、半径或搜索带。`
+    };
+  })();
   const caliperLineBoundsNotice = (() => {
     if (catalogItem.type !== 'measure.caliperLine' || transformInputEdge || measurementGeometry?.type !== 'line'
       || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
@@ -520,6 +559,33 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       type: potentiallyAvailable < minimum ? 'warning' as const : 'info' as const,
       title: potentiallyAvailable < minimum ? '图像边界可能导致卡尺数量不足' : '部分卡尺位于图像边界外',
       description: `${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请缩短跨度或调整搜索线位置。`
+    };
+  })();
+  const caliperSearchLineBoundsNotice = (() => {
+    if (catalogItem.type !== 'measure.caliper' || transformInputEdge || measurementGeometry?.type !== 'line'
+      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
+      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0) return undefined;
+    const length = Math.hypot(measurementGeometry.end.x - measurementGeometry.start.x,
+      measurementGeometry.end.y - measurementGeometry.start.y);
+    if (length < 2) return undefined;
+    const clipped = clipLineToImage(measurementGeometry.start, measurementGeometry.end,
+      imageViewerSource.width, imageViewerSource.height);
+    if (!clipped) return {
+      type: 'warning' as const,
+      title: '搜索线完全位于图像外',
+      description: '当前卡尺不会采到图像像素，运行会返回“未找到”而不是检测边缘。请将搜索线移入图像，或检查上游坐标变换。'
+    };
+    const clippedLength = Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y);
+    if (clippedLength < 2) return {
+      type: 'warning' as const,
+      title: '搜索线裁切后过短',
+      description: `搜索线与图像仅相交 ${clippedLength.toFixed(1)} px，短于卡尺要求的 2 px。请调整搜索线位置或方向。`
+    };
+    if (clippedLength >= length - 1e-6) return undefined;
+    return {
+      type: 'info' as const,
+      title: '搜索线将按图像边界裁切',
+      description: `搜索线约有 ${(length - clippedLength).toFixed(1)} px 位于图像外；运行时只会在图像内的 ${clippedLength.toFixed(1)} px 段上采样。`
     };
   })();
   const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
@@ -1085,8 +1151,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : <span>图像处理链中存在非矩形裁剪，选区外像素会清零，可能形成伪边缘；多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像。请在当前图像坐标系提供完整 ROI 掩膜，或调整流程避免将裁剪边界当作真实边缘。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
+        {caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}
+          description={caliperCircleBoundsNotice.description} />}
         {caliperLineBoundsNotice && <Alert showIcon type={caliperLineBoundsNotice.type} title={caliperLineBoundsNotice.title}
           description={caliperLineBoundsNotice.description} />}
+        {caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
+          description={caliperSearchLineBoundsNotice.description} />}
         {searchLineInputEdge && <Alert showIcon type="info"
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge

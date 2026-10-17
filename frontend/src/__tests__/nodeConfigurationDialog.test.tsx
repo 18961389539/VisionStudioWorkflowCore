@@ -1077,6 +1077,52 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(dialog.queryByText('图像边界可能导致卡尺数量不足')).toBeNull());
   });
 
+  it('warns when a single caliper search line is fully outside the image', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'single-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '单点卡尺',
+      inputs: caliperCatalog.inputs, parameters: { startX: -200, startY: 64, endX: -100, endY: 64 } } };
+    const imageNode: Node = { id: 'caliper-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const caliperResult: RunResult = { ...report, runId: 'single-caliper-bounds-run', nodeReports: [
+      { nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: true, durationMs: 1, summary: {} }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 128, height: 128 },
+      { nodeId: imageNode.id, portName: 'image', width: 128, height: 128 }
+    ] }) })));
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, imageNode], edges, result: caliperResult });
+
+    expect(await dialog.findByText('搜索线完全位于图像外')).toBeTruthy();
+    expect(dialog.getByText(/当前卡尺不会采到图像像素/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole('button', { name: '模拟拖动搜索线' }));
+    await waitFor(() => expect(dialog.queryByText('搜索线完全位于图像外')).toBeNull());
+  });
+
+  it('warns when the nominal circle leaves too few radial calipers inside the image', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 200, centerY: 200, radius: 20, radialBand: 8,
+        angleStartDeg: -180, angleEndDeg: 180, samplingMode: 'count', caliperCount: 72, minValidCalipers: 3 } } };
+    const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' }];
+    const circleResult: RunResult = { ...report, runId: 'caliper-circle-bounds-run', nodeReports: [
+      { nodeId: circleNode.id, nodeType: circleCatalog.type, success: true, durationMs: 1, summary: {} }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: circleNode.id, portName: 'image', width: 128, height: 128 },
+      { nodeId: imageNode.id, portName: 'image', width: 128, height: 128 }
+    ] }) })));
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, imageNode], edges, result: circleResult });
+
+    expect(await dialog.findByText('图像边界可能导致圆卡尺不足')).toBeTruthy();
+    expect(dialog.getByText(/72\/72 条径向剖面完全位于图像外/)).toBeTruthy();
+    expect(dialog.getByText(/最多剩余 0 条可采样，当前拟合至少需要 3 条有效卡尺/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole('button', { name: '模拟调整标称圆' }));
+    await waitFor(() => expect(dialog.queryByText('图像边界可能导致圆卡尺不足')).toBeNull());
+  });
+
   it('warns against applying a pose transform twice to an already corrected circle', () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
