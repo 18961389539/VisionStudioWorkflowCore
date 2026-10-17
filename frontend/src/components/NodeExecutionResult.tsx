@@ -182,10 +182,15 @@ function summaryJsonForDisplay(summary: Record<string, unknown>) {
 }
 
 function Values({ values, catalog, input = false }: { values: Record<string, VisionValueSnapshot>; catalog: NodeCatalogItem; input?: boolean }) {
+  const ports = input ? catalog.inputs : catalog.outputs;
+  const labelForPort = (name: string) => {
+    const port = ports.find((item) => item.name.toLowerCase() === name.toLowerCase());
+    return port?.label ?? portNames[port?.name ?? name] ?? name;
+  };
   return <div className="node-result-table-wrap"><table className="node-info-table node-result-table">
     <thead><tr><th>名称</th><th>类型</th><th>值</th></tr></thead>
     <tbody>{Object.entries(values).map(([name, value]) => <tr key={name}>
-      <td>{(input ? catalog.inputs : catalog.outputs).find((p) => p.name === name)?.label ?? portNames[name] ?? name}</td>
+      <td>{labelForPort(name)}</td>
       <td>{value.type}</td><td><span>{value.display || valueText(value.value)}</span></td>
     </tr>)}</tbody>
   </table></div>;

@@ -73,6 +73,23 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.queryByText('未找到有效结果')).toBeNull();
   });
 
+  it('uses catalog labels for imported port snapshots regardless of port-name casing', () => {
+    const runResult = result(true, 'ok');
+    runResult.nodeReports[0].inputs = { SEARCHLINE: { type: 'Line2D', display: '[(10, 20), (80, 20)]' } };
+    runResult.nodeReports[0].outputs = { FOUND: { type: 'Boolean', display: 'true', value: true } };
+    const selectedCatalog = { ...catalog,
+      inputs: [{ name: 'searchLine', label: '搜索线', dataType: 'Line2D' }],
+      outputs: [{ name: 'found', label: '找到目标', dataType: 'Boolean' }] };
+
+    render(<NodeExecutionResult nodeId="caliper" catalog={selectedCatalog} result={runResult} stale={false}
+      expanded onExpandedChange={() => {}} />);
+
+    expect(screen.getByText('[(10, 20), (80, 20)]').closest('table')?.textContent).toContain('搜索线');
+    expect(screen.getByText('true').closest('table')?.textContent).toContain('找到目标');
+    expect(screen.queryByText('SEARCHLINE')).toBeNull();
+    expect(screen.queryByText('FOUND')).toBeNull();
+  });
+
   it('puts the no-result state before empty single-caliper coordinates', () => {
     const caliperResult = result(false, 'no-edge-above-threshold');
     caliperResult.nodeReports[0].summary = { found: false, reason: 'no-edge-above-threshold', x: null, y: null, strength: null };
