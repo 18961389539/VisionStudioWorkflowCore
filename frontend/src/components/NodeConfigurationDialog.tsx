@@ -34,6 +34,48 @@ function inputSnapshotValue(inputs: Record<string, VisionValueSnapshot> | null |
   return Object.entries(inputs ?? {}).find(([name]) => name.toLowerCase() === expected)?.[1].value;
 }
 
+function connectedRoiGeometry(value: unknown): VisionRoi | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const roi = value as Record<string, unknown>;
+  const finiteCoordinate = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item) && Math.abs(item) <= 10_000_000;
+  const point = (item: unknown) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const coordinates = item as Record<string, unknown>;
+    const x = coordinates.x ?? coordinates.X, y = coordinates.y ?? coordinates.Y;
+    return finiteCoordinate(x) && finiteCoordinate(y) ? { x, y } : undefined;
+  };
+
+  if (roi.type === 'Rectangle' && finiteCoordinate(roi.x) && finiteCoordinate(roi.y)
+    && typeof roi.width === 'number' && Number.isFinite(roi.width) && roi.width > 0 && roi.width <= 10_000_000
+    && typeof roi.height === 'number' && Number.isFinite(roi.height) && roi.height > 0 && roi.height <= 10_000_000)
+    return { type: 'Rectangle', x: roi.x, y: roi.y, width: roi.width, height: roi.height };
+  if (roi.type === 'Circle' && finiteCoordinate(roi.x) && finiteCoordinate(roi.y)
+    && typeof roi.radius === 'number' && Number.isFinite(roi.radius) && roi.radius > 0 && roi.radius <= 10_000_000)
+    return { type: 'Circle', x: roi.x, y: roi.y, radius: roi.radius };
+  if (roi.type === 'Polygon' && Array.isArray(roi.points) && roi.points.length >= 3 && roi.points.length <= 500_000) {
+    const points = roi.points.map(point);
+    return points.every((item): item is { x: number; y: number } => Boolean(item)) ? { type: 'Polygon', points } : undefined;
+  }
+  if (roi.type === 'Brush' && Array.isArray(roi.strokes) && roi.strokes.length > 0 && roi.strokes.length <= 100_000) {
+    let totalPoints = 0;
+    const strokes = [];
+    for (const value of roi.strokes) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+      const stroke = value as Record<string, unknown>;
+      if ((stroke.mode !== 'Add' && stroke.mode !== 'Erase') || typeof stroke.width !== 'number'
+        || !Number.isFinite(stroke.width) || stroke.width <= 0 || stroke.width > 1024
+        || !Array.isArray(stroke.points) || stroke.points.length === 0) return undefined;
+      totalPoints += stroke.points.length;
+      if (totalPoints > 500_000) return undefined;
+      const points = stroke.points.map(point);
+      if (!points.every((item): item is { x: number; y: number } => Boolean(item))) return undefined;
+      strokes.push({ mode: stroke.mode, width: stroke.width, points });
+    }
+    return { type: 'Brush', strokes };
+  }
+  return undefined;
+}
+
 function outputPortMatches(edge: Edge | undefined, nodeId: string, portName: string) {
   return edge?.source === nodeId && edge.sourceHandle?.toLowerCase() === portName.toLowerCase();
 }
@@ -645,6 +687,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
     : undefined;
   const measurementCurrentImageAvailable = Boolean(measurementInputImageEntry);
+  const connectedRoiInputSnapshot = connectedRoiInput
+    ? inputSnapshotValue(freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]?.inputs, 'roi')
+    : undefined;
+  const connectedRoiPreviewGeometry = connectedRoiGeometry(connectedRoiInputSnapshot);
+  const showConnectedRoiPreview = Boolean((isImageCrop || measurementNodeTypes.includes(catalogItem.type))
+    && connectedRoiPreviewGeometry && roiSourceImageFrameNodeIds.length > 0 && !connectedRoiImageFrameMismatch
+    && imageSource === 'input' && previewNodeId === node.id && selectedInputAvailable);
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
     const imageExtentIssue = cropRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
@@ -1479,7 +1528,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               onClick={() => setRoiImageView('reference')}>切换到已保存基准</Button>}
           </Space>} />}
         {roiMaskInputConnected && <Alert showIcon type="info" title={`ROI 掩膜来自上游：${nodeLabels[roiInputEdge!.source] ?? roiInputEdge!.source}`}
-          description="此节点的 roi 输入优先于本地选区，且按当前图像坐标解释。请在上游编辑区域；当前节点不会再次移动 ROI。" />}
+          description="此节点的 roi 输入优先于本地选区，且按当前图像坐标解释。请在上游编辑区域；当前节点不会再次移动 ROI。有效运行报告且坐标系匹配时，轮廓会在输入图像上只读显示。" />}
         {connectedRoiImageFrameMismatch && <Alert showIcon type="error" title="ROI 与目标图像坐标系不匹配"
           description={connectedRoiImageFrameMismatchMessage} />}
         {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="上游裁剪可能形成伪边缘"
@@ -1540,7 +1589,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             : '本节点几何属于基准图像坐标；transform 会在运行时映射到测量图像。可从支持的定位修正 ROI 或图像裁剪变换自动打开对应基准图像。ROI 掩膜仍使用当前图像坐标。'} />}
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
           overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
-            : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
+            : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined)
+            : showConnectedRoiPreview ? connectedRoiPreviewGeometry : undefined} showRoiTools={canEditRoi || isRoiTransform}
           measurementGeometry={viewerMeasurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked && !showCurrentMeasurementImage}
           onMeasurementGeometryChange={updateMeasurementGeometry}
           roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : imageInputSourceId ? `输入图像 · ${nodeLabels[imageInputSourceId] ?? imageInputSourceId}` : String(node.data.label ?? node.id)}
@@ -1615,7 +1665,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           <strong>选择裁剪区域</strong>
           <p>在输入图像上绘制矩形、圆形、多边形或笔刷选区；越出图像边缘的部分会裁切，完全未覆盖图像像素时会报错。笔刷支持添加和擦除，输出图像按选区与图像交集的紧包围框裁剪，选区外清零；ROI 蒙版端口输出二值选区。裁剪后原点移到新图左上角，可将“变换”端口连接到下游测量节点以换算原图坐标。</p>
           {cropRoiInputConnected && <Alert showIcon type="info" title={`裁剪区域来自上游：${nodeLabels[cropRoiSourceId!] ?? cropRoiSourceId}`}
-            description="已连接的 roi 输入会覆盖本节点的本地选区。请在上游 ROI 节点编辑；本地选区不会参与本次裁剪。"
+            description="已连接的 roi 输入会覆盖本节点的本地选区。请在上游 ROI 节点编辑；本地选区不会参与本次裁剪。有效运行报告且坐标系匹配时，轮廓会在输入图像上只读显示。"
             style={{ marginBlock: 10 }} />}
           {!cropRoiInputConnected && draft.roi && <Button size="small" disabled={locked} onClick={clearCropSelection}>清除选区（使用整图）</Button>}
           {cropClearUndoAvailable && <Button size="small" disabled={locked} onClick={undoCropSelectionClear}>撤销清除选区</Button>}

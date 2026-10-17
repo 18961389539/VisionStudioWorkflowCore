@@ -9,8 +9,9 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../components/ImageViewer')>();
   return {
     ...actual,
-    default: ({ previewUrl, showRoiTools, roiEnabled, roiTargetLabel, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
+    default: ({ previewUrl, showRoiTools, roiEnabled, roiTargetLabel, roi, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
       previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
+      roi?: VisionRoi;
       roiTargetLabel?: string;
       measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number; profileWidth?: number }
         | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; profileWidth?: number; centerEditable?: boolean; radiusEditable?: boolean };
@@ -18,6 +19,7 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
       onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
     }) =>
       <div><span data-testid="image-url">{previewUrl}</span><span data-testid="roi-enabled">{roiEnabled ? 'ROI 可编辑' : 'ROI 只读'}</span>
+        <span data-testid="roi-preview-shape" data-type={roi?.type ?? 'none'} data-editable={roiEnabled ? 'true' : 'false'} />
         <span data-testid="roi-target">{roiTargetLabel}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
         <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
         {measurementGeometry?.type === 'circle' && <span data-testid="circle-geometry" data-center-x={measurementGeometry.center.x}
@@ -348,6 +350,34 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
+  it('shows the actual connected cropped ROI on the matching input image even without an overlay', async () => {
+    const upstreamCrop: Node = { id: 'upstream-crop', position: { x: 0, y: 0 }, data: { typeKey: 'image.crop', label: '前级裁剪',
+      inputs: cropCatalog.inputs, parameters: {} } };
+    const targetCrop: Node = { ...cropNode, id: 'target-crop', data: { ...cropNode.data, label: '后级裁剪' } };
+    const edges = [
+      { id: 'upstream-image', source: 'source', sourceHandle: 'image', target: 'upstream-crop', targetHandle: 'image' },
+      { id: 'target-image', source: 'upstream-crop', sourceHandle: 'image', target: 'target-crop', targetHandle: 'image' },
+      { id: 'cropped-roi', source: 'upstream-crop', sourceHandle: 'croppedRoi', target: 'target-crop', targetHandle: 'roi' }
+    ];
+    const runResult: RunResult = { ...report, runId: 'connected-cropped-roi-run', nodeReports: [
+      { nodeId: 'target-crop', nodeType: 'image.crop', success: true, durationMs: 1, summary: {}, inputs: {
+        roi: { type: 'Roi', display: 'Circle (30, 24, r=12)', value: { type: 'Circle', x: 30, y: 24, radius: 12 } }
+      } }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'target-crop', portName: 'image', width: 30, height: 30 },
+      { nodeId: 'upstream-crop', portName: 'image', width: 60, height: 50 },
+      { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: targetCrop, catalogItem: cropCatalog, nodes: [targetCrop, upstreamCrop, imageNode], edges, result: runResult });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/upstream-crop/image'));
+    expect(dialog.getByTestId('roi-preview-shape').getAttribute('data-type')).toBe('Circle');
+    expect(dialog.getByTestId('roi-preview-shape').getAttribute('data-editable')).toBe('false');
+    expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 只读');
+    expect(dialog.getByTestId('overlay-ids').textContent).toBe('');
+  });
+
   it('hides a stale upstream corrected ROI overlay on the crop input image', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
@@ -627,6 +657,36 @@ describe('ROI input coordinate frame guidance', () => {
     expect(dialog.getByText(/上游 ROI 与目标图像“裁剪输入图像”不在同一像素坐标系/)).toBeTruthy();
     expect(dialog.getByText(/裁剪区域来自上游：定位修正 ROI/)).toBeTruthy();
     expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('does not draw a connected ROI over an image from a different coordinate frame', async () => {
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const roiNode: Node = { id: 'roi', position: { x: 0, y: 0 }, data: {
+      typeKey: roiCatalog.type, label: '定位修正 ROI', inputs: roiCatalog.inputs, parameters: {}
+    } };
+    const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '裁剪输入图像' } };
+    const otherImage: Node = { id: 'other-image', position: { x: 0, y: 0 }, data: { label: 'ROI 来源图像' } };
+    const edges = [
+      { id: 'crop-image', source: inputImage.id, sourceHandle: 'IMAGE', target: cropNode.id, targetHandle: 'IMAGE' },
+      { id: 'roi-image', source: otherImage.id, sourceHandle: 'IMAGE', target: roiNode.id, targetHandle: 'DEBUGIMAGE' },
+      { id: 'crop-roi', source: roiNode.id, sourceHandle: 'ROI', target: cropNode.id, targetHandle: 'ROI' }
+    ];
+    const runResult: RunResult = { ...report, runId: 'mismatched-crop-roi', nodeReports: [
+      { nodeId: cropNode.id, nodeType: cropCatalog.type, success: false, durationMs: 1, summary: {}, inputs: {
+        roi: { type: 'Roi', display: 'Circle', value: { type: 'Circle', x: 30, y: 24, radius: 12 } }
+      } }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'input-image', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'other-image', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, inputImage, otherImage], edges, result: runResult });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/input-image/image'));
+    expect(dialog.getByText('ROI 与目标图像坐标系不匹配')).toBeTruthy();
+    expect(dialog.getByTestId('roi-preview-shape').getAttribute('data-type')).toBe('none');
   });
 
   it('allows a corrected ROI and crop input from the same image frame', () => {
