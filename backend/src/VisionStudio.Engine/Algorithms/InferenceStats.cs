@@ -39,6 +39,36 @@ public static class InferenceStats
         return new(min, max, sum / values.Length, max, peakIndex % width, peakIndex / width, (double)above / values.Length);
     }
 
+    /// <summary>
+    /// Otsu threshold of a score map, in the map's own units. The map range is binned
+    /// into 256 levels; a constant map yields its only value. This is a starting-point
+    /// suggestion (as in HALCON DL threshold aids), not a trained operating point.
+    /// </summary>
+    public static double OtsuThreshold(float[] values)
+    {
+        if (values.Length == 0) throw new InvalidOperationException("Cannot threshold an empty anomaly map.");
+        var min = values.Min(); var max = values.Max();
+        if (max - min < 1e-12) return min;
+        var histogram = new long[256];
+        foreach (var v in values) histogram[Math.Clamp((int)((v - min) / (max - min) * 255), 0, 255)]++;
+        var total = values.Length;
+        var sumTotal = histogram.Select((count, i) => (double)count * i).Sum();
+        double sumBackground = 0; long weightBackground = 0; var bestVariance = -1d; var bestBin = 0;
+        for (var bin = 0; bin < 256; bin++)
+        {
+            weightBackground += histogram[bin];
+            if (weightBackground == 0) continue;
+            var weightForeground = total - weightBackground;
+            if (weightForeground == 0) break;
+            sumBackground += bin * histogram[bin];
+            var meanBackground = sumBackground / weightBackground;
+            var meanForeground = (sumTotal - sumBackground) / weightForeground;
+            var variance = (double)weightBackground * weightForeground * Math.Pow(meanBackground - meanForeground, 2);
+            if (variance > bestVariance) { bestVariance = variance; bestBin = bin; }
+        }
+        return min + (bestBin + 0.5) / 256d * (max - min);
+    }
+
     /// <summary>Normalize a float map to 0-255 (min-max). Constant maps become all-zero.</summary>
     public static byte[] NormalizeMap(float[] values)
     {
@@ -53,7 +83,7 @@ public static class InferenceStats
     /// scores, no separate objectness). Accepts [1,C,N], [1,N,C] and [N,C] shapes.
     /// Coordinates are returned in the same units as the tensor (normalization is the caller's job).
     /// </summary>
-    public static YoloCandidate[] DecodeYolo(float[] values, IReadOnlyList<int> shape)
+    public static YoloCandidate[] DecodeYolo(float[] values, IReadOnlyList<int> shape, bool useObjectness = false)
     {
         int channels, count; bool channelsFirst;
         if (shape.Count == 3 && shape[0] == 1 && shape[1] >= 5 && shape[2] > 0) { channels = (int)shape[1]; count = (int)shape[2]; channelsFirst = true; }
@@ -61,17 +91,23 @@ public static class InferenceStats
         else if (shape.Count == 2 && shape[1] >= 5 && shape[0] > 0) { channels = (int)shape[1]; count = (int)shape[0]; channelsFirst = false; }
         else throw new InvalidOperationException($"YOLO detection output must have shape [1,C,N], [1,N,C] or [N,C] with C>=5; received [{string.Join(',', shape)}].");
         if (values.Length != channels * count) throw new InvalidOperationException("YOLO tensor element count does not match its shape.");
+        // YOLOv5 heads carry an objectness channel at index 4 and class scores after it;
+        // the effective score is objectness * best class score. YOLOv8 heads have no
+        // objectness and class scores start at index 4.
+        var firstClass = useObjectness ? 5 : 4;
+        if (useObjectness && channels < 6) throw new InvalidOperationException("YOLOv5 detection output must have at least 6 channels (cx, cy, w, h, objectness, one or more class scores).");
         float At(int n, int c) => channelsFirst ? values[c * count + n] : values[n * channels + c];
         var result = new YoloCandidate[count];
         for (var n = 0; n < count; n++)
         {
             var bestClass = 0; var bestScore = double.NegativeInfinity;
-            for (var c = 4; c < channels; c++)
+            for (var c = firstClass; c < channels; c++)
             {
                 var score = At(n, c);
-                if (score > bestScore) { bestScore = score; bestClass = c - 4; }
+                if (score > bestScore) { bestScore = score; bestClass = c - firstClass; }
             }
-            result[n] = new(At(n, 0), At(n, 1), At(n, 2), At(n, 3), bestScore, bestClass);
+            var objectness = useObjectness ? At(n, 4) : 1d;
+            result[n] = new(At(n, 0), At(n, 1), At(n, 2), At(n, 3), objectness * bestScore, bestClass);
         }
         return result;
     }

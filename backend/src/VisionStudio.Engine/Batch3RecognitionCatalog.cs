@@ -31,7 +31,7 @@ public static class Batch3RecognitionCatalog
             "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.", "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("recognition.ocr", "OCR", "Recognition", [Exec, Image],
-            [new("text", VisionDataType.String), new("confidence", VisionDataType.Double), new("wordCount", VisionDataType.Integer), new("words", VisionDataType.String), new("result", VisionDataType.String), Next],
+            [new("text", VisionDataType.String), new("confidence", VisionDataType.Double), new("wordCount", VisionDataType.Integer), new("words", VisionDataType.String), new("chars", VisionDataType.String), new("result", VisionDataType.String), Next],
             [
                 new("dataPath", "Tessdata Directory", "text", string.Empty, Description: "Directory containing language .traineddata files."),
                 new("language", "Language(s)", "text", "eng", Description: "Tesseract language codes, e.g. eng or eng+chi_sim."),
@@ -44,7 +44,7 @@ public static class Batch3RecognitionCatalog
                 new("invert", "Invert Image", "boolean", false, Description: "Enable for light text on a dark background."),
                 new("minConfidence", "Minimum Word Confidence", "number", 0, 0, 1, 0.01, Description: "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words.")
             ],
-            "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, and per-word JSON with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.", "builtin",
+            "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, per-word JSON and per-character JSON (chars, from Tesseract box output; empty when the model produces none), with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.", "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new("inference.classification", "ONNX Classification", "Inference", [Exec, Image],
             [new("result", VisionDataType.String), new("label", VisionDataType.String), new("classIndex", VisionDataType.Integer), new("confidence", VisionDataType.Double), Next],
@@ -53,7 +53,7 @@ public static class Batch3RecognitionCatalog
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("inference.detection", "ONNX Detection", "Inference", [Exec, Image],
             [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("result", VisionDataType.String), Next],
-            [.. OnnxParameters, new("layout", "Output Layout", "select", "xyxy", Options: [new("Rows [x1,y1,x2,y2,score,class]", "xyxy"), new("YOLO (cx,cy,w,h + class scores)", "yolo")]), new("coordinates", "Coordinate Units", "select", "normalized", Options: [new("Normalized 0-1", "normalized"), new("Input Pixels", "pixels")]), new("letterbox", "Letterboxed Input", "boolean", false, Description: "Enable when the model input was resized preserving aspect with symmetric padding; coordinates are un-padded before mapping to the source."), new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01), new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01), new("maxCount", "Max Detections", "number", 100, 1, 1000, 1)],
+            [.. OnnxParameters, new("layout", "Output Layout", "select", "xyxy", Options: [new("Rows [x1,y1,x2,y2,score,class]", "xyxy"), new("YOLO (cx,cy,w,h + class scores)", "yolo"), new("YOLOv5 (with objectness)", "yolov5")]), new("coordinates", "Coordinate Units", "select", "normalized", Options: [new("Normalized 0-1", "normalized"), new("Input Pixels", "pixels")]), new("letterbox", "Letterboxed Input", "boolean", false, Description: "Enable when the model input was resized preserving aspect with symmetric padding; coordinates are un-padded before mapping to the source."), new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01), new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01), new("maxCount", "Max Detections", "number", 100, 1, 1000, 1)],
             "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6]; layout yolo expects YOLOv8-style cx,cy,w,h plus per-class scores as [1,C,N], [1,N,C] or [N,C]. Coordinates can be normalized or input-image pixels, optionally letterboxed. Class-aware NMS is applied.", "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("inference.segmentation", "ONNX Segmentation", "Inference", [Exec, Image],
@@ -62,7 +62,7 @@ public static class Batch3RecognitionCatalog
             "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions plus per-class statistics (classes JSON: pixel count, image fraction, mean winning score) and the dominant class.", "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
         new("inference.anomaly", "ONNX Anomaly Score", "Inference", [Exec, Image],
-            [new("score", VisionDataType.Double), new("isAnomaly", VisionDataType.Boolean), new("heatmap", VisionDataType.Image, Required: false), new("peakX", VisionDataType.Double, Required: false), new("peakY", VisionDataType.Double, Required: false), new("areaFraction", VisionDataType.Double, Required: false), new("result", VisionDataType.String), Next],
+            [new("score", VisionDataType.Double), new("isAnomaly", VisionDataType.Boolean), new("heatmap", VisionDataType.Image, Required: false), new("peakX", VisionDataType.Double, Required: false), new("peakY", VisionDataType.Double, Required: false), new("areaFraction", VisionDataType.Double, Required: false), new("suggestedThreshold", VisionDataType.Double, Required: false), new("result", VisionDataType.String), Next],
             [.. OnnxParameters, new("threshold", "Anomaly Threshold", "number", 0.5, -1000000, 1000000, 0.01)],
             "Run an ONNX anomaly model. A scalar output is compared directly with the threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above threshold (isAnomaly follows the peak).", "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false))

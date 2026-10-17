@@ -184,6 +184,11 @@ public sealed class OcrNode : IVisionNodeExecutor
                 using var page = engine.Process(image, psm);
                 cancellationToken.ThrowIfCancellationRequested();
                 var allWords = OcrTextParsing.ParseTsvWords(page.TsvText, scale, offsetX, offsetY);
+                // Per-character boxes come from Tesseract box output (bottom-origin);
+                // empty when the engine/model produces none - reported, never invented.
+                OcrTextParsing.OcrChar[] chars = [];
+                try { chars = OcrTextParsing.ParseBoxChars(page.BoxText, scale, offsetX, offsetY, (int)Math.Round(workSource.Height * scale)); }
+                catch (Exception) { chars = []; }
                 var words = minConfidence > 0 ? allWords.Where(w => w.Confidence >= minConfidence).ToArray() : allWords;
                 var text = minConfidence > 0 ? string.Join(" ", words.Select(w => w.Text)) : page.Text.Trim();
                 var confidence = words.Length > 0
@@ -197,9 +202,10 @@ public sealed class OcrNode : IVisionNodeExecutor
                         ["confidence"] = VisionValue.Double(confidence),
                         ["wordCount"] = VisionValue.Integer(words.Length),
                         ["words"] = VisionValue.String(wordsJson),
+                        ["chars"] = VisionValue.String(JsonSerializer.Serialize(chars.Select(ch => new { text = ch.Text, x = ch.X, y = ch.Y, width = ch.Width, height = ch.Height }))),
                         ["result"] = VisionValue.String(JsonSerializer.Serialize(new { text, confidence, language, psm = psmName, oem = oemName, wordCount = words.Length, words }))
                     },
-                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length }));
+                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length }));
             }
             catch (Exception ex) when (ex is not (InvalidOperationException or OperationCanceledException))
             {

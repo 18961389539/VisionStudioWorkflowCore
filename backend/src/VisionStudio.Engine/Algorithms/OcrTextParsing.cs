@@ -16,6 +16,33 @@ public static class OcrTextParsing
         return whitelist;
     }
 
+    public sealed record OcrChar(string Text, double X, double Y, double Width, double Height);
+
+    /// <summary>
+    /// Parse Tesseract box output (one line per character: char left bottom right top page,
+    /// bottom-left origin) into source-pixel boxes. Malformed lines are skipped, never guessed.
+    /// </summary>
+    /// <param name="processedImageHeight">Height of the (possibly upscaled) image the box
+    /// coordinates refer to; the Y axis is flipped from bottom-origin to top-origin there
+    /// before dividing by <paramref name="scale"/>.</param>
+    public static OcrChar[] ParseBoxChars(string? boxText, double scale, double offsetX, double offsetY, int processedImageHeight)
+    {
+        if (string.IsNullOrWhiteSpace(boxText) || !(scale > 0)) return [];
+        var chars = new List<OcrChar>();
+        foreach (var line in boxText.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.TrimEnd('\r').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 5) continue;
+            if (!double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var left) ||
+                !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var bottom) ||
+                !double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var right) ||
+                !double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var top)) continue;
+            var y = (processedImageHeight - top) / scale + offsetY;
+            chars.Add(new(parts[0], left / scale + offsetX, y, (right - left) / scale, (top - bottom) / scale));
+        }
+        return chars.ToArray();
+    }
+
     public static OcrWord[] ParseTsvWords(string? tsv, double scale, double offsetX, double offsetY)
     {
         if (string.IsNullOrWhiteSpace(tsv) || !(scale > 0) || !double.IsFinite(scale)) return [];

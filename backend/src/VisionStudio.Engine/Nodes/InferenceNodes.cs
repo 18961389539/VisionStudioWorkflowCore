@@ -79,7 +79,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var rows = shape.Length == 2 && shape[1] == 6
             ? shape[0]
             : shape.Length == 3 && shape[0] == 1 && shape[2] == 6 ? shape[1] : 0;
-        var isYoloLayout = node.GetString("layout", "xyxy").Trim().Equals("yolo", StringComparison.OrdinalIgnoreCase);
+        var isYoloLayout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant() is "yolo" or "yolov5";
         if (rows <= 0 && !isYoloLayout)
             throw new InvalidOperationException($"Detection output must have shape [N,6] or [1,N,6] with rows [x1,y1,x2,y2,score,classId]; received [{string.Join(',', shape)}].");
         var values = OnnxInferenceHelpers.ReadFloatTensor(output, "detection");
@@ -93,8 +93,8 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         if (coordinates is not ("normalized" or "pixels"))
             throw new InvalidOperationException($"Unsupported detection coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
         var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
-        if (layout is not ("xyxy" or "yolo"))
-            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy' and 'yolo'.");
+        if (layout is not ("xyxy" or "yolo" or "yolov5"))
+            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy', 'yolo' and 'yolov5'.");
         var letterbox = node.GetBool("letterbox", false);
 
         var candidates = new List<DetectionCandidate>();
@@ -135,7 +135,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         if (layout == "yolo")
         {
             // YOLOv8-style heads: cx, cy, w, h + per-class scores (no objectness).
-            var yolo = InferenceStats.DecodeYolo(values, shape);
+            var yolo = InferenceStats.DecodeYolo(values, shape, useObjectness: layout == "yolov5");
             for (var i = 0; i < yolo.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -326,6 +326,7 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         else throw new InvalidOperationException($"Anomaly output must be a single scalar tensor (for example [1] or [1,1]) or an anomaly map [1,1,H,W] / [1,H,W]; received [{string.Join(',', shape)}].");
         if (values.Length != mapWidth * mapHeight) throw new InvalidOperationException("Anomaly map element count does not match its shape.");
         var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, threshold);
+        var suggestedThreshold = InferenceStats.OtsuThreshold(values);
         var normalized = InferenceStats.NormalizeMap(values);
         using var mapMat = new Mat(mapHeight, mapWidth, MatType.CV_8UC1);
         mapMat.SetArray(normalized);
@@ -335,7 +336,7 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         var peakX = stat.PeakX * (double)source.Width / mapWidth;
         var peakY = stat.PeakY * (double)source.Height / mapHeight;
         var isAnomaly = stat.Peak >= threshold;
-        var json = JsonSerializer.Serialize(new { score = stat.Peak, mean = stat.Mean, min = stat.Min, max = stat.Max, threshold, isAnomaly, peakX, peakY, areaFraction = stat.AreaFraction, outputShape = shape });
+        var json = JsonSerializer.Serialize(new { score = stat.Peak, mean = stat.Mean, min = stat.Min, max = stat.Max, threshold, suggestedThreshold, isAnomaly, peakX, peakY, areaFraction = stat.AreaFraction, outputShape = shape });
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -345,8 +346,9 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
                 ["peakX"] = VisionValue.Double(peakX),
                 ["peakY"] = VisionValue.Double(peakY),
                 ["areaFraction"] = VisionValue.Double(stat.AreaFraction),
+                ["suggestedThreshold"] = VisionValue.Double(suggestedThreshold),
                 ["result"] = VisionValue.String(json)
             },
-            new Dictionary<string, object?> { ["score"] = stat.Peak, ["mean"] = stat.Mean, ["threshold"] = threshold, ["isAnomaly"] = isAnomaly, ["peakX"] = peakX, ["peakY"] = peakY, ["areaFraction"] = stat.AreaFraction, ["outputShape"] = shape }));
+            new Dictionary<string, object?> { ["score"] = stat.Peak, ["mean"] = stat.Mean, ["threshold"] = threshold, ["suggestedThreshold"] = suggestedThreshold, ["isAnomaly"] = isAnomaly, ["peakX"] = peakX, ["peakY"] = peakY, ["areaFraction"] = stat.AreaFraction, ["outputShape"] = shape }));
     }
 }
