@@ -1603,6 +1603,54 @@ describe('caliper geometry input guidance', () => {
     });
   });
 
+  it('synchronizes circle shortcuts with the canvas, parameter fields and the applied workflow', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 50, centerY: 50, radius: 20, radialBand: 5, minContrast: 18, samplingMode: 'step', angleStepDeg: 10 } } };
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, onApply, result: report });
+    fireEvent.click(dialog.getByRole('button', { name: '上半圆' }));
+    fireEvent.click(dialog.getByRole('button', { name: '144 条' }));
+    fireEvent.click(dialog.getByRole('radio', { name: '由外向内' }));
+    fireEvent.change(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'radialBand')!.label }), { target: { value: '11' } });
+    fireEvent.change(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'minContrast')!.label }), { target: { value: '24' } });
+    fireEvent.change(dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'sampleWidth')!.label }), { target: { value: '7' } });
+    const geometry = await dialog.findByTestId('circle-geometry');
+    expect(geometry.getAttribute('data-angle-start')).toBe('-180');
+    expect(geometry.getAttribute('data-angle-end')).toBe('0');
+    expect(geometry.getAttribute('data-search-direction')).toBe('firstfromend');
+    expect(geometry.getAttribute('data-band')).toBe('11');
+    expect(geometry.getAttribute('data-profile-width')).toBe('7');
+    expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'caliperCount')!.label }) as HTMLInputElement).value).toBe('144');
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0]).toMatchObject({ centerX: 50, centerY: 50, radius: 20, radialBand: 11, minContrast: 24, sampleWidth: 7,
+      angleStartDeg: -180, angleEndDeg: 0, samplingMode: 'count', caliperCount: 144, searchDirection: 'firstfromend' });
+  });
+
+  it('validates and resets sampling fields moved into circle quick settings without duplicate inputs', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 50, centerY: 50, radius: 20, radialBand: 5, minContrast: 18, sampleWidth: 4 } } };
+    const { dialog, props } = mount({ node: circleNode, catalogItem: circleCatalog, result: report });
+    const input = (name: string) => dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label });
+    for (const name of ['radialBand', 'minContrast', 'sampleWidth']) {
+      expect(dialog.getAllByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === name)!.label })).toHaveLength(1);
+    }
+    fireEvent.change(input('radialBand'), { target: { value: '11' } });
+    fireEvent.change(input('minContrast'), { target: { value: '' } });
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((dialog.getByRole('button', { name: /应\s*用/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dialog.getByRole('button', { name: /恢复出厂默认/ }));
+    for (const name of ['radialBand', 'minContrast', 'sampleWidth']) {
+      expect((input(name) as HTMLInputElement).value).toBe(String(circleCatalog.parameters.find(parameter => parameter.name === name)!.defaultValue));
+    }
+    await waitFor(() => expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(props.onPreview).not.toHaveBeenCalled();
+    expect(props.onApply).not.toHaveBeenCalled();
+  });
+
   it('writes a dragged circle and wraparound arc back into staged parameters', async () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,

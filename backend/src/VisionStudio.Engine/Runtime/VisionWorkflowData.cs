@@ -36,6 +36,10 @@ public sealed class VisionWorkflowData : IDisposable
     /// <summary>单次运行全部节点图像的编码字节总预算：高分辨率/多图像节点不能只靠张数上限约束内存。</summary>
     private const long MaxNodeImagesTotalBytes = 16L * 1024 * 1024;
     private long _nodeImageBytes;
+    private readonly Dictionary<string, RunCaliperCircleDiagnostic> _caliperDiagnostics = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RunCaliperEdgeDiagnostic> _caliperEdgeDiagnostics = new(StringComparer.OrdinalIgnoreCase);
+    private const long MaxCaliperDiagnosticBytes = 16L * 1024 * 1024;
+    private long _caliperDiagnosticBytes;
     private bool _resumeSkipCompleted;
     private string? _forceExecuteNodeId;
     private WorkflowDefinition _definition = new("empty", "Empty", [], []);
@@ -413,6 +417,51 @@ public sealed class VisionWorkflowData : IDisposable
         .OrderBy(image => image.NodeId, StringComparer.OrdinalIgnoreCase)
         .ThenBy(image => image.PortName, StringComparer.OrdinalIgnoreCase)
         .ToArray();
+
+    public void ClearCaliperDiagnostic(string nodeId)
+    {
+        lock (_imageGate)
+        {
+            if (_caliperDiagnostics.Remove(nodeId, out var previous)) _caliperDiagnosticBytes -= previous.Data.EstimatedBytes;
+            if (_caliperEdgeDiagnostics.Remove(nodeId, out var previousEdge)) _caliperDiagnosticBytes -= previousEdge.Data.EstimatedBytes;
+        }
+    }
+
+    public bool CaptureCaliperDiagnostic(string nodeId, long sequence, CaliperCircleDiagnostic diagnostic)
+    {
+        if (!CaptureNodeImages) return false;
+        lock (_imageGate)
+        {
+            if (_caliperDiagnostics.Remove(nodeId, out var previous)) _caliperDiagnosticBytes -= previous.Data.EstimatedBytes;
+            if (_caliperDiagnosticBytes + diagnostic.EstimatedBytes > MaxCaliperDiagnosticBytes) return false;
+            _caliperDiagnostics[nodeId] = new(nodeId, sequence, diagnostic);
+            _caliperDiagnosticBytes += diagnostic.EstimatedBytes;
+            return true;
+        }
+    }
+
+    public IReadOnlyList<RunCaliperCircleDiagnostic> SnapshotCaliperDiagnostics()
+    {
+        lock (_imageGate) return _caliperDiagnostics.Values.ToArray();
+    }
+
+    public bool CaptureCaliperEdgeDiagnostic(string nodeId, long sequence, CaliperEdgeDiagnostic diagnostic)
+    {
+        if (!CaptureNodeImages) return false;
+        lock (_imageGate)
+        {
+            if (_caliperEdgeDiagnostics.Remove(nodeId, out var previous)) _caliperDiagnosticBytes -= previous.Data.EstimatedBytes;
+            if (_caliperDiagnosticBytes + diagnostic.EstimatedBytes > MaxCaliperDiagnosticBytes) return false;
+            _caliperEdgeDiagnostics[nodeId] = new(nodeId, sequence, diagnostic);
+            _caliperDiagnosticBytes += diagnostic.EstimatedBytes;
+            return true;
+        }
+    }
+
+    public IReadOnlyList<RunCaliperEdgeDiagnostic> SnapshotCaliperEdgeDiagnostics()
+    {
+        lock (_imageGate) return _caliperEdgeDiagnostics.Values.ToArray();
+    }
 
     private readonly record struct NodeImageKey(string NodeId, string PortName);
 

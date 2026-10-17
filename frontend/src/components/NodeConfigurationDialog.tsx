@@ -6,6 +6,12 @@ import NodeCategoryIcon from './NodeCategoryIcon';
 import PropertyPanel from './PropertyPanel';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from './ImageViewer';
 import NodeExecutionResult from './NodeExecutionResult';
+import CaliperCircleQuickSettings, { caliperCircleQuickParameterNames } from './CaliperCircleQuickSettings';
+import CaliperCircleDiagnosticsPanel from './CaliperCircleDiagnosticsPanel';
+import { useCaliperCircleDiagnostics } from '../caliperCircleDiagnostics';
+import CaliperEdgeQuickSettings, { caliperEdgeQuickParameterNames } from './CaliperEdgeQuickSettings';
+import CaliperEdgeDiagnosticsPanel from './CaliperEdgeDiagnosticsPanel';
+import { caliperProfilePoint, useCaliperEdgeDiagnostics } from '../caliperEdgeDiagnostics';
 import SplitHandle from './SplitHandle';
 import { runImageEntryForPort, useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
@@ -432,6 +438,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const [measurementFitUndo, setMeasurementFitUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
   const [previewNodeId, setPreviewNodeId] = useState(node.id);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [caliperDiagnosticMode, setCaliperDiagnosticMode] = useState(false);
+  const [edgeInspection, setEdgeInspection] = useState<{ key: string; position: number }>();
   const [trainBusy, setTrainBusy] = useState(false);
   const [trainingImageBusy, setTrainingImageBusy] = useState(false);
   const [searchImageBusy, setSearchImageBusy] = useState(false);
@@ -525,6 +533,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';
   const isCaliperCircle = catalogItem.type === 'measure.caliperCircle';
+  const isCaliperEdge = catalogItem.type === 'measure.caliper';
   const roiImageInputPort = isRoiTransform ? 'debugImage'
     : ['image.crop', 'region.fromRoi', ...measurementNodeTypes].includes(catalogItem.type) ? 'image' : undefined;
   const roiImageInputEdge = roiImageInputPort ? inputEdge(edges, node.id, roiImageInputPort) : undefined;
@@ -695,6 +704,18 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   }, [preview]);
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
+  const showCaliperDiagnostics = (isCaliperCircle || isCaliperEdge) && caliperDiagnosticMode;
+  const caliperDiagnosticReport = displayedResult?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
+  const caliperDiagnostics = useCaliperCircleDiagnostics({ enabled: open && isCaliperCircle && showCaliperDiagnostics,
+    runId: displayedResult?.runId, nodeId: node.id, report: caliperDiagnosticReport });
+  const edgeDiagnostics = useCaliperEdgeDiagnostics({ enabled: open && isCaliperEdge && showCaliperDiagnostics,
+    runId: displayedResult?.runId, nodeId: node.id, report: caliperDiagnosticReport });
+  const edgeDiagnosticKey = edgeDiagnostics.data ? `${edgeDiagnostics.data.runId}:${node.id}:${edgeDiagnostics.data.executionSequence}` : undefined;
+  const edgeInspectionPosition = edgeInspection?.key === edgeDiagnosticKey ? edgeInspection?.position : undefined;
+  const inspectEdgePosition = (position?: number) => {
+    if (position === undefined || !edgeDiagnosticKey) { setEdgeInspection(undefined); return; }
+    setEdgeInspection(current => current?.key === edgeDiagnosticKey && current.position === position ? current : { key: edgeDiagnosticKey, position });
+  };
   const freshInputResult = preview && !previewError && preview.fingerprint === draftFingerprint
     ? preview.result : !resultStale ? result : undefined;
   const matchReport = (searchPreview?.result ?? result)?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
@@ -1085,7 +1106,39 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && (showTrainedTemplatePreview || Boolean(showCapturedTrainingImage)));
   const showMeasurementReferenceImage = Boolean((canEditMeasurementGeometry || canDisplayConnectedSearchLine)
     && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady && measurementImageView === 'reference');
-  const displayImageSource = isRoiTransform && roiImageView === 'reference'
+  const diagnosticSnapshot = isCaliperEdge ? edgeDiagnostics.data : caliperDiagnostics.manifest;
+  const diagnosticImageEntry = showCaliperDiagnostics && diagnosticSnapshot
+    ? runImageEntryForPort(runImageCatalog, node.id, 'image') : undefined;
+  const diagnosticImageMatches = Boolean(diagnosticImageEntry && diagnosticSnapshot
+    && diagnosticImageEntry.width === diagnosticSnapshot.imageWidth && diagnosticImageEntry.height === diagnosticSnapshot.imageHeight);
+  const edgeDiagnosticGeometry: MeasurementGeometry | undefined = showCaliperDiagnostics && isCaliperEdge && diagnosticImageMatches && edgeDiagnostics.data
+    ? { type: 'line', start: edgeDiagnostics.data.start, end: edgeDiagnostics.data.end,
+      profileWidth: edgeDiagnostics.data.sampleWidth, direction: edgeDiagnostics.data.direction } : undefined;
+  const diagnosticOverlays = showCaliperDiagnostics && diagnosticImageMatches
+    ? (displayedResult?.overlays ?? []).filter(overlay => overlay.nodeId === node.id
+      && (!isCaliperEdge || !['caliper-edge', 'caliper-search'].includes(overlay.id))) : [];
+  const diagnosticMarkers: VisionOverlay[] = [];
+  if (isCaliperEdge && showCaliperDiagnostics && diagnosticImageMatches && edgeDiagnostics.data) {
+    const data = edgeDiagnostics.data;
+    // The profile uses the same clipped and transformed frame as the captured node image.
+    for (const [index, candidate] of data.candidates.entries()) {
+      if (index === data.selectedCandidateIndex) continue;
+      const point = caliperProfilePoint(data, candidate.position);
+      if (point) diagnosticMarkers.push({ id: `caliper-candidate-${index}`, type: 'Point', nodeId: node.id,
+        x: point.x, y: point.y, stroke: '#a78bfa', strokeWidth: 1.5 });
+    }
+    const inspected = edgeInspectionPosition === undefined ? undefined : caliperProfilePoint(data, edgeInspectionPosition);
+    if (inspected) diagnosticMarkers.push({ id: 'caliper-profile-cursor', type: 'Point', nodeId: node.id,
+      x: inspected.x, y: inspected.y, stroke: '#ffd666', strokeWidth: 3 });
+    if (data.edgePoint) diagnosticMarkers.push({ id: 'caliper-diagnostic-chosen', type: 'Point', nodeId: node.id,
+      x: data.edgePoint.x, y: data.edgePoint.y, stroke: '#52c41a', strokeWidth: 2.5 });
+  }
+  const displayImageSource = showCaliperDiagnostics
+    ? { url: diagnosticImageMatches && displayedResult
+      ? `/api/runs/${encodeURIComponent(displayedResult.runId)}/nodes/${encodeURIComponent(node.id)}/image?portName=image` : '',
+      width: diagnosticImageEntry?.width, height: diagnosticImageEntry?.height,
+      label: `${isCaliperEdge ? '边缘剖面诊断' : '单卡尺诊断'} · 本次实际测量图像（运行快照）` }
+    : isRoiTransform && roiImageView === 'reference'
     ? { url: referenceImage ? `data:image/png;base64,${referenceImage}` : '', width: Number(draft.referenceWidth ?? 0),
       height: Number(draft.referenceHeight ?? 0), label: referenceImage ? '已保存基准图像' : '尚未建立基准' }
     : showMeasurementReferenceImage && savedMeasurementReference
@@ -1532,7 +1585,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       style={{ '--node-columns': columns(imageShare) } as CSSProperties}>
       {showImage && <section className={'node-configuration-image' + (isRoiTransform ? ' has-roi-reference' : '')} aria-label={shapeMode === 'training' ? '模型训练图像' : shapeMode === 'search' ? '搜索推理图像' : '图像预览'}>
         <div className="node-configuration-image-source">
-          {shapeMode ? <>
+          {showCaliperDiagnostics ? <span>诊断图像 · 已应用本次 ROI 与坐标变换</span> : shapeMode ? <>
             <span>{trainingMode ? '训练图像' : '搜索场景图像'}</span>
             <Button size="small" onClick={() => void (trainingMode ? fetchTrainingImage() : fetchSearchImage())}
               loading={trainingMode ? trainingImageBusy : searchImageBusy}
@@ -1581,16 +1634,16 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             <Segmented size="small" value={imageSource} onChange={(value) => setImageSource(value as 'preview' | 'output' | 'input')}
               options={[{ label: '最终预览', value: 'preview' }, { label: '输出', value: 'output', disabled: !selectedOutputAvailable }, { label: '输入', value: 'input', disabled: !selectedInputAvailable }]} />
           </>}
-          {imageSource === 'output' && imageOutputPorts.length > 1 && <Select size="small" aria-label="输出图像端口"
+          {!showCaliperDiagnostics && imageSource === 'output' && imageOutputPorts.length > 1 && <Select size="small" aria-label="输出图像端口"
             value={imageOutputPortName} style={{ minWidth: 110 }} options={imageOutputPorts.map((entry) => ({ value: entry.portName, label: entry.portName }))}
             onChange={setImageOutputPortName} />}
-          {canEditMeasurementGeometry && measurementGeometry && measurementImageFrameReady && !showCurrentMeasurementImage
+          {!showCaliperDiagnostics && canEditMeasurementGeometry && measurementGeometry && measurementImageFrameReady && !showCurrentMeasurementImage
             && !(measurementGeometry.type === 'circle' && circleInputEdge) && <Button size="small" disabled={locked}
               onClick={fitMeasurementGeometryToImage}
               title="将搜索线或标称圆居中并缩放到当前几何图像内；必要时收窄沿边缘跨度或径向搜索带，保留阈值、极性、数量和圆弧设置。">
               适配几何到图像
             </Button>}
-          {measurementFitUndoAvailable && <Button size="small" disabled={locked} onClick={undoMeasurementGeometryFit}
+          {!showCaliperDiagnostics && measurementFitUndoAvailable && <Button size="small" disabled={locked} onClick={undoMeasurementGeometryFit}
             title="撤销最近一次适配几何到图像">撤销几何适配</Button>}
         </div>
         <div className="node-image-provenance"><span>{displayImageSource.label}</span>
@@ -1625,23 +1678,23 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {measurementTransformInvalid && <Alert showIcon type="warning" title="当前 transform 不符合卡尺测量要求"
           description="本提示依据最近一次运行报告中的实际输入。卡尺只接受有限、方向保持的 px→px 刚性变换（平移和旋转）；缩放、剪切、透视、镜像或非像素单位会导致测量失败。请改用刚性像素变换，或让测量几何直接使用当前图像坐标。" />}
-        {showCurrentMeasurementImage && viewerMeasurementGeometry && <Alert showIcon type="info" title="映射几何只读"
+        {!showCaliperDiagnostics && showCurrentMeasurementImage && viewerMeasurementGeometry && <Alert showIcon type="info" title="映射几何只读"
           description={canEditMeasurementGeometry
             ? '当前视图用于核对本次运行 transform 后的实际位置；请切回基准图像拖动或重绘卡尺几何。'
             : '当前视图用于核对本次运行 transform 后的实际位置；上游几何保持只读，请在来源节点中调整。'} />}
-        {currentMeasurementGeometryUnavailable && <Alert showIcon type="info" title="尚无当前图像中的卡尺位置"
+        {!showCaliperDiagnostics && currentMeasurementGeometryUnavailable && <Alert showIcon type="info" title="尚无当前图像中的卡尺位置"
           description="运行此节点以读取本次实际使用的 transform；在此之前不会把基准图像坐标直接叠加到当前测量图像。" />}
         {measurementTransformSourceNotice && <Alert showIcon type="info" title="transform 来源可能不适用于卡尺"
           description={measurementTransformSourceNotice} />}
-        {transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
+        {!showCaliperDiagnostics && transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
           description="当前节点的有效运行报告或测量图尺寸尚不可用。预检不会用基准图坐标冒充当前图像坐标；先运行一次上游定位与变换，再检查变换后的卡尺范围。" />}
-        {caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}
+        {!showCaliperDiagnostics && caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}
           description={caliperCircleBoundsNotice.description} />}
         {caliperLineBoundsNotice && <Alert showIcon type={caliperLineBoundsNotice.type} title={caliperLineBoundsNotice.title}
           description={caliperLineBoundsNotice.description} />}
-        {caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
+        {!showCaliperDiagnostics && caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
           description={caliperSearchLineBoundsNotice.description} />}
-        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict || connectedSearchLineImageFrameMismatch || connectedSearchLineTransformSourceMismatch ? 'error' : 'info'}
+        {searchLineInputEdge && (!showCaliperDiagnostics || measurementGeometryConflict) && <Alert showIcon type={correctedSearchLineTransformConflict || connectedSearchLineImageFrameMismatch || connectedSearchLineTransformSourceMismatch ? 'error' : 'info'}
           title={correctedSearchLineTransformConflict ? '上游几何已处于变换目标坐标系'
             : connectedSearchLineTransformSourceMismatch ? '上游搜索线与 transform 源坐标系不匹配'
               : connectedSearchLineImageFrameMismatch ? '上游搜索线与测量图像坐标不匹配'
@@ -1653,7 +1706,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             : connectedSearchLine
               ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
               : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。')} />}
-        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict || connectedCircleImageFrameMismatch || connectedCircleTransformSourceMismatch ? 'error' : transformInputEdge ? 'warning' : 'info'}
+        {circleInputEdge && (!showCaliperDiagnostics || measurementGeometryConflict) && <Alert showIcon type={correctedCircleTransformConflict || connectedCircleImageFrameMismatch || connectedCircleTransformSourceMismatch ? 'error' : transformInputEdge ? 'warning' : 'info'}
           title={correctedCircleTransformConflict ? directCorrectedCircleTransformConflict
             ? '定位修正圆不能再次应用 transform' : '上游几何已处于变换目标坐标系'
             : connectedCircleTransformSourceMismatch ? '上游圆与 transform 源坐标系不匹配'
@@ -1668,20 +1721,27 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               : '上游 circle 会覆盖本节点的圆心和标称半径参数；运行此节点以读取本次使用的圆，之后可在图像上调整圆弧和搜索带。')} />}
         {circleInputIsBoundingApproximation && <Alert showIcon type="warning" title="上游提供的是 ROI 包围圆"
           description={`定位修正节点的 ROI 类型为 ${circleSourceRoiType}；其 circle 端口输出包围圆，不是圆拟合结果。请核对圆心和半径，并按实际尺寸设置径向搜索带；若目标需要精确圆心/半径，请连接圆检测或圆拟合节点。`} />}
-        {!searchLineInputEdge && !circleInputEdge && transformInputEdge && <Alert showIcon type="info"
+        {!showCaliperDiagnostics && !searchLineInputEdge && !circleInputEdge && transformInputEdge && <Alert showIcon type="info"
           title={`几何将按变换跟随：${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}`}
           description={canEditMeasurementGeometry
             ? `本节点几何属于基准图像坐标；当前显示的${showMeasurementReferenceImage ? '已保存基准图像' : '变换输入图像'}可直接拖动或重绘，transform 会在运行时映射到测量图像。ROI 掩膜仍使用当前图像坐标。`
             : '本节点几何属于基准图像坐标；transform 会在运行时映射到测量图像。可从支持的定位修正 ROI 或图像裁剪变换自动打开对应基准图像。ROI 掩膜仍使用当前图像坐标。'} />}
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
-          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (isImageCrop ? cropRoiForImage : shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
+          overlays={showCaliperDiagnostics ? diagnosticOverlays : overlaysWithTrainedContour}
+          roi={showCaliperDiagnostics ? undefined : canEditRoi ? (isImageCrop ? cropRoiForImage : shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined)
-            : showConnectedRoiPreview ? connectedRoiPreviewGeometry : undefined} showRoiTools={canEditRoi || isRoiTransform}
-          measurementGeometry={viewerMeasurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked && !showCurrentMeasurementImage}
+            : showConnectedRoiPreview ? connectedRoiPreviewGeometry : undefined} showRoiTools={!showCaliperDiagnostics && (canEditRoi || isRoiTransform)}
+          measurementGeometry={showCaliperDiagnostics ? edgeDiagnosticGeometry : viewerMeasurementGeometry}
+          measurementMarkers={showCaliperDiagnostics ? diagnosticMarkers : undefined}
+          measurementGeometryEditable={!showCaliperDiagnostics && Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked && !showCurrentMeasurementImage}
+          caliperDiagnosticSelection={isCaliperCircle && showCaliperDiagnostics && diagnosticImageMatches && caliperDiagnostics.manifest ? {
+            center: caliperDiagnostics.manifest.center, radius: caliperDiagnostics.manifest.nominalRadius,
+            spokes: caliperDiagnostics.manifest.spokes, index: caliperDiagnostics.index, onSelect: caliperDiagnostics.select
+          } : undefined}
           onMeasurementGeometryChange={updateMeasurementGeometry}
-          roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : imageInputSourceId ? `输入图像 · ${nodeLabels[imageInputSourceId] ?? imageInputSourceId}` : String(node.data.label ?? node.id)}
+          roiEnabled={!showCaliperDiagnostics && canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : imageInputSourceId ? `输入图像 · ${nodeLabels[imageInputSourceId] ?? imageInputSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}
-          emptyHint={isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? regionEditMode === 'clutter' ? '在训练图像上绘制预期为空的杂乱区域' : '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
+          emptyHint={showCaliperDiagnostics ? (isCaliperEdge ? edgeDiagnostics.loading : caliperDiagnostics.loading) ? '正在读取本次运行的诊断图像…' : '本次诊断图像不可用；请读取诊断或重新运行此节点。' : isRoiTransform ? '获取图像并设为基准，然后在已保存的图像上绘制 ROI' : isImageCrop ? '运行节点以加载输入图像，然后绘制裁剪区域' : shapeMode === 'training' ? regionEditMode === 'clutter' ? '在训练图像上绘制预期为空的杂乱区域' : '获取训练图像后可绘制模型区域' : shapeMode === 'search' ? '获取场景图像后可绘制搜索区域' : '运行此节点以显示图像与矢量覆盖层'}
           emptyAction={{
             label: isRoiTransform ? '获取图像并设为基准' : isImageCrop ? '运行以获取输入图像' : shapeMode === 'training' ? '获取训练图像' : shapeMode === 'search' ? '获取场景图像' : '运行此节点',
             onClick: () => void (isRoiTransform ? captureRoiReference() : shapeMode === 'training' ? fetchTrainingImage() : shapeMode === 'search' ? fetchSearchImage() : runPreview()),
@@ -1699,6 +1759,29 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             <Button size="small" type="link" disabled={!dirty || locked} onClick={() => setDraft(cloneParameters(baseline))}>还原为打开时</Button>
           </span>
         </div>
+        {(isCaliperCircle || isCaliperEdge) && <div className="caliper-workspace-mode"><Segmented size="small" aria-label={isCaliperEdge ? '单边缘卡尺工作模式' : '圆卡尺工作模式'}
+          value={caliperDiagnosticMode ? 'diagnostics' : 'settings'}
+          options={[{ label: isCaliperEdge ? '选线与调参' : '圈选与调参', value: 'settings' }, { label: isCaliperEdge ? '边缘剖面诊断' : '单卡尺诊断', value: 'diagnostics' }]}
+          onChange={value => setCaliperDiagnosticMode(value === 'diagnostics')} /></div>}
+        {isCaliperCircle && showCaliperDiagnostics && <CaliperCircleDiagnosticsPanel manifest={caliperDiagnostics.manifest} profile={caliperDiagnostics.profile}
+          index={caliperDiagnostics.index} available={caliperDiagnostics.available} loading={caliperDiagnostics.loading} error={caliperDiagnostics.error}
+          stale={stale} busy={previewBusy} onSelect={caliperDiagnostics.select} onRetry={caliperDiagnostics.retry} onRun={() => void runPreview()}
+          runDisabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryConflict || connectedRoiImageFrameMismatch} />}
+        {isCaliperEdge && showCaliperDiagnostics && <CaliperEdgeDiagnosticsPanel key={edgeDiagnosticKey ?? 'no-edge-diagnostic'}
+          data={edgeDiagnostics.data} available={edgeDiagnostics.available} loading={edgeDiagnostics.loading} error={edgeDiagnostics.error}
+          stale={stale} busy={previewBusy} onRetry={edgeDiagnostics.retry} onRun={() => void runPreview()}
+          inspectionPosition={edgeInspectionPosition} onInspect={inspectEdgePosition}
+          runDisabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryConflict || connectedRoiImageFrameMismatch} />}
+        {isCaliperEdge && <CaliperEdgeQuickSettings parameters={draft} parameterDescriptors={catalogItem.parameters} disabled={locked}
+          geometry={measurementGeometry?.type === 'line' ? measurementGeometry : undefined}
+          geometryDisabled={showCaliperDiagnostics || !canEditMeasurementGeometry || !measurementImageFrameReady || showCurrentMeasurementImage || measurementGeometryConflict}
+          geometryHint={searchLineInputEdge ? '搜索线来自上游，几何只读；可在此调节采样参数。'
+            : showCaliperDiagnostics ? '当前图像显示运行快照；切回“选线与调参”调整搜索线。'
+              : showCurrentMeasurementImage ? '当前映射几何只读；切回基准图像调整搜索线。'
+                : !measurementGeometry ? '运行节点加载匹配的图像后，可拖动或重绘搜索线。' : undefined}
+          onGeometryChange={updateMeasurementGeometry} onChange={patch => setDraft(current => ({ ...current, ...patch }))} />}
+        {isCaliperCircle && <CaliperCircleQuickSettings parameters={draft} parameterDescriptors={catalogItem.parameters} disabled={locked}
+          onChange={patch => setDraft(current => ({ ...current, ...patch }))} />}
         {isRoiTransform && <div className="shape-training-panel">
           <strong>{referenceImage ? '已保存基准位姿' : '建立基准'}</strong>
           {referenceImage && <p>X {Number(draft.baseX).toFixed(2)} px · Y {Number(draft.baseY).toFixed(2)} px · 角度 {Number(draft.baseThetaDeg).toFixed(2)}°</p>}
@@ -1761,6 +1844,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         </div>}
         {issues.length > 0 && <Alert type="error" title="请修正参数后再运行或应用" description={issues.join('；')} />}
         <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
+          hiddenParameterNames={isCaliperCircle ? caliperCircleQuickParameterNames : isCaliperEdge ? caliperEdgeQuickParameterNames : undefined}
           roiFields={roiFields} onLocateRoi={canLocateRoiInImage ? locateRoi : undefined} />
       </section>
     </div>;

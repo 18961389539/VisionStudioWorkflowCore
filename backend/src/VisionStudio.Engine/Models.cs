@@ -103,6 +103,12 @@ public sealed record WorkflowRunResult(
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlyList<RunNodeImage>? NodeImages { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<RunCaliperCircleDiagnostic>? CaliperDiagnostics { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<RunCaliperEdgeDiagnostic>? CaliperEdgeDiagnostics { get; init; }
 }
 
 /// <summary>Structured run failure codes carried by <see cref="WorkflowRunResult.ErrorCode"/>.</summary>

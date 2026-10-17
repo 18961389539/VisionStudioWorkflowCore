@@ -34,12 +34,22 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
         var observation = data.BeginNodeObservation();
         var sw = Stopwatch.StartNew();
         IReadOnlyDictionary<string, VisionValue> inputs = new Dictionary<string, VisionValue>();
+        CaliperCircleDiagnostic? caliperDiagnostic = null;
+        CaliperEdgeDiagnostic? caliperEdgeDiagnostic = null;
+        var captureCaliperDiagnostic = data.CaptureNodeImages && node.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
+            && (data.DebugMode != DebugRunMode.RunNode || node.Id.Equals(data.TargetNodeId, StringComparison.OrdinalIgnoreCase));
+        var captureCaliperEdgeDiagnostic = data.CaptureNodeImages && node.Type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+            && (data.DebugMode != DebugRunMode.RunNode || node.Id.Equals(data.TargetNodeId, StringComparison.OrdinalIgnoreCase));
+        if (captureCaliperDiagnostic || captureCaliperEdgeDiagnostic) data.ClearCaliperDiagnostic(node.Id);
         try
         {
             // A02：节点执行前重入所有权环境——真实派发（写设备/机器人指令/相机触发）据此校验租约代次。
             using var ownership = DeviceCommandOwnership.Enter(data.Ownership);
             inputs = dispatcher.ResolveInputs(data, node);
-            var result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken);
+            NodeExecutorResult result;
+            using (captureCaliperDiagnostic ? CaliperCircleDiagnosticCapture.Begin(diagnostic => caliperDiagnostic = diagnostic) : null)
+            using (captureCaliperEdgeDiagnostic ? CaliperEdgeDiagnosticCapture.Begin(diagnostic => caliperEdgeDiagnostic = diagnostic) : null)
+                result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken);
             if (node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase))
                 result = await ExecuteTryBodyAsync(data, node, result, cancellationToken);
             sw.Stop();
@@ -52,6 +62,16 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             var reportSummary = Algorithms.VisionAlgorithmRuntime.BackendFor(node.Type) is { } algorithmBackend
                 ? new Dictionary<string, object?>(result.Summary) { ["algorithmBackend"] = algorithmBackend }
                 : result.Summary;
+            if (caliperDiagnostic is not null)
+                reportSummary = new Dictionary<string, object?>(reportSummary)
+                {
+                    ["caliperDiagnosticsAvailable"] = data.CaptureCaliperDiagnostic(node.Id, observation.Sequence, caliperDiagnostic)
+                };
+            if (caliperEdgeDiagnostic is not null)
+                reportSummary = new Dictionary<string, object?>(reportSummary)
+                {
+                    ["caliperEdgeDiagnosticsAvailable"] = data.CaptureCaliperEdgeDiagnostic(node.Id, observation.Sequence, caliperEdgeDiagnostic)
+                };
 
             if ((node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) || node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase)) &&
                 result.Outputs.TryGetValue("condition", out var condition) &&

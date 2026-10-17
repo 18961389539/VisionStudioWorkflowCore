@@ -109,6 +109,8 @@ public sealed class WorkflowCoreVisionRunner(
                 DeferredArtifacts = artifacts,
                 StartedAt = startedAt,
                 NodeImages = data.SnapshotNodeImages(),
+                CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
+                CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics(),
                 // Workflow Core may surface a step fault as a suspended instance instead of an exception,
                 // so the interrupted lifecycle states are re-derived here too: data.Error is set by the node
                 // runtime whenever a node faults, including cancellation-induced faults.
@@ -138,6 +140,8 @@ public sealed class WorkflowCoreVisionRunner(
             {
                 StartedAt = startedAt,
                 NodeImages = data.SnapshotNodeImages(),
+                CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
+                CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics(),
                 ErrorCode = VisionRunErrorCodes.Timeout
             };
         }
@@ -164,6 +168,8 @@ public sealed class WorkflowCoreVisionRunner(
             {
                 StartedAt = startedAt,
                 NodeImages = data.SnapshotNodeImages(),
+                CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
+                CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics(),
                 ErrorCode = VisionRunErrorCodes.Cancelled
             };
         }
@@ -192,6 +198,8 @@ public sealed class WorkflowCoreVisionRunner(
             {
                 StartedAt = startedAt,
                 NodeImages = data.SnapshotNodeImages(),
+                CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
+                CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics(),
                 ErrorCode = data.Error is not null ? VisionRunErrorCodes.NodeFailure : VisionRunErrorCodes.RuntimeError
             };
         }

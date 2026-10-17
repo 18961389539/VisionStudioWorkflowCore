@@ -347,7 +347,9 @@ public sealed class WorkflowDebugSessionService(
             data.BuildReplayInput())
         {
             StartedAt = startedAt,
-            NodeImages = data.SnapshotNodeImages()
+            NodeImages = data.SnapshotNodeImages(),
+            CaliperDiagnostics = data.SnapshotCaliperDiagnostics(),
+            CaliperEdgeDiagnostics = data.SnapshotCaliperEdgeDiagnostics()
         };
     }
 

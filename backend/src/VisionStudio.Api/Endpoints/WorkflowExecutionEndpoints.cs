@@ -180,6 +180,63 @@ public static class WorkflowExecutionEndpoints
             return image is null ? Results.NotFound() : Results.File(image.Bytes, image.ContentType);
         });
 
+        app.MapGet("/api/runs/{runId}/nodes/{nodeId}/caliper-edge-diagnostics", (
+            string runId, string nodeId, RunStore store) =>
+        {
+            var capture = store.TryGet(runId, out var artifact)
+                ? artifact.CaliperEdgeDiagnostics?.FirstOrDefault(x => x.NodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)) : null;
+            if (capture is null) return Results.NotFound(new { error = "此运行没有单边缘卡尺诊断数据，或数据已被清理。请重新运行节点。" });
+            var data = capture.Data;
+            return Results.Ok(new
+            {
+                runId, nodeId, capture.ExecutionSequence,
+                data.ImageWidth, data.ImageHeight, data.CoordinateFrame, data.Start, data.End,
+                data.ProfileStart, data.ProfileEnd, data.Clipped, data.StartOffset, data.Spacing,
+                data.MinContrast, data.SampleWidth, data.Polarity, data.Direction, data.Refine,
+                data.Found, data.Reason, data.EdgePosition, data.EdgePoint, data.EdgeStrength, data.FitError,
+                data.SelectedCandidateIndex, data.Candidates,
+                profile = data.Profile.Select(value => double.IsFinite(value) ? (double?)value : null).ToArray(),
+                sampleCount = data.Profile.Length, validSampleCount = data.Profile.Count(double.IsFinite)
+            });
+        }).RequireAuthorization(SecurityPolicies.Engineer);
+
+        // Read captured samples only; selecting a spoke must never execute a workflow or a device.
+        app.MapGet("/api/runs/{runId}/nodes/{nodeId}/caliper-diagnostics", (
+            string runId, string nodeId, int? spokeIndex, RunStore store) =>
+        {
+            var capture = store.TryGet(runId, out var artifact)
+                ? artifact.CaliperDiagnostics?.FirstOrDefault(x => x.NodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)) : null;
+            if (capture is null) return Results.NotFound(new { error = "此运行没有卡尺诊断数据，或数据已被清理。请重新运行节点。" });
+            var data = capture.Data;
+            if (spokeIndex is { } index)
+            {
+                if (index < 0 || index >= data.Spokes.Count)
+                    return Results.BadRequest(new { error = "卡尺序号超出本次运行的采样范围。" });
+                var spoke = data.Spokes[index];
+                return Results.Ok(new
+                {
+                    runId, nodeId, capture.ExecutionSequence,
+                    spoke.Index, spoke.AngleDeg, spoke.Status, spoke.StartRadius, spoke.Spacing,
+                    spoke.ProfileStart, spoke.ProfileEnd, spoke.Clipped, spoke.EdgeRadius, spoke.EdgeStrength, spoke.EdgePoint,
+                    profile = spoke.Profile.Select(value => double.IsFinite(value) ? (double?)value : null).ToArray(),
+                    spoke.Candidates
+                });
+            }
+            return Results.Ok(new
+            {
+                runId, nodeId, capture.ExecutionSequence,
+                data.ImageWidth, data.ImageHeight, data.CoordinateFrame, data.Center, data.NominalRadius, data.RadialBand,
+                data.MinContrast, data.SampleWidth, data.Polarity, data.SearchDirection, data.Found, data.Reason,
+                spokes = data.Spokes.Select(spoke => new
+                {
+                    spoke.Index, spoke.AngleDeg, spoke.Start, spoke.End, spoke.Status,
+                    spoke.ProfileStart, spoke.ProfileEnd, spoke.Clipped, spoke.EdgePoint,
+                    spoke.EdgeRadius, spoke.EdgeStrength, sampleCount = spoke.Profile.Length,
+                    validSampleCount = spoke.Profile.Count(double.IsFinite), candidateCount = spoke.Candidates.Count
+                }).ToArray()
+            });
+        }).RequireAuthorization(SecurityPolicies.Engineer);
+
         return app;
     }
 

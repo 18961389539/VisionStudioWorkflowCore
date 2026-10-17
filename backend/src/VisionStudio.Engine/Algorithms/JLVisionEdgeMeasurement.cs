@@ -9,7 +9,7 @@ internal static class JLVisionEdgeMeasurement
     private const int MinimumNativeSegmentLength = 8;
 
     public static Edge Find(double[] profile, double spacing, string polarity, double threshold, string direction, string refine,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var candidates = new List<(double Position, double Amplitude)>();
@@ -46,7 +46,8 @@ internal static class JLVisionEdgeMeasurement
                 // surfacing HALCON error #3022 to the workflow runner.
                 if (length < MinimumNativeSegmentLength)
                 {
-                    AddShortProfileCandidates(profile, start, length, polarity, threshold, refine, candidates, cancellationToken);
+                    AddShortProfileCandidates(profile, start, length, polarity, threshold, refine, candidates, cancellationToken,
+                        spacing, diagnosticCandidates);
                     start = end + 1;
                     continue;
                 }
@@ -69,6 +70,7 @@ internal static class JLVisionEdgeMeasurement
                     {
                         if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
                         candidates.Add((start + columns[i].D, Math.Abs(amplitude[i].D)));
+                        diagnosticCandidates?.Add(new((start + columns[i].D) * spacing, amplitude[i].D, "gaussian"));
                     }
                 }
             }
@@ -84,7 +86,8 @@ internal static class JLVisionEdgeMeasurement
     }
 
     private static void AddShortProfileCandidates(double[] profile, int start, int length, string polarity, double threshold,
-        string refine, List<(double Position, double Amplitude)> candidates, CancellationToken cancellationToken)
+        string refine, List<(double Position, double Amplitude)> candidates, CancellationToken cancellationToken,
+        double spacing, List<CaliperEdgeCandidate>? diagnosticCandidates)
     {
         var requestedPolarity = polarity.ToLowerInvariant();
         var gradients = new double[length - 1];
@@ -127,6 +130,7 @@ internal static class JLVisionEdgeMeasurement
                 }
             }
             candidates.Add((position, amplitude));
+            diagnosticCandidates?.Add(new(position * spacing, Math.CopySign(amplitude, gradient), "local-gradient"));
         }
     }
 

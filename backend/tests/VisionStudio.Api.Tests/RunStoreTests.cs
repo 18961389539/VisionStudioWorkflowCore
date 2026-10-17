@@ -8,6 +8,22 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class RunStoreTests
 {
+    [Fact]
+    public void DiagnosticProfilesCountTowardsTheArtifactBudgetAndReplacementRefundsTheirBytes()
+    {
+        var diagnostic = new CaliperCircleDiagnostic(100, 100, "CurrentImage", new(50, 50), 20, 4, 8, 1, "any", "strongest", true, "ok",
+            [new(0, 0, new(66, 50), new(74, 50)) { Profile = new double[1000] }]);
+        WorkflowRunResult WithDiagnostic(string id) => Result(id, 0, 0) with
+        { CaliperDiagnostics = [new("circle", 1, diagnostic)] };
+        var store = new RunStore(maxTotalBytes: diagnostic.EstimatedBytes * 2);
+        store.Put(WithDiagnostic("a")); store.Put(WithDiagnostic("b"));
+        store.Put(WithDiagnostic("a"));
+        Assert.True(store.TryGet("a", out _)); Assert.True(store.TryGet("b", out _));
+        store.Put(WithDiagnostic("c"));
+        Assert.False(store.TryGet("b", out _));
+        Assert.True(store.TryGet("a", out _)); Assert.True(store.TryGet("c", out _));
+    }
+
     private static WorkflowRunResult Result(string runId, int nodeImageBytes, int nodeImageCount = 1)
         => new(runId, true, 1.0, false, 0, 0, [], [], null)
         {

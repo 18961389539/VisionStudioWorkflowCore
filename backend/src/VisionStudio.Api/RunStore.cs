@@ -8,7 +8,11 @@ public sealed record RunArtifact(
     int Width,
     int Height,
     IReadOnlyList<VisionOverlay> Overlays,
-    IReadOnlyList<RunNodeImage> NodeImages);
+    IReadOnlyList<RunNodeImage> NodeImages)
+{
+    public IReadOnlyList<RunCaliperCircleDiagnostic>? CaliperDiagnostics { get; init; }
+    public IReadOnlyList<RunCaliperEdgeDiagnostic>? CaliperEdgeDiagnostics { get; init; }
+}
 
 /// <summary>
 /// Small in-memory artifact cache for the MVP viewer. Bounded retention prevents repeated debug runs
@@ -48,7 +52,11 @@ public sealed class RunStore
             result.PreviewWidth,
             result.PreviewHeight,
             result.Overlays,
-            result.NodeImages ?? []);
+            result.NodeImages ?? [])
+        {
+            CaliperDiagnostics = result.CaliperDiagnostics,
+            CaliperEdgeDiagnostics = result.CaliperEdgeDiagnostics
+        };
         var bytes = EstimateBytes(artifact);
 
         // 替换、记账、驱逐作为一个整体在同一临界区完成：并发 Put 不再互相覆盖字节账
@@ -88,7 +96,9 @@ public sealed class RunStore
         return false;
     }
 
-    /// <summary>预算计入预览和节点图像的编码字节；overlay 为小型矢量数据，忽略不计。</summary>
+    /// <summary>预算计入预览、节点图像以及交互式卡尺剖面；overlay 为小型矢量数据。</summary>
     private static long EstimateBytes(RunArtifact artifact)
-        => (artifact.PreviewJpeg?.Length ?? 0) + artifact.NodeImages.Sum(x => (long)x.Bytes.Length);
+        => (artifact.PreviewJpeg?.Length ?? 0) + artifact.NodeImages.Sum(x => (long)x.Bytes.Length)
+            + (artifact.CaliperDiagnostics?.Sum(x => x.Data.EstimatedBytes) ?? 0)
+            + (artifact.CaliperEdgeDiagnostics?.Sum(x => x.Data.EstimatedBytes) ?? 0);
 }

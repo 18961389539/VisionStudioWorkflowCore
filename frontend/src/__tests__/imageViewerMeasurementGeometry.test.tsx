@@ -4,6 +4,7 @@ import { useState } from 'react';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from '../components/ImageViewer';
 import { circleArcSpan, effectiveSampleWidth, normalizeCaliperCircleArc, normalizeCaliperAngle } from '../caliperCircleSampling';
 import type { VisionOverlay, VisionRoi } from '../types';
+import { diagnosticManifest } from './fixtures/caliperDiagnostics';
 
 vi.mock('react-konva', async () => {
   const React = await import('react');
@@ -27,8 +28,8 @@ vi.mock('react-konva', async () => {
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
-    Arrow: ({ points, pointerAtBeginning }: { points?: number[]; pointerAtBeginning?: boolean }) =>
-      <span data-testid="search-arrow" data-points={points?.join(',')} data-pointer-at-beginning={pointerAtBeginning} />,
+    Arrow: ({ points, pointerAtBeginning, name }: { points?: number[]; pointerAtBeginning?: boolean; name?: string }) =>
+      <span data-testid={name === 'caliper-diagnostic-selected-spoke' ? name : 'search-arrow'} data-points={points?.join(',')} data-pointer-at-beginning={pointerAtBeginning} />,
     Image: () => null,
     Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('measurement-profile-band-')
       || name?.startsWith('measurement-circle-profile-band-')
@@ -39,7 +40,7 @@ vi.mock('react-konva', async () => {
       : stroke === '#ff4d4f'
         ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
     Circle: ({ name, x, y }: { name?: string; x?: number; y?: number }) => name?.startsWith('measurement-profile-span-') || name === 'measurement-profile-width'
-      || name?.startsWith('caliper-circle-angle-') ? <span data-testid={name} data-x={x} data-y={y} /> : null,
+      || name?.startsWith('caliper-circle-angle-') || name === 'caliper-diagnostic-selected-edge' ? <span data-testid={name} data-x={x} data-y={y} /> : null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
@@ -63,6 +64,189 @@ const imageView = (geometry: MeasurementGeometry, onChange: (geometry: Measureme
 );
 
 describe('ImageViewer measurement geometry editing', () => {
+  it('picks a captured spoke without editing the circle or ROI and highlights the selected run point', () => {
+    const manifest = diagnosticManifest('run-a', 7, 4);
+    const onSelect = vi.fn(), onGeometryChange = vi.fn(), onRoiChange = vi.fn();
+    const selection = { center: manifest.center, radius: manifest.nominalRadius, spokes: manifest.spokes, index: 0, onSelect };
+    const geometry: MeasurementGeometry = { type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 4 };
+    const view = render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled={false} onRoiChange={onRoiChange} measurementGeometry={geometry} measurementGeometryEditable
+      onMeasurementGeometryChange={onGeometryChange} caliperDiagnosticSelection={selection} />);
+    fireEvent.click(screen.getByRole('button', { name: '原始比例' }));
+    fireEvent.mouseDown(screen.getByTestId('stage'), { clientX: 220, clientY: 130 });
+    fireEvent.mouseUp(document.body);
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(0);
+    expect(onGeometryChange).not.toHaveBeenCalled(); expect(onRoiChange).not.toHaveBeenCalled();
+    view.rerender(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled={false} onRoiChange={onRoiChange} caliperDiagnosticSelection={{ ...selection, index: 1 }} />);
+    const edge = screen.getByTestId('caliper-diagnostic-selected-edge');
+    expect(Number(edge.dataset.x)).toBeCloseTo(50); expect(Number(edge.dataset.y)).toBeCloseTo(70);
+    const points = screen.getByTestId('caliper-diagnostic-selected-spoke').getAttribute('data-points')!.split(',').map(Number);
+    expect(points[0]).toBeCloseTo(50); expect(points[1]).toBeCloseTo(66); expect(points[3]).toBeCloseTo(74);
+  });
+
+  it('pans from diagnostic background without selecting a spoke or editing geometry', () => {
+    const manifest = diagnosticManifest(), onSelect = vi.fn(), onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled={false} onRoiChange={onRoiChange}
+      caliperDiagnosticSelection={{ center: manifest.center, radius: manifest.nominalRadius, spokes: manifest.spokes, index: 0, onSelect }} />);
+    fireEvent.click(screen.getByRole('button', { name: '原始比例' }));
+    fireEvent.mouseDown(screen.getByTestId('stage'), { clientX: 160, clientY: 90 });
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 180, clientY: 110 });
+    fireEvent.mouseUp(document.body);
+    expect(onSelect).not.toHaveBeenCalled(); expect(onRoiChange).not.toHaveBeenCalled();
+  });
+
+  const circleGeometry: Extract<MeasurementGeometry, { type: 'circle' }> = {
+    type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+    angleStartDeg: -90, angleEndDeg: 90, caliperCount: 24, profileWidth: 5
+  };
+  const pickCirclePoint = (x: number, y: number) => {
+    fireEvent.mouseDown(screen.getByTestId('stage'), { clientX: x + 150, clientY: y + 80 });
+    fireEvent.mouseUp(document.body);
+  };
+  const startCircleDrawing = (mode: string) => {
+    fireEvent.click(screen.getByRole('button', { name: '原始比例' }));
+    fireEvent.click(screen.getByRole('button', { name: '重绘标称圆' }));
+    fireEvent.click(screen.getByRole('radio', { name: mode }));
+  };
+
+  it('redraws from diameter endpoints with a live size preview and preserves caliper settings', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('直径两端');
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 170, clientY: 130 }); // image (20,50)
+    fireEvent.mouseMove(stage, { clientX: 230, clientY: 130 }); // image (80,50)
+    expect(screen.getByLabelText('圈选尺寸').textContent).toContain('圆心 (50.00, 50.00) · 半径 30.00 px');
+    fireEvent.mouseUp(document.body);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...circleGeometry, radius: 30 });
+    expect(screen.queryByLabelText('标称圆圈选提示')).toBeNull();
+  });
+
+  it('previews and constructs a circle through three edge points without guessing its center', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50);
+    pickCirclePoint(50, 20);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 230, clientY: 130 });
+    expect(screen.getByLabelText('圈选尺寸').textContent).toContain('半径 30.00 px');
+    pickCirclePoint(80, 50);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...circleGeometry, radius: 30 });
+  });
+
+  it.each([false, true])('constructs and previews the upper search arc regardless of endpoint pick order (reversed=%s)', reverse => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点选弧');
+    pickCirclePoint(reverse ? 80 : 20, 50);
+    expect(screen.getByText(/点选圆弧第 2\/3 点/)).toBeTruthy();
+    pickCirclePoint(50, 20);
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: (reverse ? 20 : 80) + 150, clientY: 130 });
+    expect(screen.getByLabelText('圈选尺寸').textContent).toContain('圆弧 180.0°');
+    pickCirclePoint(reverse ? 20 : 80, 50);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...circleGeometry, radius: 30, angleStartDeg: -180, angleEndDeg: 0 });
+  });
+
+  it('undoes a three-point arc and its circle together', () => {
+    function Harness() {
+      const [geometry, setGeometry] = useState<MeasurementGeometry>(circleGeometry);
+      return <><ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100} overlays={overlays}
+        roiEnabled={false} onRoiChange={emptyRoi} measurementGeometry={geometry} measurementGeometryEditable onMeasurementGeometryChange={setGeometry} />
+        <output data-testid="geometry-state">{JSON.stringify(geometry)}</output></>;
+    }
+    render(<Harness />);
+    startCircleDrawing('三点选弧');
+    pickCirclePoint(20, 50); pickCirclePoint(50, 20); pickCirclePoint(80, 50);
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!)).toMatchObject({ radius: 30, angleStartDeg: -180, angleEndDeg: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '撤销测量编辑' }));
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!)).toEqual(circleGeometry);
+  });
+
+  it('retains the first two points after a collinear third pick and accepts a corrected pick', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50);
+    pickCirclePoint(50, 50);
+    pickCirclePoint(80, 50);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('重新选择第 3 点');
+    pickCirclePoint(50, 20);
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ center: { x: 35, y: 35 }, radius: Math.hypot(15, 15) });
+  });
+
+  it('supports retracting picks and cancelling without changing the saved geometry', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50);
+    pickCirclePoint(20, 50);
+    expect(screen.getByRole('alert').textContent).toContain('第 2 点距离第 1 点过近');
+    pickCirclePoint(50, 20);
+    fireEvent.click(screen.getByRole('button', { name: '撤回上一点' }));
+    expect(screen.getByText(/沿目标圆边缘点选第 2\/3 点/)).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByLabelText('标称圆圈选提示')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('undoes a three-point circle construction as one measurement edit', () => {
+    function Harness() {
+      const [geometry, setGeometry] = useState<MeasurementGeometry>(circleGeometry);
+      return <><ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100} overlays={overlays}
+        roiEnabled={false} onRoiChange={emptyRoi} measurementGeometry={geometry} measurementGeometryEditable onMeasurementGeometryChange={setGeometry} />
+        <output data-testid="geometry-state">{JSON.stringify(geometry)}</output></>;
+    }
+    render(<Harness />);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50); pickCirclePoint(50, 20); pickCirclePoint(80, 50);
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!).radius).toBe(30);
+    fireEvent.click(screen.getByRole('button', { name: '撤销测量编辑' }));
+    expect(JSON.parse(screen.getByTestId('geometry-state').textContent!)).toEqual(circleGeometry);
+  });
+
+  it('accepts three touch picks without treating them as circle drags', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点定圆');
+    for (const [x, y] of [[20, 50], [50, 20], [80, 50]]) {
+      fireEvent.touchStart(screen.getByTestId('stage'), { touches: [{ clientX: x + 150, clientY: y + 80 }] });
+      fireEvent.touchEnd(document.body);
+    }
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...circleGeometry, radius: 30 });
+  });
+
+  it('clears unfinished point picks when switching construction methods', () => {
+    const onChange = vi.fn();
+    imageView(circleGeometry, onChange);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50); pickCirclePoint(50, 20);
+    fireEvent.click(screen.getByRole('radio', { name: '直径两端' }));
+    fireEvent.click(screen.getByRole('radio', { name: '三点定圆' }));
+    expect(screen.getByText(/沿目标圆边缘点选第 1\/3 点/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '撤回上一点' }) as HTMLButtonElement).disabled).toBe(true);
+    pickCirclePoint(80, 50);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('consumes Escape during construction before a containing dialog can close', () => {
+    const dialogKeyDown = vi.fn();
+    render(<div onKeyDown={dialogKeyDown}><ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roiEnabled={false} onRoiChange={emptyRoi} measurementGeometry={circleGeometry}
+      measurementGeometryEditable onMeasurementGeometryChange={vi.fn()} /></div>);
+    startCircleDrawing('三点定圆');
+    pickCirclePoint(20, 50);
+    fireEvent.keyDown(screen.getByTestId('stage'), { key: 'Escape' });
+    expect(screen.queryByLabelText('标称圆圈选提示')).toBeNull();
+    expect(dialogKeyDown).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId('stage'), { key: 'Escape' });
+    expect(dialogKeyDown).toHaveBeenCalledOnce();
+  });
+
   it('keeps the image canvas usable when a legacy ROI has malformed shape data', () => {
     const invalidRoi = { type: 'Polygon' } as unknown as VisionRoi;
     render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}

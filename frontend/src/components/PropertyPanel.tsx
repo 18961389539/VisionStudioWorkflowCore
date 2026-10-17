@@ -14,6 +14,8 @@ type Props = {
   /** 在图像查看器中居中显示当前节点的 ROI */
   onLocateRoi?: (key?: string) => void;
   roiFields?: { key: string; label: string; emptyText?: string; showEmpty?: boolean }[];
+  /** Hide controls rendered in a specialized editor while keeping validation and reset behavior. */
+  hiddenParameterNames?: readonly string[];
 };
 
 const polygonVertexPageSize = 50;
@@ -154,7 +156,7 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
   return sections;
 }
 
-export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields }: Props) {
+export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields, hiddenParameterNames }: Props) {
   const sections = useMemo(() => buildSections(catalogItem), [catalogItem]);
 
   if (!node || !catalogItem) {
@@ -319,7 +321,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
         {catalogItem.parameters.length === 0 && !parameters.roi && !roiFields && <div className="property-empty">无可配置参数</div>}
         {sections.map((section, index) => {
           const visibleParameters = section.parameters.filter((parameter) =>
-            isParameterVisible(parameter, catalogItem.parameters, parameters));
+            !hiddenParameterNames?.includes(parameter.name) && isParameterVisible(parameter, catalogItem.parameters, parameters));
           if (visibleParameters.length === 0) return null;
           return <div key={section.title ?? `section-${index}`}>
             {section.title && <div className="property-group">{section.title}</div>}

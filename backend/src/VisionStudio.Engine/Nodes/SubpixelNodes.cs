@@ -9,8 +9,8 @@ namespace VisionStudio.Engine.Nodes;
 /// <summary>
 /// 第五批（2026-10-14）· 5B 亚像素测量族共享核心。
 /// 1D 剖面采样（沿线 + 垂直条带平均）→ 梯度 → 极性/对比度候选 → 抛物线/质心亚像素细化。
-/// 与既有 measure.caliper 的分工：卡尺只报整数像素最强梯度点；本族输出亚像素位置、
-/// 拟合误差与有效采样点数，且"未找到合格边缘"返回 found=false（业务结果）而非异常。
+/// measure.caliper 与亚像素测量节点共享采样、极性与选边规则；是否细化由 refine 参数决定。
+/// 输出拟合误差与有效采样点数，且"未找到合格边缘"返回 found=false（业务结果）而非异常。
 /// </summary>
 internal static class SubpixelEdgeCore
 {
@@ -126,10 +126,10 @@ internal static class SubpixelEdgeCore
     }
 
     public static EdgeResult FindEdge(double[] profile, double spacing, string polarity, double minContrast, string direction, string refine,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine, cancellationToken);
+        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine, cancellationToken, diagnosticCandidates);
         return new(edge.Found, edge.Position, edge.Strength, edge.Error, edge.Count, edge.Reason);
     }
 
@@ -680,6 +680,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                 var spokesWithEdgeCandidate = 0;
                 var spokesClipped = 0;
                 var spokeOverlays = new List<VisionOverlay>(angles.Length);
+                var diagnosticSpokes = CaliperCircleDiagnosticCapture.Enabled ? new List<CaliperSpokeDiagnostic>(angles.Length) : null;
+                var edgeSpokeIndices = diagnosticSpokes is not null ? new List<int>() : null;
                 for (var spokeIndex = 0; spokeIndex < angles.Length; spokeIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -691,16 +693,34 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                     // Clip the inner limit at the center so first-from-start always searches outward.
                     var start = new VisionPoint2D(center.X + dirX * innerRadius, center.Y + dirY * innerRadius);
                     var end = new VisionPoint2D(center.X + dirX * outerRadius, center.Y + dirY * outerRadius);
+                    var diagnostic = diagnosticSpokes is not null ? new CaliperSpokeDiagnostic(spokeIndex, angleDeg, start, end) : null;
+                    if (diagnostic is not null) diagnosticSpokes!.Add(diagnostic);
                     if (SubpixelEdgeCore.SegmentBoundsOutsideImage(start, end, gray.Cols, gray.Rows))
                     { rejected++; spokesOutsideImage++; continue; }
                     var (profileStart, profileEnd, spokeClipped, spokeIntersects) =
                         SubpixelEdgeCore.ClampLine(start, end, gray.Cols, gray.Rows, 20_000_500);
                     if (spokeClipped) spokesClipped++;
                     if (!spokeIntersects) { rejected++; spokesOutsideImage++; continue; }
+                    var clippedStartRadius = (profileStart.X - center.X) * dirX + (profileStart.Y - center.Y) * dirY;
+                    if (diagnostic is not null)
+                    {
+                        diagnostic.ProfileStart = profileStart;
+                        diagnostic.ProfileEnd = profileEnd;
+                        diagnostic.Clipped = spokeClipped;
+                        diagnostic.StartRadius = clippedStartRadius;
+                        diagnostic.Status = "clipped-too-short";
+                    }
                     if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
                     { rejected++; spokesTooShortAfterClip++; continue; }
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing, cancellationToken);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic", cancellationToken);
+                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic", cancellationToken,
+                        diagnostic?.Candidates);
+                    if (diagnostic is not null)
+                    {
+                        diagnostic.Profile = profile;
+                        diagnostic.Spacing = spokeSpacing;
+                        diagnostic.Status = edge.Reason;
+                    }
                     if (!edge.Found)
                     {
                         spokeOverlays.Add(new($"caliper-circle-search-{spokeIndex}", VisionOverlayType.Line,
@@ -712,8 +732,14 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         continue;
                     }
                     spokesWithEdgeCandidate++;
-                    var clippedStartRadius = (profileStart.X - center.X) * dirX + (profileStart.Y - center.Y) * dirY;
                     var edgeRadius = clippedStartRadius + edge.Position;
+                    if (diagnostic is not null)
+                    {
+                        diagnostic.EdgeRadius = edgeRadius;
+                        diagnostic.EdgeStrength = edge.Strength;
+                        diagnostic.EdgePoint = new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius);
+                        diagnostic.Status = "radius-deviation";
+                    }
                     if (maxDeviation > 0 && Math.Abs(edgeRadius - nominalRadius) > maxDeviation)
                     {
                         var candidate = new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius);
@@ -731,6 +757,7 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
                         Stroke: "#91d5ff", StrokeWidth: 0.7));
                     edgePoints.Add(new VisionPoint2D(center.X + dirX * edgeRadius, center.Y + dirY * edgeRadius));
+                    edgeSpokeIndices?.Add(spokeIndex);
                 }
 
                 var hasEnoughPoints = edgePoints.Count >= 3;
@@ -857,6 +884,15 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
                         X: point.X, Y: point.Y, Stroke: "#faad14", StrokeWidth: 2.5)));
                 }
 
+                if (diagnosticSpokes is not null)
+                {
+                    var ignored = fit?.IgnoredIndices.ToHashSet();
+                    for (var index = 0; index < edgeSpokeIndices!.Count; index++)
+                        diagnosticSpokes[edgeSpokeIndices[index]].Status = fit is null ? "fit-unavailable"
+                            : ignored!.Contains(index) ? "fit-outlier" : "used";
+                    CaliperCircleDiagnosticCapture.Publish(new(gray.Cols, gray.Rows, sourceImage.CoordinateFrame, center,
+                        nominalRadius, band, minContrast, sampleWidth, polarity, searchDirection, found, reason, diagnosticSpokes));
+                }
                 return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, overlays));
             }
             finally

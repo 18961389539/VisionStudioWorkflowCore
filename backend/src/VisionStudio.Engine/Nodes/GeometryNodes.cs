@@ -206,11 +206,19 @@ public sealed class CaliperNode : IVisionNodeExecutor
                 var clippedLine = new VisionLine2D(start, end);
                 var searchLine = intersects ? clippedLine : search;
                 var clippedLength = MeasurementMath.Hypot(end.X - start.X, end.Y - start.Y);
+                var candidates = CaliperEdgeDiagnosticCapture.Enabled ? new List<CaliperEdgeCandidate>() : null;
+                double[] profile = [];
+                var spacing = 0d;
                 var edge = !intersects
                     ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-outside-image")
                     : clippedLength < 2
                         ? SubpixelEdgeCore.EdgeResult.NotFound("search-line-clipped-too-short")
-                        : FindClippedEdge(gray, mask, start, end, sampleWidth, polarity, minContrast, direction, refine, cancellationToken);
+                        : SampleAndFind();
+                SubpixelEdgeCore.EdgeResult SampleAndFind()
+                {
+                    profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out spacing, cancellationToken);
+                    return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, cancellationToken, candidates);
+                }
                 var outputs = new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
@@ -233,6 +241,23 @@ public sealed class CaliperNode : IVisionNodeExecutor
                     overlays.Add(new VisionOverlay("caliper-label", VisionOverlayType.Text,
                         Label: $"G={edge.Strength:0.0}", X: edgePoint.Value.X + 7, Y: edgePoint.Value.Y - 7,
                         Stroke: "#ff7875", StrokeWidth: 1));
+                }
+
+                if (candidates is not null)
+                {
+                    int? selectedIndex = candidates.Count == 0 ? null : direction switch
+                    {
+                        "firstfromstart" => Enumerable.Range(0, candidates.Count).MinBy(i => candidates[i].Position),
+                        "firstfromend" => Enumerable.Range(0, candidates.Count).MaxBy(i => candidates[i].Position),
+                        _ => Enumerable.Range(0, candidates.Count).MaxBy(i => Math.Abs(candidates[i].Amplitude))
+                    };
+                    CaliperEdgeDiagnosticCapture.Publish(new(gray.Cols, gray.Rows, sourceImage.CoordinateFrame,
+                        search.Start, search.End, intersects ? start : null, intersects ? end : null, clamped,
+                        intersects ? MeasurementMath.Hypot(start.X - search.Start.X, start.Y - search.Start.Y) : 0,
+                        spacing, minContrast, sampleWidth, polarity, direction, refine, edge.Found, edge.Reason,
+                        profile, candidates, selectedIndex, edge.Found ? edge.Position : null, edgePoint,
+                        edge.Found ? edge.Strength : null,
+                        edge.Found && double.IsFinite(edge.FitError) && edge.FitError >= 0 ? edge.FitError : null));
                 }
 
                 return ValueTask.FromResult(new NodeExecutorResult(outputs,
@@ -260,12 +285,6 @@ public sealed class CaliperNode : IVisionNodeExecutor
         finally { mask?.Dispose(); }
     }
 
-    private static SubpixelEdgeCore.EdgeResult FindClippedEdge(Mat gray, Mat? mask, VisionPoint2D start, VisionPoint2D end,
-        int sampleWidth, string polarity, double minContrast, string direction, string refine, CancellationToken cancellationToken)
-    {
-        var profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out var spacing, cancellationToken);
-        return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, cancellationToken);
-    }
 }
 
 public sealed class RotatedRectangleNode : IVisionNodeExecutor

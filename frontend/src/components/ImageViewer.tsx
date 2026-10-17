@@ -5,10 +5,13 @@ import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } fro
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
 import { buildCaliperCircleAngles, circleArcSpan, effectiveSampleWidth, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
+import { circleArcThroughThreePoints, circleThroughThreePoints } from '../circleConstruction';
+import type { CaliperSpokeDiagnostic } from '../caliperCircleDiagnostics';
 
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
 type ToolMode = 'pan' | 'rect' | 'circle' | 'polygon' | 'brush' | 'eraser';
+type CircleDrawMode = 'center' | 'diameter' | 'threePoints' | 'threePointArc';
 type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiMoveBounds = { minX: number; maxX: number; minY: number; maxY: number };
@@ -20,6 +23,44 @@ export type MeasurementGeometry =
   | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
       caliperCount?: number; samplingMode?: string; angleStepDeg?: number; profileWidth?: number;
       searchDirection?: string; centerEditable?: boolean; radiusEditable?: boolean };
+
+type CaliperDiagnosticSelection = {
+  center: Point; radius: number; spokes: CaliperSpokeDiagnostic[]; index: number; onSelect: (index: number) => void;
+};
+
+function nearestDiagnosticSpoke(selection: CaliperDiagnosticSelection, point: Point, scale: number) {
+  let nearest: number | undefined;
+  let distance = 12 / scale;
+  for (const spoke of selection.spokes) {
+    const start = spoke.profileStart ?? spoke.start, end = spoke.profileEnd ?? spoke.end;
+    const dx = end.x - start.x, dy = end.y - start.y;
+    const fraction = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / Math.max(1e-12, dx * dx + dy * dy)));
+    const current = Math.hypot(point.x - start.x - fraction * dx, point.y - start.y - fraction * dy);
+    if (current < distance) { distance = current; nearest = spoke.index; }
+  }
+  return nearest;
+}
+
+function CaliperDiagnosticShape({ selection, scale }: { selection: CaliperDiagnosticSelection; scale: number }) {
+  const selected = selection.spokes[selection.index];
+  const start = selected?.profileStart ?? selected?.start, end = selected?.profileEnd ?? selected?.end;
+  return <Group listening={false}>
+    <Circle x={selection.center.x} y={selection.center.y} radius={selection.radius} stroke="#597ef7" strokeWidth={1 / scale} opacity={.5} />
+    {selection.spokes.map(spoke => <Line key={spoke.index}
+      points={[(spoke.profileStart ?? spoke.start).x, (spoke.profileStart ?? spoke.start).y,
+        (spoke.profileEnd ?? spoke.end).x, (spoke.profileEnd ?? spoke.end).y]}
+      stroke={spoke.status === 'used' ? '#38bdf8' : '#bfbfbf'} strokeWidth={1 / scale} opacity={.7} />)}
+    {selected && start && end && <>
+      <Line points={[start.x, start.y, end.x, end.y]} stroke="#101b2e" strokeWidth={6 / scale} />
+      <Arrow name="caliper-diagnostic-selected-spoke" points={[start.x, start.y, end.x, end.y]}
+        stroke="#ffd666" fill="#ffd666" strokeWidth={2.5 / scale} pointerLength={6 / scale} pointerWidth={5 / scale} />
+      <Text x={end.x + 8 / scale} y={end.y - 15 / scale} text={`#${selected.index + 1}`} fontSize={13 / scale}
+        fontStyle="bold" fill="#ffd666" stroke="#101b2e" strokeWidth={3 / scale} fillAfterStrokeEnabled />
+      {selected.edgePoint && <Circle name="caliper-diagnostic-selected-edge" x={selected.edgePoint.x} y={selected.edgePoint.y}
+        radius={5 / scale} fill={selected.status === 'used' ? '#52c41a' : '#faad14'} stroke="#fff" strokeWidth={1.5 / scale} />}
+    </>}
+  </Group>;
+}
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -562,8 +603,10 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const dx = searchEnd.x - searchStart.x, dy = searchEnd.y - searchStart.y;
     const length = Math.hypot(dx, dy);
     const directionX = length > 0 ? dx / length : 1, directionY = length > 0 ? dy / length : 0;
+    const endpointDirectionX = searchFromEnd ? -directionX : directionX;
+    const endpointDirectionY = searchFromEnd ? -directionY : directionY;
     const labelOffset = 7 / scale;
-    const labelNormalX = -directionY * labelOffset, labelNormalY = directionX * labelOffset;
+    const labelNormalX = -endpointDirectionY * labelOffset, labelNormalY = endpointDirectionX * labelOffset;
     const count = geometry.profileCount === undefined ? 0 : Math.round(clamp(geometry.profileCount, 3, 101));
     const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
     const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
@@ -591,13 +634,13 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       })}
       <Arrow points={[searchStart.x, searchStart.y, searchEnd.x, searchEnd.y]} stroke="#fa8c16" fill="#fa8c16"
         pointerAtBeginning={searchStrongest} pointerLength={8 / scale} pointerWidth={8 / scale} strokeWidth={2.5 / scale} />
-      <Text x={searchStart.x - directionX * 15 / scale + labelNormalX} y={searchStart.y - directionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
-        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
-      <Text x={searchEnd.x + directionX * 7 / scale + labelNormalX} y={searchEnd.y + directionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
-        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
+      <Text x={geometry.start.x - endpointDirectionX * 15 / scale + labelNormalX} y={geometry.start.y - endpointDirectionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
+        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} fillAfterStrokeEnabled listening={false} />
+      <Text x={geometry.end.x + endpointDirectionX * 7 / scale + labelNormalX} y={geometry.end.y + endpointDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
+        fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} fillAfterStrokeEnabled listening={false} />
       {editable && <>
-        <Circle x={searchStart.x} y={searchStart.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
-        <Circle x={searchEnd.x} y={searchEnd.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
         {profileHandles && <>
           <Circle name="measurement-profile-span-start" x={profileHandles.start.x} y={profileHandles.start.y} radius={handleRadius}
             fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -658,7 +701,13 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       <Circle x={geometry.center.x} y={geometry.center.y} radius={inner} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
       <Circle x={geometry.center.x} y={geometry.center.y} radius={outer} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
     </>}
-    <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16" strokeWidth={2.5 / scale} />
+    <Circle x={geometry.center.x} y={geometry.center.y} radius={geometry.radius} stroke="#fa8c16"
+      strokeWidth={(fullCircle ? 2.5 : 1) / scale} opacity={fullCircle ? 1 : 0.35} />
+    {!fullCircle && span > 0 && <Line name="caliper-circle-selected-arc"
+      points={Array.from({ length: Math.max(2, Math.ceil(span / 3)) + 1 }, (_, index) => {
+        const radians = (normalizeCaliperAngle(start) + span * index / Math.max(2, Math.ceil(span / 3))) * Math.PI / 180;
+        return [geometry.center.x + geometry.radius * Math.cos(radians), geometry.center.y + geometry.radius * Math.sin(radians)];
+      }).flat()} stroke="#fa8c16" strokeWidth={2.5 / scale} />}
     {angles.map((angleDeg, index) => {
       const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
       const points = [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -670,9 +719,9 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
         : <Line key={`spoke-${index}`} points={points} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
     })}
     <Text x={firstSearchStart[0] - searchDirectionX * 15 / scale + labelNormalX} y={firstSearchStart[1] - searchDirectionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
-      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
+      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} fillAfterStrokeEnabled listening={false} />
     <Text x={firstSearchEnd[0] + searchDirectionX * 7 / scale + labelNormalX} y={firstSearchEnd[1] + searchDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
-      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
+      fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} fillAfterStrokeEnabled listening={false} />
     {!fullCircle && span > 0 && <>
       <Line points={boundary(normalizeCaliperAngle(start))} stroke="#fa8c16" strokeWidth={1.5 / scale} />
       <Line points={boundary(normalizeCaliperAngle(start) + span)} stroke="#fa8c16" strokeWidth={1.5 / scale} />
@@ -708,6 +757,8 @@ export default function ImageViewer({
   measurementGeometry,
   measurementGeometryEditable = false,
   onMeasurementGeometryChange,
+  caliperDiagnosticSelection,
+  measurementMarkers = [],
   nodeLabels,
   focusTick,
   emptyHint = '运行工作流以显示图像和矢量覆盖层',
@@ -728,6 +779,10 @@ export default function ImageViewer({
   measurementGeometry?: MeasurementGeometry;
   measurementGeometryEditable?: boolean;
   onMeasurementGeometryChange?: (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => void;
+  /** Read-only samples in the displayed run image frame. Picking never changes measurement geometry. */
+  caliperDiagnosticSelection?: CaliperDiagnosticSelection;
+  /** Diagnostic cursor and candidates stay visible above the search geometry. */
+  measurementMarkers?: VisionOverlay[];
   /** 覆盖层按节点筛选时的显示名映射 */
   nodeLabels?: Record<string, string>;
   /** 递增信号：来自属性面板“定位选区”，把视图适配到当前 ROI 区域 */
@@ -751,6 +806,10 @@ export default function ImageViewer({
   const [brushWidth, setBrushWidth] = useState(20);
   const [measurementDraft, setMeasurementDraft] = useState<MeasurementGeometry>();
   const [geometryDrawMode, setGeometryDrawMode] = useState(false);
+  const [circleDrawMode, setCircleDrawMode] = useState<CircleDrawMode>('center');
+  const isThreePointDrawing = circleDrawMode === 'threePoints' || circleDrawMode === 'threePointArc';
+  const [circleConstructionPoints, setCircleConstructionPoints] = useState<Point[]>([]);
+  const [circleConstructionIssue, setCircleConstructionIssue] = useState<string>();
   const [roiUndoEntry, setRoiUndoEntry] = useState<{ previous?: VisionRoi; afterFingerprint: string }>();
   const [measurementUndoEntry, setMeasurementUndoEntry] = useState<{ previous: MeasurementGeometry; afterFingerprint: string }>();
   // 像素化（最近邻）默认开：放大即真实像素方块；开关可切回平滑插值
@@ -773,6 +832,8 @@ export default function ImageViewer({
   const { image, failed } = useHtmlImage(previewUrl);
   const actualWidth = imageWidth || image?.naturalWidth || 0;
   const actualHeight = imageHeight || image?.naturalHeight || 0;
+  const canDrawMeasurementGeometry = measurementGeometryEditable && measurementGeometry && (measurementGeometry.type === 'line'
+    || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false);
   const cursorPoint = cursorScreen ? { x: (cursorScreen.x - view.x) / view.scale, y: (cursorScreen.y - view.y) / view.scale } : undefined;
   const cursor = cursorPoint && cursorPoint.x >= 0 && cursorPoint.y >= 0 && cursorPoint.x < actualWidth && cursorPoint.y < actualHeight ? cursorPoint : undefined;
   const pixelBuffer = useMemo(() => {
@@ -809,6 +870,8 @@ export default function ImageViewer({
     setBrushPreview(undefined);
     setMeasurementDraft(undefined);
     setGeometryDrawMode(false);
+    setCircleConstructionPoints([]);
+    setCircleConstructionIssue(undefined);
     setRoiUndoEntry(undefined);
     setMeasurementUndoEntry(undefined);
     geometryGestureStart.current = undefined;
@@ -819,13 +882,15 @@ export default function ImageViewer({
     setRoiDragOffset(undefined);
   }, [previewUrl]);
   useEffect(() => {
-    if (measurementGeometryEditable) return;
+    if (measurementGeometryEditable && canDrawMeasurementGeometry) return;
     setGeometryDrawMode(false);
     setMeasurementDraft(undefined);
-    setMeasurementUndoEntry(undefined);
+    setCircleConstructionPoints([]);
+    setCircleConstructionIssue(undefined);
+    if (!measurementGeometryEditable) setMeasurementUndoEntry(undefined);
     geometryGestureStart.current = undefined;
     geometryDrag.current = undefined;
-  }, [measurementGeometryEditable]);
+  }, [measurementGeometryEditable, Boolean(canDrawMeasurementGeometry)]);
 
   const commitRoiEdit = (next?: VisionRoi) => {
     if (parameterFingerprint(roi) === parameterFingerprint(next)) return;
@@ -901,6 +966,19 @@ export default function ImageViewer({
     if (!actualWidth || !actualHeight) return;
     fitTargetRef.current = { x: 0, y: 0, width: actualWidth, height: actualHeight };
     setView({ scale: 1, x: (size.width - actualWidth) / 2, y: (size.height - actualHeight) / 2 });
+  };
+
+  const focusSearchLine = () => {
+    if (measurementGeometry?.type !== 'line') return;
+    const segment = clipSegmentToImage(measurementGeometry.start, measurementGeometry.end, actualWidth, actualHeight);
+    if (!segment) return;
+    const margin = 48 + (measurementGeometry.profileWidth ?? 0) / 2;
+    const x = Math.max(0, Math.min(segment.start.x, segment.end.x) - margin);
+    const y = Math.max(0, Math.min(segment.start.y, segment.end.y) - margin);
+    fitTargetRef.current = { x, y,
+      width: Math.max(2, Math.min(actualWidth, Math.max(segment.start.x, segment.end.x) + margin) - x),
+      height: Math.max(2, Math.min(actualHeight, Math.max(segment.start.y, segment.end.y) + margin) - y) };
+    setViewToTarget(fitTargetRef.current, 24);
   };
 
   // 图像（尺寸）变化：目标重置为全图并适配
@@ -1044,11 +1122,42 @@ export default function ImageViewer({
     if (!p) return;
     setCursor(p);
     const ip = imagePoint(p);
-    if (geometryDrawMode && measurementGeometryEditable && measurementGeometry) {
+    if (caliperDiagnosticSelection) {
+      const index = nearestDiagnosticSpoke(caliperDiagnosticSelection, ip, view.scale);
+      if (index !== undefined) caliperDiagnosticSelection.onSelect(index);
+      else panStart.current = { pointer: p, view };
+      return;
+    }
+    if (geometryDrawMode && canDrawMeasurementGeometry && measurementGeometry) {
       if (!inside(ip)) return;
+      if (measurementGeometry.type === 'circle' && isThreePointDrawing) {
+        const picked = [...circleConstructionPoints, ip];
+        setCircleConstructionIssue(undefined);
+        if (picked.length === 2 && Math.hypot(ip.x - picked[0].x, ip.y - picked[0].y) < 1) {
+          setCircleConstructionIssue('第 2 点距离第 1 点过近，请换一个边缘点。');
+          return;
+        }
+        if (picked.length < 3) {
+          setCircleConstructionPoints(picked);
+        } else {
+          const circle = circleDrawMode === 'threePointArc'
+            ? circleArcThroughThreePoints(picked[0], picked[1], picked[2])
+            : circleThroughThreePoints(picked[0], picked[1], picked[2]);
+          if (!circle) {
+            setCircleConstructionIssue('这三个点过近或接近共线，无法确定有效圆。请重新选择第 3 点。');
+            setMeasurementDraft(undefined);
+            return;
+          }
+          commitMeasurementEdit({ ...measurementGeometry, ...circle });
+          setCircleConstructionPoints([]);
+          setMeasurementDraft(undefined);
+          setGeometryDrawMode(false);
+        }
+        return;
+      }
       geometryGestureStart.current = ip;
       setMeasurementDraft(measurementGeometry.type === 'line'
-        ? { type: 'line', start: ip, end: ip }
+        ? { ...measurementGeometry, start: ip, end: ip }
         : { ...measurementGeometry, center: ip, radius: 0 });
       return;
     }
@@ -1102,13 +1211,23 @@ export default function ImageViewer({
     if (!p) return;
     const ip = imagePoint(p);
     setCursor(p);
+    if (geometryDrawMode && isThreePointDrawing && measurementGeometry?.type === 'circle') {
+      const circle = circleConstructionPoints.length === 2 && inside(ip)
+        ? (circleDrawMode === 'threePointArc' ? circleArcThroughThreePoints : circleThroughThreePoints)(circleConstructionPoints[0], circleConstructionPoints[1], ip)
+        : undefined;
+      setMeasurementDraft(circle ? { ...measurementGeometry, ...circle } : undefined);
+      return;
+    }
     if (geometryGestureStart.current && measurementGeometry) {
       const start = geometryGestureStart.current;
+      const end = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
       setMeasurementDraft(measurementGeometry.type === 'line'
-        ? { type: 'line', start, end: boundedMeasurementPoint(ip) }
-        : { ...measurementGeometry, center: start,
-          radius: Math.min(Math.hypot(clamp(ip.x, 0, actualWidth) - start.x, clamp(ip.y, 0, actualHeight) - start.y),
-            maxInteractiveCircleRadius(start, actualWidth, actualHeight)) });
+        ? { ...measurementGeometry, start, end: boundedMeasurementPoint(ip) }
+        : circleDrawMode === 'diameter'
+          ? { ...measurementGeometry, center: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 },
+            radius: Math.hypot(end.x - start.x, end.y - start.y) / 2 }
+          : { ...measurementGeometry, center: start,
+            radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxInteractiveCircleRadius(start, actualWidth, actualHeight)) });
       return;
     }
     if (geometryDrag.current) {
@@ -1283,6 +1402,8 @@ export default function ImageViewer({
     setDraft(undefined);
     setMeasurementDraft(undefined);
     setGeometryDrawMode(false);
+    setCircleConstructionPoints([]);
+    setCircleConstructionIssue(undefined);
   };
 
   useEffect(() => { pointerUpHandler.current = onPointerUp; });
@@ -1346,6 +1467,8 @@ export default function ImageViewer({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Cancel the unfinished construction before the containing modal handles Escape.
+        if (geometryDrawMode) { e.preventDefault(); e.stopPropagation(); }
         gestureStart.current = undefined;
         geometryGestureStart.current = undefined;
         geometryDrag.current = undefined;
@@ -1357,14 +1480,17 @@ export default function ImageViewer({
         setDraft(undefined);
         setMeasurementDraft(undefined);
         setGeometryDrawMode(false);
+        setCircleConstructionPoints([]);
+        setCircleConstructionIssue(undefined);
         setTool('pan');
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [geometryDrawMode]);
 
   const cursorStyle = useMemo(() => {
+    if (caliperDiagnosticSelection) return panStart.current ? 'grabbing' : 'crosshair';
     if (geometryDrawMode) return 'crosshair';
     if (panStart.current || roiDrag.current || geometryDrag.current) return 'grabbing';
     if (cursorScreen) {
@@ -1401,7 +1527,7 @@ export default function ImageViewer({
       }
     }
     return tool === 'pan' ? 'grab' : 'crosshair';
-  }, [actualHeight, actualWidth, cursorScreen, geometryDrawMode, measurementGeometry, measurementGeometryEditable,
+  }, [actualHeight, actualWidth, cursorScreen, geometryDrawMode, measurementGeometry, measurementGeometryEditable, caliperDiagnosticSelection,
     roi, roiEnabled, tool, view]);
 
   // 覆盖层按节点筛选：不选=显示全部；选了=只显示所选节点的覆盖层
@@ -1420,7 +1546,7 @@ export default function ImageViewer({
     && measurementUndoEntry.afterFingerprint === parameterFingerprint(measurementGeometry));
 
   return (
-    <div className="vision-viewer">
+    <div className={'vision-viewer' + (geometryDrawMode && measurementGeometry?.type === 'circle' ? ' is-drawing-circle' : '')}>
       <div className="viewer-toolbar">
         <Space size={5} wrap>
           {showRoiTools && <Segmented
@@ -1428,6 +1554,7 @@ export default function ImageViewer({
             value={tool}
             onChange={(value) => { polygonPoints.current = []; brushStroke.current = undefined; setBrushPreview(undefined); gestureStart.current = undefined;
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
+              setCircleConstructionPoints([]); setCircleConstructionIssue(undefined);
               roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
               { value: 'pan', label: <Tooltip title="平移画布；拖动已有选区可移动，矩形/圆形可缩放，多边形可编辑顶点">平移</Tooltip> },
@@ -1451,23 +1578,34 @@ export default function ImageViewer({
           </span>}
           {showRoiTools && roiUndoAvailable && <Button size="small" onClick={undoRoiEdit}
             title="撤销最近一次在画布上完成的选区编辑">{roi?.type === 'Brush' ? '撤销笔迹' : '撤销选区编辑'}</Button>}
-          {measurementGeometry && measurementGeometryEditable && (measurementGeometry.type === 'line'
-            || measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false) && <>
+          {canDrawMeasurementGeometry && <>
             <span className="viewer-toolbar-divider" />
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
-              onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
+              onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setCircleConstructionPoints([]);
+                setCircleConstructionIssue(undefined); setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，拖动圆周可平移并将圆心移出图像边缘，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带，粉色调整投影宽度'
+                ? '可选择圆心+半径、直径两端、三点定圆或三点选弧；三点选弧会同时确定圆和测量角度范围。橙色调整圆心/半径，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带，粉色调整投影宽度'
                 : measurementGeometry.profileCount !== undefined
-                  ? '箭头由起点指向终点；蓝色起点、紫色终点，青色控制点对称调整沿边缘的采样跨度，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'
-                  : '箭头由起点指向终点；蓝色起点、紫色终点，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'}>
+                  ? '蓝色起点、紫色终点固定表示参数端点；箭头表示选边顺序（最强为双向）。青色控制点调整采样跨度，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'
+                  : '蓝色起点、紫色终点固定表示参数端点；箭头表示选边顺序（最强为双向）。粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}
+          {geometryDrawMode && measurementGeometry?.type === 'circle' && <Segmented size="small" aria-label="标称圆圈选方式"
+            value={circleDrawMode} options={[{ label: '圆心+半径', value: 'center' },
+              { label: '直径两端', value: 'diameter' }, { label: '三点定圆', value: 'threePoints' },
+              { label: '三点选弧', value: 'threePointArc' }]}
+            onChange={value => {
+              setCircleDrawMode(value as CircleDrawMode); setCircleConstructionPoints([]); setCircleConstructionIssue(undefined);
+              setMeasurementDraft(undefined); geometryGestureStart.current = undefined;
+            }} />}
           {measurementUndoAvailable && <Button size="small" onClick={undoMeasurementEdit}
             title="撤销最近一次在画布上完成的卡尺几何编辑">撤销测量编辑</Button>}
           {measurementGeometry?.profileWidth !== undefined && <span className="viewer-profile-width-hint"
             title="浅蓝色窄带表示每条卡尺沿垂直于搜索方向的实际灰度投影宽度">浅蓝色采样带 · {measurementGeometry.profileWidth} px</span>}
+          {measurementGeometry?.type === 'line' && <Button size="small" onClick={focusSearchLine}
+            disabled={!clipSegmentToImage(measurementGeometry.start, measurementGeometry.end, actualWidth, actualHeight)}
+            title="放大并居中显示图像内的搜索线与投影带，不改变测量参数">定位搜索线</Button>}
           <Button size="small" onClick={fit}>适应窗口</Button>
           <Button size="small" onClick={oneToOne}>原始比例</Button>
           {showRoiTools && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}
@@ -1491,6 +1629,30 @@ export default function ImageViewer({
           )}
         </Space>
       </div>
+      {geometryDrawMode && measurementGeometry?.type === 'line' && <div className="viewer-drawing-hint" aria-label="搜索线绘制提示">
+        <div className="viewer-drawing-instructions"><span role="status">从起点拖到终点，松开完成；搜索线至少 2 px，Esc 取消。</span></div>
+        <div className="viewer-drawing-feedback">{measurementDraft?.type === 'line' ? <output aria-label="搜索线绘制尺寸" aria-live="off">
+          长度 {Math.hypot(measurementDraft.end.x - measurementDraft.start.x, measurementDraft.end.y - measurementDraft.start.y).toFixed(2)} px
+          {' · '}方向 {(Math.atan2(measurementDraft.end.y - measurementDraft.start.y, measurementDraft.end.x - measurementDraft.start.x) * 180 / Math.PI).toFixed(1)}°
+        </output> : <span>极性按起点 → 终点解释；投影长度和选边顺序在重绘后保留。</span>}</div>
+      </div>}
+      {geometryDrawMode && measurementGeometry?.type === 'circle' && <div className="viewer-drawing-hint" aria-label="标称圆圈选提示">
+        <div className="viewer-drawing-instructions"><span role="status">{isThreePointDrawing
+          ? circleDrawMode === 'threePointArc'
+            ? `点选圆弧第 ${circleConstructionPoints.length + 1}/3 点：端点 → 经过点 → 另一端；Esc 取消。`
+            : `沿目标圆边缘点选第 ${circleConstructionPoints.length + 1}/3 点；尽量分散选点，Esc 取消。`
+          : circleDrawMode === 'diameter'
+            ? '从圆边缘拖到直径另一端，松开完成；Esc 取消。'
+            : '从圆心拖到目标边缘，松开完成；Esc 取消。'}</span>
+        {isThreePointDrawing && <Button size="small" disabled={circleConstructionPoints.length === 0} onClick={() => {
+          setCircleConstructionPoints(points => points.slice(0, -1)); setMeasurementDraft(undefined); setCircleConstructionIssue(undefined);
+        }}>撤回上一点</Button>}</div>
+        <div className="viewer-drawing-feedback">{circleConstructionIssue ? <span role="alert">{circleConstructionIssue}</span>
+        : measurementDraft?.type === 'circle' ? <output aria-label="圈选尺寸" aria-live="off">
+          圆心 ({measurementDraft.center.x.toFixed(2)}, {measurementDraft.center.y.toFixed(2)}) · 半径 {measurementDraft.radius.toFixed(2)} px
+          {circleDrawMode === 'threePointArc' && ` · 圆弧 ${circleArcSpan(measurementDraft.angleStartDeg ?? -180, measurementDraft.angleEndDeg ?? 180).span.toFixed(1)}°`}
+        </output> : <span>{circleDrawMode === 'threePointArc' ? '自动选择经过第 2 点的圆弧；完成后可旋转或反选圆弧。' : '完成圈选后可继续拖动圆心、半径和搜索带。'}</span>}</div>
+      </div>}
 
       <div ref={hostRef} className={`viewer-stage ${loading ? 'is-loading' : ''}`} style={{ cursor: cursorStyle }}>
         {!previewUrl && !failed && <div className="image-placeholder">
@@ -1526,8 +1688,29 @@ export default function ImageViewer({
             </Layer>
             {measurementGeometry && <Layer>
               <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
-                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable}
+                <MeasurementGeometryShape geometry={measurementDraft ?? measurementGeometry} scale={view.scale} editable={measurementGeometryEditable && !geometryDrawMode}
                   imageWidth={actualWidth} imageHeight={actualHeight} />
+                {circleConstructionPoints.length > 0 && <Group listening={false}>
+                  <Line points={[...circleConstructionPoints, ...(cursor ? [cursor] : [])].flatMap(point => [point.x, point.y])}
+                    stroke="#fa8c16" strokeWidth={1 / view.scale} dash={[4 / view.scale, 4 / view.scale]} />
+                  {circleConstructionPoints.map((point, index) => <Group key={index}>
+                    <Circle name={`circle-construction-point-${index}`} x={point.x} y={point.y} radius={4 / view.scale}
+                      fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / view.scale} />
+                    <Text x={point.x + 7 / view.scale} y={point.y - 14 / view.scale}
+                      text={circleDrawMode === 'threePointArc' ? ['端点 1', '经过点', '端点 2'][index] : `${index + 1}`}
+                      fill="#fa8c16" fontSize={12 / view.scale} />
+                  </Group>)}
+                </Group>}
+              </Group>
+            </Layer>}
+            {showOverlay && measurementMarkers.length > 0 && <Layer>
+              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
+                {measurementMarkers.map(marker => <OverlayShape key={marker.id} overlay={marker} scale={view.scale} />)}
+              </Group>
+            </Layer>}
+            {caliperDiagnosticSelection && <Layer>
+              <Group x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}>
+                <CaliperDiagnosticShape selection={caliperDiagnosticSelection} scale={view.scale} />
               </Group>
             </Layer>}
             <Layer>
