@@ -2,14 +2,16 @@ namespace VisionStudio.Engine.Algorithms;
 
 /// <summary>Pure golden-template helpers: exhaustive small-shift registration search and
 /// least-squares illumination (gain/offset) compensation, HALCON variation-model style.
-/// Inputs are row-major 8-bit grayscale buffers of identical size.</summary>
+/// Inputs are row-major 8-bit grayscale buffers of identical size; optional masks
+/// restrict fitting and alignment scoring to the inspection domain.</summary>
 public static class ReferenceAlignment
 {
     public sealed record ShiftResult(int ShiftX, int ShiftY, double MeanAbsoluteDifference);
 
-    public static ShiftResult SearchShift(byte[] image, byte[] reference, int width, int height, int maxShift)
+    public static ShiftResult SearchShift(byte[] image, byte[] reference, int width, int height, int maxShift, byte[]? domainMask = null)
     {
         if (image.Length != width * height || reference.Length != width * height) throw new InvalidOperationException("Registration buffers must match image dimensions.");
+        if (domainMask is not null && domainMask.Length != image.Length) throw new InvalidOperationException("Registration mask must match image dimensions.");
         if (maxShift < 0) throw new InvalidOperationException("Registration tolerance must be non-negative.");
         var best = new ShiftResult(0, 0, double.MaxValue);
         for (var dy = -maxShift; dy <= maxShift; dy++)
@@ -21,6 +23,7 @@ public static class ReferenceAlignment
             for (var y = y0; y < y1; y++)
             for (var x = x0; x < x1; x++)
             {
+                if (domainMask is not null && domainMask[y * width + x] == 0) continue;
                 sum += Math.Abs(image[y * width + x] - reference[(y - dy) * width + (x - dx)]);
                 count++;
             }
@@ -31,7 +34,7 @@ public static class ReferenceAlignment
                          Math.Abs(dx) + Math.Abs(dy) < Math.Abs(best.ShiftX) + Math.Abs(best.ShiftY);
             if (better) best = new(dx, dy, mean);
         }
-        return best;
+        return best.MeanAbsoluteDifference == double.MaxValue ? new(0, 0, 0) : best;
     }
 
     /// <summary>

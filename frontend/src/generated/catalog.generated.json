@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "09d9b3a23c331aab78751c70e3a96c45d22da29aade6ec624c4c921a7c543a12",
+  "hash": "a0d3d3960b91a0aa5cee3fdc8bd95a6fb5d1a15ea3e7efec030437e190446982",
   "items": [
     {
       "type": "image.acquire",
@@ -3170,7 +3170,7 @@
           "max": 25,
           "step": 1,
           "unit": "px",
-          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. 0 disables registration."
+          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
         },
         {
           "name": "compensation",
@@ -3191,7 +3191,7 @@
               "value": "gainoffset"
             }
           ],
-          "description": "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."
+          "description": "Least-squares fit of the reference toward the inspected image using only pixels inside the effective inspection domain before differencing (variation-model style)."
         },
         {
           "name": "morphologyOpen",

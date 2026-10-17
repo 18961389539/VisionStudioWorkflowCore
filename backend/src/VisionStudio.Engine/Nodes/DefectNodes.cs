@@ -245,9 +245,14 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         // (defaults keep the historical pixel-exact behaviour).
         VisionImage? preparedReference = null;
         byte[]? effectiveRefBytes = null; byte[]? sourceBytesCache = null;
-        var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d;
+        var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d; double? registrationError = null;
         try
         {
+            using var image = DefectNodeHelpers.Gray(source, true);
+            using var domain = DefectNodeHelpers.Domain(image, source.Width, source.Height, scoped, context);
+            using var domainMaskImage = domain.RegionToBin(255, 0, source.Width, source.Height);
+            using var domainMaskMat = JLVisionImages.ToMat(domainMaskImage);
+            domainMaskMat.GetArray(out byte[] domainMask);
             if (registrationTolerance > 0 || compensation != "none" || variationK > 0)
             {
                 using var sourceGray = RecognitionImageHelpers.ToGray8(source.Mat);
@@ -257,8 +262,9 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 var width = source.Width; var height = source.Height;
                 if (registrationTolerance > 0)
                 {
-                    var shift = ReferenceAlignment.SearchShift(imageBytes, referenceBytes, width, height, registrationTolerance);
+                    var shift = ReferenceAlignment.SearchShift(imageBytes, referenceBytes, width, height, registrationTolerance, domainMask);
                     shiftX = shift.ShiftX; shiftY = shift.ShiftY;
+                    registrationError = shift.MeanAbsoluteDifference;
                 }
                 var aligned = new byte[imageBytes.Length];
                 for (var y = 0; y < height; y++)
@@ -269,7 +275,7 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 }
                 if (compensation != "none")
                 {
-                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(imageBytes, aligned);
+                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(imageBytes, aligned, domainMask);
                     gain = compensation == "gainoffset" ? fittedGain : 1d;
                     offset = fittedOffset;
                     for (var i = 0; i < aligned.Length; i++)
@@ -281,11 +287,10 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 effectiveRefBytes = aligned; sourceBytesCache = imageBytes;
             }
             var effectiveReference = preparedReference ?? reference;
-            using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(effectiveReference, true);
-            using var domain = DefectNodeHelpers.Domain(image, source.Width, source.Height, scoped, context);
+            using var effectiveBaseline = DefectNodeHelpers.Gray(effectiveReference, true);
             using var difference = node.GetString("polarity", "both") switch
             {
-                "both" => image.AbsDiffImage(baseline, 1d), "bright" => image.SubImage(baseline, 1d, 0d), "dark" => baseline.SubImage(image, 1d, 0d),
+                "both" => image.AbsDiffImage(effectiveBaseline, 1d), "bright" => image.SubImage(effectiveBaseline, 1d, 0d), "dark" => effectiveBaseline.SubImage(image, 1d, 0d),
                 _ => throw new InvalidOperationException("Invalid defect polarity.")
             };
             if (domain.AreaCenter(out double _, out double _) > 0) _ = DefectNodeHelpers.Statistics(difference, domain);
@@ -330,6 +335,7 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                     ["threshold"] = threshold, ["minArea"] = minArea, ["maxArea"] = maxArea,
                     ["polarity"] = node.GetString("polarity", "both"),
                     ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
+                    ["registrationMeanAbsoluteDifference"] = registrationError,
                     ["compensation"] = compensation, ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
                     ["morphologyOpen"] = openSize, ["morphologyClose"] = closeSize,
                     ["variationK"] = variationK, ["variationWindow"] = variationWindow,
