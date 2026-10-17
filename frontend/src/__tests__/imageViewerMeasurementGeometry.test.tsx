@@ -213,6 +213,22 @@ describe('ImageViewer measurement geometry editing', () => {
     if (result.type === 'circle') expect(result.radius).toBeCloseTo(60, 0);
   });
 
+  it('lets users resize a caliper circle to the node minimum of one pixel', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 10, band: 6,
+      angleStartDeg: 0, angleEndDeg: 90 }, onChange);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 216.7, clientY: 147.7 }); // radius handle at ~57.07, 57.07
+    fireEvent.mouseMove(stage, { clientX: 201.7, clientY: 131.7 }); // one image pixel from the center
+    fireEvent.mouseUp(document.body, { clientX: 201.7, clientY: 131.7 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') expect(result.radius).toBeCloseTo(1, 0);
+  });
+
   it('keeps an oversized caliper circle center inside the image when moving it', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 60, angleStartDeg: 0, angleEndDeg: 90 }, onChange);

@@ -872,7 +872,7 @@ export default function ImageViewer({
       } else if (mode === 'radius') {
         const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
         const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
-        setMeasurementDraft({ ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 2, 10_000_000) });
+        setMeasurementDraft({ ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 1, 10_000_000) });
       } else if (mode === 'angleStart' || mode === 'angleEnd') {
         const startAngle = origin.angleStartDeg ?? -180;
         const arcEndAngle = startAngle + circleArcSpan(startAngle, origin.angleEndDeg ?? 180).span;
@@ -936,7 +936,7 @@ export default function ImageViewer({
       const next = measurementDraft;
       if (next && onMeasurementGeometryChange && (next.type === 'line'
         ? Math.hypot(next.end.x - next.start.x, next.end.y - next.start.y) >= 2
-        : next.radius >= 2)) onMeasurementGeometryChange(next);
+        : next.radius >= 1)) onMeasurementGeometryChange(next);
       setMeasurementDraft(undefined);
       setGeometryDrawMode(false);
       return;
