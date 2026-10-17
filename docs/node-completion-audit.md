@@ -333,5 +333,5 @@ Usage and scope are documented in [2D Hand-Eye Calibration](hand-eye-2d.md). The
 
 ## Follow-up implementation: calibration asset integrity
 
-Planar calibration asset reads and publication now recompute the stored workspace/result snapshot hash and reject mismatches. Production dependency capture reads the same immutable version, so corrupted snapshot contents cannot pass dependency validation under an unchanged recorded hash. `calibration.planar` continues to solve the point pairs embedded in the workflow; asset id/version remain provenance fields rather than runtime-loaded solve inputs.
+Planar calibration asset reads and publication now recompute the stored workspace/result snapshot hash and reject mismatches. Production dependency capture reads the same immutable version and verifies the workflow node's embedded frames, units, quality gates, and enabled point pairs match it. The node solves from workflow parameters after this binding check, so publishing and production validation cannot silently associate an unrelated asset version with the solve.
 

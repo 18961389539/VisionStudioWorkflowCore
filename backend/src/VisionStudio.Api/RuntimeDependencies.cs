@@ -9,6 +9,7 @@ using VisionStudio.Api.Provenance;
 using VisionStudio.Engine;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
+using VisionStudio.Engine.Nodes;
 using VisionStudio.Engine.Robot;
 
 namespace VisionStudio.Api;
@@ -329,6 +330,15 @@ public sealed class RuntimeDependencyManifestService(
 
             var assetId = ResolveString(node, registration.Catalog, "assetId");
             var assetVersion = ResolveInt(node, registration.Catalog, "assetVersion");
+            if (string.Equals(node.Type, "calibration.planar", StringComparison.OrdinalIgnoreCase))
+            {
+                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
+                var hasAssetVersion = assetVersion > 0;
+                if (assetVersion < 0 || hasAssetId != hasAssetVersion)
+                    throw new InvalidOperationException($"Planar calibration node '{node.Id}' must specify both assetId and a positive assetVersion, or leave both unset.");
+                if (hasAssetId)
+                    await ValidatePlanarCalibrationBindingAsync(node, assetId!, assetVersion, ct);
+            }
             if (!string.IsNullOrWhiteSpace(assetId) && assetVersion > 0)
                 calibrationRefs.Add((assetId, assetVersion));
         }
@@ -798,6 +808,40 @@ public sealed class RuntimeDependencyManifestService(
             output.Add(new CalibrationRuntimeDependency(snapshot.AssetId, snapshot.Version, snapshot.SnapshotHash));
         }
         return output;
+    }
+
+    private async Task ValidatePlanarCalibrationBindingAsync(NodeDefinition node, string assetId, int version, CancellationToken ct)
+    {
+        var snapshot = await calibrations.GetVersionAsync(assetId, version, ct)
+            ?? throw new InvalidOperationException($"Planar calibration node '{node.Id}' references missing calibration '{assetId}' v{version}.");
+        var workspace = snapshot.Workspace;
+        var fieldsMatch =
+            string.Equals(node.GetString("sourceFrame", "ImagePixel"), workspace.SourceFrame, StringComparison.Ordinal) &&
+            string.Equals(node.GetString("targetFrame", "Workpiece"), workspace.TargetFrame, StringComparison.Ordinal) &&
+            string.Equals(node.GetString("targetUnit", "mm"), workspace.TargetUnit, StringComparison.Ordinal) &&
+            node.GetDouble("maxRmse", 0) == workspace.MaxRmse &&
+            node.GetDouble("maxPointError", 0) == workspace.MaxPointError;
+
+        List<CalibrationPair> actualPairs;
+        try
+        {
+            actualPairs = JsonSerializer.Deserialize<List<CalibrationPair>>(node.GetString("pairsJson", "[]"), Json)
+                ?? throw new JsonException("empty pair list");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Planar calibration node '{node.Id}' has invalid pairsJson while bound to '{assetId}' v{version}.", ex);
+        }
+
+        var expectedPairs = workspace.Points.Where(point => point.Enabled)
+            .Select(point => new CalibrationPair(point.ImageX, point.ImageY, point.WorldX, point.WorldY));
+        static IOrderedEnumerable<CalibrationPair> CanonicalOrder(IEnumerable<CalibrationPair> pairs)
+            => pairs.OrderBy(pair => pair.ImageX).ThenBy(pair => pair.ImageY).ThenBy(pair => pair.WorldX).ThenBy(pair => pair.WorldY);
+        var orderedExpected = CanonicalOrder(expectedPairs).ToArray();
+        var orderedActual = CanonicalOrder(actualPairs).ToArray();
+        var pairsMatch = orderedExpected.Length == orderedActual.Length && orderedExpected.SequenceEqual(orderedActual);
+        if (!fieldsMatch || !pairsMatch)
+            throw new InvalidOperationException($"Planar calibration node '{node.Id}' parameters do not match immutable calibration '{assetId}' v{version}. Reapply that version from the Calibration workspace before publishing or running with dependency validation.");
     }
 
     private static void CollectStringReference(NodeDefinition node, NodeCatalogItem catalog, string name, HashSet<string> output)
