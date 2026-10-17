@@ -616,6 +616,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
 
         var angleStart = SubpixelEdgeCore.RequireFiniteParameter(node, "angleStartDeg", -180);
         var angleEnd = SubpixelEdgeCore.RequireFiniteParameter(node, "angleEndDeg", 180);
+        if (Math.Abs(angleEnd - angleStart) < 1e-9)
+            throw new InvalidOperationException("Caliper circle start and end angles are equal, which creates a single radial caliper and cannot fit a circle. Increase the search arc angle range.");
         var fixture = MeasurementFixture.Resolve(context);
         if (fixture is not null)
         {

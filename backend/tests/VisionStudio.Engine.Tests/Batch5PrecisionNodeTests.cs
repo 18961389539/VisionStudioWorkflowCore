@@ -429,6 +429,23 @@ public sealed class Batch5PrecisionNodeTests
     }
 
     [Theory]
+    [InlineData(30, 30)]
+    [InlineData(30, 30.0000000001)]
+    public async Task CaliperCircle_RejectsZeroSpanArcBeforeSampling(double angleStartDeg, double angleEndDeg)
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        var parameters = JsonSerializer.Serialize(new
+        {
+            centerX = 32, centerY = 32, radius = 12, angleStartDeg, angleEndDeg
+        });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new CaliperCircleNode(), Image(image), parameters));
+        Assert.Contains("single radial caliper", error.Message);
+        Assert.Contains("Increase the search arc", error.Message);
+    }
+
+    [Theory]
     [InlineData("measure.caliperLine", 4.5, 5)]
     [InlineData("measure.caliperLine", 5.5, 6)]
     [InlineData("measure.caliperCircle", 4.5, 5)]
@@ -533,11 +550,10 @@ public sealed class Batch5PrecisionNodeTests
         Assert.False(Convert.ToBoolean(portOverride.Summary["found"]));
         Assert.Equal("no-edge-above-threshold", portOverride.Summary["reason"]);
 
-        // 有效边缘点 < 3 ⇒ 退化拟合，found=false。
-        var single = await Run(new CaliperCircleNode(), Image(image),
-            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"angleStartDeg":0,"angleEndDeg":0,"minContrast":15}""");
-        Assert.False(Convert.ToBoolean(single.Summary["found"]));
-        Assert.Equal("too-few-edge-points", single.Summary["reason"]);
+        // 零角跨度生成单条径向卡尺，后端应在采样前给出配置错误。
+        var zeroSpan = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":200,"centerY":200,"radius":100,"radialBand":12,"angleStartDeg":0,"angleEndDeg":0,"minContrast":15}"""));
+        Assert.Contains("single radial caliper", zeroSpan.Message);
 
         // 半径偏离闸门：标称 92、带宽 ±15（覆盖真实边缘 100），deviation=3 时全部被拒。
         var rejected = await Run(new CaliperCircleNode(), Image(image),
