@@ -18,7 +18,8 @@ type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'mo
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number; profileWidth?: number }
   | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
-      caliperCount?: number; samplingMode?: string; angleStepDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
+      caliperCount?: number; samplingMode?: string; angleStepDeg?: number; profileWidth?: number;
+      centerEditable?: boolean; radiusEditable?: boolean };
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -528,11 +529,26 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   };
   const firstSpoke = boundary(angles[0] ?? start);
   const firstSpokeAngle = normalizeCaliperAngle(angles[0] ?? start) * Math.PI / 180;
+  const profileHalfWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
   const labelOffset = 7 / scale;
   const labelNormalX = -Math.sin(firstSpokeAngle) * labelOffset;
   const labelNormalY = Math.cos(firstSpokeAngle) * labelOffset;
   const labelDirectionX = Math.cos(firstSpokeAngle), labelDirectionY = Math.sin(firstSpokeAngle);
   return <Group listening={false}>
+    {profileHalfWidth > 0 && angles.map((angleDeg, index) => {
+      const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
+      const direction = { x: Math.cos(radians), y: Math.sin(radians) };
+      const normal = { x: -direction.y, y: direction.x };
+      const innerPoint = { x: geometry.center.x + inner * direction.x, y: geometry.center.y + inner * direction.y };
+      const outerPoint = { x: geometry.center.x + outer * direction.x, y: geometry.center.y + outer * direction.y };
+      const offsetX = normal.x * profileHalfWidth, offsetY = normal.y * profileHalfWidth;
+      return <Line key={`profile-band-${index}`} name={`measurement-circle-profile-band-${index}`} closed
+        points={[innerPoint.x + offsetX, innerPoint.y + offsetY,
+          outerPoint.x + offsetX, outerPoint.y + offsetY,
+          outerPoint.x - offsetX, outerPoint.y - offsetY,
+          innerPoint.x - offsetX, innerPoint.y - offsetY]}
+        fill="#91d5ff" opacity={0.1} stroke="#91d5ff" strokeWidth={0.35 / scale} />;
+    })}
     {band > 0 && <>
       <Circle x={geometry.center.x} y={geometry.center.y} radius={inner} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
       <Circle x={geometry.center.x} y={geometry.center.y} radius={outer} stroke="#fa8c16" strokeWidth={1 / scale} dash={[4 / scale, 4 / scale]} />
@@ -1291,6 +1307,8 @@ export default function ImageViewer({
           </>}
           {measurementUndoAvailable && <Button size="small" onClick={undoMeasurementEdit}
             title="撤销最近一次在画布上完成的卡尺几何编辑">撤销测量编辑</Button>}
+          {measurementGeometry?.profileWidth !== undefined && <span className="viewer-profile-width-hint"
+            title="浅蓝色窄带表示每条卡尺沿垂直于搜索方向的实际灰度投影宽度">浅蓝色采样带 · {measurementGeometry.profileWidth} px</span>}
           <Button size="small" onClick={fit}>适应窗口</Button>
           <Button size="small" onClick={oneToOne}>原始比例</Button>
           {showRoiTools && <Button size="small" danger disabled={!roi || !roiEnabled} onClick={clearRoi}>清除选区</Button>}

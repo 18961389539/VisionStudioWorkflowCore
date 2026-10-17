@@ -704,7 +704,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         radius: connectedCircle?.radius ?? Math.max(0, geometryNumber('radius', 100)), band: Math.max(0, geometryNumber('radialBand', 8)),
         angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
         caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
-        angleStepDeg: geometryNumber('angleStepDeg', 5), centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
+        angleStepDeg: geometryNumber('angleStepDeg', 5), profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)),
+        centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
   const measurementInputReport = transformInputEdge
     ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]

@@ -26,7 +26,8 @@ vi.mock('react-konva', async () => {
     Arrow: () => <span data-testid="search-arrow" />,
     Image: () => null,
     Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('measurement-profile-band-')
-      ? <span data-testid="measurement-profile-band" data-band-index={name.slice('measurement-profile-band-'.length)} data-points={points?.join(',')} />
+      || name?.startsWith('measurement-circle-profile-band-')
+      ? <span data-testid="measurement-profile-band" data-band-index={name.slice(name.indexOf('profile-band-') + 'profile-band-'.length)} data-points={points?.join(',')} />
       : name?.startsWith('roi-brush-stroke-')
       ? <span data-testid="roi-brush-stroke" data-mode={name.slice('roi-brush-stroke-'.length)}
         data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
@@ -216,6 +217,16 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(bands).toHaveLength(3);
     const points = bands[0].getAttribute('data-points')!.split(',').map(Number);
     expect(points).toEqual([20, 42.5, 80, 42.5, 80, 37.5, 20, 37.5]);
+  });
+
+  it('shows the effective projection-width band across each radial caliper', () => {
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 3, profileWidth: effectiveSampleWidth(4) }, vi.fn());
+
+    const bands = screen.getAllByTestId('measurement-profile-band');
+    expect(bands).toHaveLength(3);
+    const points = bands[0].getAttribute('data-points')!.split(',').map(Number);
+    expect(points).toEqual([65, 52.5, 75, 52.5, 75, 47.5, 65, 47.5]);
   });
 
   it('resizes the caliper profile span from its visible image handles', () => {
