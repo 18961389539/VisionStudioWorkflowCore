@@ -22,7 +22,8 @@ vi.mock('react-konva', async () => {
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Arrow: () => <span data-testid="search-arrow" />,
     Image: () => null,
-    Line: () => null,
+    Line: ({ points, stroke }: { points?: number[]; stroke?: string }) => stroke === '#ff4d4f'
+      ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
     Circle: () => null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
@@ -65,7 +66,8 @@ describe('ImageViewer measurement geometry editing', () => {
     const view = render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
       overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} focusTick={0} />);
     expect(screen.getAllByTestId('roi-handle').length).toBeLessThanOrEqual(33);
-    expect(screen.getByText('复杂多边形 · 顶点抽样')).toBeTruthy();
+    expect(Number(screen.getByTestId('roi-polygon-preview').getAttribute('data-point-count'))).toBeLessThanOrEqual(8192);
+    expect(screen.getByText('复杂多边形 · 预览与控制点抽样')).toBeTruthy();
 
     view.rerender(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
       overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} focusTick={1} />);

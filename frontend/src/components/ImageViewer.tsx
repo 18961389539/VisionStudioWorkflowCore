@@ -28,7 +28,19 @@ const persistPixelated = (value: boolean) => {
 };
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
+const flatten = (points?: readonly OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
+const MAX_POLYGON_PREVIEW_POINTS = 8192;
+const polygonPreviewCache = new WeakMap<readonly Point[], readonly Point[]>();
+function polygonPreviewPoints(points: readonly Point[]): readonly Point[] {
+  if (points.length <= MAX_POLYGON_PREVIEW_POINTS) return points;
+  const cached = polygonPreviewCache.get(points);
+  if (cached) return cached;
+  const stride = Math.ceil(points.length / MAX_POLYGON_PREVIEW_POINTS);
+  const sampled = points.filter((_, index) => index % stride === 0);
+  if (sampled.at(-1) !== points.at(-1)) sampled.push(points[points.length - 1]);
+  polygonPreviewCache.set(points, sampled);
+  return sampled;
+}
 const maxInteractiveCircleRadius = (center: Point, width: number, height: number) => Math.max(
   Math.hypot(center.x, center.y), Math.hypot(width - center.x, center.y),
   Math.hypot(center.x, height - center.y), Math.hypot(width - center.x, height - center.y)
@@ -216,7 +228,7 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
     return inside;
   }
   let inside = false;
-  const pts = roi.points;
+  const pts = polygonPreviewPoints(roi.points);
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const xi = pts[i].x; const yi = pts[i].y; const xj = pts[j].x; const yj = pts[j].y;
     if ((yi > point.y) !== (yj > point.y) && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) inside = !inside;
@@ -361,7 +373,8 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
         strokeWidth={item.width} lineCap="round" lineJoin="round" opacity={item.mode === 'Add' ? 0.28 : 1}
         globalCompositeOperation={item.mode === 'Erase' ? 'destination-out' : 'source-over'} />)}
     </Group>;
-  return <Line listening={false} points={flatten(roi.points)} closed={roi.points.length >= 3 && !draft} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
+  const previewPoints = polygonPreviewPoints(roi.points);
+  return <Line listening={false} points={flatten(previewPoints)} closed={roi.points.length >= 3 && !draft} stroke={stroke} strokeWidth={sw} dash={[7 / scale, 4 / scale]} />;
 }
 
 /** 选区控制点：大型多边形均匀抽样，避免编辑复杂 ROI 时创建数十万个控制点。 */
@@ -1085,8 +1098,8 @@ export default function ImageViewer({
             ]}
           />}
           {showRoiTools && roi?.type === 'Polygon' && roi.points.length > MAX_POLYGON_HANDLES && <Tooltip
-            title="复杂多边形只显示最多 32 个均匀抽样的顶点控制点；在选区内部拖动可整体移动。">
-            <span className="viewer-roi-handle-hint">复杂多边形 · 顶点抽样</span>
+            title="复杂多边形轮廓最多抽样 8192 个点预览，控制点最多抽样 32 个；在预览选区内部拖动可整体移动，执行仍使用完整 ROI。全部顶点可在属性面板分页编辑。">
+            <span className="viewer-roi-handle-hint">复杂多边形 · 预览与控制点抽样</span>
           </Tooltip>}
           {showRoiTools && <span className="viewer-toolbar-divider" />}
           {showRoiTools && (tool === 'brush' || tool === 'eraser') && <span className="viewer-brush-size">
