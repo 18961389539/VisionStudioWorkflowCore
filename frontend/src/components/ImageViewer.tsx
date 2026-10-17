@@ -30,6 +30,10 @@ const persistPixelated = (value: boolean) => {
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 const flatten = (points?: OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
 const maxCircleRadius = (center: Point, width: number, height: number) => Math.max(0, Math.min(center.x, center.y, width - center.x, height - center.y));
+const maxCaliperCircleRadius = (center: Point, width: number, height: number) => Math.max(
+  Math.hypot(center.x, center.y), Math.hypot(width - center.x, center.y),
+  Math.hypot(center.x, height - center.y), Math.hypot(width - center.x, height - center.y)
+);
 const clampCircleCenter = (value: number, radius: number, limit: number) => radius * 2 <= limit
   ? clamp(value, radius, limit - radius)
   : clamp(value, 0, limit);
@@ -120,6 +124,21 @@ function caliperCircleBandHandles(geometry: Extract<MeasurementGeometry, { type:
   return {
     inner: atAngle(-90, innerHandleRadius),
     outer: atAngle(90, outerHandleRadius)
+  };
+}
+
+function caliperCircleRadiusHandle(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, width: number, height: number): Point {
+  const corners = [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: 0, y: height }, { x: width, y: height }];
+  const corner = corners.reduce((farthest, candidate) =>
+    Math.hypot(candidate.x - geometry.center.x, candidate.y - geometry.center.y)
+      >= Math.hypot(farthest.x - geometry.center.x, farthest.y - geometry.center.y) ? candidate : farthest);
+  const dx = corner.x - geometry.center.x;
+  const dy = corner.y - geometry.center.y;
+  const cornerDistance = Math.hypot(dx, dy);
+  if (cornerDistance === 0) return { x: 0, y: 0 };
+  return {
+    x: clamp(geometry.center.x + dx / cornerDistance * geometry.radius, 0, width),
+    y: clamp(geometry.center.y + dy / cornerDistance * geometry.radius, 0, height)
   };
 }
 
@@ -406,6 +425,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   const angles = buildCaliperCircleAngles(geometry);
   const arcHandles = editable ? caliperCircleArcHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const bandHandles = editable ? caliperCircleBandHandles(geometry, scale, imageWidth, imageHeight) : undefined;
+  const radiusHandle = editable && geometry.radiusEditable !== false
+    ? caliperCircleRadiusHandle(geometry, imageWidth, imageHeight) : undefined;
   const boundary = (angleDeg: number) => {
     const radians = angleDeg * Math.PI / 180;
     return [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
@@ -444,7 +465,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     <Line points={[geometry.center.x, geometry.center.y - handleRadius * 1.7, geometry.center.x, geometry.center.y + handleRadius * 1.7]} stroke="#fa8c16" strokeWidth={1.5 / scale} />
     {editable && <>
       {geometry.centerEditable !== false && <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
-      {geometry.radiusEditable !== false && <Circle x={geometry.center.x + geometry.radius} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
+      {radiusHandle && <Circle x={radiusHandle.x} y={radiusHandle.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {arcHandles && <>
         <Circle x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -694,7 +715,7 @@ export default function ImageViewer({
     const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
     const candidates: [MeasurementDragMode, Point][] = [];
     if (target.centerEditable !== false) candidates.push(['center', target.center]);
-    if (target.radiusEditable !== false) candidates.push(['radius', { x: target.center.x + target.radius, y: target.center.y }]);
+    if (target.radiusEditable !== false) candidates.push(['radius', caliperCircleRadiusHandle(target, actualWidth, actualHeight)]);
     if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
     const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
@@ -821,7 +842,7 @@ export default function ImageViewer({
       const end = { x: clamp(ip.x, 0, actualWidth), y: clamp(ip.y, 0, actualHeight) };
       setMeasurementDraft(measurementGeometry.type === 'line'
         ? { type: 'line', start, end }
-        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxCircleRadius(start, actualWidth, actualHeight)) });
+        : { ...measurementGeometry, center: start, radius: Math.min(Math.hypot(end.x - start.x, end.y - start.y), maxCaliperCircleRadius(start, actualWidth, actualHeight)) });
       return;
     }
     if (geometryDrag.current) {
@@ -849,7 +870,9 @@ export default function ImageViewer({
           y: clampCircleCenter(center.y, origin.radius, actualHeight)
         } });
       } else if (mode === 'radius') {
-        setMeasurementDraft({ ...origin, radius: clamp(Math.hypot(current.x - origin.center.x, current.y - origin.center.y), Math.min(2, maxCircleRadius(origin.center, actualWidth, actualHeight)), maxCircleRadius(origin.center, actualWidth, actualHeight)) });
+        const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
+        const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
+        setMeasurementDraft({ ...origin, radius: clamp(origin.radius + currentDistance - startDistance, 2, 10_000_000) });
       } else if (mode === 'angleStart' || mode === 'angleEnd') {
         const startAngle = origin.angleStartDeg ?? -180;
         const arcEndAngle = startAngle + circleArcSpan(startAngle, origin.angleEndDeg ?? 180).span;

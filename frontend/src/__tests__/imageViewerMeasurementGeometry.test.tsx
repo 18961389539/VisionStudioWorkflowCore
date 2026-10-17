@@ -180,6 +180,39 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.angleEndDeg).toBe(90);
   });
 
+  it('draws a clipped caliper circle by dragging beyond the nearest image edge', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 20, y: 50 }, radius: 10, band: 6,
+      angleStartDeg: 0, angleEndDeg: 90 }, onChange);
+    fireEvent.click(screen.getByRole('button', { name: '重绘标称圆' }));
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 130 }); // center (20, 50)
+    fireEvent.mouseMove(stage, { clientX: 249.3, clientY: 205.1 }); // radius 60; most of the circle lies outside the frame
+    fireEvent.mouseUp(document.body, { clientX: 249.3, clientY: 205.1 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') expect(result.radius).toBeCloseTo(60, 0);
+  });
+
+  it('lets users enlarge a caliper circle beyond the inscribed image radius', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 20, y: 50 }, radius: 10, band: 6,
+      angleStartDeg: 0, angleEndDeg: 90 }, onChange);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 149.6, clientY: 142.5 }); // radius handle along the far-corner direction
+    fireEvent.mouseMove(stage, { clientX: 249.3, clientY: 205.1 }); // expand to radius 60, across the nearest image edge
+    fireEvent.mouseUp(document.body, { clientX: 249.3, clientY: 205.1 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') expect(result.radius).toBeCloseTo(60, 0);
+  });
+
   it('keeps an oversized caliper circle center inside the image when moving it', () => {
     const onChange = vi.fn();
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 60, angleStartDeg: 0, angleEndDeg: 90 }, onChange);
