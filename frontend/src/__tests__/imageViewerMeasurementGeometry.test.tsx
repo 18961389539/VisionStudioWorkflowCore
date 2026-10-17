@@ -1003,6 +1003,25 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('ew-resize');
   });
 
+  it('shows the circle ROI radius cursor along the visible radius handle', () => {
+    const roi: VisionRoi = { type: 'Circle', x: 75, y: 25, radius: 10 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={emptyRoi} />);
+
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 242.3, clientY: 87.7 }); // radius handle toward image lower-left
+
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('nesw-resize');
+  });
+
+  it('shows the caliper-circle radius cursor along the visible radius handle', () => {
+    imageView({ type: 'circle', center: { x: 75, y: 25 }, radius: 10, band: 0,
+      angleStartDeg: -180, angleEndDeg: 180 }, vi.fn());
+
+    fireEvent.mouseMove(screen.getByTestId('stage'), { clientX: 242.3, clientY: 87.7 }); // radius handle toward image lower-left
+
+    expect(screen.getByTestId('stage').parentElement?.style.cursor).toBe('nesw-resize');
+  });
+
   it('shows a move cursor over the visible interior of a polygon ROI', () => {
     const roi: VisionRoi = { type: 'Polygon', points: [
       { x: 30, y: 30 }, { x: 70, y: 30 }, { x: 70, y: 70 }, { x: 30, y: 70 }

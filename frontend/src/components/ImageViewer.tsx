@@ -235,6 +235,14 @@ function circleRadiusHandle(center: Point, radius: number, width: number, height
   };
 }
 
+function radialResizeCursor(center: Point, handle: Point): string {
+  const dx = handle.x - center.x;
+  const dy = handle.y - center.y;
+  if (Math.abs(dx) > Math.abs(dy) * 1.5) return 'ew-resize';
+  if (Math.abs(dy) > Math.abs(dx) * 1.5) return 'ns-resize';
+  return dx * dy >= 0 ? 'nwse-resize' : 'nesw-resize';
+}
+
 function useHtmlImage(url?: string) {
   const [loaded, setLoaded] = useState<{ url: string; image: HTMLImageElement }>();
   const [failedUrl, setFailedUrl] = useState<string>();
@@ -1305,7 +1313,9 @@ export default function ImageViewer({
     if (cursorScreen) {
       if (measurementGeometryEditable && measurementGeometry) {
         const handle = hitMeasurementHandle(measurementGeometry, cursorScreen);
-        if (handle === 'radius') return 'nwse-resize';
+        if (handle === 'radius' && measurementGeometry.type === 'circle')
+          return radialResizeCursor(measurementGeometry.center,
+            circleRadiusHandle(measurementGeometry.center, measurementGeometry.radius, actualWidth, actualHeight));
         if (handle === 'profileWidth') return 'move';
         if (handle === 'innerBand' || handle === 'outerBand') return 'ns-resize';
         if ((handle === 'profileStart' || handle === 'profileEnd') && measurementGeometry.type === 'line') {
@@ -1319,6 +1329,8 @@ export default function ImageViewer({
       }
       if (roi && roiEnabled && tool === 'pan') {
         const handle = hitRoiHandle(roi, cursorScreen);
+        if (handle && roi.type === 'Circle')
+          return radialResizeCursor({ x: roi.x, y: roi.y }, circleRadiusHandle({ x: roi.x, y: roi.y }, roi.radius, actualWidth, actualHeight));
         if (handle === 'nw' || handle === 'se') return 'nwse-resize';
         if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
         if (handle === 'w' || handle === 'e') return 'ew-resize';
