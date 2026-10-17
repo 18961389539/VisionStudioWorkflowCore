@@ -117,9 +117,19 @@ export function poseSourceFingerprint(sourceNodeId: string | undefined, nodes: N
   return graphSourceFingerprint(sourceNodeId, nodes, edges, true);
 }
 
+function referenceAngleDelta(parameters: NodeParameters, thetaDeg: number): number {
+  const baseTheta = Number(parameters.baseThetaDeg ?? 0);
+  const configuredPeriod = Number(parameters.anglePeriodDeg ?? 360);
+  const period = Number.isFinite(configuredPeriod) && configuredPeriod > 0 && configuredPeriod <= 360 ? configuredPeriod : 360;
+  let delta = (thetaDeg - baseTheta) % period;
+  if (delta > period / 2) delta -= period;
+  else if (delta < -period / 2) delta += period;
+  return delta;
+}
+
 /** Re-author an existing region in a new reference frame without applying the motion twice. */
 export function rebaseRoi(roi: VisionRoi, previous: NodeParameters, x: number, y: number, thetaDeg: number): VisionRoi {
-  const angle = (thetaDeg - Number(previous.baseThetaDeg ?? 0)) * Math.PI / 180;
+  const angle = referenceAngleDelta(previous, thetaDeg) * Math.PI / 180;
   const cos = Math.cos(angle), sin = Math.sin(angle);
   const apply = (point: OverlayPoint): OverlayPoint => {
     const dx = point.x - Number(previous.baseX ?? 0), dy = point.y - Number(previous.baseY ?? 0);
@@ -203,7 +213,7 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
     let geometry: NodeParameters;
     if (type === 'measure.caliperCircle' && !edges.some(edge => edge.target === node.id && edge.targetHandle === 'circle')) {
       const center = move(Number(current.centerX ?? 320), Number(current.centerY ?? 240));
-      const rotation = Number(previous.baseThetaDeg ?? 0) - Number(parameters.baseThetaDeg ?? 0);
+      const rotation = -referenceAngleDelta(previous, Number(parameters.baseThetaDeg ?? 0));
       const start = Number(current.angleStartDeg ?? -180) + rotation;
       const end = Number(current.angleEndDeg ?? 180) + rotation;
       const turns = Math.round((start + end) / 720) * 360;

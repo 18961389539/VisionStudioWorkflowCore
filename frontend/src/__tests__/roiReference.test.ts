@@ -12,6 +12,18 @@ describe('ROI reference capture', () => {
     expect(previous.roi.x).toBe(130);
   });
 
+  it('uses the configured angle period when migrating an ROI to a new reference pose', () => {
+    const summary = { referenceCaptured: true, referenceImage: 'png-bytes', referenceWidth: 640,
+      referenceHeight: 480, referenceX: 200, referenceY: 70, referenceThetaDeg: 180 };
+    const previous = { baseX: 100, baseY: 50, baseThetaDeg: 0, anglePeriodDeg: 180,
+      roi: { type: 'Circle' as const, x: 130, y: 60, radius: 8 } };
+
+    expect(capturedReference(previous, summary, 'binding', 'captured-at').roi)
+      .toEqual({ type: 'Circle', x: 230, y: 80, radius: 8 });
+    expect(capturedReference({ ...previous, anglePeriodDeg: 360 }, summary, 'binding', 'captured-at').roi)
+      .toEqual({ type: 'Circle', x: 170, y: 60, radius: 8 });
+  });
+
   it('preserves an invalid ROI draft so a new reference can still be captured and the region replaced', () => {
     const invalidRoi = { type: 'Polygon' };
     const next = capturedReference({ roi: invalidRoi }, { referenceCaptured: true, referenceImage: 'png-bytes',
@@ -122,6 +134,33 @@ describe('ROI reference capture', () => {
     expect(moved[1].data.parameters).toMatchObject({ centerX: 230, centerY: 80, radius: 8 });
     expect(nodes[1].data.parameters).toMatchObject({ centerX: 130, centerY: 60 });
     expect(moved[0].data.parameters).toEqual({ baseX: 200, baseY: 70, baseThetaDeg: 0 });
+  });
+
+  it('uses the same angle period when rebasing downstream lines and circle arcs', () => {
+    const nodes = [
+      { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', parameters: {
+        baseX: 100, baseY: 50, baseThetaDeg: 0, anglePeriodDeg: 180
+      } } },
+      { id: 'line', position: { x: 0, y: 0 }, data: { typeKey: 'measure.caliperLine', parameters: {
+        startX: 130, startY: 60, endX: 150, endY: 70
+      } } },
+      { id: 'circle', position: { x: 0, y: 0 }, data: { typeKey: 'measure.caliperCircle', parameters: {
+        centerX: 130, centerY: 60, radius: 8, angleStartDeg: 350, angleEndDeg: 10
+      } } }
+    ];
+    const edges: Edge[] = [
+      { id: 'line-transform', source: 'roi', sourceHandle: 'transform', target: 'line', targetHandle: 'transform' },
+      { id: 'circle-transform', source: 'roi', sourceHandle: 'transform', target: 'circle', targetHandle: 'transform' }
+    ];
+
+    const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 180, anglePeriodDeg: 180 });
+
+    expect(moved.find(node => node.id === 'line')!.data.parameters).toMatchObject({ startX: 230, startY: 80, endX: 250, endY: 90 });
+    const movedCircle = moved.find(node => node.id === 'circle')!.data.parameters as Record<string, number>;
+    expect(movedCircle).toMatchObject({ centerX: 230, centerY: 80 });
+    expect(((movedCircle.angleStartDeg % 360) + 360) % 360).toBeCloseTo(350);
+    expect(((movedCircle.angleEndDeg % 360) + 360) % 360).toBeCloseTo(10);
+    expect(((movedCircle.angleEndDeg - movedCircle.angleStartDeg) % 360 + 360) % 360).toBeCloseTo(20);
   });
 
   it.each(['measure.caliperCircle', 'measure.caliperLine', 'measure.caliper', 'feature.edgeSubpixel'])(
