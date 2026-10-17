@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "3f8cdf89637a3a53c993069c3e777ecce5d7f05e684a0f8549c974e675beb497",
+  "hash": "aa5b51b1bc7b62558c42212934a198b3915e66ebea0d5da7bb31f4016e62a1f4",
   "items": [
     {
       "type": "image.acquire",
@@ -13730,9 +13730,25 @@
           "type": "textarea",
           "defaultValue": "{}",
           "description": "Optional fallback when calibrationJson is not connected; accepts CameraCalibrationModel JSON from calibration.cameraIntrinsics."
+        },
+        {
+          "name": "intrinsicsAssetId",
+          "label": "Intrinsic Asset ID",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional immutable camera-intrinsic asset used to verify this model during workflow execution, publication, and production dependency checks."
+        },
+        {
+          "name": "intrinsicsAssetVersion",
+          "label": "Intrinsic Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999,
+          "step": 1
         }
       ],
-      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
+      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

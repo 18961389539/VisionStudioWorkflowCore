@@ -64,7 +64,8 @@ public sealed class OfflineReplayService(
     RunStore runs,
     VisionWorkflowCompiler compiler,
     WorkflowModuleExpander modules,
-    ProductionRuntimeService production)
+    ProductionRuntimeService production,
+    RuntimeDependencyManifestService dependencies)
 {
     private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
@@ -107,6 +108,7 @@ public sealed class OfflineReplayService(
         var editedWorkflow = request.Workflow ?? baselineWorkflow;
         EnsureReplayCompatible(baselineWorkflow, editedWorkflow);
         var expandedEdited = await modules.ExpandAsync(editedWorkflow, ct);
+        await dependencies.ValidateCalibrationBindingsAsync(expandedEdited.Workflow, ct);
         var executable = PrepareExecutableWorkflow(sourceRunId, expandedEdited.Workflow, baseline);
         var options = request.Options ?? new VisionRunOptions(DebugRunMode.Full);
         var context = new RunTraceContext(traceSource, DebugMode: options.Mode.ToString());
@@ -155,6 +157,7 @@ public sealed class OfflineReplayService(
     public async Task<OfflineReplayResult> ExecuteImageAsync(string sourceRef, string imagePath, WorkflowDefinition workflow, string traceSource, VisionRunOptions options, CancellationToken ct, bool persistReplayInput = false, bool persistTrace = true)
     {
         var expanded = await modules.ExpandAsync(workflow, ct);
+        await dependencies.ValidateCalibrationBindingsAsync(expanded.Workflow, ct);
         var executableWorkflow = expanded.Workflow;
         if (executableWorkflow.Nodes.Any(x => x.Type.Equals("camera.syncCapture", StringComparison.OrdinalIgnoreCase)))
             throw new ApiConflictException("Dataset image validation does not support synchronized FrameSet acquisition yet.");

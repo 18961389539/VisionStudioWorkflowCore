@@ -211,6 +211,8 @@ const parameterNames: Record<string, string> = {
   'Max Sample Translation Error (0=off)': '单样本平移残差上限（0=关闭）',
   'Max Sample Angle Error deg (0=off)': '单样本角度残差上限（度，0=关闭）',
   'Angular Weight (translation units/radian)': '角度权重（平移单位/弧度）',
+  'Intrinsic Asset ID': '内参资产 ID',
+  'Intrinsic Asset Version': '内参资产版本',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -437,6 +439,7 @@ const descriptions: Record<string, string> = {
   'output.exportResult': '将输入结果导出为 JSON 或 CSV，默认拒绝覆盖已有文件。',
   'output.httpRequest': '发送 HTTP 请求，支持超时、取消和响应大小上限；非成功状态会使节点失败。',
   'image.acquire': '从连续采集的相机帧流中获取一帧。选择“最新帧”会复用最新图像；选择“下一帧”会等待新图像。',
+  'image.undistort': '使用 JLVision 相机内参校正镜头畸变；可从内参向导保存、发布和加载不可变版本。将资产 ID/版本应用到节点后，发布和生产依赖校验会核对内嵌模型与版本内容一致。连接上游 calibrationJson 时不要同时绑定静态资产。校正后的像素坐标系发生变化，几何 ROI 应基于校正图像重新创建。',
   'frameset.image': '从同步帧组中选取一台相机的图像，不复制底层图像数据。',
   'camera.syncCapture': '向同步组发送一次触发命令，收集每台成员相机的新图像，并输出包含实测时差的帧组。',
   'image.synthetic': '生成 1280×960 测试图像；圆、矩形和线段组成的图案保持固定尺寸，可按样本序号平移/旋转，或用固定随机种子生成可复现的位置。',
@@ -730,6 +733,8 @@ const parameterDescriptions: Record<string, string> = {
   'calibration.handEye2D.maxTranslationError': '单样本平移残差上限（0 关闭）。超过则指出最差样本并拒绝求解结果。',
   'calibration.handEye2D.maxAngleErrorDeg': '单样本角度残差上限（度，0 关闭）。',
   'calibration.handEye2D.angularWeight': '角度残差换算为平移单位的权重（单位/弧度，默认 50）。工作范围大时可增加，工作范围小时可减小；它会改变平移与旋转对最终拟合的相对影响。',
+  'image.undistort.intrinsicsAssetId': '可选的相机内参不可变资产 ID；发布和运行依赖校验时会验证该模型与资产版本一致。',
+  'image.undistort.intrinsicsAssetVersion': '相机内参资产版本；必须与资产 ID 同时设置，0 表示不绑定资产。',
 };
 
 const statusNames: Record<string, string> = {

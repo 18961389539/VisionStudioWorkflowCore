@@ -952,6 +952,39 @@ export type CalibrationVersionSnapshot = {
   result: CalibrationWorkspaceResult;
 };
 
+export type CameraIntrinsicVersionInfo = {
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  published: boolean;
+};
+
+export type CameraIntrinsicAssetDescriptor = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  latestVersion: number;
+  publishedVersion?: number | null;
+  versions: CameraIntrinsicVersionInfo[];
+  publicationHistory: Array<{ version: number; action: string; at: string }>;
+};
+
+export type CameraIntrinsicVersionSnapshot = {
+  assetId: string;
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  model: unknown;
+  sourceDocumentJson: string;
+  summaryJson: string;
+};
+
 
 export type CalibrationWizardQuality = {
   cornerCount: number;

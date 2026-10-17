@@ -335,3 +335,7 @@ Usage and scope are documented in [2D Hand-Eye Calibration](hand-eye-2d.md). The
 
 Planar calibration asset reads and publication now recompute the stored workspace/result snapshot hash and reject mismatches. Production dependency capture reads the same immutable version and verifies the workflow node's embedded frames, units, quality gates, and enabled point pairs match it. The node solves from workflow parameters after this binding check, so publishing and production validation cannot silently associate an unrelated asset version with the solve.
 
+## Follow-up implementation: camera intrinsic assets
+
+The Intrinsics Wizard can save solved models as immutable, hashed SQLite versions together with the full source-view document and solve summary. Versions support publication and rollback. `image.undistort` can pin an asset version; workflow execution and dependency capture verify the embedded model hash, and manifests record the snapshot hash. Fisheye/telecentric calibration and dynamic upstream-model asset binding remain open gaps.
+

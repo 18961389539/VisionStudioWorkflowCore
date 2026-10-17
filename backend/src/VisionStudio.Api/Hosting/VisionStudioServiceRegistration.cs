@@ -330,6 +330,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
+        services.AddSingleton<CameraIntrinsicAssetStore>();
         services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(
             sp.GetRequiredService<SqliteMetadataDatabase>(),

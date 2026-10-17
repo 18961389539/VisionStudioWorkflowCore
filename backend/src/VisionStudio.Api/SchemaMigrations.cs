@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 21;
+    public const int CurrentVersion = 22;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -57,7 +57,8 @@ public sealed class SqliteSchemaMigrationRunner
         new(20, "V0.64 run trace lifecycle and structured error codes", "", ApplyRunTraceLifecycleColumnsAsync,
             "run_traces.error_code"),
         new(21, "Independent recipe validation policy", "", ApplyIndependentRecipeValidationAsync,
-            "jobs.requires_validation")
+            "jobs.requires_validation"),
+        new(22, "Versioned camera intrinsic calibration assets", CameraIntrinsicAssetSchemaSql)
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -867,6 +868,41 @@ CREATE TABLE IF NOT EXISTS investigation_case_verifications (
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_case ON investigation_case_verifications(case_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_gate ON investigation_case_verifications(gate_status,created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_runs ON investigation_case_verifications(baseline_validation_run_id,candidate_validation_run_id);
+""";
+
+    private const string CameraIntrinsicAssetSchemaSql = """
+CREATE TABLE IF NOT EXISTS camera_intrinsic_assets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    latest_version INTEGER NOT NULL,
+    published_version INTEGER NULL
+);
+CREATE TABLE IF NOT EXISTS camera_intrinsic_versions (
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    model_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    note TEXT NOT NULL,
+    model_json TEXT NOT NULL,
+    source_document_json TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    PRIMARY KEY(asset_id, version),
+    FOREIGN KEY(asset_id) REFERENCES camera_intrinsic_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_camera_intrinsic_versions_created ON camera_intrinsic_versions(asset_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS camera_intrinsic_publication_history (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    at TEXT NOT NULL,
+    FOREIGN KEY(asset_id) REFERENCES camera_intrinsic_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_camera_intrinsic_publication_history_asset ON camera_intrinsic_publication_history(asset_id, seq);
 """;
 
 

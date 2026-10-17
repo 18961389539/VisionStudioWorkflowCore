@@ -36,6 +36,8 @@ public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double
 public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
 
 public sealed record CalibrationWizardImportRequest(string DocumentJson);
+public sealed record CreateCameraIntrinsicAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
+public sealed record SaveCameraIntrinsicVersionFromSessionRequest(string SessionId, string? Note = null);
 
 public sealed record CalibrationWizardDisableOutliersRequest(int[]? ViewIndexes = null, bool UseSolveOutlier = true);
 
@@ -60,6 +62,7 @@ public sealed class CalibrationWizardService
     private readonly CameraIntrinsicCalibrationNode _intrinsics;
     private readonly PlanarHandEyeCalibrationNode _handEye;
     private readonly CameraManager _cameras;
+    private readonly CameraIntrinsicAssetStore _intrinsicAssets;
     private readonly string _persistRoot;
     private static readonly JsonSerializerOptions PersistJson = new()
     {
@@ -73,12 +76,14 @@ public sealed class CalibrationWizardService
         CameraIntrinsicCalibrationNode intrinsics,
         PlanarHandEyeCalibrationNode handEye,
         CameraManager cameras,
+        CameraIntrinsicAssetStore intrinsicAssets,
         IWebHostEnvironment environment)
     {
         _detectBoard = detectBoard;
         _intrinsics = intrinsics;
         _handEye = handEye;
         _cameras = cameras;
+        _intrinsicAssets = intrinsicAssets;
         _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "calibration-wizard");
         Directory.CreateDirectory(_persistRoot);
         TryHydrateFromDisk();
@@ -383,6 +388,29 @@ public sealed class CalibrationWizardService
             fisheyeSupported = false,
             fisheyeNote = "Fisheye / telecentric models are not available; JLVision path is polynomial pinhole only."
         };
+    }
+
+    public async Task<CameraIntrinsicAssetDescriptor> CreateIntrinsicAssetAsync(CreateCameraIntrinsicAssetFromSessionRequest request, CancellationToken ct)
+    {
+        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        return await _intrinsicAssets.CreateAsync(new CreateCameraIntrinsicAssetRequest(
+            request.Id, request.Name, request.Description, solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
+    }
+
+    public async Task<CameraIntrinsicVersionSnapshot> AddIntrinsicVersionAsync(string id, SaveCameraIntrinsicVersionFromSessionRequest request, CancellationToken ct)
+    {
+        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        return await _intrinsicAssets.AddVersionAsync(id, new SaveCameraIntrinsicVersionRequest(
+            solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
+    }
+
+    private static (CameraCalibrationModel Model, string DocumentJson, string SummaryJson) RequireSolvedModel(CalibrationIntrinsicsWizard.Session session)
+    {
+        var state = session.Snapshot();
+        if (state.Model is null) throw new ApiConflictException("Solve camera intrinsics before saving a versioned calibration asset.");
+        var document = session.ExportDocument();
+        if (document.Model is null) throw new InvalidOperationException("Solved session model was not included in the wizard source document.");
+        return (state.Model, JsonSerializer.Serialize(document, PersistJson), JsonSerializer.Serialize(state.LastSolveSummary ?? new { }, PersistJson));
     }
 
     public CalibrationIntrinsicsWizard.SessionState ImportDocument(CalibrationWizardImportRequest request)

@@ -132,6 +132,10 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var intrinsicAssetId = node.GetString("intrinsicsAssetId", "").Trim();
+        var intrinsicAssetVersion = node.GetInt("intrinsicsAssetVersion", 0);
+        if (intrinsicAssetVersion < 0 || (intrinsicAssetId.Length > 0) != (intrinsicAssetVersion > 0))
+            throw new InvalidOperationException("intrinsicsAssetId and a positive intrinsicsAssetVersion must be provided together, or both left unset.");
         var source = context.RequireImage("image").Mat;
         CameraCalibrationModel model;
         var calibrationJson = context.TryGetValue("calibrationJson", out var connectedCalibration)
@@ -145,7 +149,7 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
         try { output = JLVisionCalibration.Undistort(source, model, cancellationToken); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"JLVision undistortion failed: {ex.Message}", ex); }
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight }));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight, ["intrinsicsAssetId"] = intrinsicAssetId.Length == 0 ? null : intrinsicAssetId, ["intrinsicsAssetVersion"] = intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion }));
     }
 }
 

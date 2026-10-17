@@ -66,6 +66,36 @@ public static class CalibrationEndpoints
         app.MapPost("/api/calibrations/{id}/rollback/{version:int}", async (string id, int version, CalibrationAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.rollback", "calibration");
 
+        app.MapGet("/api/camera-intrinsics", async (CameraIntrinsicAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.ListAsync(ct)));
+
+        app.MapPost("/api/camera-intrinsics", async (CreateCameraIntrinsicAssetFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.CreateIntrinsicAssetAsync(request, ct))).RequireEngineer("calibration.intrinsic-asset.create", "calibration");
+
+        app.MapGet("/api/camera-intrinsics/{id}", async (string id, CameraIntrinsicAssetStore store, CancellationToken ct) =>
+        {
+            var asset = await store.GetAsync(id, ct);
+            return asset is null ? Results.NotFound() : Results.Ok(asset);
+        });
+
+        app.MapPost("/api/camera-intrinsics/{id}/versions", async (string id, SaveCameraIntrinsicVersionFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.AddIntrinsicVersionAsync(id, request, ct))).RequireEngineer("calibration.intrinsic-asset.version.create", "calibration");
+
+        app.MapGet("/api/camera-intrinsics/{id}/versions/{version:int}", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
+        {
+            var snapshot = await store.GetVersionAsync(id, version, ct);
+            return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+        });
+
+        app.MapGet("/api/camera-intrinsics/{id}/published", async (string id, CameraIntrinsicAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.GetPublishedAsync(id, ct)));
+
+        app.MapPost("/api/camera-intrinsics/{id}/versions/{version:int}/publish", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.intrinsic-asset.publish", "calibration");
+
+        app.MapPost("/api/camera-intrinsics/{id}/rollback/{version:int}", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.intrinsic-asset.rollback", "calibration");
+
         // --- Guided camera-intrinsics wizard (HALCON-assistant style slice) ---
         app.MapPost("/api/calibration/wizard/sessions", (CalibrationWizardCreateRequest request, CalibrationWizardService wizard) =>
         {

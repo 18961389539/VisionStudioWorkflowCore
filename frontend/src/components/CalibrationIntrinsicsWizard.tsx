@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
-import type { CalibrationWizardHint, CalibrationWizardSession } from '../types';
+import type { CameraIntrinsicAssetDescriptor, CameraIntrinsicVersionSnapshot, CalibrationWizardHint, CalibrationWizardSession } from '../types';
 
 type Props = {
   canApplyToSelectedNode: boolean;
@@ -9,6 +9,15 @@ type Props = {
 };
 
 type CameraListItem = { id: string; name?: string; acquisition?: { acquisitionState?: string } };
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
 
 const stepTitles = ['标定板设置', '采集 / 导入视图', '审核视图', '求解内参', '导出应用'];
 
@@ -37,6 +46,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [previewQuality, setPreviewQuality] = useState<string>();
   const [viewStatsRows, setViewStatsRows] = useState<Record<string, unknown>[]>([]);
+  const [intrinsicAssets, setIntrinsicAssets] = useState<CameraIntrinsicAssetDescriptor[]>([]);
+  const [intrinsicAssetId, setIntrinsicAssetId] = useState('camera-intrinsics-1');
+  const [intrinsicAssetName, setIntrinsicAssetName] = useState('Camera Intrinsic Calibration');
+  const [pinnedAssetId, setPinnedAssetId] = useState<string>();
+  const [pinnedVersion, setPinnedVersion] = useState(0);
+  const [pinnedModel, setPinnedModel] = useState<unknown>();
 
   const enabledCount = session?.enabledCount ?? 0;
   const guidance = useMemo(() => {
@@ -58,6 +73,17 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       } catch { setCameras([]); }
     })();
   }, []);
+
+  const refreshIntrinsicAssets = async () => {
+    try {
+      const response = await fetch('/api/camera-intrinsics');
+      if (response.ok) setIntrinsicAssets(await response.json() as CameraIntrinsicAssetDescriptor[]);
+    } catch { setIntrinsicAssets([]); }
+  };
+
+  useEffect(() => { void refreshIntrinsicAssets(); }, []);
+
+  const pinMatchesSession = Boolean(pinnedAssetId && pinnedVersion > 0 && session?.model && stableJson(session.model) === stableJson(pinnedModel));
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -237,6 +263,9 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
       setSession(data.session);
       setSolveSummary(data.result);
+      setPinnedAssetId(undefined);
+      setPinnedVersion(0);
+      setPinnedModel(undefined);
       if (Array.isArray(data.hints)) setHints(data.hints);
       const statsRaw = data.result?.viewStats;
       if (typeof statsRaw === 'string') {
@@ -264,6 +293,74 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     finally { setBusy(false); }
   };
 
+  const saveIntrinsicAsset = async () => {
+    if (!session?.model) return messageApi.warning('请先完成内参求解');
+    if (!intrinsicAssetId.trim() || !intrinsicAssetName.trim()) return messageApi.warning('请填写资产 ID 和名称');
+    setBusy(true);
+    try {
+      const existing = intrinsicAssets.find((asset) => asset.id === intrinsicAssetId.trim());
+      const url = existing ? `/api/camera-intrinsics/${encodeURIComponent(existing.id)}/versions` : '/api/camera-intrinsics';
+      const body = existing
+        ? { sessionId: session.sessionId, note: `Wizard save ${new Date().toISOString()}` }
+        : { sessionId: session.sessionId, id: intrinsicAssetId.trim(), name: intrinsicAssetName.trim(), description: 'Camera intrinsic model with source wizard views', note: 'Initial intrinsic calibration' };
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await response.json() as Record<string, unknown>;
+      if (!response.ok) throw new Error(String(data.error ?? '保存相机内参资产失败'));
+      const version = Number(data.version ?? data.latestVersion ?? 0);
+      if (!Number.isInteger(version) || version < 1) throw new Error('服务端未返回有效版本号');
+      setPinnedAssetId(intrinsicAssetId.trim());
+      setPinnedVersion(version);
+      setPinnedModel(session.model);
+      await refreshIntrinsicAssets();
+      messageApi.success(`已保存相机内参资产 ${intrinsicAssetId.trim()} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '保存失败'); }
+    finally { setBusy(false); }
+  };
+
+  const loadIntrinsicVersion = async (id: string, version: number) => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}`);
+      const snapshot = await response.json() as CameraIntrinsicVersionSnapshot & { error?: string };
+      if (!response.ok) throw new Error(snapshot.error ?? '加载相机内参版本失败');
+      const importResponse = await fetch('/api/calibration/wizard/sessions/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentJson: snapshot.sourceDocumentJson })
+      });
+      const restored = await importResponse.json() as CalibrationWizardSession & { error?: string };
+      if (!importResponse.ok) throw new Error(restored.error ?? '恢复标定源视图失败');
+      let summary: Record<string, unknown> = {};
+      try { summary = JSON.parse(snapshot.summaryJson) as Record<string, unknown>; } catch { /* checksum validation already rejects invalid saved JSON */ }
+      setSession(restored);
+      setSolveSummary(summary);
+      const stats = summary.viewStats;
+      if (typeof stats === 'string') { try { setViewStatsRows(JSON.parse(stats) as Record<string, unknown>[]); } catch { setViewStatsRows([]); } }
+      else setViewStatsRows([]);
+      setIntrinsicAssetId(id);
+      setIntrinsicAssetName(intrinsicAssets.find((asset) => asset.id === id)?.name ?? id);
+      setPinnedAssetId(id);
+      setPinnedVersion(version);
+      setPinnedModel(snapshot.model);
+      setStep(4);
+      messageApi.success(`已加载相机内参资产 ${id} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '加载失败'); }
+    finally { setBusy(false); }
+  };
+
+  const publishIntrinsicVersion = async (id: string, version: number, rollback = false) => {
+    setBusy(true);
+    try {
+      const url = rollback
+        ? `/api/camera-intrinsics/${encodeURIComponent(id)}/rollback/${version}`
+        : `/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}/publish`;
+      const response = await fetch(url, { method: 'POST' });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? '发布相机内参版本失败');
+      await refreshIntrinsicAssets();
+      messageApi.success(`${rollback ? '已回滚' : '已发布'}相机内参资产 ${id} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '发布失败'); }
+    finally { setBusy(false); }
+  };
+
   const applyModel = async () => {
     if (!session) return;
     setBusy(true);
@@ -275,8 +372,11 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', maxViewRms, maxRms, maxPoseViewRms });
         messageApi.success('已将视图 JSON 应用到相机内参节点');
       } else if (selectedNodeType === 'image.undistort') {
-        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '' });
-        messageApi.success('已将内参模型应用到去畸变节点');
+        const bound = pinMatchesSession && pinnedAssetId
+          ? { intrinsicsAssetId: pinnedAssetId, intrinsicsAssetVersion: pinnedVersion }
+          : { intrinsicsAssetId: '', intrinsicsAssetVersion: 0 };
+        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '', ...bound });
+        messageApi.success(pinMatchesSession ? `已应用并绑定内参资产 ${pinnedAssetId} V${pinnedVersion}` : '已将内参模型应用到去畸变节点（未绑定资产版本）');
       } else {
         onApplyToSelectedNode({
           calibrationDataJson: data.calibrationDataJson ?? '',
@@ -297,7 +397,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message="相机内参向导（Batch F）"
-        description="会话落盘 + 导出/导入完整文档 · 相机刷新检测预览 · 规则姿态提示 · 离群一键禁用 · 导出到节点。鱼眼/远心：当前 JLVision 仅支持多项式针孔，已跳过。" />
+        description="会话落盘 · 质量审核与离群处理 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。鱼眼/远心：当前 JLVision 仅支持多项式针孔，尚未支持。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
       {hints.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
@@ -415,6 +515,21 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
                 { title: 'Pose-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
               ]} />
           )}
+          <Space wrap>
+            <Input value={intrinsicAssetId} onChange={(event) => setIntrinsicAssetId(event.target.value)} addonBefore="资产 ID" style={{ width: 300 }} />
+            <Input value={intrinsicAssetName} onChange={(event) => setIntrinsicAssetName(event.target.value)} addonBefore="名称" style={{ width: 330 }} />
+            <Button type="primary" loading={busy} disabled={!session?.model} onClick={() => void saveIntrinsicAsset()}>
+              {intrinsicAssets.some((asset) => asset.id === intrinsicAssetId.trim()) ? '保存新版本' : '创建版本资产'}
+            </Button>
+            <Button loading={busy} onClick={() => void refreshIntrinsicAssets()}>刷新资产</Button>
+            {pinMatchesSession && pinnedAssetId && <Tag color="green">绑定 {pinnedAssetId} V{pinnedVersion}</Tag>}
+          </Space>
+          <Table size="small" rowKey="id" pagination={false} dataSource={intrinsicAssets} scroll={{ x: 900, y: 220 }}
+            columns={[
+              { title: '资产', width: 240, render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => <><b>{row.name}</b><div><Typography.Text type="secondary" code>{row.id}</Typography.Text></div></> },
+              { title: '已发布', width: 90, render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => row.publishedVersion ? <Tag color="green">V{row.publishedVersion}</Tag> : <Tag>无</Tag> },
+              { title: '版本 / 加载 / 发布', render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => <Space wrap>{row.versions.map((version) => <Space key={version.version} size={4}><Button size="small" loading={busy} type={version.published ? 'primary' : 'default'} onClick={() => void loadIntrinsicVersion(row.id, version.version)}>加载 V{version.version}</Button>{version.published ? <Tag color="green">生效</Tag> : <Button size="small" loading={busy} onClick={() => void publishIntrinsicVersion(row.id, version.version, Boolean(row.publishedVersion && version.version < row.latestVersion))}>{row.publishedVersion && version.version < row.latestVersion ? `回滚到 V${version.version}` : `发布 V${version.version}`}</Button>}</Space>)}</Space> }
+            ]} />
           <Space wrap>
             <Button danger loading={busy} onClick={() => void disableOutliers()}>禁用离群/最差视图</Button>
             <Button loading={busy} onClick={() => void exportDocument()}>导出完整会话文档</Button>

@@ -132,7 +132,8 @@ public sealed class RuntimeDependencyManifestService(
     HardwareProvenanceService hardwareProvenance,
     WorkflowModuleExpander? moduleExpander = null,
     CameraSynchronizationGroupStore? synchronizationGroups = null,
-    DeviceLeaseRegistry? commandGate = null)
+    DeviceLeaseRegistry? commandGate = null,
+    CameraIntrinsicAssetStore? cameraIntrinsicAssets = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -305,6 +306,7 @@ public sealed class RuntimeDependencyManifestService(
         ArgumentNullException.ThrowIfNull(workflow);
         var expandedModules = moduleExpander is null ? new ExpandedWorkflowModules(workflow, []) : await moduleExpander.ExpandAsync(workflow, ct);
         workflow = expandedModules.Workflow;
+        await ValidateCalibrationBindingsAsync(workflow, ct);
         var moduleDependencies = expandedModules.Dependencies
             .GroupBy(x => new { x.ModuleId, x.Version, x.ModuleHash })
             .Select(x => new WorkflowModuleRuntimeDependency(x.Key.ModuleId, x.Key.Version, x.Key.ModuleHash))
@@ -330,17 +332,16 @@ public sealed class RuntimeDependencyManifestService(
 
             var assetId = ResolveString(node, registration.Catalog, "assetId");
             var assetVersion = ResolveInt(node, registration.Catalog, "assetVersion");
-            if (string.Equals(node.Type, "calibration.planar", StringComparison.OrdinalIgnoreCase))
-            {
-                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
-                var hasAssetVersion = assetVersion > 0;
-                if (assetVersion < 0 || hasAssetId != hasAssetVersion)
-                    throw new InvalidOperationException($"Planar calibration node '{node.Id}' must specify both assetId and a positive assetVersion, or leave both unset.");
-                if (hasAssetId)
-                    await ValidatePlanarCalibrationBindingAsync(node, assetId!, assetVersion, ct);
-            }
             if (!string.IsNullOrWhiteSpace(assetId) && assetVersion > 0)
                 calibrationRefs.Add((assetId, assetVersion));
+
+            if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
+            {
+                var intrinsicAssetId = ResolveString(node, registration.Catalog, "intrinsicsAssetId");
+                var intrinsicAssetVersion = ResolveInt(node, registration.Catalog, "intrinsicsAssetVersion");
+                if (!string.IsNullOrWhiteSpace(intrinsicAssetId) && intrinsicAssetVersion > 0)
+                    calibrationRefs.Add((IntrinsicCalibrationReference(intrinsicAssetId!), intrinsicAssetVersion));
+            }
         }
 
         if (synchronizationGroupIds.Count > 0)
@@ -452,6 +453,42 @@ public sealed class RuntimeDependencyManifestService(
             robotDependencies,
             calibrationDependencies,
             moduleDependencies);
+    }
+
+    /// <summary>Verifies immutable calibration pins before any workflow execution path.</summary>
+    public async Task ValidateCalibrationBindingsAsync(WorkflowDefinition workflow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(workflow);
+        foreach (var node in workflow.Nodes)
+        {
+            if (!registry.IsRegistered(node.Type)) continue;
+            var catalog = registry.Require(node.Type).Catalog;
+            if (string.Equals(node.Type, "calibration.planar", StringComparison.OrdinalIgnoreCase))
+            {
+                var assetId = ResolveString(node, catalog, "assetId");
+                var version = ResolveInt(node, catalog, "assetVersion");
+                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
+                var hasVersion = version > 0;
+                if (version < 0 || hasAssetId != hasVersion)
+                    throw new InvalidOperationException($"Planar calibration node '{node.Id}' must specify both assetId and a positive assetVersion, or leave both unset.");
+                if (hasAssetId) await ValidatePlanarCalibrationBindingAsync(node, assetId!, version, ct);
+            }
+            else if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
+            {
+                var assetId = ResolveString(node, catalog, "intrinsicsAssetId");
+                var version = ResolveInt(node, catalog, "intrinsicsAssetVersion");
+                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
+                var hasVersion = version > 0;
+                if (version < 0 || hasAssetId != hasVersion)
+                    throw new InvalidOperationException($"Image undistort node '{node.Id}' must specify both intrinsicsAssetId and a positive intrinsicsAssetVersion, or leave both unset.");
+                if (!hasAssetId) continue;
+                if (cameraIntrinsicAssets is null)
+                    throw new InvalidOperationException("Workflow references a camera intrinsic asset, but intrinsic calibration storage is unavailable.");
+                if (workflow.Edges.Any(edge => string.Equals(edge.TargetNodeId, node.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(edge.TargetPort, "calibrationJson", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Image undistort node '{node.Id}' cannot pin an intrinsic asset while calibrationJson is connected from another node. Pin a static model or remove the asset reference.");
+                await cameraIntrinsicAssets.RequireModelMatchAsync(assetId!, version, node.GetString("calibrationJson", "{}"), ct);
+            }
+        }
     }
 
     /// <summary>
@@ -803,11 +840,36 @@ public sealed class RuntimeDependencyManifestService(
         var output = new List<CalibrationRuntimeDependency>();
         foreach (var reference in references.OrderBy(x => x.AssetId, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Version))
         {
-            var snapshot = await calibrations.GetVersionAsync(reference.AssetId, reference.Version, ct)
-                ?? throw new InvalidOperationException($"Workflow references calibration '{reference.AssetId}' v{reference.Version}, but that immutable version does not exist.");
-            output.Add(new CalibrationRuntimeDependency(snapshot.AssetId, snapshot.Version, snapshot.SnapshotHash));
+            if (TryGetIntrinsicCalibrationId(reference.AssetId, out var intrinsicAssetId))
+            {
+                if (cameraIntrinsicAssets is null)
+                    throw new InvalidOperationException("Workflow references a camera intrinsic asset, but intrinsic calibration storage is unavailable.");
+                var intrinsic = await cameraIntrinsicAssets.GetVersionAsync(intrinsicAssetId, reference.Version, ct)
+                    ?? throw new InvalidOperationException($"Workflow references camera intrinsic calibration '{intrinsicAssetId}' v{reference.Version}, but that immutable version does not exist.");
+                output.Add(new CalibrationRuntimeDependency(reference.AssetId, intrinsic.Version, intrinsic.SnapshotHash));
+            }
+            else
+            {
+                var snapshot = await calibrations.GetVersionAsync(reference.AssetId, reference.Version, ct)
+                    ?? throw new InvalidOperationException($"Workflow references calibration '{reference.AssetId}' v{reference.Version}, but that immutable version does not exist.");
+                output.Add(new CalibrationRuntimeDependency(snapshot.AssetId, snapshot.Version, snapshot.SnapshotHash));
+            }
         }
         return output;
+    }
+
+    private static string IntrinsicCalibrationReference(string assetId) => "camera-intrinsics:" + assetId;
+
+    private static bool TryGetIntrinsicCalibrationId(string reference, out string assetId)
+    {
+        const string prefix = "camera-intrinsics:";
+        if (reference.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            assetId = reference[prefix.Length..];
+            return true;
+        }
+        assetId = string.Empty;
+        return false;
     }
 
     private async Task ValidatePlanarCalibrationBindingAsync(NodeDefinition node, string assetId, int version, CancellationToken ct)
