@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { applyReferenceParameters, capturedReference, imageFrameFingerprint, poseSourceFingerprint, rebaseRoi } from '../roiReference';
+import { roiConfigurationIssue } from '../nodeConfigurationState';
 
 describe('ROI reference capture', () => {
   it('captures pixels and the actual pose together and rebases a legacy ROI without mutating it', () => {
@@ -51,6 +52,34 @@ describe('ROI reference capture', () => {
   it('refuses to rotate a rectangle that selects no pixel', () => {
     expect(() => rebaseRoi({ type: 'Rectangle', x: 10.1, y: 10, width: 0.2, height: 5 }, {}, 20, 20, 90))
       .toThrow('没有覆盖任何像素');
+  });
+
+  it('keeps rotated one-pixel rectangles valid with a subpixel polygon support', () => {
+    const expectPolygon = (roi: ReturnType<typeof rebaseRoi>, expected: { x: number; y: number }[]) => {
+      expect(roi.type).toBe('Polygon');
+      if (roi.type !== 'Polygon') return;
+      expect(roi.points).toHaveLength(expected.length);
+      roi.points.forEach((point, index) => {
+        expect(point.x).toBeCloseTo(expected[index].x, 6);
+        expect(point.y).toBeCloseTo(expected[index].y, 6);
+      });
+      expect(roiConfigurationIssue(roi, 'ROI', 1024)).toBeUndefined();
+    };
+    const vertical = rebaseRoi({ type: 'Rectangle', x: 10, y: 10, width: 1, height: 10 }, {}, 100, 100, 90);
+    expectPolygon(vertical, [
+      { x: 110, y: 90.49 }, { x: 110, y: 89.51 }, { x: 119, y: 89.51 }, { x: 119, y: 90.49 }
+    ]);
+
+    const horizontal = rebaseRoi({ type: 'Rectangle', x: 10, y: 10, width: 10, height: 1 }, {}, 100, 100, 90);
+    expectPolygon(horizontal, [
+      { x: 109.51, y: 90 }, { x: 109.51, y: 81 }, { x: 110.49, y: 81 }, { x: 110.49, y: 90 }
+    ]);
+
+    const pixel = rebaseRoi({ type: 'Rectangle', x: 10, y: 10, width: 1, height: 1 }, {}, 100, 100, 90);
+    expectPolygon(pixel, [
+      { x: 109.51, y: 90.49 }, { x: 109.51, y: 89.51 },
+      { x: 110.49, y: 89.51 }, { x: 110.49, y: 90.49 }
+    ]);
   });
 
   it('refuses partial and failed captures instead of replacing a valid reference', () => {

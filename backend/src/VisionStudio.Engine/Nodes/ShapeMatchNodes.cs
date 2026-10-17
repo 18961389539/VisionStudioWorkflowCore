@@ -211,6 +211,15 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     var bottom = Math.Ceiling(y + height) - 1;
                     if (right < left || bottom < top)
                         throw new InvalidOperationException("The rectangle ROI selects no image pixels and cannot be rotated. Increase its width and height before applying ROI correction.");
+                    if (right == left || bottom == top)
+                    {
+                        // Pixel-center corners collapse for a one-pixel-wide ROI. Give
+                        // the polygon a subpixel support (< half a pixel) so it remains
+                        // valid while rasterizing back to the same single-pixel support.
+                        const double halfSupport = 0.49;
+                        if (right == left) { left -= halfSupport; right += halfSupport; }
+                        if (bottom == top) { top -= halfSupport; bottom += halfSupport; }
+                    }
                     var maskCorners = new[]
                     {
                         new VisionPoint2D(left, top),

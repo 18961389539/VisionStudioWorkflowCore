@@ -891,6 +891,30 @@ public sealed class Batch5ShapeMatchTests
         Assert.Equal(0d, Cv2.Norm(expectedMask, transformedMask, NormTypes.INF));
     }
 
+    [Theory]
+    [InlineData(1, 10, 30, 30, 10, 1)]
+    [InlineData(10, 1, 30, 21, 1, 10)]
+    [InlineData(1, 1, 30, 30, 1, 1)]
+    public async Task RoiTransform_Rotation_KeepsOnePixelRectangleAsUsablePolygonRoi(
+        int roiWidth, int roiHeight, int expectedX, int expectedY, int expectedWidth, int expectedHeight)
+    {
+        var sourceRoi = new VisionRoi(VisionRoiType.Rectangle, X: 10, Y: 10, Width: roiWidth, Height: roiHeight);
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            $$"""{"roi":{"type":"Rectangle","x":10,"y":10,"width":{{roiWidth}},"height":{{roiHeight}}},"baseX":10,"baseY":10,"currentX":30,"currentY":30,"baseThetaDeg":0,"currentThetaDeg":90}""");
+        var transformed = result.Outputs["roi"].Require<VisionRoi>("roi");
+        Assert.Equal(VisionRoiType.Polygon, transformed.Type);
+        Assert.Equal("Polygon", result.Summary["roiType"]);
+
+        using var sourceMask = sourceRoi.BuildMask(new Size(64, 64));
+        using var transformedMask = transformed.BuildMask(new Size(64, 64));
+        using var expectedMask = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(expectedMask, new Rect(expectedX, expectedY, expectedWidth, expectedHeight), Scalar.All(255), -1);
+
+        Assert.Equal(roiWidth * roiHeight, Cv2.CountNonZero(sourceMask));
+        Assert.Equal(Cv2.CountNonZero(sourceMask), Cv2.CountNonZero(transformedMask));
+        Assert.Equal(0d, Cv2.Norm(expectedMask, transformedMask, NormTypes.INF));
+    }
+
     [Fact]
     public async Task RoiTransform_ArbitraryRotationKeepsRectangleMaskAreaWithinRasterTolerance()
     {

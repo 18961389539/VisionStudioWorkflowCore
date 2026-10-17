@@ -165,9 +165,15 @@ export function rebaseRoi(roi: VisionRoi, previous: NodeParameters, x: number, y
       const bottom = Math.ceil(roi.y + roi.height) - 1;
       if (right < left || bottom < top)
         throw new Error('矩形 ROI 当前没有覆盖任何像素，无法旋转并迁移基准。请先增大区域。');
+      let supportLeft = left, supportTop = top, supportRight = right, supportBottom = bottom;
+      // Pixel-center corners collapse for a one-pixel-wide ROI. A subpixel
+      // support below half a pixel keeps its polygon valid and rasterizes to
+      // the same single-pixel support as RoiTransformNode.
+      if (right === left) { supportLeft -= 0.49; supportRight += 0.49; }
+      if (bottom === top) { supportTop -= 0.49; supportBottom += 0.49; }
       return { type: 'Polygon', points: [
-        { x: left, y: top }, { x: right, y: top },
-        { x: right, y: bottom }, { x: left, y: bottom }
+        { x: supportLeft, y: supportTop }, { x: supportRight, y: supportTop },
+        { x: supportRight, y: supportBottom }, { x: supportLeft, y: supportBottom }
       ].map(apply) };
     }
   }
