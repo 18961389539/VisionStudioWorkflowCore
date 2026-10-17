@@ -266,6 +266,7 @@ export const portNames: Record<string, string> = {
   spokesWithoutFiniteSamples: '无有效采样卡尺数', spokesWithInsufficientContiguousSamples: '连续采样不足卡尺数', spokesClippedToImage: '裁切卡尺数',
   nominalRadius: '标称半径', samplingMode: '采样方式', caliperCount: '卡尺数', angleStepDeg: '角度步长',
   radialBand: '径向搜索带', radialSearchMinRadius: '径向搜索内边界', radialSearchMaxRadius: '径向搜索外边界',
+  maxRadiusDeviation: '最大半径偏差',
   fitRadiusTolerance: '拟合半径公差', fitPoints: '参与拟合点数', ignoredByFit: '拟合剔除点数',
   edgeX: '边缘点 X', edgeY: '边缘点 Y',
   profilesIntersectingImage: '与图像相交剖面数', profilesOutsideImage: '图像外剖面数',

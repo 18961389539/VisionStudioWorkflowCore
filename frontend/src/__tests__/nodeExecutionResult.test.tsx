@@ -79,6 +79,38 @@ describe('NodeExecutionResult measurement status', () => {
     expect(summary.textContent).toContain('最大拟合误差 0.8');
   });
 
+  it('shows the nominal radius and tolerance beside a rejected circle fit', () => {
+    const circleResult = result(false, 'fitted-radius-outside-tolerance');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = {
+      found: false, reason: 'fitted-radius-outside-tolerance', fittedRadius: 14.2,
+      nominalRadius: 12, radiusDelta: 2.2, fitRadiusTolerance: 1
+    };
+    mount('measure.caliperCircle', circleResult);
+
+    expect(screen.getByText(/半径超出允许偏差/)).toBeTruthy();
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('拟合半径 14.2');
+    expect(summary.textContent).toContain('标称半径 12');
+    expect(summary.textContent).toContain('半径偏差 2.2');
+    expect(summary.textContent).toContain('拟合半径公差 1');
+  });
+
+  it('shows how many circle spokes exceeded the configured radius deviation', () => {
+    const circleResult = result(false, 'all-spokes-exceed-max-radius-deviation');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = {
+      found: false, reason: 'all-spokes-exceed-max-radius-deviation',
+      spokesWithEdgeCandidate: 24, rejectedByDeviation: 24, maxRadiusDeviation: 2
+    };
+    mount('measure.caliperCircle', circleResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('含边缘候选卡尺数 24');
+    expect(summary.textContent).toContain('半径偏差剔除数 24');
+    expect(summary.textContent).toContain('最大半径偏差 2');
+  });
+
   it('keeps the successful status when the measurement found an edge', () => {
     mount(catalog.type, result(true, 'ok'));
 

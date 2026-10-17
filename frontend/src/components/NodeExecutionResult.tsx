@@ -224,6 +224,10 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
       .filter(key => key in report.summary).slice(0, 5)
     : report?.summary.reason === 'fit-error-exceeds-tolerance'
     ? ['found', 'fitError', 'maxFitError', 'sampleCount', 'ignoredByFit'].filter(key => key in report.summary).slice(0, 5)
+    : report?.summary.reason === 'fitted-radius-outside-tolerance'
+    ? ['found', 'fittedRadius', 'nominalRadius', 'radiusDelta', 'fitRadiusTolerance'].filter(key => key in report.summary).slice(0, 5)
+    : report?.summary.reason === 'all-spokes-exceed-max-radius-deviation'
+    ? ['found', 'spokesWithEdgeCandidate', 'rejectedByDeviation', 'maxRadiusDeviation'].filter(key => key in report.summary).slice(0, 5)
     : catalog.type === 'measure.caliper' && report?.summary.found === false
     ? ['found', ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'strength', 'reason'].includes(key))].slice(0, 4)
     : reportSummaryKeys;
