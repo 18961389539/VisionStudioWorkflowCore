@@ -39,11 +39,9 @@ public sealed class CalibrationDetectBoardNode : IVisionNodeExecutor
         var points = new List<VisionPoint2D>();
         using var native = JLVisionImages.FromMat(source.Mat); using var channels = native.CountChannels();
         using var gray = channels.I == 1 ? native.CopyImage() : native.Rgb1ToGray();
-        using var blurGray = new Mat();
-        if (source.Mat.Channels() == 1) source.Mat.CopyTo(blurGray);
-        else if (source.Mat.Channels() == 3) Cv2.CvtColor(source.Mat, blurGray, ColorConversionCodes.BGR2GRAY);
-        else if (source.Mat.Channels() == 4) Cv2.CvtColor(source.Mat, blurGray, ColorConversionCodes.BGRA2GRAY);
-        else throw new InvalidOperationException("Board detection requires 1, 3, or 4 channel images.");
+        if (source.Mat.Channels() != 1 && source.Mat.Channels() != 3 && source.Mat.Channels() != 4)
+            throw new InvalidOperationException("Board detection requires 1, 3, or 4 channel images.");
+        using var blurGray = JLVisionImages.ToMat(gray);
         var blurVariance = CalibrationViewQuality.LaplacianVariance(blurGray);
         if (pattern == "chessboard")
         {

@@ -49,14 +49,14 @@ internal static class ManagedShapeMatch
                 crop = r;
             }
             using var templateGray = new Mat(templateGrayFull, crop);
-            using var templateEdges = new Mat(); Cv2.Canny(templateGray, templateEdges, low, high);
+            using var templateEdges = new Mat(); JLVisionOperators.Canny(templateGray, templateEdges, low, high);
             var originX = (templateGray.Width - 1) / 2d; var originY = (templateGray.Height - 1) / 2d;
             var rawPoints = EdgePoints(templateEdges).Select(p => new ChamferShapeMatching.ModelPoint(p.X - originX, p.Y - originY)).ToList();
             var maxPoints = Math.Clamp(node.GetInt("chamferMaxModelPoints", 240), 16, 2000);
             var model = ChamferShapeMatching.BuildModel(rawPoints, maxPoints);
             if (model.Length < 8) throw new InvalidOperationException($"Managed chamfer model needs at least 8 template edge points, found {model.Length}. Lower the Canny thresholds or use a template with stronger contours.");
 
-            using var sceneEdges = new Mat(); Cv2.Canny(sceneGray, sceneEdges, low, high);
+            using var sceneEdges = new Mat(); JLVisionOperators.Canny(sceneGray, sceneEdges, low, high);
             if (node.GetRoi("searchRoi") is { Type: VisionRoiType.Rectangle } searchRoi)
             {
                 using var mask = new Mat(sceneEdges.Size(), MatType.CV_8UC1, Scalar.All(0));
@@ -145,7 +145,7 @@ internal static class ManagedShapeMatch
     private static Mat Gray(Mat source)
     {
         var gray = new Mat();
-        if (source.Channels() == 1) source.CopyTo(gray); else Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+        if (source.Channels() == 1) source.CopyTo(gray); else JLVisionOperators.CvtColor(source, gray, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         return gray;
     }
 
