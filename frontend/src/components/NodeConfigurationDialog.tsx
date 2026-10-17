@@ -148,6 +148,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   }, [open, initialTab, activeTab]);
   const [baseline] = useState(() => configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem));
   const [draft, setDraft] = useState(() => cloneParameters(baseline));
+  const [cropClearUndo, setCropClearUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
   const [previewNodeId, setPreviewNodeId] = useState(node.id);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [trainBusy, setTrainBusy] = useState(false);
@@ -173,6 +174,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const [searchWorkspacePreview, setSearchWorkspacePreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string; preserveTrainingWorkspace?: boolean }>();
   const [focusTick, setFocusTick] = useState(0);
   const draftFingerprint = parameterFingerprint(draft);
+  useEffect(() => {
+    if (cropClearUndo && cropClearUndo.afterFingerprint !== draftFingerprint) setCropClearUndo(undefined);
+  }, [cropClearUndo, draftFingerprint]);
   const dirty = draftFingerprint !== parameterFingerprint(baseline);
   // 与打开弹窗时的值不同的参数项数：用于参数区“已改 N 项”与关闭确认
   const changedCount = [...new Set([...Object.keys(baseline), ...Object.keys(draft)])]
@@ -282,6 +286,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const cropRoiEdge = isImageCrop ? roiInputEdge : undefined;
   const cropRoiSourceId = cropRoiEdge?.source;
   const cropRoiInputConnected = Boolean(cropRoiEdge);
+  const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
+    && cropClearUndo.afterFingerprint === draftFingerprint);
   const searchLineInputEdge = ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'searchLine')
     : undefined;
@@ -542,6 +548,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   };
   const changeCropRoi = (roi?: VisionRoi) => {
     if (locked) return;
+    setCropClearUndo(undefined);
     setImageSource('input');
     setDraft((current) => {
       const next = { ...current };
@@ -549,6 +556,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       if (roi) next.roi = roi; else delete next.roi;
       return next;
     });
+  };
+  const clearCropSelection = () => {
+    if (locked || cropRoiInputConnected || !draft.roi) return;
+    const next = { ...draft };
+    for (const key of ['x', 'y', 'width', 'height']) delete next[key];
+    delete next.roi;
+    setCropClearUndo({ previous: cloneParameters(draft), afterFingerprint: parameterFingerprint(next) });
+    setImageSource('input');
+    setDraft(next);
+  };
+  const undoCropSelectionClear = () => {
+    if (!cropClearUndoAvailable || !cropClearUndo) return;
+    setDraft(cloneParameters(cropClearUndo.previous));
+    setCropClearUndo(undefined);
+    setImageSource('input');
   };
   const runPreview = async () => {
     if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || correctedCircleTransformConflict) return;
@@ -1093,7 +1115,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           {cropRoiInputConnected && <Alert showIcon type="info" title={`裁剪区域来自上游：${nodeLabels[cropRoiSourceId!] ?? cropRoiSourceId}`}
             description="已连接的 roi 输入会覆盖本节点的本地选区。请在上游 ROI 节点编辑；本地选区不会参与本次裁剪。"
             style={{ marginBlock: 10 }} />}
-          {!cropRoiInputConnected && draft.roi && <Button size="small" disabled={locked} onClick={() => changeCropRoi(undefined)}>清除选区（使用整图）</Button>}
+          {!cropRoiInputConnected && draft.roi && <Button size="small" disabled={locked} onClick={clearCropSelection}>清除选区（使用整图）</Button>}
+          {cropClearUndoAvailable && <Button size="small" disabled={locked} onClick={undoCropSelectionClear}>撤销清除选区</Button>}
           <Button type="primary" size="small" onClick={() => void runPreview()} loading={previewBusy}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}
             title={previewBlockedReason || '按当前 ROI 预览裁剪图像与 ROI 蒙版'}>预览裁剪结果</Button>

@@ -403,6 +403,11 @@ describe('crop workspace with a connected ROI', () => {
     await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
     expect(dialog.getByTestId('roi-enabled').textContent).toBe('ROI 可编辑');
     expect(dialog.getByText('未绘制 · 使用旧版坐标或整幅图像')).toBeTruthy();
+    expect(dialog.getByRole('button', { name: '撤销清除选区' })).toBeTruthy();
+    fireEvent.click(dialog.getByRole('button', { name: '撤销清除选区' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    expect(dialog.queryByRole('button', { name: '撤销清除选区' })).toBeNull();
+    expect(dialog.getByRole('button', { name: '清除选区（使用整图）' })).toBeTruthy();
   });
 });
 
