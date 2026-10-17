@@ -329,6 +329,25 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
+  it('keeps the corrected ROI overlay visible through pixel-coordinate-preserving preprocessing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'gray', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const grayscaleNode: Node = { id: 'gray', position: { x: 0, y: 0 }, data: { typeKey: 'image.grayscale', label: '灰度转换' } };
+    const edges = [
+      { id: 'roi-gray', source: 'roi', sourceHandle: 'image', target: 'gray', targetHandle: 'image' },
+      { id: 'gray-crop', source: 'gray', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, imageNode, grayscaleNode], edges, result });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/gray/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
+
   it('allows preview when a malformed local ROI is dormant behind the connected ROI input', async () => {
     const invalidCropNode: Node = { ...cropNode, data: { ...cropNode.data,
       parameters: { roi: { type: 'Rectangle', x: 0, y: 0, width: 0, height: 10 } } } };
