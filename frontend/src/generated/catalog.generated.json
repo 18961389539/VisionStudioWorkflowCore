@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "a0d3d3960b91a0aa5cee3fdc8bd95a6fb5d1a15ea3e7efec030437e190446982",
+  "hash": "48a4e5fb0235276d4bd377152d8be915557ffa1c65c9b4ea2ff3b50b5308d627",
   "items": [
     {
       "type": "image.acquire",
@@ -3059,6 +3059,26 @@
           "required": true
         },
         {
+          "name": "reference2",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference3",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference4",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference5",
+          "dataType": "Image",
+          "required": false
+        },
+        {
           "name": "region",
           "dataType": "Region",
           "required": false
@@ -3088,6 +3108,11 @@
         {
           "name": "found",
           "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "referenceSampleCount",
+          "dataType": "Integer",
           "required": true
         },
         {
@@ -3139,7 +3164,8 @@
           "defaultValue": 15,
           "min": 0.001,
           "max": 65535,
-          "step": 1
+          "step": 1,
+          "description": "Minimum grayscale difference in the source image intensity units; 16-bit grayscale images keep their full 0–65535 range."
         },
         {
           "name": "minArea",
@@ -3170,7 +3196,17 @@
           "max": 25,
           "step": 1,
           "unit": "px",
-          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
+          "description": "Search and refine integer reference shifts within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
+        },
+        {
+          "name": "maxRegistrationError",
+          "label": "Maximum Registration Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "description": "Fail inspection if source or any extra reference cannot align below this mean absolute grayscale error inside the inspection domain. Uses source intensity units."
         },
         {
           "name": "compensation",
@@ -3223,7 +3259,7 @@
           "min": 0,
           "max": 20,
           "step": 0.5,
-          "description": "When > 0, a pixel must differ by at least threshold + K * local reference standard deviation (variation-model style; local variation is estimated from the single reference)."
+          "description": "When > 0, a pixel must differ by at least threshold + K * reference standard deviation. With multiple references, deviation is learned per pixel from aligned samples; with one reference, it is estimated locally."
         },
         {
           "name": "variationWindow",
@@ -3234,7 +3270,7 @@
           "max": 101,
           "step": 2,
           "unit": "px",
-          "description": "Odd window for the local variation estimate."
+          "description": "Odd neighborhood for local variation when only one reference image is connected; ignored by a multi-reference model."
         },
         {
           "name": "majorArea",
@@ -3257,7 +3293,7 @@
           "unit": "px²"
         }
       ],
-      "description": "Golden-template defect comparison (PatInspect/variation-model style): optional small-shift registration and illumination compensation align the good reference, differences are thresholded, morphology cleans the mask, defects are split, area-filtered and graded minor/major/critical. defects JSON lists area and bounding box per defect; grade is the worst defect grade (none when clean). Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "description": "Golden-template defect comparison: connect one to five known-good images with matching dimensions and pixel depth; optional small-shift registration aligns extra samples and the current image inside the inspection domain. Multiple references build a per-pixel mean and sample-standard-deviation model; a single reference uses the legacy local-texture estimate. Optional registration error gating and illumination compensation precede thresholding, morphology, defect splitting, area filtering and minor/major/critical grading. defects JSON lists area and bounding box per defect; referenceSampleCount reports used samples. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

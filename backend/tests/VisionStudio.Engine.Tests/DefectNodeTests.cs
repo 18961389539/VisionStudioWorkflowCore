@@ -109,6 +109,99 @@ public sealed class DefectNodeTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceCompareLearnsPerPixelVariationFromMultipleGoodSamples()
+    {
+        using var source = Image(109); using var first = Image(100); using var second = Image(110);
+        var inputs = Pair(source, first); inputs["reference2"] = VisionValue.Image(second);
+        var parameters = """{"threshold":3,"variationK":1,"minArea":1}""";
+
+        var multiSample = await Run(new ReferenceCompareNode(), inputs, parameters);
+        var singleSample = await Run(new ReferenceCompareNode(), Pair(source, first), parameters);
+
+        Assert.Equal(0L, multiSample.Outputs["count"].Require<long>("count"));
+        Assert.Equal(2L, multiSample.Outputs["referenceSampleCount"].Require<long>("referenceSampleCount"));
+        Assert.Equal(1L, singleSample.Outputs["count"].Require<long>("count"));
+        Assert.Equal(1L, singleSample.Outputs["referenceSampleCount"].Require<long>("referenceSampleCount"));
+    }
+
+    [Fact]
+    public async Task ReferenceCompareRegistersExtraGoodSamplesBeforeBuildingDeviation()
+    {
+        using var source = Image(); using var first = Image(); using var shifted = Image();
+        Patch(source, new Rect(10, 10, 4, 4), 180);
+        Patch(first, new Rect(10, 10, 4, 4), 180);
+        Patch(shifted, new Rect(11, 10, 4, 4), 180);
+        var inputs = Pair(source, first); inputs["reference2"] = VisionValue.Image(shifted);
+
+        var result = await Run(new ReferenceCompareNode(), inputs,
+            """{"threshold":5,"variationK":1,"registrationTolerance":1,"minArea":1}""");
+
+        Assert.Equal(0L, result.Outputs["count"].Require<long>("count"));
+        Assert.Equal(2L, result.Outputs["referenceSampleCount"].Require<long>("referenceSampleCount"));
+        var sampleErrors = Assert.IsType<List<double>>(result.Summary["referenceSampleAlignmentErrors"]);
+        Assert.Single(sampleErrors);
+        Assert.Equal(0d, sampleErrors[0]);
+    }
+
+    [Fact]
+    public async Task ReferenceCompareVariationUsesFullSixteenBitIntensityUnits()
+    {
+        using var source = VisionImage.Own(new Mat(32, 32, MatType.CV_16UC1, Scalar.All(1000)));
+        using var reference = VisionImage.Own(new Mat(32, 32, MatType.CV_16UC1, Scalar.All(900)));
+
+        var result = await Run(new ReferenceCompareNode(), Pair(source, reference), """{"threshold":50,"variationK":1,"minArea":1}""");
+
+        Assert.Equal(1L, result.Outputs["count"].Require<long>("count"));
+        Assert.Equal(1024d, result.Outputs["area"].Require<double>("area"));
+    }
+
+    [Fact]
+    public async Task ReferenceCompareRejectsDifferentPixelDepths()
+    {
+        using var source = Image(100);
+        using var reference = VisionImage.Own(new Mat(32, 32, MatType.CV_16UC1, Scalar.All(100)));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new ReferenceCompareNode(), Pair(source, reference)));
+
+        Assert.Contains("intensity depths must match", error.Message);
+    }
+
+    [Fact]
+    public async Task ReferenceCompareCanRejectExcessiveRegistrationError()
+    {
+        using var source = Image(200); using var reference = Image(100);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new ReferenceCompareNode(), Pair(source, reference),
+            """{"registrationTolerance":1,"maxRegistrationError":10}"""));
+
+        Assert.Contains("Source alignment error", error.Message);
+    }
+
+    [Fact]
+    public async Task ReferenceCompareCanRejectPoorlyAlignedReferenceSample()
+    {
+        using var source = Image(100); using var first = Image(100); using var extra = Image(220);
+        var inputs = Pair(source, first); inputs["reference2"] = VisionValue.Image(extra);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new ReferenceCompareNode(), inputs,
+            """{"registrationTolerance":1,"maxRegistrationError":10}"""));
+
+        Assert.Contains("reference2 alignment error", error.Message);
+    }
+
+    [Fact]
+    public async Task ReferenceCompareRegistrationGateAllowsCompensatedExposureChange()
+    {
+        using var source = Image(150); using var reference = Image(100);
+
+        var result = await Run(new ReferenceCompareNode(), Pair(source, reference),
+            """{"registrationTolerance":1,"maxRegistrationError":10,"compensation":"offset","threshold":5,"minArea":1}""");
+
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.Equal(0d, result.Summary["registrationMeanAbsoluteDifference"]);
+    }
+
+    [Fact]
     public async Task IdenticalReferenceAndEmptyDomainAreNormalNoDefectResults()
     {
         using var source = Image(); using var reference = Image();

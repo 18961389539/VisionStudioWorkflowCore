@@ -1,5 +1,7 @@
 # VisionStudioWorkflowCore - Node Completion Audit (re-run)
 
+> Baseline snapshot: the scores and limitation statements below predate the follow-up work recorded at the end of this file. They are not current scores for nodes that have since changed.
+
 - Date: 2026-10-18 (Asia/Shanghai)
 - Repo: D:\SourceCode\Workflow, branch `local/halcon-cognex-node-audit`, HEAD `5b816eb` (Batch F, local, ahead of remote)
 - Catalog source: `frontend/src/generated/catalog.generated.json` - **142 nodes**
@@ -288,7 +290,14 @@ Only anchors actually cited in earlier batches are compared above; a full previo
 
 ## Interpretation
 
-- No node reaches 90+: the top band vs HALCON/Cognex is still limited by product depth (training-free inference is now solid, but OBB/depth/3D, fisheye/telecentric, OCR font training, and full variation-model workflows are absent - training nodes are explicitly out of scope per user).
+- In this baseline snapshot, no node reaches 90+: the top band vs HALCON/Cognex is limited by product depth (OBB/depth/3D, fisheye/telecentric, OCR font training, and full variation-model workflows were absent - training nodes are explicitly out of scope per user).
 - The long 60-69 band is mostly complete-but-thin utility/preprocess/coordinate nodes and a few complex nodes with weak direct evidence (`inference.classification`, `match.template`, `calibration.planar`).
 - Lowest scores are evidence-thin narrow transforms, not known-broken nodes; prioritise them only if direct tests/debug outputs matter, not for feature work.
+
+## Follow-up implementation: reference defect model
+
+After the baseline audit, `defect.referenceCompare` was extended to accept one to five known-good image inputs. With multiple samples it aligns extra references by integer translation inside the effective inspection domain, then builds a per-pixel mean and sample-standard-deviation model using online Welford accumulation. `variationK` now uses that measured sample deviation; single-reference workflows retain the prior local-texture estimate. The model keeps the full source grayscale intensity range, including 16-bit images, and reports reference count and sample alignment errors. An optional registration-error gate rejects poorly aligned references or inspected images.
+
+The earlier **74** score and `<=74` cap describe only the baseline snapshot; this implementation has not yet been rescored against the full audit rubric. Remaining product gaps include persistent/cached model assets, subpixel/rotation/scale registration, and a larger managed sample set.
+Usage and limits are documented in [Reference Defect Compare](reference-defect-comparison.md).
 

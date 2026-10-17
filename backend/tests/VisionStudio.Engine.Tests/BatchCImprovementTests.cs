@@ -101,4 +101,36 @@ public sealed class BatchCVariationTests
         Assert.All(ReferenceAlignment.LocalStdDev(textured, 5, 5, 3), v => Assert.True(v > 100));
         Assert.Throws<InvalidOperationException>(() => ReferenceAlignment.LocalStdDev(flat, 5, 5, 4));
     }
+
+    [Fact]
+    public void RegistrationMaskPreventsBackgroundFromChoosingTheWrongShift()
+    {
+        byte[] reference = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140];
+        byte[] image = [0, 0, 10, 20, 30, 60, 70, 80, 90, 100, 110, 120, 130, 140, 140];
+        byte[] mask = [0, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+        var fullFrame = ReferenceAlignment.SearchShift(image, reference, 15, 1, 1);
+        var inspectionDomain = ReferenceAlignment.SearchShift(image, reference, 15, 1, 1, mask);
+
+        Assert.Equal(-1, fullFrame.ShiftX);
+        Assert.Equal(1, inspectionDomain.ShiftX);
+        Assert.Equal(0, inspectionDomain.MeanAbsoluteDifference);
+    }
+
+    [Fact]
+    public void MultiSampleModelAccumulatesTranslatedReferencesAndExcludesShiftBorders()
+    {
+        float[] anchor = [0, 10, 20, 30, 40];
+        float[] shiftedSample = [0, 0, 10, 20, 30];
+        var shift = ReferenceAlignment.SearchShift(anchor, shiftedSample, 5, 1, 1);
+        var mean = (float[])anchor.Clone(); var m2 = new float[5]; var counts = Enumerable.Repeat(1, 5).ToArray();
+
+        ReferenceAlignment.AccumulateAlignedSample(mean, m2, counts, shiftedSample, 5, 1, shift.ShiftX, shift.ShiftY);
+        var stdDev = ReferenceAlignment.SampleStdDev(m2, counts);
+
+        Assert.Equal(-1, shift.ShiftX);
+        Assert.Equal(anchor, mean);
+        Assert.Equal([2, 2, 2, 2, 1], counts);
+        Assert.Equal([0, 0, 0, 0, 0], stdDev);
+    }
 }

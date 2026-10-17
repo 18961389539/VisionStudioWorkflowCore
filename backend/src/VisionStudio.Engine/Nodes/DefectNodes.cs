@@ -24,6 +24,11 @@ internal static class DefectNodeHelpers
         if (a.Width != b.Width || a.Height != b.Height) throw new InvalidOperationException("Image/reference dimensions must match; align images before comparing.");
     }
 
+    public static void SameGrayDepth(VisionImage a, VisionImage b)
+    {
+        if (a.Mat.Depth() != b.Mat.Depth()) throw new InvalidOperationException("Image and reference grayscale intensity depths must match.");
+    }
+
     public static JlRegion Domain(JlImage image, int width, int height, VisionRegion? domain, NodeExecutionContext context)
     {
         var result = image.GetDomain();
@@ -216,7 +221,15 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var (source, scoped) = RegionNodeHelpers.Source(context); var reference = context.Require<VisionImage>("reference");
-        DefectNodeHelpers.SameSize(source, reference);
+        DefectNodeHelpers.SameSize(source, reference); DefectNodeHelpers.SameGrayDepth(source, reference);
+        var referenceSamples = new List<VisionImage> { reference };
+        for (var sampleIndex = 2; sampleIndex <= 5; sampleIndex++)
+        {
+            if (!context.TryGetValue($"reference{sampleIndex}", out var referenceValue)) continue;
+            var sample = referenceValue.Require<VisionImage>($"reference{sampleIndex}");
+            DefectNodeHelpers.SameSize(source, sample); DefectNodeHelpers.SameGrayDepth(source, sample);
+            referenceSamples.Add(sample);
+        }
         var threshold = DefectNodeHelpers.Positive(node, "threshold", 15);
         var minArea = node.GetDouble("minArea", 5);
         if (!double.IsFinite(minArea) || minArea < 0) throw new InvalidOperationException("minArea must be finite and non-negative.");
@@ -224,6 +237,11 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         if (!double.IsFinite(maxArea) || maxArea < 0 || maxArea > 0 && maxArea < minArea) throw new InvalidOperationException("maxArea must be 0 (unbounded) or at least minArea.");
         var registrationTolerance = node.GetInt("registrationTolerance", 0);
         if (registrationTolerance is < 0 or > 25) throw new InvalidOperationException("registrationTolerance must be between 0 and 25 pixels.");
+        var maxRegistrationError = node.GetDouble("maxRegistrationError", 0);
+        if (!double.IsFinite(maxRegistrationError) || maxRegistrationError < 0 || maxRegistrationError > 65535)
+            throw new InvalidOperationException("maxRegistrationError must be finite and between 0 and 65535.");
+        if (maxRegistrationError > 0 && registrationTolerance == 0)
+            throw new InvalidOperationException("maxRegistrationError requires registrationTolerance greater than zero.");
         var compensation = node.GetString("compensation", "none").Trim().ToLowerInvariant();
         if (compensation is not ("none" or "offset" or "gainoffset")) throw new InvalidOperationException("compensation must be none, offset, or gainOffset.");
         var openSize = node.GetInt("morphologyOpen", 0);
@@ -239,13 +257,13 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         if (!double.IsFinite(majorArea) || !double.IsFinite(criticalArea) || majorArea < 0 || criticalArea < majorArea)
             throw new InvalidOperationException("Defect grading requires 0 <= majorArea <= criticalArea.");
 
-        // Golden-template preparation (PatInspect / HALCON variation-model ideas):
-        // exhaustive small-shift registration, then least-squares illumination
-        // compensation of the reference toward the inspected image. Both are opt-in
-        // (defaults keep the historical pixel-exact behaviour).
+        // One reference preserves historical comparison behavior. Extra good
+        // references build a per-pixel mean and sample-deviation model after optional
+        // registration; ordinary image inputs keep the model portable with the graph.
         VisionImage? preparedReference = null;
-        byte[]? effectiveRefBytes = null; byte[]? sourceBytesCache = null;
+        float[]? effectiveReferenceValues = null; float[]? sourceValuesCache = null; float[]? modelStdDev = null;
         var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d; double? registrationError = null;
+        var referenceAlignmentErrors = new List<double>();
         try
         {
             using var image = DefectNodeHelpers.Gray(source, true);
@@ -253,38 +271,102 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
             using var domainMaskImage = domain.RegionToBin(255, 0, source.Width, source.Height);
             using var domainMaskMat = JLVisionImages.ToMat(domainMaskImage);
             domainMaskMat.GetArray(out byte[] domainMask);
-            if (registrationTolerance > 0 || compensation != "none" || variationK > 0)
+            var needsPreparedModel = referenceSamples.Count > 1 || registrationTolerance > 0 || compensation != "none" || variationK > 0;
+            if (needsPreparedModel)
             {
-                using var sourceGray = RecognitionImageHelpers.ToGray8(source.Mat);
-                using var referenceGray = RecognitionImageHelpers.ToGray8(reference.Mat);
-                sourceGray.GetArray(out byte[] imageBytes);
-                referenceGray.GetArray(out byte[] referenceBytes);
-                var width = source.Width; var height = source.Height;
+                var width = source.Width; var height = source.Height; var pixelCount = checked(width * height);
+                var sourceValues = GrayValues(image);
+                using var firstReferenceGray = DefectNodeHelpers.Gray(referenceSamples[0], true);
+                var referenceAnchor = GrayValues(firstReferenceGray);
+                var mean = (float[])referenceAnchor.Clone();
+                float[]? m2 = referenceSamples.Count > 1 ? new float[pixelCount] : null;
+                int[]? sampleCounts = referenceSamples.Count > 1 ? Enumerable.Repeat(1, pixelCount).ToArray() : null;
+                for (var sampleIndex = 1; sampleIndex < referenceSamples.Count; sampleIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var sampleGray = DefectNodeHelpers.Gray(referenceSamples[sampleIndex], true);
+                    var sampleValues = GrayValues(sampleGray);
+                    if (compensation != "none")
+                    {
+                        var (sampleGain, sampleOffset) = ReferenceAlignment.FitGainOffset(referenceAnchor, sampleValues, domainMask, cancellationToken);
+                        if (compensation != "gainoffset") sampleGain = 1d;
+                        for (var i = 0; i < sampleValues.Length; i++)
+                        {
+                            if ((i & 0x3FFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+                            sampleValues[i] = (float)(sampleGain * sampleValues[i] + sampleOffset);
+                        }
+                    }
+                    var sampleShiftX = 0; var sampleShiftY = 0;
+                    if (registrationTolerance > 0)
+                    {
+                        var sampleShift = ReferenceAlignment.SearchShift(referenceAnchor, sampleValues, width, height,
+                            registrationTolerance, domainMask, cancellationToken);
+                        sampleShiftX = sampleShift.ShiftX; sampleShiftY = sampleShift.ShiftY;
+                        referenceAlignmentErrors.Add(sampleShift.MeanAbsoluteDifference);
+                        if (maxRegistrationError > 0 && sampleShift.MeanAbsoluteDifference > maxRegistrationError)
+                            throw new InvalidOperationException($"reference{sampleIndex + 1} alignment error {sampleShift.MeanAbsoluteDifference:F3} exceeds maxRegistrationError {maxRegistrationError:F3}.");
+                    }
+                    ReferenceAlignment.AccumulateAlignedSample(mean, m2!, sampleCounts!, sampleValues, width, height,
+                        sampleShiftX, sampleShiftY, cancellationToken);
+                }
+                if (m2 is not null) modelStdDev = ReferenceAlignment.SampleStdDev(m2, sampleCounts!, cancellationToken);
                 if (registrationTolerance > 0)
                 {
-                    var shift = ReferenceAlignment.SearchShift(imageBytes, referenceBytes, width, height, registrationTolerance, domainMask);
+                    var registrationValues = sourceValues; var registrationScale = 1d;
+                    if (compensation != "none")
+                    {
+                        var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
+                        registrationScale = compensation == "gainoffset" ? fittedGain : 1d;
+                        registrationValues = new float[pixelCount];
+                        for (var i = 0; i < pixelCount; i++)
+                        {
+                            if ((i & 0x3FFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+                            registrationValues[i] = (float)((sourceValues[i] - fittedOffset) / registrationScale);
+                        }
+                    }
+                    var shift = ReferenceAlignment.SearchShift(registrationValues, mean, width, height, registrationTolerance, domainMask, cancellationToken);
                     shiftX = shift.ShiftX; shiftY = shift.ShiftY;
-                    registrationError = shift.MeanAbsoluteDifference;
-                }
-                var aligned = new byte[imageBytes.Length];
-                for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var rx = x - shiftX; var ry = y - shiftY;
-                    aligned[y * width + x] = rx >= 0 && rx < width && ry >= 0 && ry < height ? referenceBytes[ry * width + rx] : imageBytes[y * width + x];
+                    registrationError = shift.MeanAbsoluteDifference * registrationScale;
+                    if (maxRegistrationError > 0 && registrationError > maxRegistrationError)
+                        throw new InvalidOperationException($"Source alignment error {registrationError:F3} exceeds maxRegistrationError {maxRegistrationError:F3}.");
+                    var alignedMean = new float[pixelCount];
+                    var alignedStdDev = modelStdDev is null ? null : new float[pixelCount];
+                    for (var y = 0; y < height; y++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        for (var x = 0; x < width; x++)
+                        {
+                            var index = y * width + x; var referenceX = x - shiftX; var referenceY = y - shiftY;
+                            if (referenceX < 0 || referenceX >= width || referenceY < 0 || referenceY >= height)
+                            {
+                                alignedMean[index] = sourceValues[index];
+                                if (alignedStdDev is not null) alignedStdDev[index] = 0;
+                                continue;
+                            }
+                            var referenceIndex = referenceY * width + referenceX;
+                            alignedMean[index] = mean[referenceIndex];
+                            if (alignedStdDev is not null) alignedStdDev[index] = modelStdDev![referenceIndex];
+                        }
+                    }
+                    mean = alignedMean;
+                    modelStdDev = alignedStdDev;
                 }
                 if (compensation != "none")
                 {
-                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(imageBytes, aligned, domainMask);
+                    var (fittedGain, fittedOffset) = ReferenceAlignment.FitGainOffset(sourceValues, mean, domainMask, cancellationToken);
                     gain = compensation == "gainoffset" ? fittedGain : 1d;
                     offset = fittedOffset;
-                    for (var i = 0; i < aligned.Length; i++)
-                        aligned[i] = (byte)Math.Clamp(Math.Round(gain * aligned[i] + offset), 0, 255);
+                    for (var i = 0; i < mean.Length; i++)
+                    {
+                        if ((i & 0x3FFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+                        mean[i] = (float)(gain * mean[i] + offset);
+                        if (modelStdDev is not null) modelStdDev[i] = (float)(gain * modelStdDev[i]);
+                    }
                 }
-                using var alignedMat = new Mat(height, width, MatType.CV_8UC1);
-                alignedMat.SetArray(aligned);
+                using var alignedMat = new Mat(height, width, MatType.CV_32FC1);
+                alignedMat.SetArray(mean);
                 preparedReference = VisionImage.Own(alignedMat.Clone());
-                effectiveRefBytes = aligned; sourceBytesCache = imageBytes;
+                effectiveReferenceValues = mean; sourceValuesCache = sourceValues;
             }
             var effectiveReference = preparedReference ?? reference;
             using var effectiveBaseline = DefectNodeHelpers.Gray(effectiveReference, true);
@@ -296,7 +378,8 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
             if (domain.AreaCenter(out double _, out double _) > 0) _ = DefectNodeHelpers.Statistics(difference, domain);
             using var limited = difference.ReduceDomain(domain);
             using var detected = variationK > 0
-                ? VariationThreshold(source, effectiveRefBytes!, sourceBytesCache!, domain, threshold, variationK, variationWindow, node.GetString("polarity", "both"), cancellationToken)
+                ? VariationThreshold(effectiveReferenceValues!, sourceValuesCache!, modelStdDev, source.Width, source.Height, domain,
+                    threshold, variationK, variationWindow, node.GetString("polarity", "both"), cancellationToken)
                 : limited.Threshold(threshold, (double)float.MaxValue);
             using var cleaned = Clean(detected, openSize, closeSize);
             using var connected = cleaned.Connection();
@@ -325,6 +408,7 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
             {
                 ["defects"] = VisionValue.String(JsonSerializer.Serialize(defects)),
                 ["maxDefectArea"] = VisionValue.Double(maxDefectArea),
+                ["referenceSampleCount"] = VisionValue.Integer(referenceSamples.Count),
                 ["grade"] = VisionValue.String(grade)
             };
             return ValueTask.FromResult(result with
@@ -336,6 +420,8 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                     ["polarity"] = node.GetString("polarity", "both"),
                     ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
                     ["registrationMeanAbsoluteDifference"] = registrationError,
+                    ["referenceSampleCount"] = referenceSamples.Count,
+                    ["referenceSampleAlignmentErrors"] = referenceAlignmentErrors,
                     ["compensation"] = compensation, ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
                     ["morphologyOpen"] = openSize, ["morphologyClose"] = closeSize,
                     ["variationK"] = variationK, ["variationWindow"] = variationWindow,
@@ -347,35 +433,39 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
     }
 
     /// <summary>
-    /// Variation-model thresholding: a pixel is a defect when its absolute difference
-    /// reaches threshold + variationK * local reference standard deviation. Textured
-    /// reference areas therefore tolerate more change than flat ones (HALCON
-    /// compare_variation_model with a locally estimated variation image; a true
-    /// multi-sample model would need multiple reference inputs, which this node's
-    /// single reference port cannot supply - that remains a documented limit).
+    /// A multi-sample model supplies learned per-pixel deviation. One reference keeps
+    /// the local-texture estimate as a compatibility fallback.
     /// </summary>
-    private static JlRegion VariationThreshold(VisionImage source, byte[] referenceBytes, byte[] sourceBytes, JlRegion domain, double threshold, double variationK, int variationWindow, string polarity, CancellationToken token)
+    private static JlRegion VariationThreshold(float[] referenceValues, float[] sourceValues, float[]? modelStdDev,
+        int width, int height, JlRegion domain, double threshold, double variationK, int variationWindow, string polarity, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var width = source.Width; var height = source.Height;
-        var localStd = ReferenceAlignment.LocalStdDev(referenceBytes, width, height, variationWindow);
+        var variation = modelStdDev ?? ReferenceAlignment.LocalStdDev(referenceValues, width, height, variationWindow, token);
         var mask = new byte[width * height];
         for (var i = 0; i < mask.Length; i++)
         {
+            if ((i & 0x3FFF) == 0) token.ThrowIfCancellationRequested();
             var diff = polarity switch
             {
-                "bright" => (double)sourceBytes[i] - referenceBytes[i],
-                "dark" => (double)referenceBytes[i] - sourceBytes[i],
-                "both" => Math.Abs((double)sourceBytes[i] - referenceBytes[i]),
+                "bright" => (double)sourceValues[i] - referenceValues[i],
+                "dark" => (double)referenceValues[i] - sourceValues[i],
+                "both" => Math.Abs((double)sourceValues[i] - referenceValues[i]),
                 _ => throw new InvalidOperationException("Invalid defect polarity.")
             };
-            mask[i] = diff >= threshold + variationK * localStd[i] ? (byte)255 : (byte)0;
+            mask[i] = diff >= threshold + variationK * variation[i] ? (byte)255 : (byte)0;
         }
         using var maskMat = new Mat(height, width, MatType.CV_8UC1);
         maskMat.SetArray(mask);
         using var maskImage = JLVisionImages.FromMat(maskMat);
         using var maskRegion = maskImage.Threshold(1d, 255d);
         return maskRegion.Intersection(domain);
+    }
+
+    private static float[] GrayValues(JlImage image)
+    {
+        using var mat = JLVisionImages.ToMat(image);
+        mat.GetArray(out float[] values);
+        return values;
     }
 
     private static JlRegion Clean(JlRegion detected, int openSize, int closeSize)
