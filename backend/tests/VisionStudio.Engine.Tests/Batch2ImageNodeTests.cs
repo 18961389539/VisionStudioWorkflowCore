@@ -43,6 +43,18 @@ public sealed class Batch2ImageNodeTests
     }
 
     [Fact]
+    public async Task CropExplainsWhenAnOverlappingRectangleIsTooSmallToCoverAnyPixel()
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source),
+            """{"roi":{"type":"Rectangle","x":0.1,"y":0.1,"width":0.2,"height":0.2}}"""));
+
+        Assert.Contains("范围有重叠，但栅格化后没有覆盖任何像素", error.Message);
+        Assert.Contains("增大 ROI 宽高", error.Message);
+    }
+
+    [Fact]
     public async Task CropRejectsBrushRoiWithoutAnAddStroke()
     {
         using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));

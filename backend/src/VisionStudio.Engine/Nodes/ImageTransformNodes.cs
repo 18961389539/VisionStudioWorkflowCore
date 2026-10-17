@@ -88,9 +88,14 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             VisionRoiType.Brush => "笔刷",
             _ => roi.Type.ToString()
         };
-        var guidance = roi.Type == VisionRoiType.Brush
-            ? "请确认添加笔迹与图像范围有重叠、且未被后续擦除笔迹全部擦除；检查上游位姿/坐标变换。"
-            : "请将 ROI 移入图像范围，或检查上游位姿/坐标变换。";
+        var rectangleOverlapsImage = roi.Type == VisionRoiType.Rectangle
+            && (roi.X ?? 0) < imageSize.Width && (roi.X ?? 0) + (roi.Width ?? 0) > 0
+            && (roi.Y ?? 0) < imageSize.Height && (roi.Y ?? 0) + (roi.Height ?? 0) > 0;
+        var guidance = rectangleOverlapsImage
+            ? "矩形 ROI 与图像范围有重叠，但栅格化后没有覆盖任何像素；请增大 ROI 宽高或向图像内部移动。"
+            : roi.Type == VisionRoiType.Brush
+                ? "请确认添加笔迹与图像范围有重叠、且未被后续擦除笔迹全部擦除；检查上游位姿/坐标变换。"
+                : "请将 ROI 移入图像范围，或检查上游位姿/坐标变换。";
         return new InvalidOperationException(
             $"{roiName}裁剪区域在输入图像（{imageSize.Width}×{imageSize.Height}）中没有覆盖任何像素。{guidance}");
     }

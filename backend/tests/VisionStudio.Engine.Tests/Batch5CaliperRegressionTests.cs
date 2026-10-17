@@ -197,7 +197,9 @@ public sealed class Batch5CaliperRegressionTests
                 new NodeExecutionContext(inputs), Node(executor.Type, "{}"), CancellationToken.None).AsTask());
 
             Assert.Contains("Rectangle ROI does not cover any pixels in the measurement image (128×128)", error.Message);
-            Assert.Contains("check its coordinate frame", error.Message);
+            Assert.Contains("Move or enlarge the ROI", error.Message);
+            if (x > 128) Assert.Contains("check its coordinate frame", error.Message);
+            else Assert.Contains("enlarge the ROI", error.Message);
         }
     }
 

@@ -20,7 +20,7 @@ public static class VisionRoiOpenCvExtensions
             cancellationToken.ThrowIfCancellationRequested();
             if (Cv2.CountNonZero(mask) == 0)
                 throw new InvalidOperationException(
-                    $"{roi.Type} ROI does not cover any pixels in the measurement image ({size.Width}×{size.Height}). Move the ROI into the image or check its coordinate frame.");
+                    $"{roi.Type} ROI does not cover any pixels in the measurement image ({size.Width}×{size.Height}). Move or enlarge the ROI, or check its coordinate frame.");
             return mask;
         }
         catch

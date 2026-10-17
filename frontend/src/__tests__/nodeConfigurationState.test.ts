@@ -61,7 +61,8 @@ describe('node configuration snapshots', () => {
 
   it('preflights crop ROIs that cannot cover an input pixel without rejecting clipped or uncertain regions', () => {
     expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 100, y: 10, width: 8, height: 12 }, 100, 80)).toContain('没有像素交集');
-    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, 100, 80)).toContain('没有像素交集');
+    expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, 100, 80))
+      .toContain('范围有重叠，但没有覆盖任何像素；请增大 ROI 尺寸');
     expect(cropRoiOutsideImageIssue({ type: 'Rectangle', x: -3, y: 10, width: 8, height: 12 }, 100, 80)).toBeUndefined();
     expect(cropRoiOutsideImageIssue({ type: 'Circle', x: 120, y: 20, radius: 8 }, 100, 80)).toContain('没有像素交集');
     expect(cropRoiOutsideImageIssue({ type: 'Polygon', points: [{ x: 110, y: 10 }, { x: 120, y: 10 }, { x: 115, y: 20 }] }, 100, 80)).toContain('没有像素交集');
@@ -97,7 +98,7 @@ describe('node configuration snapshots', () => {
     expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 100, y: 10, width: 8, height: 12 }, 100, 80))
       .toContain('测量 ROI 与当前输入图像（100×80）没有像素交集');
     expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 0.1, y: 0.1, width: 0.2, height: 0.2 }, 100, 80))
-      .toContain('没有像素交集');
+      .toContain('范围有重叠，但没有覆盖任何像素；请增大 ROI 尺寸');
     expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: -3, y: 10, width: 8, height: 12 }, 100, 80)).toBeUndefined();
     expect(measurementRoiOutsideImageIssue({ type: 'Circle', x: 120, y: 20, radius: 8 }, 100, 80)).toContain('没有像素交集');
     expect(measurementRoiOutsideImageIssue({ type: 'Rectangle', x: 120, y: 10, width: 8, height: 12 }, 0, 80)).toBeUndefined();

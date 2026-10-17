@@ -188,6 +188,9 @@ function roiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: n
   const noIntersection = () => purpose === 'crop'
     ? `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`
     : `测量 ROI 与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+  const noRectanglePixels = () => purpose === 'crop'
+    ? `裁剪矩形与当前输入图像（${imageWidth}×${imageHeight}）范围有重叠，但没有覆盖任何像素；请增大 ROI 尺寸或向图像内部移动。`
+    : `测量矩形 ROI 与当前输入图像（${imageWidth}×${imageHeight}）范围有重叠，但没有覆盖任何像素；请增大 ROI 尺寸或向图像内部移动。`;
   const isFiniteNumber = (item: unknown): item is number => typeof item === 'number' && Number.isFinite(item);
   const finite = (...items: unknown[]) => items.every(isFiniteNumber);
   let minX: number; let minY: number; let maxX: number; let maxY: number;
@@ -201,7 +204,8 @@ function roiOutsideImageIssue(value: unknown, imageWidth: number, imageHeight: n
     const right = Math.max(0, Math.min(imageWidth, Math.ceil(x + width)));
     const bottom = Math.max(0, Math.min(imageHeight, Math.ceil(y + height)));
     if (right > left && bottom > top) return undefined;
-    return noIntersection();
+    const overlapsImage = x < imageWidth && x + width > 0 && y < imageHeight && y + height > 0;
+    return overlapsImage ? noRectanglePixels() : noIntersection();
   }
   if (roi.type === 'Circle' && finite(roi.x, roi.y, roi.radius) && (roi.radius as number) > 0) {
     const x = roi.x as number; const y = roi.y as number; const radius = roi.radius as number;
