@@ -455,6 +455,25 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(result.end).toEqual({ x: 50, y: 10 });
   });
 
+  it('drags the nearest endpoint when short search-line handles overlap', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 40, y: 40 }, end: { x: 42, y: 40 } }, onChange);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 181.12, clientY: 106.4 }); // end (42, 40), both handles are within 10 screen px
+    fireEvent.mouseMove(stage, { clientX: 204.72, clientY: 106.4 }); // move end to (52, 40)
+    fireEvent.mouseUp(document.body, { clientX: 204.72, clientY: 106.4 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('line');
+    if (result.type === 'line') {
+      expect(result.start.x).toBeCloseTo(40);
+      expect(result.start.y).toBeCloseTo(40);
+      expect(result.end.x).toBeCloseTo(52);
+      expect(result.end.y).toBeCloseTo(40);
+    }
+  });
+
   it('moves a clipped search line without snapping it fully inside the image', () => {
     const onChange = vi.fn();
     imageView({ type: 'line', start: { x: -20, y: 50 }, end: { x: 80, y: 50 } }, onChange);
@@ -553,6 +572,28 @@ describe('ImageViewer measurement geometry editing', () => {
       expect(moved.x).toBeCloseTo(60);
       expect(moved.y).toBeCloseTo(55);
       expect(moved.radius).toBe(60);
+    }
+  });
+
+  it('resizes a tiny rectangle from the nearest corner when handle hit areas overlap', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Rectangle', x: 40, y: 40, width: 2, height: 2 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 181.12, clientY: 111.12 }); // southeast corner (42, 42)
+    fireEvent.mouseMove(stage, { clientX: 183.48, clientY: 113.48 }); // enlarge by one image pixel
+    fireEvent.mouseUp(document.body, { clientX: 183.48, clientY: 113.48 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const resized = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(resized.type).toBe('Rectangle');
+    if (resized.type === 'Rectangle') {
+      expect(resized.x).toBe(40);
+      expect(resized.y).toBe(40);
+      expect(resized.width).toBeCloseTo(3);
+      expect(resized.height).toBeCloseTo(3);
     }
   });
 

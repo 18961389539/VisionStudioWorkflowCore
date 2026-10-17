@@ -99,6 +99,16 @@ export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, 
 const HANDLE_HIT = 10;
 const MAX_POLYGON_HANDLES = 32;
 
+function closestHandle<T extends string>(candidates: readonly (readonly [T, Point])[], screen: Point, view: ViewState): T | undefined {
+  let selected: T | undefined;
+  let closestDistance = Infinity;
+  for (const [mode, point] of candidates) {
+    const distance = Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale));
+    if (distance < closestDistance) { closestDistance = distance; selected = mode; }
+  }
+  return closestDistance <= HANDLE_HIT ? selected : undefined;
+}
+
 function polygonHandleIndices(pointCount: number): number[] {
   const stride = Math.max(1, Math.ceil(pointCount / MAX_POLYGON_HANDLES));
   const indices = Array.from({ length: Math.ceil(pointCount / stride) }, (_, index) => index * stride);
@@ -714,32 +724,27 @@ export default function ImageViewer({
 
   /** 命中选区控制点（屏幕距离判定）：返回拖动模式 */
   const hitRoiHandle = (target: VisionRoi, screen: Point): RoiDragMode | undefined => {
-    const near = (x: number, y: number) => Math.hypot(screen.x - (view.x + x * view.scale), screen.y - (view.y + y * view.scale)) <= HANDLE_HIT;
     if (target.type === 'Rectangle') {
-      if (near(target.x, target.y)) return 'nw';
-      if (near(target.x + target.width, target.y)) return 'ne';
-      if (near(target.x, target.y + target.height)) return 'sw';
-      if (near(target.x + target.width, target.y + target.height)) return 'se';
-      return undefined;
+      const handles: [RoiDragMode, Point][] = [
+        ['nw', { x: target.x, y: target.y }], ['ne', { x: target.x + target.width, y: target.y }],
+        ['sw', { x: target.x, y: target.y + target.height }], ['se', { x: target.x + target.width, y: target.y + target.height }]
+      ];
+      return closestHandle(handles, screen, view);
     }
     if (target.type === 'Circle') {
       const handle = circleRadiusHandle({ x: target.x, y: target.y }, target.radius, actualWidth, actualHeight);
-      if (near(handle.x, handle.y)) return 'e';
-      return undefined;
+      return closestHandle([['e', handle]], screen, view);
     }
     if (target.type === 'Brush') return undefined;
-    for (const vertexIndex of polygonHandleIndices(target.points.length)) {
-      const point = target.points[vertexIndex];
-      if (near(point.x, point.y)) return `vertex:${vertexIndex}`;
-    }
-    return undefined;
+    return closestHandle(polygonHandleIndices(target.points.length)
+      .map((vertexIndex): [RoiDragMode, Point] => [`vertex:${vertexIndex}`, target.points[vertexIndex]]), screen, view);
   };
 
   const hitMeasurementHandle = (target: MeasurementGeometry, screen: Point): MeasurementDragMode | undefined => {
     const near = (point: Point) => Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)) <= HANDLE_HIT;
     if (target.type === 'line') {
-      if (near(target.start)) return 'start';
-      if (near(target.end)) return 'end';
+      const endpoint = closestHandle([['start', target.start], ['end', target.end]], screen, view);
+      if (endpoint) return endpoint;
       const dx = target.end.x - target.start.x, dy = target.end.y - target.start.y;
       const lengthSquared = dx * dx + dy * dy;
       const cursor = imagePoint(screen);
@@ -755,10 +760,8 @@ export default function ImageViewer({
     if (target.radiusEditable !== false) candidates.push(['radius', circleRadiusHandle(target.center, target.radius, actualWidth, actualHeight)]);
     if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
-    const closest = candidates.map(([mode, point]) => ({ mode, distance: Math.hypot(
-      screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)
-    ) })).sort((a, b) => a.distance - b.distance)[0];
-    if (closest?.distance <= HANDLE_HIT) return closest.mode;
+    const closest = closestHandle(candidates, screen, view);
+    if (closest) return closest;
     const cursor = imagePoint(screen);
     if (target.centerEditable !== false
       && Math.abs(Math.hypot(cursor.x - target.center.x, cursor.y - target.center.y) - target.radius) * view.scale <= HANDLE_HIT)
