@@ -641,6 +641,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     imageOutputPorts, imageOutputPortName, setImageOutputPortName } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
+  const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
+    ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
+    : undefined;
+  const measurementCurrentImageAvailable = Boolean(measurementInputImageEntry);
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
     const imageExtentIssue = cropRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
@@ -681,18 +685,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       setPreviewNodeId(node.id);
       setImageSource(measurementGeometryFrameKind === 'current' && !selectedInputAvailable && selectedOutputAvailable ? 'output' : 'input');
     } else if (cropMeasurementReferenceNodeId) {
-      setPreviewNodeId(cropMeasurementReferenceNodeId);
-      setImageSource('output');
+      const currentImage = measurementImageView === 'current';
+      setPreviewNodeId(currentImage ? node.id : cropMeasurementReferenceNodeId);
+      setImageSource(currentImage ? 'input' : 'output');
     }
   }, [canEditMeasurementGeometry, canDisplayConnectedSearchLine, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open,
-    selectedInputAvailable, selectedOutputAvailable, setImageSource]);
+    measurementCurrentImageAvailable, measurementImageView, selectedInputAvailable, selectedOutputAvailable, setImageSource]);
   useEffect(() => {
     if (open) setMeasurementImageView('reference');
   }, [node.id, open]);
   const measurementImageFrameReady = measurementGeometryFrameKind === 'saved-reference'
     ? previewNodeId === node.id && Boolean(savedMeasurementReference && savedMeasurementReference.width > 0 && savedMeasurementReference.height > 0)
     : measurementGeometryFrameKind === 'transform-input'
-      ? previewNodeId === cropMeasurementReferenceNodeId && imageSource === 'output' && selectedOutputAvailable
+      ? measurementImageView === 'current'
+        ? previewNodeId === node.id && imageSource === 'input' && measurementCurrentImageAvailable
+        : previewNodeId === cropMeasurementReferenceNodeId && imageSource === 'output' && selectedOutputAvailable
       : previewNodeId === node.id
         && (imageSource === 'input' && selectedInputAvailable || imageSource === 'output' && selectedOutputAvailable);
   const geometryNumber = (key: string, fallback: number) => Number.isFinite(Number(draft[key])) ? Number(draft[key]) : fallback;
@@ -740,13 +747,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
     : measurementGeometry);
-  const showCurrentMeasurementImage = measurementGeometryFrameKind === 'saved-reference' && measurementImageView === 'current';
+  const showCurrentMeasurementImage = (measurementGeometryFrameKind === 'saved-reference' || measurementGeometryFrameKind === 'transform-input')
+    && measurementImageView === 'current';
   const viewerMeasurementGeometry = showCurrentMeasurementImage ? mappedMeasurementGeometry : measurementGeometry;
   const currentMeasurementGeometryUnavailable = showCurrentMeasurementImage && Boolean(measurementGeometry)
     && !mappedMeasurementGeometry && !measurementTransformInvalid;
-  const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
-    ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
-    : undefined;
   const measurementBoundsWidth = transformInputEdge ? measurementInputImageEntry?.width : imageViewerSource.width;
   const measurementBoundsHeight = transformInputEdge ? measurementInputImageEntry?.height : imageViewerSource.height;
   const transformedBoundsPreflightUnavailable = Boolean(transformInputEdge && measurementGeometry && measurementImageFrameReady
@@ -1424,16 +1429,21 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               options={[{ label: '已保存基准', value: 'reference', disabled: !referenceImage },
                 { label: '当前输入', value: 'input', disabled: !selectedInputAvailable },
                 { label: '修正结果', value: 'output', disabled: !selectedOutputAvailable }]} />
-          </> : (canEditMeasurementGeometry || canDisplayConnectedSearchLine) && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady ? <>
+          </> : (canEditMeasurementGeometry || canDisplayConnectedSearchLine)
+            && (measurementGeometryFrameKind === 'transform-input'
+              || measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady) ? <>
             <span>卡尺几何图像</span>
             <Segmented size="small" aria-label="卡尺几何图像坐标系" value={measurementImageView}
               onChange={(value) => {
                 const next = value as 'reference' | 'current';
                 setMeasurementImageView(next);
                 if (next === 'current') { setPreviewNodeId(node.id); setImageSource('input'); }
+                else if (measurementGeometryFrameKind === 'transform-input' && cropMeasurementReferenceNodeId) {
+                  setPreviewNodeId(cropMeasurementReferenceNodeId); setImageSource('output');
+                }
               }}
               options={[{ label: '基准图像', value: 'reference' },
-                { label: '当前测量图像', value: 'current', disabled: !selectedInputAvailable }]} />
+                { label: '当前测量图像', value: 'current', disabled: !measurementCurrentImageAvailable }]} />
           </>
             : canEditMeasurementGeometry && measurementGeometryFrameKind === 'transform-input' && cropMeasurementReferenceNodeId
               ? <span>几何基准图像 · {nodeLabels[cropMeasurementReferenceNodeId] ?? cropMeasurementReferenceNodeId}</span>
@@ -1480,6 +1490,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {measurementTransformInvalid && <Alert showIcon type="warning" title="当前 transform 不符合卡尺测量要求"
           description="本提示依据最近一次运行报告中的实际输入。卡尺只接受有限、方向保持的 px→px 刚性变换（平移和旋转）；缩放、剪切、透视、镜像或非像素单位会导致测量失败。请改用刚性像素变换，或让测量几何直接使用当前图像坐标。" />}
+        {showCurrentMeasurementImage && viewerMeasurementGeometry && <Alert showIcon type="info" title="映射几何只读"
+          description={canEditMeasurementGeometry
+            ? '当前视图用于核对本次运行 transform 后的实际位置；请切回基准图像拖动或重绘卡尺几何。'
+            : '当前视图用于核对本次运行 transform 后的实际位置；上游几何保持只读，请在来源节点中调整。'} />}
         {currentMeasurementGeometryUnavailable && <Alert showIcon type="info" title="尚无当前图像中的卡尺位置"
           description="运行此节点以读取本次实际使用的 transform；在此之前不会把基准图像坐标直接叠加到当前测量图像。" />}
         {measurementTransformSourceNotice && <Alert showIcon type="info" title="transform 来源可能不适用于卡尺"

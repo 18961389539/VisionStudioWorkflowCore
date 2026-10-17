@@ -23,6 +23,8 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
         {measurementGeometry?.type === 'circle' && <span data-testid="circle-geometry" data-center-x={measurementGeometry.center.x}
           data-center-y={measurementGeometry.center.y} data-radius={measurementGeometry.radius} data-band={measurementGeometry.band}
           data-profile-width={measurementGeometry.profileWidth}
+          data-angle-start={measurementGeometry.angleStartDeg} data-angle-end={measurementGeometry.angleEndDeg}
+          data-editable={Boolean(measurementGeometryEditable)}
           data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
         {measurementGeometry?.type === 'line' && <span data-testid="line-geometry" data-start-x={measurementGeometry.start.x}
           data-start-y={measurementGeometry.start.y} data-end-x={measurementGeometry.end.x} data-end-y={measurementGeometry.end.y}
@@ -1065,6 +1067,86 @@ describe('caliper geometry input guidance', () => {
     expect(geometry.getAttribute('data-start-x')).toBe('24');
     expect(geometry.getAttribute('data-end-y')).toBe('39');
     expect(geometry.getAttribute('data-editable')).toBe('false');
+  });
+
+  it('switches a crop-transformed caliper between its editable reference and mapped current image', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 30, startY: 35, endX: 80, endY: 35 } } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Rectangle', x: 20, y: 20, width: 50, height: 50 } } } };
+    const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '裁剪前图像' } };
+    const edges = [
+      { id: 'crop-image-input', source: imageNode.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'line-image-input', source: cropNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' }
+    ];
+    const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { transform: { type: 'Transform2D', display: 'crop translation', value: { sourceUnit: 'px', targetUnit: 'px',
+        h00: 1, h01: 0, h02: -20, h10: 0, h11: 1, h12: -20, h20: 0, h21: 0, h22: 1 } } } }] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: lineNode.id, portName: 'image', width: 50, height: 50 },
+      { nodeId: cropNode.id, portName: 'image', width: 50, height: 50 },
+      { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, cropNode, imageNode], edges, result: lineResult });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('30');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-editable')).toBe('true');
+
+    fireEvent.click(dialog.getByRole('radio', { name: '当前测量图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/crop/image'));
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('10');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-y')).toBe('15');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-end-x')).toBe('60');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-editable')).toBe('false');
+    expect(dialog.getByText(/请切回基准图像拖动或重绘卡尺几何/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole('radio', { name: '基准图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('30');
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-editable')).toBe('true');
+  });
+
+  it('switches a crop-transformed circle caliper to the mapped read-only current image', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆', inputs: circleCatalog.inputs,
+      parameters: { centerX: 30, centerY: 35, radius: 12, radialBand: 6, angleStartDeg: -45, angleEndDeg: 45 } } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: { typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Rectangle', x: 20, y: 20, width: 50, height: 50 } } } };
+    const imageNode: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '裁剪前图像' } };
+    const edges = [
+      { id: 'crop-image-input', source: imageNode.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'circle-image-input', source: cropNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
+    ];
+    const circleResult: RunResult = { ...report, nodeReports: [{ nodeId: circleNode.id, nodeType: circleCatalog.type, success: true,
+      durationMs: 1, summary: {}, inputs: { transform: { type: 'Transform2D', display: 'crop translation', value: { sourceUnit: 'px', targetUnit: 'px',
+        h00: 1, h01: 0, h02: -20, h10: 0, h11: 1, h12: -20, h20: 0, h21: 0, h22: 1 } } } }] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: circleNode.id, portName: 'image', width: 50, height: 50 },
+      { nodeId: cropNode.id, portName: 'image', width: 50, height: 50 },
+      { nodeId: imageNode.id, portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, cropNode, imageNode], edges, result: circleResult });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source-image/image'));
+    expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('30');
+    expect(dialog.getByTestId('circle-geometry').getAttribute('data-radius')).toBe('12');
+    expect(dialog.getByTestId('circle-geometry').getAttribute('data-editable')).toBe('true');
+
+    fireEvent.click(dialog.getByRole('radio', { name: '当前测量图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/crop/image'));
+    const mappedCircle = dialog.getByTestId('circle-geometry');
+    expect(mappedCircle.getAttribute('data-center-x')).toBe('10');
+    expect(mappedCircle.getAttribute('data-center-y')).toBe('15');
+    expect(mappedCircle.getAttribute('data-radius')).toBe('12');
+    expect(mappedCircle.getAttribute('data-angle-start')).toBe('-45');
+    expect(mappedCircle.getAttribute('data-angle-end')).toBe('45');
+    expect(mappedCircle.getAttribute('data-editable')).toBe('false');
   });
 
   it('uses the ROI reference image to edit measurement geometry through a composed ROI-and-crop transform', async () => {
