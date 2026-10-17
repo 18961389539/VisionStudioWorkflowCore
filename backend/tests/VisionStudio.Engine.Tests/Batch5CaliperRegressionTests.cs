@@ -726,6 +726,62 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CroppedRoi_CanMaskArtificialCropBoundaryEdgesDuringCaliperLineMeasurement()
+    {
+        using var source = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80));
+        using (var brightHalf = new Mat(source, new Rect(64, 0, 64, 128))) brightHalf.SetTo(Scalar.All(120));
+        using var input = VisionImage.Own(source.Clone());
+        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("image.crop", """{"roi":{"type":"Circle","x":64,"y":64,"radius":20}}"""), CancellationToken.None);
+        using var croppedImage = crop.Outputs["image"].Require<VisionImage>("image");
+        var croppedRoi = crop.Outputs["croppedRoi"].Require<VisionRoi>("croppedRoi");
+        var node = Node("measure.caliperLine", """{"startX":0,"startY":5,"endX":40,"endY":5,"edgeLength":8,"caliperCount":7,"minValidCalipers":5,"sampleWidth":1,"minContrast":10}""");
+
+        var unmasked = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(croppedImage)), node, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(unmasked.Summary["found"]));
+        var unmaskedPoint = unmasked.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.True(Math.Abs(unmaskedPoint.X - 20) > 5, $"Expected the zeroed crop boundary to dominate, got x={unmaskedPoint.X}.");
+        (unmasked.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var maskedInputs = Inputs(croppedImage);
+        maskedInputs["roi"] = VisionValue.Roi(croppedRoi);
+        var masked = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(maskedInputs), node, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(masked.Summary["found"]), Convert.ToString(masked.Summary["reason"]));
+        var measuredPoint = masked.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.InRange(measuredPoint.X, 19, 21);
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task CroppedRoi_CanMaskArtificialCropBoundaryEdgesDuringCaliperCircleMeasurement()
+    {
+        using var source = new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80));
+        Cv2.Circle(source, new Point(64, 64), 10, Scalar.All(120), -1);
+        using var input = VisionImage.Own(source.Clone());
+        var crop = await new ImageCropNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("image.crop", """{"roi":{"type":"Circle","x":64,"y":64,"radius":20}}"""), CancellationToken.None);
+        using var croppedImage = crop.Outputs["image"].Require<VisionImage>("image");
+        var croppedRoi = crop.Outputs["croppedRoi"].Require<VisionRoi>("croppedRoi");
+        var node = Node("measure.caliperCircle", """{"centerX":20,"centerY":20,"radius":10,"radialBand":12,"samplingMode":"count","caliperCount":72,"minValidCalipers":24,"minContrast":10,"sampleWidth":1}""");
+
+        var unmasked = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(croppedImage)), node, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(unmasked.Summary["found"]));
+        var unmaskedRadius = unmasked.Outputs["circle"].Require<VisionCircle>("circle").Radius;
+        Assert.True(Math.Abs(unmaskedRadius - 10) > 1.5, $"Expected the zeroed crop boundary to bias the fit, got radius={unmaskedRadius}.");
+        (unmasked.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var maskedInputs = Inputs(croppedImage);
+        maskedInputs["roi"] = VisionValue.Roi(croppedRoi);
+        var masked = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(maskedInputs), node, CancellationToken.None);
+        Assert.True(Convert.ToBoolean(masked.Summary["found"]), Convert.ToString(masked.Summary["reason"]));
+        var measuredRadius = masked.Outputs["circle"].Require<VisionCircle>("circle").Radius;
+        Assert.InRange(measuredRadius, 9, 11);
+        (masked.Outputs["image"].Value as IDisposable)?.Dispose();
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CropTransform_MapsReferenceCaliperLineIntoCropCoordinates()
     {
         using var mat = MakeEdgeImage(0.5);
