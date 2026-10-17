@@ -1011,14 +1011,14 @@ export default function ImageViewer({
         return;
       }
     }
-    // 已有选区时优先响应拖动：控制点缩放 > 选区内部平移 > 平移画布 / 新建选区
-    if (roi && roiEnabled && tool !== 'brush' && tool !== 'eraser') {
+    // 平移模式负责编辑已有 ROI；绘制工具始终新建/替换选区，避免 ROI 内部点击被吞成移动。
+    if (roi && roiEnabled && tool === 'pan') {
       const handle = hitRoiHandle(roi, p);
       if (handle) {
         roiDrag.current = { mode: handle, origin: roi, start: imagePoint(p) };
         return;
       }
-      if (tool !== 'polygon' && pointInsideRoi(roi, imagePoint(p))) {
+      if (pointInsideRoi(roi, imagePoint(p))) {
         const moveBounds = roi.type === 'Brush' ? brushRoiBounds(roi)
           : roi.type === 'Polygon' ? polygonRoiBounds(roi) : undefined;
         roiDrag.current = { mode: 'move', origin: roi, start: imagePoint(p), moveBounds };
@@ -1313,7 +1313,7 @@ export default function ImageViewer({
         }
         if (handle) return 'move';
       }
-      if (roi && roiEnabled && tool !== 'brush' && tool !== 'eraser') {
+      if (roi && roiEnabled && tool === 'pan') {
         const handle = hitRoiHandle(roi, cursorScreen);
         if (handle === 'nw' || handle === 'se') return 'nwse-resize';
         if (handle === 'ne' || handle === 'sw') return 'nesw-resize';
@@ -1354,10 +1354,10 @@ export default function ImageViewer({
               geometryGestureStart.current = undefined; geometryDrag.current = undefined; setGeometryDrawMode(false); setMeasurementDraft(undefined);
               roiDrag.current = undefined; setRoiDragOffset(undefined); setDraft(undefined); setTool(value as ToolMode); }}
             options={[
-              { value: 'pan', label: <Tooltip title="平移">平移</Tooltip> },
-              { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="矩形选区">矩形</Tooltip> },
-              { value: 'circle', disabled: !roiEnabled, label: <Tooltip title="圆形选区">圆形</Tooltip> },
-              { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title="多边形选区 · 双击完成">多边形</Tooltip> },
+              { value: 'pan', label: <Tooltip title="平移画布；拖动已有选区可移动、缩放或编辑顶点">平移</Tooltip> },
+              { value: 'rect', disabled: !roiEnabled, label: <Tooltip title="拖动绘制矩形，并替换当前选区">矩形</Tooltip> },
+              { value: 'circle', disabled: !roiEnabled, label: <Tooltip title="拖动绘制圆形，并替换当前选区">圆形</Tooltip> },
+              { value: 'polygon', disabled: !roiEnabled, label: <Tooltip title="逐点绘制多边形，并替换当前选区；双击完成">多边形</Tooltip> },
               { value: 'brush', disabled: !roiEnabled, label: <Tooltip title="笔刷：按住鼠标拖动绘制选区">笔刷</Tooltip> },
               { value: 'eraser', disabled: !roiEnabled || roi?.type !== 'Brush', label: <Tooltip title="橡皮：按住鼠标拖动擦除">橡皮</Tooltip> }
             ]}
@@ -1472,7 +1472,8 @@ export default function ImageViewer({
                         <RoiShape roi={draft} scale={view.scale} draft />
                       </>}
                   </>}
-                {roi && roiEnabled && !draft && !brushPreview && !roiDragOffset && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
+                {roi && roiEnabled && tool === 'pan' && !draft && !brushPreview && !roiDragOffset
+                  && <RoiHandles roi={roi} scale={view.scale} imageWidth={actualWidth} imageHeight={actualHeight} />}
               </Group>
             </Layer>
           </Stage>

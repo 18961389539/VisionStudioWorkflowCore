@@ -103,6 +103,22 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.queryByRole('button', { name: '撤销选区编辑' })).toBeNull();
   });
 
+  it('draws a replacement rectangle from inside the existing ROI when the rectangle tool is active', () => {
+    const roi: VisionRoi = { type: 'Rectangle', x: 20, y: 20, width: 40, height: 40 };
+    const onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: '矩形' }));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 164.6, clientY: 94.6 }); // image (35,35), inside the old ROI
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 130 }); // image (50,50)
+    fireEvent.mouseUp(document.body, { clientX: 200, clientY: 130 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    expect(onRoiChange.mock.calls[0][0]).toEqual({ type: 'Rectangle', x: 35, y: 35, width: 15, height: 15 });
+  });
+
   it('undoes the last caliper geometry drag', () => {
     const initial: MeasurementGeometry = { type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } };
     const GeometryHarness = () => {
