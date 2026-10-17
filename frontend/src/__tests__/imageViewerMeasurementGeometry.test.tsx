@@ -33,7 +33,7 @@ vi.mock('react-konva', async () => {
         data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
       : stroke === '#ff4d4f'
         ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
-    Circle: ({ name }: { name?: string }) => name?.startsWith('measurement-profile-span-')
+    Circle: ({ name }: { name?: string }) => name?.startsWith('measurement-profile-span-') || name === 'measurement-profile-width'
       || name?.startsWith('caliper-circle-angle-') ? <span data-testid={name} /> : null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
@@ -229,6 +229,19 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(points).toEqual([65, 52.5, 75, 52.5, 75, 47.5, 65, 47.5]);
   });
 
+  it('adjusts a line-caliper projection width from its canvas handle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 }, profileWidth: 5 }, onChange);
+    expect(screen.getByTestId('measurement-profile-width')).toBeTruthy();
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 135.9 }); // profile-width handle at image (50, 52.5)
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 147.7 }); // widen from 5 px to 15 px
+    fireEvent.mouseUp(document.body, { clientX: 200, clientY: 147.7 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'line', profileWidth: 15 });
+  });
+
   it('resizes the caliper profile span from its visible image handles', () => {
     const onChange = vi.fn();
     const geometry: MeasurementGeometry = { type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 }, profileSpan: 40, profileCount: 5 };
@@ -261,6 +274,20 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
     expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
+  it('adjusts a radial-caliper projection width from its canvas handle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: 0, angleEndDeg: 90, samplingMode: 'count', caliperCount: 3, profileWidth: 5 }, onChange);
+    expect(screen.getByTestId('measurement-profile-width')).toBeTruthy();
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 247.2, clientY: 135.9 }); // width handle at image (70, 52.5)
+    fireEvent.mouseMove(stage, { clientX: 247.2, clientY: 147.7 }); // widen from 5 px to 15 px
+    fireEvent.mouseUp(document.body, { clientX: 247.2, clientY: 147.7 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'circle', profileWidth: 15 });
   });
 
   it('keeps distinct angle handles on a full circle and lets users drag it into an arc', () => {

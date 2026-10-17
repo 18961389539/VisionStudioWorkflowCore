@@ -893,12 +893,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     if (locked || searchLineInputEdge) return;
     if (geometry.type === 'line') {
       setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y,
+        ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
         ...(catalogItem.type === 'measure.caliperLine' && geometry.profileSpan !== undefined ? { edgeLength: geometry.profileSpan } : {}) }));
     } else {
       const startAngle = geometry.angleStartDeg ?? -180;
       const endAngle = geometry.angleEndDeg ?? 180;
       const normalizedArc = normalizeCaliperCircleArc(startAngle, endAngle);
       setDraft(current => ({ ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
+        ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
         angleStartDeg: options?.preserveValues ? startAngle : normalizedArc.start,
         angleEndDeg: options?.preserveValues ? endAngle : normalizedArc.end,
         radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));

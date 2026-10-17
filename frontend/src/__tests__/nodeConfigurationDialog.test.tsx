@@ -31,6 +31,8 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && measurementGeometry.profileSpan !== undefined
           && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry, profileSpan: 45 })}>模拟调整采样跨度</button>}
+        {measurementGeometryEditable && measurementGeometry && measurementGeometry.profileWidth !== undefined
+          && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry, profileWidth: 11 })}>模拟调整投影宽度</button>}
         {measurementGeometryEditable && measurementGeometry?.type === 'circle' && measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false
           && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
             center: { x: 42, y: 51 }, radius: 17, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
@@ -1305,6 +1307,11 @@ describe('caliper geometry input guidance', () => {
     const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, imageNode], edges, result: report });
 
     expect((await dialog.findByTestId('circle-geometry')).getAttribute('data-profile-width')).toBe('5');
+    fireEvent.click(dialog.getByRole('button', { name: '模拟调整投影宽度' }));
+    await waitFor(() => {
+      expect((dialog.getByRole('spinbutton', { name: circleCatalog.parameters.find(parameter => parameter.name === 'sampleWidth')!.label }) as HTMLInputElement).value).toBe('11');
+      expect(dialog.getByTestId('circle-geometry').getAttribute('data-profile-width')).toBe('11');
+    });
   });
 
   it('writes a dragged circle and wraparound arc back into staged parameters', async () => {

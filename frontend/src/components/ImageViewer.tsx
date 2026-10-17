@@ -4,7 +4,7 @@ import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Te
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
-import { buildCaliperCircleAngles, circleArcSpan, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
+import { buildCaliperCircleAngles, circleArcSpan, effectiveSampleWidth, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
 
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 
@@ -13,7 +13,7 @@ type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiMoveBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
-type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
+type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'profileWidth' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number; profileWidth?: number }
@@ -44,6 +44,24 @@ function caliperLineProfileSpanHandles(geometry: Extract<MeasurementGeometry, { 
     start: { x: midpoint.x - tangent.x * span / 2, y: midpoint.y - tangent.y * span / 2 },
     end: { x: midpoint.x + tangent.x * span / 2, y: midpoint.y + tangent.y * span / 2 }
   };
+}
+function caliperLineProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'line' }>): Point | undefined {
+  if (geometry.profileWidth === undefined) return undefined;
+  const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0) return undefined;
+  const halfWidth = Math.max(0, geometry.profileWidth) / 2;
+  return { x: (geometry.start.x + geometry.end.x) / 2 - dy / length * halfWidth,
+    y: (geometry.start.y + geometry.end.y) / 2 + dx / length * halfWidth };
+}
+
+function caliperCircleProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, angleDeg: number): Point | undefined {
+  if (geometry.profileWidth === undefined || !Number.isFinite(angleDeg)) return undefined;
+  const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
+  const direction = { x: Math.cos(radians), y: Math.sin(radians) };
+  const halfWidth = Math.max(0, geometry.profileWidth) / 2;
+  return { x: geometry.center.x + geometry.radius * direction.x - direction.y * halfWidth,
+    y: geometry.center.y + geometry.radius * direction.y + direction.x * halfWidth };
 }
 const flatten = (points?: readonly OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
 const brushPathCache = new WeakMap<readonly OverlayPoint[], number[]>();
@@ -474,6 +492,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const apertureCount = geometry.profileWidth === undefined ? 0 : Math.max(1, count);
     const halfProfileWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
     const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry) : undefined;
+    const profileWidthHandle = editable ? caliperLineProfileWidthHandle(geometry) : undefined;
     return <Group listening={false}>
       {apertureCount > 0 && Array.from({ length: apertureCount }, (_, index) => {
         const offset = apertureCount === 1 ? 0 : (index / (apertureCount - 1) - 0.5) * span;
@@ -507,6 +526,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
           <Circle name="measurement-profile-span-end" x={profileHandles.end.x} y={profileHandles.end.y} radius={handleRadius}
             fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
         </>}
+        {profileWidthHandle && <Circle name="measurement-profile-width" x={profileWidthHandle.x} y={profileWidthHandle.y} radius={handleRadius}
+          fill="#eb2f96" stroke="#fff" strokeWidth={1.5 / scale} />}
       </>}
     </Group>;
   }
@@ -518,6 +539,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   const end = geometry.angleEndDeg ?? 180;
   const { span, fullCircle } = circleArcSpan(start, end);
   const angles = buildCaliperCircleAngles(geometry);
+  const profileWidthHandle = editable && angles.length > 0
+    ? caliperCircleProfileWidthHandle(geometry, angles[0]) : undefined;
   const arcHandles = editable ? caliperCircleArcHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const bandHandles = editable ? caliperCircleBandHandles(geometry, scale, imageWidth, imageHeight) : undefined;
   const radiusHandle = editable && geometry.radiusEditable !== false
@@ -576,6 +599,8 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     {editable && <>
       {geometry.centerEditable !== false && <Circle x={geometry.center.x} y={geometry.center.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
       {radiusHandle && <Circle x={radiusHandle.x} y={radiusHandle.y} radius={handleRadius} fill="#fa8c16" stroke="#fff" strokeWidth={1.5 / scale} />}
+      {profileWidthHandle && <Circle name="measurement-profile-width" x={profileWidthHandle.x} y={profileWidthHandle.y} radius={handleRadius}
+        fill="#eb2f96" stroke="#fff" strokeWidth={1.5 / scale} />}
       {arcHandles && <>
         <Circle name="caliper-circle-angle-start" x={arcHandles.start.x} y={arcHandles.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle name="caliper-circle-angle-end" x={arcHandles.end.x} y={arcHandles.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -734,12 +759,14 @@ export default function ImageViewer({
   };
 
   const committedMeasurementGeometry = (geometry: MeasurementGeometry): MeasurementGeometry => {
-    if (geometry.type === 'line') return geometry;
+    if (geometry.type === 'line') return geometry.profileWidth === undefined ? geometry
+      : { ...geometry, profileWidth: effectiveSampleWidth(geometry.profileWidth) };
     const start = geometry.angleStartDeg ?? -180;
     const end = geometry.angleEndDeg ?? 180;
     const normalizedArc = normalizeCaliperCircleArc(start, end);
     return { ...geometry, angleStartDeg: normalizedArc.start, angleEndDeg: normalizedArc.end,
-      band: clamp(geometry.band ?? 1, 1, 500) };
+      band: clamp(geometry.band ?? 1, 1, 500),
+      ...(geometry.profileWidth === undefined ? {} : { profileWidth: effectiveSampleWidth(geometry.profileWidth) }) };
   };
 
   const commitMeasurementEdit = (next: MeasurementGeometry) => {
@@ -861,6 +888,8 @@ export default function ImageViewer({
       const profileHandles = target.profileCount !== undefined ? caliperLineProfileSpanHandles(target) : undefined;
       const candidates: [MeasurementDragMode, Point][] = [['start', target.start], ['end', target.end]];
       if (profileHandles) candidates.push(['profileStart', profileHandles.start], ['profileEnd', profileHandles.end]);
+      const widthHandle = caliperLineProfileWidthHandle(target);
+      if (widthHandle) candidates.push(['profileWidth', widthHandle]);
       const endpoint = closestHandle(candidates, screen, view);
       if (endpoint) return endpoint;
       const dx = target.end.x - target.start.x, dy = target.end.y - target.start.y;
@@ -874,8 +903,11 @@ export default function ImageViewer({
     const arcHandles = caliperCircleArcHandles(target, view.scale, actualWidth, actualHeight);
     const bandHandles = caliperCircleBandHandles(target, view.scale, actualWidth, actualHeight);
     const candidates: [MeasurementDragMode, Point][] = [];
+    const angles = buildCaliperCircleAngles(target);
+    const widthHandle = angles.length > 0 ? caliperCircleProfileWidthHandle(target, angles[0]) : undefined;
     if (target.centerEditable !== false) candidates.push(['center', target.center]);
     if (target.radiusEditable !== false) candidates.push(['radius', circleRadiusHandle(target.center, target.radius, actualWidth, actualHeight)]);
+    if (widthHandle) candidates.push(['profileWidth', widthHandle]);
     if (arcHandles) candidates.push(['angleStart', arcHandles.start], ['angleEnd', arcHandles.end]);
     if (bandHandles) candidates.push(['innerBand', bandHandles.inner], ['outerBand', bandHandles.outer]);
     const closest = closestHandle(candidates, screen, view);
@@ -998,6 +1030,14 @@ export default function ImageViewer({
       if (origin.type === 'line') {
         if (mode === 'start' || mode === 'end') {
           setMeasurementDraft({ ...origin, [mode]: boundedMeasurementPoint(ip) });
+        } else if (mode === 'profileWidth') {
+          const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
+          const length = Math.hypot(dx, dy);
+          if (length > 0) {
+            const normal = { x: -dy / length, y: dx / length };
+            const delta = (current.x - start.x) * normal.x + (current.y - start.y) * normal.y;
+            setMeasurementDraft({ ...origin, profileWidth: effectiveSampleWidth(clamp((origin.profileWidth ?? 1) + 2 * delta, 1, 99)) });
+          }
         } else if (mode === 'profileStart' || mode === 'profileEnd') {
           const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
           const length = Math.hypot(dx, dy);
@@ -1017,6 +1057,12 @@ export default function ImageViewer({
           const dy = clamp(current.y - start.y, -maxY, actualHeight - minY);
           setMeasurementDraft({ ...origin, start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
         }
+      } else if (mode === 'profileWidth') {
+        const angle = buildCaliperCircleAngles(origin)[0] ?? origin.angleStartDeg ?? -180;
+        const radians = normalizeCaliperAngle(angle) * Math.PI / 180;
+        const normal = { x: -Math.sin(radians), y: Math.cos(radians) };
+        const delta = (current.x - start.x) * normal.x + (current.y - start.y) * normal.y;
+        setMeasurementDraft({ ...origin, profileWidth: effectiveSampleWidth(clamp((origin.profileWidth ?? 1) + 2 * delta, 1, 99)) });
       } else if (mode === 'center' || mode === 'moveCircle') {
         const center = mode === 'center' ? current : {
           x: origin.center.x + current.x - start.x,
@@ -1220,6 +1266,7 @@ export default function ImageViewer({
       if (measurementGeometryEditable && measurementGeometry) {
         const handle = hitMeasurementHandle(measurementGeometry, cursorScreen);
         if (handle === 'radius') return 'nwse-resize';
+        if (handle === 'profileWidth') return 'move';
         if (handle === 'innerBand' || handle === 'outerBand') return 'ns-resize';
         if ((handle === 'profileStart' || handle === 'profileEnd') && measurementGeometry.type === 'line') {
           const dx = measurementGeometry.end.x - measurementGeometry.start.x;
@@ -1298,10 +1345,10 @@ export default function ImageViewer({
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，拖动圆周可平移并将圆心移出图像边缘，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带'
+                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，拖动圆周可平移并将圆心移出图像边缘，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带，粉色调整投影宽度'
                 : measurementGeometry.profileCount !== undefined
-                  ? '箭头由起点指向终点；蓝色起点、紫色终点，青色控制点对称调整沿边缘的采样跨度。拖动端点或线段可微调搜索线'
-                  : '箭头由起点指向终点；蓝色起点、紫色终点。拖动端点或线段可微调搜索线'}>
+                  ? '箭头由起点指向终点；蓝色起点、紫色终点，青色控制点对称调整沿边缘的采样跨度，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'
+                  : '箭头由起点指向终点；蓝色起点、紫色终点，粉色控制点调整投影宽度。拖动端点或线段可微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}
