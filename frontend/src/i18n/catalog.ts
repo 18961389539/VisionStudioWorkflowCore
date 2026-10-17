@@ -53,7 +53,7 @@ const nodeNames: Record<string, string> = {
   'image.morphology': '形态学处理', 'image.threshold.adaptive': '自适应阈值',
   'image.threshold.otsu': 'Otsu 自动阈值', 'measure.blobs': '多斑点分析：面积、圆度、宽高、矩形度多特征组合筛选（HALCON select_shape 式），可按面积/X/Y/圆度排序。',
   'match.template': '模板匹配 / 旋转定位', 'value.number': '数值常量',
-  'value.arithmetic': '四则运算', 'value.range': '范围判定', 'logic.boolean': '布尔运算',
+  'value.arithmetic': '四则运算', 'value.range': '判定数值是否在闭区间内。上下限写反时自动交换并在诊断中标记；同时输出偏差、钳位值、区间内标志、边距和诊断信息。反转开关只翻转通过结果。', 'logic.boolean': '布尔运算',
   'image.acquire': '采集图像', 'frameset.image': '帧组图像', 'camera.syncCapture': '同步采集', 'image.synthetic': '生成测试图像',
   'calibration.planar': '平面标定', 'coordinate.transformCompose': '组合坐标变换', 'coordinate.transformConstant': '固定坐标变换',
   'coordinate.distance': '坐标点距离', 'coordinate.point': '坐标点', 'coordinate.pose': '坐标位姿', 'coordinate.frameTree': '坐标系树',
