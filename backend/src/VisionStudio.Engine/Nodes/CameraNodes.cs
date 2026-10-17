@@ -34,7 +34,9 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
                     ["image"] = VisionValue.Image(replayImage),
                     ["sequence"] = VisionValue.Integer(replaySequence),
                     ["timestamp"] = VisionValue.String(replayTimestamp),
-                    ["cameraId"] = VisionValue.String(replayCameraId)
+                    ["cameraId"] = VisionValue.String(replayCameraId),
+                    ["width"] = VisionValue.Integer(replayImage.Width),
+                    ["height"] = VisionValue.Integer(replayImage.Height)
                 },
                 new Dictionary<string, object?>
                 {
@@ -46,13 +48,40 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
         }
 
         var cameraId = node.GetString("cameraId", "virtual-1");
+        if (string.IsNullOrWhiteSpace(cameraId)) throw new InvalidOperationException("Acquire Image requires a non-empty cameraId.");
         var timeoutMs = node.GetInt("timeoutMs", 1500);
+        if (timeoutMs is < 50 or > 10000) throw new InvalidOperationException("Acquire Image timeoutMs must be between 50 and 10000 ms.");
         var autoStart = node.GetBool("autoStart", node.GetBool("autoOpen", true));
         var triggerBeforeGrab = node.GetBool("triggerBeforeGrab", false);
         var frameModeText = node.GetString("frameMode", "Latest");
-        var frameMode = Enum.TryParse<CameraFrameMode>(frameModeText, true, out var parsed)
-            ? parsed
-            : CameraFrameMode.Latest;
+        // Previously an unknown mode silently fell back to Latest, so a typo such as
+        // frameMode=NextFrame waited on the wrong frame without any signal.
+        if (!Enum.TryParse<CameraFrameMode>(frameModeText, true, out var frameMode) || !Enum.IsDefined(frameMode))
+            throw new InvalidOperationException($"Unsupported frameMode '{frameModeText}'. Supported values are: {string.Join(", ", Enum.GetNames<CameraFrameMode>())}.");
+
+        // Optional exposure/gain applied through the real device layer before grabbing.
+        // Sentinels keep the historical behaviour: exposureUs=0 and gainDb=-1 leave the
+        // camera's current settings untouched.
+        var exposureUs = node.GetDouble("exposureUs", 0);
+        var gainDb = node.GetDouble("gainDb", -1);
+        if (!double.IsFinite(exposureUs) || exposureUs < 0 || exposureUs > 10_000_000)
+            throw new InvalidOperationException("Acquire Image exposureUs must be 0 (leave unchanged) or between 10 and 10000000.");
+        if (!double.IsFinite(gainDb) || gainDb < -1 || gainDb > 48)
+            throw new InvalidOperationException("Acquire Image gainDb must be -1 (leave unchanged) or between 0 and 48.");
+        if (exposureUs > 0 || gainDb >= 0)
+        {
+            var device = cameraManager.Require(cameraId);
+            if (exposureUs > 0 && !device.Capabilities.Exposure)
+                throw new InvalidOperationException($"Camera '{cameraId}' does not support exposure control.");
+            if (gainDb >= 0 && !device.Capabilities.Gain)
+                throw new InvalidOperationException($"Camera '{cameraId}' does not support gain control.");
+            var current = device.Settings;
+            await cameraManager.ApplySettingsAsync(cameraId, current with
+            {
+                ExposureUs = exposureUs > 0 ? exposureUs : current.ExposureUs,
+                GainDb = gainDb >= 0 ? gainDb : current.GainDb
+            }, cancellationToken);
+        }
 
         var lease = await cameraManager.AcquireAsync(
             cameraId,
@@ -69,7 +98,9 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
                 ["image"] = VisionValue.Image(image),
                 ["sequence"] = VisionValue.Integer(lease.Sequence),
                 ["timestamp"] = VisionValue.String(lease.Timestamp.ToString("O")),
-                ["cameraId"] = VisionValue.String(lease.CameraId)
+                ["cameraId"] = VisionValue.String(lease.CameraId),
+                ["width"] = VisionValue.Integer(image.Width),
+                ["height"] = VisionValue.Integer(image.Height)
             },
             new Dictionary<string, object?>
             {

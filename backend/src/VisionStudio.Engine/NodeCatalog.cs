@@ -17,6 +17,8 @@ public static class BuiltInNodeCatalog
                 new("sequence", VisionDataType.Integer),
                 new("timestamp", VisionDataType.String),
                 new("cameraId", VisionDataType.String),
+                new("width", VisionDataType.Integer),
+                new("height", VisionDataType.Integer),
                 Next
             ],
             [
@@ -28,7 +30,9 @@ public static class BuiltInNodeCatalog
                 ]),
                 new("timeoutMs", "Timeout (ms)", "number", 1500, 50, 10000, 50),
                 new("autoStart", "Auto Start", "boolean", true),
-                new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false)
+                new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false),
+                new("exposureUs", "Exposure (us, 0=leave)", "number", 0, 0, 10000000, 100, Description: "Applied through the camera device layer before grabbing; 0 leaves the current exposure unchanged. Cameras without exposure support fail deterministically."),
+                new("gainDb", "Gain (dB, -1=leave)", "number", -1, -1, 48, 0.5, Description: "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."),
             ],
             "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
             "builtin",
@@ -140,16 +144,16 @@ public static class BuiltInNodeCatalog
             "Grayscale",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("mode", "Mode", "select", "luminance", Options:
+                new("mode", "Mode", "select", "luminance", Description: "Conversion mode: BT.601 luminance, channel average, or per-pixel channel maximum. Unknown modes fail instead of silently using luminance.", Options:
                 [
                     new("Luminance (BT.601)", "luminance"),
                     new("Average", "average"),
                     new("Max", "max")
                 ])
             ],
-            "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through).",
+            "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through unchanged). Strictly validates the mode and emits JSON diagnostics with input/output channels and size.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -157,9 +161,9 @@ public static class BuiltInNodeCatalog
             "Channel Extract",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("channel", "Channel", "select", "gray", Options:
+                new("channel", "Channel", "select", "gray", Description: "Channel to extract: gray/B/G/R, HSV hue/saturation/value, or average/max gray. Color/HSV channels require a color input; unknown values fail.", Options:
                 [
                     new("Gray", "gray"),
                     new("Average Gray", "average"),
@@ -172,7 +176,7 @@ public static class BuiltInNodeCatalog
                     new("Value", "value")
                 ])
             ],
-            "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
+            "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image; color channels require a color input and unknown channels fail deterministically. Emits JSON diagnostics with channel and size.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -180,7 +184,7 @@ public static class BuiltInNodeCatalog
             "Image Filter",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("method", "Filter Method", "select", "gaussian", Options:
                 [
@@ -201,13 +205,13 @@ public static class BuiltInNodeCatalog
             "Gaussian Blur",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2),
+                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."),
                 new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5, Description: "0 derives sigma from the kernel size."),
                 new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5, Description: "0 mirrors sigmaX.")
             ],
-            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value.",
+            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Validates finite, non-negative sigma values and emits JSON diagnostics with effective kernel, size and channels.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -215,9 +219,9 @@ public static class BuiltInNodeCatalog
             "Median Blur",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
-            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2)],
-            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required).",
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
+            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise.")],
+            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). Emits JSON diagnostics with the effective kernel, image size and channel count.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -225,7 +229,7 @@ public static class BuiltInNodeCatalog
             "Morphology",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("operation", "Operation", "select", "open", Options:
                 [
@@ -260,18 +264,18 @@ public static class BuiltInNodeCatalog
             "Adaptive Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("blockSize", "Block Size", "number", 31, 3, 99, 2, Description: "Local window size (coerced to odd)."),
-                new("c", "C Constant", "number", 5, 0, 50, 1),
+                new("c", "C Constant", "number", 5, 0, 50, 1, Description: "Finite constant subtracted from the local threshold; larger values reduce foreground."),
                 new("method", "Method", "select", "mean", Options:
                 [
                     new("Mean", "mean"),
                     new("Gaussian", "gaussian")
-                ]),
+                ], Description: "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."),
                 new("invert", "Invert", "boolean", false)
             ],
-            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray).",
+            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -279,9 +283,9 @@ public static class BuiltInNodeCatalog
             "Otsu Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), Next],
-            [new("invert", "Invert", "boolean", false)],
-            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring.",
+            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("invert", "Invert", "boolean", false, Description: "Invert the binary output (dark objects become foreground).")],
+            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -307,16 +311,22 @@ public static class BuiltInNodeCatalog
                 new("minArea", "Min Area", "number", 100, 0, 99999999, 10),
                 new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
                 new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Description: "4*pi*A/P^2, 1 = perfect circle.", VisibleWhen: new("mode", ["all"])),
+                new("minWidth", "Min Width", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
+                new("maxWidth", "Max Width", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
+                new("minHeight", "Min Height", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
+                new("maxHeight", "Max Height", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
+                new("minRectangularity", "Min Rectangularity", "number", 0, 0, 1, 0.05, Description: "Area / bounding-box area, 1 = perfect rectangle.", VisibleWhen: new("mode", ["all"])),
                 new("maxCount", "Max Count", "number", 20, 1, 200, 1, VisibleWhen: new("mode", ["all"])),
                 new("sortBy", "Sort By", "select", "area", Options:
                 [
                     new("Area", "area"),
                     new("X (left to right)", "x"),
-                    new("Y (top to bottom)", "y")
+                    new("Y (top to bottom)", "y"),
+                    new("Circularity", "circularity")
                 ], VisibleWhen: new("mode", ["all"])),
                 new("descending", "Descending", "boolean", true, VisibleWhen: new("mode", ["all"]))
             ],
-            "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+            "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -356,28 +366,36 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [
                 new("image", VisionDataType.Image),
-                new("x", VisionDataType.Double),
-                new("y", VisionDataType.Double),
-                new("area", VisionDataType.Double),
-                new("radius", VisionDataType.Double),
-                new("center", VisionDataType.Point2D),
-                new("circle", VisionDataType.Circle),
+                new("found", VisionDataType.Boolean),
+                new("x", VisionDataType.Double, Required: false),
+                new("y", VisionDataType.Double, Required: false),
+                new("area", VisionDataType.Double, Required: false),
+                new("radius", VisionDataType.Double, Required: false),
+                new("center", VisionDataType.Point2D, Required: false),
+                new("circle", VisionDataType.Circle, Required: false),
+                new("count", VisionDataType.Integer),
+                new("circularity", VisionDataType.Double, Required: false),
+                new("width", VisionDataType.Double, Required: false),
+                new("height", VisionDataType.Double, Required: false),
+                new("blobs", VisionDataType.String),
                 Next
             ],
             [new("minArea", "Min Area", "number", 1000, 1, 999999, 10)],
-            "Find the largest contour and return typed geometry.",
+            "Find the largest blob and return typed geometry plus shape features (circularity, bounding-box size). blobs JSON lists every blob at or above Min Area, largest first; no qualifying blob returns found=false instead of failing.",
             "builtin"),
         new(
             "feature.edge",
             "Edge / Canny",
             "Feature",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), Next],
+            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("chainCount", VisionDataType.Integer), new("longestChain", VisionDataType.Integer), new("chains", VisionDataType.String), Next],
             [
                 new("lowThreshold", "Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge"),
-                new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge")
+                new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("blurSize", "Blur Kernel (0=off)", "number", 0, 0, 7, 2, Unit: "px", Group: "Edge", Description: "Optional Gaussian pre-blur; must be 0, 3, 5, or 7."),
+                new("subpixel", "Subpixel Chain Points", "boolean", false, Group: "Edge", Description: "Refine chain points along the local gradient (parabolic peak interpolation) and include them in the chains JSON, stride-sampled to at most 200 points per chain.")
             ],
-            "Canny edge extraction. Supports image-space ROI and returns a binary edge image.",
+            "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first), optionally with subpixel-refined chain points. Thresholds must satisfy 0 <= low <= high <= 255.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -387,17 +405,27 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [
                 new("image", VisionDataType.Image),
-                new("line", VisionDataType.Line2D),
-                new("length", VisionDataType.Double),
-                new("angle", VisionDataType.Double),
+                new("found", VisionDataType.Boolean),
+                new("line", VisionDataType.Line2D, Required: false),
+                new("length", VisionDataType.Double, Required: false),
+                new("angle", VisionDataType.Double, Required: false),
+                new("rmsError", VisionDataType.Double, Required: false),
+                new("confidence", VisionDataType.Double, Required: false),
+                new("count", VisionDataType.Integer),
+                new("lines", VisionDataType.String),
                 Next
             ],
             [
                 new("houghThreshold", "Minimum Edge Evidence", "number", 45, 1, 500, 1, Group: "Detection"),
                 new("minLength", "Min Length", "number", 60, 1, 4000, 1, Unit: "px", Group: "Detection"),
-                new("maxGap", "Max Gap", "number", 12, 0, 1000, 1, Unit: "px", Group: "Detection")
+                new("maxGap", "Max Gap", "number", 12, 0, 1000, 1, Unit: "px", Group: "Detection"),
+                new("cannyLow", "Canny Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("cannyHigh", "Canny High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("maxLines", "Max Lines", "number", 10, 1, 100, 1, Group: "Detection"),
+                new("angleToleranceDeg", "Collinear Angle Tolerance", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Merging"),
+                new("distanceTolerance", "Collinear Distance Tolerance", "number", 6, 0, 1000, 1, Unit: "px", Group: "Merging")
             ],
-            "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
+            "Detect multiple lines: collinear segments are clustered and refit with robust total least squares. Returns found=false (instead of failing) when no line qualifies; lines JSON lists every line with length, angle, RMS/max fit error and inlier support. The primary line/length/angle ports carry the longest line.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -407,9 +435,15 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [
                 new("image", VisionDataType.Image),
-                new("circle", VisionDataType.Circle),
-                new("center", VisionDataType.Point2D),
-                new("radius", VisionDataType.Double),
+                new("found", VisionDataType.Boolean),
+                new("circle", VisionDataType.Circle, Required: false),
+                new("center", VisionDataType.Point2D, Required: false),
+                new("radius", VisionDataType.Double, Required: false),
+                new("rmsError", VisionDataType.Double, Required: false),
+                new("coverageDeg", VisionDataType.Double, Required: false),
+                new("confidence", VisionDataType.Double, Required: false),
+                new("count", VisionDataType.Integer),
+                new("circles", VisionDataType.String),
                 Next
             ],
             [
@@ -417,9 +451,12 @@ public static class BuiltInNodeCatalog
                 new("maxRadius", "Max Radius", "number", 180, 1, 5000, 1, Unit: "px", Group: "Geometry"),
                 new("minDist", "Min Center Distance", "number", 40, 1, 5000, 1, Unit: "px", Group: "Detection"),
                 new("edgeThreshold", "Edge Threshold", "number", 100, 1, 500, 1, Group: "Detection"),
-                new("centerThreshold", "Center Threshold", "number", 24, 1, 500, 1, Group: "Detection")
+                new("centerThreshold", "Center Threshold", "number", 24, 1, 500, 1, Group: "Detection"),
+                new("blurSize", "Blur Kernel", "number", 9, 3, 15, 2, Unit: "px", Group: "Detection", Description: "Gaussian pre-blur kernel; must be odd (3-15)."),
+                new("refineBand", "Refinement Band", "number", 3, 0.5, 25, 0.5, Unit: "px", Group: "Refinement", Description: "Edge points within this radial distance of a candidate are used for the geometric circle refit."),
+                new("maxCircles", "Max Circles", "number", 10, 1, 100, 1, Group: "Detection")
             ],
-            "JLVision subpixel contour segmentation and geometric circle fitting.",
+            "Detect multiple circles: candidates are refined against Canny edge points with a robust geometric circle fit and ranked by inlier support (not largest radius). Returns found=false when no circle qualifies; circles JSON lists center, radius, RMS error and inliers per circle.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -477,10 +514,15 @@ public static class BuiltInNodeCatalog
                 new("center", VisionDataType.Point2D),
                 new("pose", VisionDataType.Pose2D),
                 new("angle", VisionDataType.Double),
+                new("width", VisionDataType.Double),
+                new("height", VisionDataType.Double),
+                new("area", VisionDataType.Double),
+                new("aspectRatio", VisionDataType.Double),
+                new("diagnostics", VisionDataType.String),
                 Next
             ],
-            [new("minArea", "Min Area", "number", 500, 1, 99999999, 10, Unit: "px²", Group: "Contour")],
-            "Minimum-area rotated rectangle around the largest accepted contour.",
+            [new("minArea", "Min Area", "number", 500, 1, 99999999, 10, Unit: "px²", Group: "Contour", Description: "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically.")],
+            "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -488,9 +530,9 @@ public static class BuiltInNodeCatalog
             "Line Intersection",
             "Geometry",
             [ExecIn, new("lineA", VisionDataType.Line2D), new("lineB", VisionDataType.Line2D)],
-            [new("point", VisionDataType.Point2D), Next],
-            [],
-            "Intersect two infinite Line2D values and return Point2D.",
+            [new("point", VisionDataType.Point2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("withinSegments", VisionDataType.Boolean), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("parallelTolerance", "Parallel Tolerance", "number", 0.000000001, 0, 0.1, 0.000000001, Group: "Validation", Description: "Minimum |determinant| below which lines are rejected as parallel/coincident instead of returning an unstable point."), new("requireWithinSegments", "Require Within Segments", "boolean", false, Group: "Validation", Description: "When true, reject intersections that lie outside either finite segment; when false, intersect the infinite lines.")],
+            "Intersect two Line2D values with strict parallel/degenerate validation. Reports the point, segment parameters (withinSegments), inter-line angle and a JSON diagnostics payload; optionally requires the crossing to lie inside both finite segments.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(
@@ -498,9 +540,9 @@ public static class BuiltInNodeCatalog
             "Point Distance",
             "Geometry",
             [ExecIn, new("pointA", VisionDataType.Point2D), new("pointB", VisionDataType.Point2D)],
-            [new("distance", VisionDataType.Double), Next],
+            [new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("midX", VisionDataType.Double), new("midY", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Euclidean distance between two Point2D values.",
+            "Euclidean distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Non-finite inputs are rejected deterministically instead of propagating NaN downstream.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(
@@ -508,9 +550,9 @@ public static class BuiltInNodeCatalog
             "Line Angle",
             "Geometry",
             [ExecIn, new("lineA", VisionDataType.Line2D), new("lineB", VisionDataType.Line2D)],
-            [new("angle", VisionDataType.Double), Next],
+            [new("angle", VisionDataType.Double), new("signedAngleDeg", VisionDataType.Double), new("lineALength", VisionDataType.Double), new("lineBLength", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Acute angle between two Line2D values in degrees.",
+            "Acute (0-90 deg) and signed (-180..180 deg) angle between two non-degenerate Line2D values, with both line lengths, parallel/perpendicular flags in JSON diagnostics, and overlay lines for visual debugging.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: true)),
         new(
@@ -522,6 +564,8 @@ public static class BuiltInNodeCatalog
                 new("transform", VisionDataType.Transform2D),
                 new("rmse", VisionDataType.Double),
                 new("maxError", VisionDataType.Double),
+                new("pointCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String),
                 Next
             ],
             [
@@ -540,7 +584,7 @@ public static class BuiltInNodeCatalog
                     Group: "Calibration",
                     Description: "Four or more image/world point pairs. Nine points are recommended for MVP validation.")
             ],
-            "Least-squares planar homography from pixel coordinates to a named target coordinate frame.",
+            "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -548,155 +592,155 @@ public static class BuiltInNodeCatalog
             "Transform Point",
             "Coordinate",
             [ExecIn, new("point", VisionDataType.Point2D), new("transform", VisionDataType.Transform2D)],
-            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
+            "Convert an image-space Point2D into a frame/unit-aware coordinate point through a validated Transform2D. Rejects non-finite points and singular transforms; emits frame, unit and JSON diagnostics alongside the point.",
             "builtin"),
         new(
             "coordinate.transformLine",
             "Transform Line",
             "Coordinate",
             [ExecIn, new("line", VisionDataType.Line2D), new("transform", VisionDataType.Transform2D)],
-            [new("line", VisionDataType.CoordinateLine2D), new("length", VisionDataType.Measurement), new("lengthValue", VisionDataType.Double), Next],
+            [new("line", VisionDataType.CoordinateLine2D), new("length", VisionDataType.Measurement), new("lengthValue", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
+            "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.transformPose",
             "Transform Pose",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.Pose2D), new("transform", VisionDataType.Transform2D)],
-            [new("pose", VisionDataType.CoordinatePose2D), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Transform X/Y and local orientation into a named target frame.",
+            "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.point",
             "Coordinate Point",
             "Coordinate",
             [ExecIn],
-            [new("point", VisionDataType.CoordinatePoint2D), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
-                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
-                new("frame", "Frame", "text", "Workpiece", Group: "Point"),
-                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
+                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Finite X coordinate in the selected frame and unit."),
+                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Finite Y coordinate in the selected frame and unit."),
+                new("frame", "Frame", "text", "Workpiece", Group: "Point", Description: "Named coordinate frame the point belongs to; must be non-empty."),
+                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m"), new("px", "px")], Group: "Point", Description: "Engineering unit of X/Y; downstream frame/unit checks compare against this value.")
             ],
-            "Create a constant coordinate-aware reference point.",
+            "Create a constant coordinate-aware reference point with strict finite-value, frame and unit validation. Emits the point plus scalar x/y, frame, unit and a JSON diagnostics payload for downstream debugging.",
             "builtin"),
         new(
             "coordinate.distance",
             "Coordinate Distance",
             "Coordinate",
             [ExecIn, new("pointA", VisionDataType.CoordinatePoint2D), new("pointB", VisionDataType.CoordinatePoint2D)],
-            [new("measurement", VisionDataType.Measurement), new("distance", VisionDataType.Double), Next],
+            [new("measurement", VisionDataType.Measurement), new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Distance between two points only when frame and unit match.",
+            "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
             "builtin"),
         new(
             "coordinate.transformConstant",
             "Constant Transform",
             "Coordinate",
             [ExecIn],
-            [new("transform", VisionDataType.Transform2D), Next],
+            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Frames"),
-                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Frames"),
+                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Frames", Description: "Frame the transform maps from; must be non-empty."),
+                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Frames", Description: "Frame the transform maps to; must be non-empty."),
                 new("unit", "Unit", "select", "mm", Options:
                 [
                     new("Pixels (px)", "px"), new("mm", "mm"), new("cm", "cm"), new("m", "m")
                 ], Group: "Frames", Description: "Use px for image-space transforms used by image.warpAffine or caliper measurement; use mm/cm/m for engineering coordinates."),
-                new("x", "X Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
-                new("y", "Y Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
-                new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform")
+                new("x", "X Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform", Description: "Finite translation along the target frame X axis."),
+                new("y", "Y Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform", Description: "Finite translation along the target frame Y axis."),
+                new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform", Description: "Finite counter-clockwise rotation in degrees.")
             ],
-            "Create a rigid 2D transform between named engineering or pixel coordinate frames.",
+            "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
             "builtin"),
         new(
             "coordinate.transformInverse",
             "Inverse Transform",
             "Coordinate",
             [ExecIn, new("transform", VisionDataType.Transform2D)],
-            [new("transform", VisionDataType.Transform2D), Next],
+            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Invert a Transform2D and swap source/target frame and units.",
+            "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.transformCompose",
             "Compose Transform",
             "Coordinate",
             [ExecIn, new("transformA", VisionDataType.Transform2D), new("transformB", VisionDataType.Transform2D)],
-            [new("transform", VisionDataType.Transform2D), Next],
+            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility. For image geometry, compose roi.transform (ReferenceImage→CurrentImage) as A with image.crop (CurrentImage→CropImage) as B.",
+            "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.frameTree",
             "Frame Tree",
             "Coordinate",
             [ExecIn],
-            [new("tree", VisionDataType.FrameTree2D), Next],
+            [new("tree", VisionDataType.FrameTree2D), new("transformCount", VisionDataType.Integer), new("frameCount", VisionDataType.Integer), new("frames", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("transformsJson", "Transforms JSON", "textarea",
                     "[{\"sourceFrame\":\"Workpiece\",\"targetFrame\":\"Fixture\",\"unit\":\"mm\",\"x\":100,\"y\":50,\"angleDeg\":5},{\"sourceFrame\":\"Fixture\",\"targetFrame\":\"RobotBase\",\"unit\":\"mm\",\"x\":500,\"y\":200,\"angleDeg\":0}]",
                     Group: "Frame Tree",
                     Description: "Static rigid transforms. Runtime dynamic transforms can still be composed as normal workflow data.")
             ],
-            "Build a bidirectional frame graph and resolve transforms by named frame path.",
+            "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.frameResolve",
             "Resolve Frame Transform",
             "Coordinate",
             [ExecIn, new("tree", VisionDataType.FrameTree2D)],
-            [new("transform", VisionDataType.Transform2D), new("path", VisionDataType.String), Next],
+            [new("transform", VisionDataType.Transform2D), new("path", VisionDataType.String), new("hopCount", VisionDataType.Integer), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Resolve"),
-                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Resolve")
+                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Resolve", Description: "Frame to resolve from; must exist in the frame tree."),
+                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Resolve", Description: "Frame to resolve to; an unreachable target fails deterministically.")
             ],
-            "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
+            "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
             "builtin"),
         new(
             "coordinate.pose",
             "Coordinate Pose",
             "Coordinate",
             [ExecIn],
-            [new("pose", VisionDataType.CoordinatePose2D), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose"),
-                new("frame", "Frame", "text", "RobotBase", Group: "Pose"),
-                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Pose")
+                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Finite X position in the selected frame and unit."),
+                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Finite Y position in the selected frame and unit."),
+                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose", Description: "Finite heading in degrees; the normalized -180..180 value is reported in diagnostics."),
+                new("frame", "Frame", "text", "RobotBase", Group: "Pose", Description: "Named frame the pose is expressed in; must be non-empty."),
+                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m"), new("px", "px")], Group: "Pose", Description: "Engineering unit of X/Y.")
             ],
-            "Create a constant frame-aware 2D pose.",
+            "Create a constant frame-aware 2D pose with strict finite-value, frame and unit validation. Emits the pose plus scalar x/y/theta, frame, unit, normalized angle (in diagnostics) and a JSON diagnostics payload.",
             "builtin"),
         new(
             "coordinate.poseToTransform",
             "Pose to Transform",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
-            [new("transform", VisionDataType.Transform2D), Next],
-            [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames")],
-            "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
+            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames", Description: "Child/tool frame named by the new transform; must differ from the pose frame.")],
+            "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.transformCoordinatePoint",
             "Transform Coordinate Point",
             "Coordinate",
             [ExecIn, new("point", VisionDataType.CoordinatePoint2D), new("transform", VisionDataType.Transform2D)],
-            [new("point", VisionDataType.CoordinatePoint2D), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
+            "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.transformCoordinatePose",
             "Transform Coordinate Pose",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D), new("transform", VisionDataType.Transform2D)],
-            [new("pose", VisionDataType.CoordinatePose2D), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
+            "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
             "builtin"),
         new(
             "device.readTag",
@@ -859,7 +903,7 @@ public static class BuiltInNodeCatalog
             "Robot Guidance 2D",
             "Robot",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
-            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), Next],
+            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("robot", "Robot", "text", "ABB", Group: "Target"),
                 new("guidanceMode", "Guidance Mode", "select", "EyeToHand", Options: [new("Eye-to-Hand", "EyeToHand"), new("Eye-in-Hand", "EyeInHand"), new("Manual", "Manual")], Group: "Target"),
@@ -868,14 +912,14 @@ public static class BuiltInNodeCatalog
                 new("offsetY", "Pick Offset Y", "number", 0, -10000, 10000, 0.001, Unit: "pose unit", Group: "Pick Offset"),
                 new("angleOffsetDeg", "Angle Offset", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pick Offset")
             ],
-            "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
+            "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame). Validates frame, finite pose/offsets and guidance mode; pick offset is applied in pose-local coordinates. Emits frame, unit and JSON diagnostics. Does not send motion to hardware.",
             "builtin"),
         new(
             "robot.j4TcpCompensation",
             "J4 / TCP Compensation",
             "Robot",
             [ExecIn, new("target", VisionDataType.RobotTarget2D)],
-            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), Next],
+            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("eccentricity", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("tcpOffsetX", "TCP Offset X", "number", 0, -1000, 1000, 0.001, Unit: "target unit", Group: "Eccentricity"),
                 new("tcpOffsetY", "TCP Offset Y", "number", 0, -1000, 1000, 0.001, Unit: "target unit", Group: "Eccentricity"),
@@ -883,7 +927,7 @@ public static class BuiltInNodeCatalog
                 new("j4PivotOffsetY", "J4 Pivot Offset Y", "number", 0, -1000, 1000, 0.001, Unit: "target unit", Group: "Eccentricity"),
                 new("angleZeroOffsetDeg", "J4 Angle Zero Offset", "number", 0, -360, 360, 0.001, Unit: "deg", Group: "Rotation")
             ],
-            "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
+            "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",
             "builtin"),
         // ===== 批次一（2026-10-13 节点补齐）：通用数值 / 布尔判定族 =====
         new(
@@ -891,18 +935,18 @@ public static class BuiltInNodeCatalog
             "Number Constant",
             "Value",
             [ExecIn],
-            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), Next],
-            [new("value", "Value", "number", 0, -1000000000, 1000000000, 1)],
-            "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), new("isInteger", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
+            [new("value", "Value", "number", 0, -1000000000, 1000000000, 1, Description: "Finite constant within the signed 64-bit integer range; non-finite values fail deterministically.")],
+            "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
             "builtin"),
         new(
             "value.arithmetic",
             "Arithmetic",
             "Value",
             [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double)],
-            [new("result", VisionDataType.Double), Next],
+            [new("result", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
-                new("op", "Operation", "select", "add", Options:
+                new("op", "Operation", "select", "add", Description: "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add.", Options:
                 [
                     new("Add (a + b)", "add"),
                     new("Subtract (a - b)", "subtract"),
@@ -910,29 +954,29 @@ public static class BuiltInNodeCatalog
                     new("Divide (a / b)", "divide")
                 ])
             ],
-            "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+            "Combine two measurements with one of the four basic operations; division by zero, overflow and unknown operations fail explicitly instead of producing NaN/Infinity or silently defaulting. Emits JSON diagnostics with operands, operation and result.",
             "builtin"),
         new(
             "value.range",
             "Range Check",
             "Value",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("pass", VisionDataType.Boolean), Next],
+            [new("pass", VisionDataType.Boolean), new("inside", VisionDataType.Boolean), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
-                new("min", "Min", "number", 0, -1000000000, 1000000000, 1),
-                new("max", "Max", "number", 100, -1000000000, 1000000000, 1),
-                new("invert", "Invert", "boolean", false)
+                new("min", "Min", "number", 0, -1000000000, 1000000000, 1, Description: "Inclusive lower bound; reversed bounds are swapped and reported in diagnostics."),
+                new("max", "Max", "number", 100, -1000000000, 1000000000, 1, Description: "Inclusive upper bound; must be finite."),
+                new("invert", "Invert", "boolean", false, Description: "When true, pass means the value lies outside the inclusive window.")
             ],
-            "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+            "Inclusive range check (min/max are swapped when configured in reverse and flagged in diagnostics); invert for exclusive windows. Emits pass, raw inside flag, signed margin to the nearest bound (negative outside) and JSON diagnostics.",
             "builtin"),
         new(
             "logic.boolean",
             "Boolean Logic",
             "Logic",
             [ExecIn, new("a", VisionDataType.Boolean), new("b", VisionDataType.Boolean, Required: false)],
-            [new("result", VisionDataType.Boolean), Next],
+            [new("result", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
             [
-                new("op", "Operation", "select", "and", Options:
+                new("op", "Operation", "select", "and", Description: "Strictly one of and/or/xor/not; NOT uses input a only, unknown operations fail.", Options:
                 [
                     new("AND", "and"),
                     new("OR", "or"),
@@ -940,14 +984,14 @@ public static class BuiltInNodeCatalog
                     new("NOT (a)", "not")
                 ])
             ],
-            "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+            "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
             "builtin"),
         new(
             "flow.if",
             "If",
             "Flow",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean)],
+            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean), new("value", VisionDataType.Double), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String)],
             [
                 new(
                     "operator",
@@ -963,27 +1007,27 @@ public static class BuiltInNodeCatalog
                         new("==", "=="),
                         new("!=", "!=")
                     ]),
-                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1)
+                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1, Description: "Finite comparison threshold; equality uses a 1e-9 absolute tolerance.")
             ],
-            "Workflow Core conditional marker.",
+            "Workflow Core numeric conditional: compares a finite input against a threshold with a strict operator set (unknown operators fail). Emits condition, echoed value, signed margin (value - threshold) and JSON diagnostics, then schedules the selected branch.",
             "builtin"),
         new(
             "flow.result",
             "Result / Disposition",
             "Flow",
             [ExecIn, new("pass", VisionDataType.Boolean)],
-            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), Next],
+            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
-            "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+            "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
             "builtin"),
         new(
             "flow.parallel",
             "Parallel",
             "Flow",
             [ExecIn],
-            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control)],
+            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control), new("diagnostics", VisionDataType.String)],
             [],
-            "Start two Workflow Core parallel paths.",
+            "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
             "builtin"),
         .. Batch2ImageCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. Batch2UtilityCatalog.Items,
@@ -1002,9 +1046,9 @@ public static class BuiltInNodeCatalog
             "Join",
             "Flow",
             [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control)],
-            [Next],
+            [Next, new("diagnostics", VisionDataType.String)],
             [],
-            "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
+            "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
             "builtin")
     ];
 

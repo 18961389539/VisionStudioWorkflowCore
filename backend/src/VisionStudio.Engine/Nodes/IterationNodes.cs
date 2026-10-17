@@ -14,9 +14,10 @@ public sealed class DetectionForEachNode : IVisionNodeExecutor
         var detections = DetectionListInput.Read(context);
         if (detections.Count > maximum) throw new InvalidOperationException($"flow.forEach received {detections.Count} detections, exceeding maxItems={maximum}.");
         var ordered = detections.Select((d, i) => d with { Index = i }).ToArray();
+        var diag = CoordinateValidation.Diagnostics(Type, ("count", ordered.Length), ("maxItems", maximum), ("empty", ordered.Length == 0), ("order", "input"));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["detections"] = VisionValue.Detections(ordered), ["count"] = VisionValue.Integer(ordered.Length) },
-            new Dictionary<string, object?> { ["count"] = ordered.Length, ["maxItems"] = maximum, ["order"] = "input" }));
+            new Dictionary<string, VisionValue> { ["detections"] = VisionValue.Detections(ordered), ["count"] = VisionValue.Integer(ordered.Length), ["isEmpty"] = VisionValue.Boolean(ordered.Length == 0), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["count"] = ordered.Length, ["maxItems"] = maximum, ["order"] = "input", ["diagnostics"] = diag }));
     }
 }
 
@@ -27,6 +28,7 @@ public sealed class LoopEndNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>(), new Dictionary<string, object?> { ["boundary"] = "loopEnd" }));
+        var diag = CoordinateValidation.Diagnostics(Type, ("boundary", "loopEnd"), ("marker", "loopEnd"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["boundary"] = "loopEnd", ["diagnostics"] = diag }));
     }
 }

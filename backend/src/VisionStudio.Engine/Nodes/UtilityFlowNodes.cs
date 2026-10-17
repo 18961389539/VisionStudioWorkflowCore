@@ -1,81 +1,65 @@
-using VisionStudio.Abstractions;
-
+﻿using VisionStudio.Abstractions;
 namespace VisionStudio.Engine.Nodes;
-
-/// <summary>Cancellation-aware workflow delay. Bounds are also enforced at the executor boundary.</summary>
 public sealed class DelayNode : IVisionNodeExecutor
 {
     public string Type => "flow.delay";
-
     public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         var delayMs = node.GetInt("delayMs", 1000);
         if (delayMs is < 0 or > 600000) throw new InvalidOperationException("flow.delay delayMs must be between 0 and 600000.");
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
-        return new NodeExecutorResult(new Dictionary<string, VisionValue> { ["elapsedMs"] = VisionValue.Double(delayMs) },
-            new Dictionary<string, object?> { ["delayMs"] = delayMs });
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        CoordinateValidation.RequireFinite(elapsed, "delay.elapsedMs");
+        var diag = CoordinateValidation.Diagnostics(Type, ("requestedMs", delayMs), ("elapsedMs", elapsed));
+        return new NodeExecutorResult(new Dictionary<string, VisionValue> { ["elapsedMs"] = VisionValue.Double(delayMs), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["delayMs"] = delayMs, ["elapsedMs"] = Math.Round(elapsed, 3), ["diagnostics"] = diag });
     }
 }
-
-/// <summary>
-/// Boolean condition evaluator; the structured compiler schedules its selected branch.
-/// </summary>
 public sealed class BooleanIfConditionNode : IVisionNodeExecutor
 {
     public string Type => "flow.ifBoolean";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var condition = context.Require<bool>("condition");
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["condition"] = VisionValue.Boolean(condition) },
-            new Dictionary<string, object?> { ["condition"] = condition }));
+        cancellationToken.ThrowIfCancellationRequested();
+        var condition = context.Require<bool>("condition"); var branch = condition ? "true" : "false";
+        var diag = CoordinateValidation.Diagnostics(Type, ("condition", condition), ("branch", branch));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["condition"] = VisionValue.Boolean(condition), ["branch"] = VisionValue.String(branch), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["condition"] = condition, ["diagnostics"] = diag }));
     }
 }
-
-/// <summary>
-/// Multiway condition evaluator; the structured compiler schedules exactly one selected path.
-/// </summary>
 public sealed class SwitchNode : IVisionNodeExecutor
 {
     public string Type => "flow.switch";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var value = context.RequireValue("value");
-        var casesJson = node.GetString("casesJson", "[]");
+        cancellationToken.ThrowIfCancellationRequested();
+        var value = context.RequireValue("value"); var casesJson = node.GetString("casesJson", "[]");
         string[] cases;
-        try { cases = System.Text.Json.JsonSerializer.Deserialize<string[]>(casesJson) ?? []; }
-        catch (System.Text.Json.JsonException ex) { throw new InvalidOperationException("flow.switch casesJson must be a JSON string array.", ex); }
-        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(StringComparer.Ordinal).Count() != cases.Length)
-            throw new InvalidOperationException("flow.switch requires 1-16 non-empty unique case labels.");
+        try { cases = System.Text.Json.JsonSerializer.Deserialize<string[]>(casesJson) ?? []; } catch (System.Text.Json.JsonException ex) { throw new InvalidOperationException("flow.switch casesJson must be a JSON string array.", ex); }
+        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(StringComparer.Ordinal).Count() != cases.Length) throw new InvalidOperationException("flow.switch requires 1-16 non-empty unique case labels.");
         var key = Convert.ToString(value.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-        var index = Array.FindIndex(cases, x => string.Equals(x, key, StringComparison.Ordinal));
-        var selected = index < 0 ? "default" : $"case{index + 1}";
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["selected"] = VisionValue.String(selected) },
-            new Dictionary<string, object?> { ["selected"] = selected, ["caseCount"] = cases.Length }));
+        if (key.Length > 256) throw new InvalidOperationException("flow.switch input value text is too long (max 256 chars).");
+        var index = Array.FindIndex(cases, x => string.Equals(x, key, StringComparison.Ordinal)); var matched = index >= 0; var selected = matched ? $"case{index + 1}" : "default";
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", key), ("selected", selected), ("matched", matched), ("caseCount", cases.Length), ("caseIndex", matched ? index : -1));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["selected"] = VisionValue.String(selected), ["matched"] = VisionValue.Boolean(matched), ["caseCount"] = VisionValue.Integer(cases.Length), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["selected"] = selected, ["caseCount"] = cases.Length, ["diagnostics"] = diag }));
     }
 }
-
-/// <summary>Control-flow convergence marker. Scheduling is emitted by StructuredWorkflowIrCompiler.</summary>
 public sealed class FlowMergeNode : IVisionNodeExecutor
 {
     public string Type => "flow.merge";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-        => ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>(),
-            new Dictionary<string, object?> { ["merged"] = true }));
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var diag = CoordinateValidation.Diagnostics(Type, ("merged", true), ("marker", "merge"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["merged"] = true, ["diagnostics"] = diag }));
+    }
 }
-
-/// <summary>Marker executor; VisionNodeRuntime runs the validated, deterministic try body and records its outcome.</summary>
 public sealed class FlowTryNode : IVisionNodeExecutor
 {
     public string Type => "flow.try";
-
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-        => ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
-        {
-            ["succeeded"] = VisionValue.Boolean(false), ["errorMessage"] = VisionValue.String(string.Empty), ["attempts"] = VisionValue.Integer(0)
-        }, new Dictionary<string, object?> { ["phase"] = "try" }));
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var diag = CoordinateValidation.Diagnostics(Type, ("phase", "try"), ("markerExecutor", true), ("note", "VisionNodeRuntime executes the try body and overwrites succeeded/errorMessage/attempts"));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["succeeded"] = VisionValue.Boolean(false), ["errorMessage"] = VisionValue.String(string.Empty), ["attempts"] = VisionValue.Integer(0), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["phase"] = "try", ["diagnostics"] = diag }));
+    }
 }

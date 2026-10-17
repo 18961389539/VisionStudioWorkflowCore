@@ -13,6 +13,7 @@ public sealed class Batch3RecognitionNodeTests
     [Theory]
     [InlineData("QR_CODE", "VISION-QR-42", 0)]
     [InlineData("CODE_128", "VISION-128-42", 1)]
+    [InlineData("DATA_MATRIX", "VISION-DM-42", 2)]
     public async Task BarcodeDecodesGeneratedRealSymbols(string formatName, string value, int mode)
     {
         var format = Enum.Parse<BarcodeFormat>(formatName);
@@ -23,7 +24,7 @@ public sealed class Batch3RecognitionNodeTests
         var vision = VisionImage.Own(source.Clone());
         try
         {
-            var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) }, $"{{\"mode\":\"{(mode == 0 ? "qr" : "1d")}\"}}");
+            var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) }, $"{{\"mode\":\"{new[] { "qr", "1d", "2d" }[mode]}\"}}");
             Assert.Equal(value, result.Outputs["text"].Require<string>("text"));
             Assert.Equal(formatName, result.Outputs["format"].Require<string>("format"));
             Assert.True(source.At<byte>(0, 0) is 0 or 255); // upstream image remains usable
@@ -37,6 +38,29 @@ public sealed class Batch3RecognitionNodeTests
         using var source = new Mat(16, 16, MatType.CV_8UC1, Scalar.All(255));
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new BarcodeDecodeNode(), "recognition.barcode", Inputs(source), "{\"mode\":\"fallback\"}"));
         Assert.Contains("Unsupported barcode mode", ex.Message);
+    }
+
+    [Fact]
+    public async Task BarcodeMultipleStillExposesFirstTextAndFormat()
+    {
+        var left = new MultiFormatWriter().encode("VISION-A", BarcodeFormat.QR_CODE, 220, 220);
+        var right = new MultiFormatWriter().encode("VISION-B", BarcodeFormat.QR_CODE, 220, 220);
+        using var source = new Mat(260, 520, MatType.CV_8UC1, Scalar.All(255));
+        for (var y = 0; y < 220; y++)
+        for (var x = 0; x < 220; x++)
+        {
+            source.Set(y + 20, x + 20, left[x, y] ? (byte)0 : (byte)255);
+            source.Set(y + 20, x + 280, right[x, y] ? (byte)0 : (byte)255);
+        }
+        var vision = VisionImage.Own(source.Clone());
+        try
+        {
+            var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) }, "{\"mode\":\"qr\",\"multiple\":true}");
+            Assert.Equal(2, checked((int)result.Outputs["count"].Require<long>("count")));
+            Assert.Contains(result.Outputs["text"].Require<string>("text"), new[] { "VISION-A", "VISION-B" });
+            Assert.Equal("QR_CODE", result.Outputs["format"].Require<string>("format"));
+        }
+        finally { vision.Dispose(); }
     }
 
     [Theory]
@@ -113,6 +137,13 @@ public sealed class Batch3RecognitionNodeTests
         var mask = ((VisionImage)result.Outputs["mask"].Value!).Mat;
         Assert.Equal(new Size(60, 40), mask.Size());
         Assert.Equal((byte)2, mask.At<byte>(20, 30));
+        // Batch D: colour overlay, per-class geometry and confidence reporting
+        var overlay = ((VisionImage)result.Outputs["overlay"].Value!).Mat;
+        Assert.Equal(new Size(60, 40), overlay.Size());
+        Assert.Equal(3, overlay.Channels());
+        Assert.Contains("centroidX", result.Outputs["classes"].Require<string>("classes"));
+        Assert.True(result.Outputs.ContainsKey("meanConfidence"));
+        Assert.True(result.Outputs.ContainsKey("lowConfidenceFraction"));
     }
 
     [Fact]

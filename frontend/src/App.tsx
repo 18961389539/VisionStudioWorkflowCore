@@ -1486,9 +1486,11 @@ function Editor() {
     messageApi.info('已丢弃本地草稿');
   };
 
-  const applyCalibrationParameters = (parameters: Record<string, unknown>) => {
-    if (!selectedId || selectedNode?.data.typeKey !== 'calibration.planar') {
-      messageApi.warning('请先选择“平面标定”节点');
+    const applyCalibrationParameters = (parameters: Record<string, unknown>) => {
+    const typeKey = String(selectedNode?.data.typeKey ?? '');
+    const supported = ['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort'];
+    if (!selectedId || !supported.includes(typeKey)) {
+      messageApi.warning('请先选择平面标定、相机内参或去畸变节点');
       return;
     }
     setNodes((current) => current.map((node) =>
@@ -1496,6 +1498,7 @@ function Editor() {
         ? { ...node, data: { ...node.data, parameters: { ...((node.data.parameters ?? {}) as Record<string, unknown>), ...parameters } } }
         : node
     ));
+    messageApi.success(`标定参数已写入节点（${typeKey}）`);
   };
 
   // 顶栏二级入口：高频动作（校验 / 保存 / 运行）常驻，其余按领域归入四个下拉菜单
@@ -2203,10 +2206,11 @@ function Editor() {
       <RobotPanel open={robotsOpen} onClose={() => setRobotsOpen(false)} />
       <DevicePanel open={devicesOpen} onClose={() => setDevicesOpen(false)} />
       <LazyPanel open={framesOpen}><FrameTreePanel open onClose={() => setFramesOpen(false)} /></LazyPanel>
-      <LazyPanel open={calibrationOpen}><CalibrationPanel
+            <LazyPanel open={calibrationOpen}><CalibrationPanel
         open
         onClose={() => setCalibrationOpen(false)}
-        canApplyToSelectedNode={selectedNode?.data.typeKey === 'calibration.planar'}
+        canApplyToSelectedNode={['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort'].includes(String(selectedNode?.data.typeKey ?? ''))}
+        selectedNodeType={selectedNode ? String(selectedNode.data.typeKey) : undefined}
         onApplyToSelectedNode={applyCalibrationParameters}
       /></LazyPanel>
       <LazyPanel open={jobsOpen}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} onLoadWorkflow={restoreWorkflow} onRunResult={applyResult} /></LazyPanel>

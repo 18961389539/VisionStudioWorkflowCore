@@ -1,4 +1,4 @@
-using VisionStudio.Api.Infrastructure;
+﻿using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 
 namespace VisionStudio.Api.Endpoints;
@@ -65,6 +65,118 @@ public static class CalibrationEndpoints
 
         app.MapPost("/api/calibrations/{id}/rollback/{version:int}", async (string id, int version, CalibrationAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.rollback", "calibration");
+
+        // --- Guided camera-intrinsics wizard (HALCON-assistant style slice) ---
+        app.MapPost("/api/calibration/wizard/sessions", (CalibrationWizardCreateRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.Create(request)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.create", "calibration");
+
+        app.MapGet("/api/calibration/wizard/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.Get(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+        });
+
+        app.MapDelete("/api/calibration/wizard/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            return wizard.Delete(sessionId) ? Results.Ok(new { deleted = true }) : Results.NotFound();
+        }).RequireEngineer("calibration.wizard.delete", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/views", (string sessionId, CalibrationWizardAddViewRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.AddViewJson(sessionId, request)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.add-view", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/views/from-image", async (string sessionId, HttpRequest http, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            if (!http.HasFormContentType) throw new ApiValidationException("from-image requires multipart/form-data with an image file.");
+            var form = await http.ReadFormAsync(ct);
+            var file = form.Files.GetFile("image") ?? form.Files.FirstOrDefault()
+                ?? throw new ApiValidationException("Upload an image file (form field 'image').");
+            await using var stream = file.OpenReadStream();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            var label = form["label"].FirstOrDefault();
+            bool? enable = bool.TryParse(form["enable"].FirstOrDefault(), out var e) ? e : null;
+            try { return Results.Ok(await wizard.AddViewFromImageAsync(sessionId, ms.ToArray(), label, enable, ct)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.add-view-image", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/views/{index:int}/enabled", (string sessionId, int index, CalibrationWizardSetEnabledRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.SetEnabled(sessionId, index, request.Enabled)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.set-enabled", "calibration");
+
+        app.MapDelete("/api/calibration/wizard/sessions/{sessionId}/views/{index:int}", (string sessionId, int index, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.RemoveView(sessionId, index)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.remove-view", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/calibrate", async (string sessionId, CalibrationWizardSolveRequest? request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.SolveAsync(sessionId, request ?? new CalibrationWizardSolveRequest(), ct)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.calibrate", "calibration");
+
+        app.MapGet("/api/calibration/wizard/sessions/{sessionId}/export", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.Export(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        });
+
+        app.MapPost("/api/calibration/wizard/sessions/import", (CalibrationWizardImportRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.ImportDocument(request)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.import", "calibration");
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/preview", async (string sessionId, CalibrationWizardPreviewRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.PreviewFromCameraAsync(sessionId, request, ct)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException or TimeoutException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.preview", "calibration");
+
+        app.MapGet("/api/calibration/wizard/sessions/{sessionId}/hints", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.Hints(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+        });
+
+        app.MapPost("/api/calibration/wizard/sessions/{sessionId}/disable-outliers", (string sessionId, CalibrationWizardDisableOutliersRequest? request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.DisableOutliers(sessionId, request ?? new CalibrationWizardDisableOutliersRequest())); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.disable-outliers", "calibration");
+
+        app.MapPost("/api/calibration/wizard/handeye/solve", async (CalibrationHandEyeSolveRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.SolveHandEyeAsync(request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.handeye", "calibration");
 
         return app;
     }

@@ -8,16 +8,17 @@ public static class AlignmentRegionCatalog
     private static readonly PortDescriptor Region = new("region", VisionDataType.Region);
     private static readonly PortDescriptor Found = new("found", VisionDataType.Boolean);
     private static readonly PortDescriptor Count = new("count", VisionDataType.Integer);
-    private static readonly PortDescriptor[] RegionOutputs = [Region, new("image", VisionDataType.Image), Count, new("area", VisionDataType.Double), Found, Next];
+    private static readonly PortDescriptor[] RegionOutputs = [Region, new("image", VisionDataType.Image), Count, new("area", VisionDataType.Double), Found, new("diagnostics", VisionDataType.String, Required: false), Next];
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         new("image.register", "Register Image", "Matching",
             [Exec, new("image", VisionDataType.Image), new("reference", VisionDataType.Image)],
-            [Found, new("score", VisionDataType.Double), new("transform", VisionDataType.Transform2D, Required: false), Next],
+            [Found, new("score", VisionDataType.Double), new("transform", VisionDataType.Transform2D, Required: false), new("angle", VisionDataType.Double, Required: false), new("center", VisionDataType.Point2D, Required: false), Next],
             [new("x", "Reference Patch X", "number", 0, 0, 32768, 1), new("y", "Reference Patch Y", "number", 0, 0, 32768, 1),
              new("width", "Reference Patch Width (0=full)", "number", 0, 0, 32768, 1), new("height", "Reference Patch Height (0=full)", "number", 0, 0, 32768, 1),
-             new("angleRangeDeg", "Angle Range", "number", 15, 0, 180, 0.1), new("angleStepDeg", "Angle Step", "number", 1, 0.1, 30, 0.1), new("minScore", "Min Score", "number", 0.7, 0.01, 1, 0.01)],
-            "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform only when found; gate downstream warp on found.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+             new("angleRangeDeg", "Angle Range", "number", 15, 0, 180, 0.1), new("angleStepDeg", "Angle Step", "number", 1, 0.1, 30, 0.1), new("minScore", "Min Score", "number", 0.7, 0.01, 1, 0.01),
+             new("subpixelRefine", "Subpixel Refinement", "boolean", false, Description: "Parabolically refine the match translation to subpixel precision. Applied only when the found angle is within 5 degrees (rotated matches keep the integer result).")],
+            "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform, match angle and patch centre only when found; gate downstream warp on found. Optional subpixel refinement improves translation for near-axis-aligned matches.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("image.warpAffine", "Warp Affine Image", "Preprocess", [Exec, new("image", VisionDataType.Image), new("transform", VisionDataType.Transform2D)],
             [new("image", VisionDataType.Image), new("validRegion", VisionDataType.Region), Next],
             [new("width", "Output Width (0=input)", "number", 0, 0, 16384, 1), new("height", "Output Height (0=input)", "number", 0, 0, 16384, 1),
@@ -45,12 +46,15 @@ public static class AlignmentRegionCatalog
              new("angleDeg", "Sampling Angle (image coordinates)", "number", 90, -180, 180, 0.1)],
             "Sample segment A and intersect rays in both directions with segment B. Report mean/min/max/population deviation of absolute pixel distances. Parallel sampling direction is invalid; no overlap returns found=false. Not an image edge detector.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("calibration.detectBoard", "Detect Calibration Board", "Calibration", [Exec, new("image", VisionDataType.Image), new("calibrationDataJson", VisionDataType.String, Required: false)],
-            [Found, Count, new("image", VisionDataType.Image), new("viewJson", VisionDataType.String, Required: false), new("calibrationDataJson", VisionDataType.String), Next],
+            [Found, Count, new("image", VisionDataType.Image), new("viewJson", VisionDataType.String, Required: false), new("calibrationDataJson", VisionDataType.String),
+             new("blurVariance", VisionDataType.Double), new("coverageX", VisionDataType.Double, Required: false), new("coverageY", VisionDataType.Double, Required: false), new("quality", VisionDataType.String, Required: false), Next],
             [new("pattern", "Board Pattern", "select", "chessboard", Options: [new("Chessboard", "chessboard"), new("Symmetric Circle Grid", "circles")]),
              new("columns", "Board Columns", "number", 7, 2, 30, 1), new("rows", "Board Rows", "number", 6, 2, 30, 1), new("spacingMm", "Board Spacing (mm)", "number", 10, 0.001, 10000, 0.1),
              new("threshold", "Threshold", "number", 128, 0, 255, 1), new("darkObjects", "Dark Objects", "boolean", true), new("minArea", "Minimum Area", "number", 20, 1, 999999, 1),
              new("maxArea", "Maximum Dot Area", "number", 10000, 1, 99999999, 1), new("minCircularity", "Min Circularity", "number", 0.6, 0, 1, 0.01),
-             new("maxGridError", "Maximum Grid Error (px)", "number", 2, 0.1, 20, 0.1), new("saddleThreshold", "Saddle Contrast", "number", 10, 0.1, 255, 0.1)],
-            "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Require exactly rows*columns candidates and a consistent projective lattice. Append a view to optional calibrationDataJson (maximum 100 views), then connect it to cameraIntrinsics. Use varied views; missing boards return found=false without appending.", "builtin", new VisionToolCapabilities(EmitsOverlay: true))
+             new("maxGridError", "Maximum Grid Error (px)", "number", 2, 0.1, 20, 0.1), new("saddleThreshold", "Saddle Contrast", "number", 10, 0.1, 255, 0.1),
+             new("minBlurVariance", "Min Blur Variance (0=off)", "number", 0, 0, 1e6, 1), new("minCoverage", "Min Coverage Fraction (0=off)", "number", 0, 0, 1, 0.01),
+             new("rejectWeakViews", "Reject Weak Views", "boolean", false)],
+            "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Reports blurVariance (Laplacian), coverage, and a Pass/Warn/Fail quality verdict with guidance. Optional minBlurVariance/minCoverage gates plus rejectWeakViews skip appending failed views. Append up to 100 views into calibrationDataJson for cameraIntrinsics or the Calibration Wizard.", "builtin", new VisionToolCapabilities(EmitsOverlay: true))
     ];
 }

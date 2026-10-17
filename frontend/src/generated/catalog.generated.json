@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "517d98d77526c1c6f3b9775387e1ee18d9539c4970e07f8b1c317d9aa5ec07f0",
+  "hash": "09e54e72a062895ed02eede73e94c06c3fa8a96012ab5f244b41e3cf8e0a32c2",
   "items": [
     {
       "type": "image.acquire",
@@ -32,6 +32,16 @@
         {
           "name": "cameraId",
           "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
           "required": true
         },
         {
@@ -83,6 +93,26 @@
           "label": "Trigger Before Grab",
           "type": "boolean",
           "defaultValue": false
+        },
+        {
+          "name": "exposureUs",
+          "label": "Exposure (us, 0=leave)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000000,
+          "step": 100,
+          "description": "Applied through the camera device layer before grabbing; 0 leaves the current exposure unchanged. Cameras without exposure support fail deterministically."
+        },
+        {
+          "name": "gainDb",
+          "label": "Gain (dB, -1=leave)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 48,
+          "step": 0.5,
+          "description": "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."
         }
       ],
       "description": "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
@@ -537,6 +567,26 @@
           "required": true
         },
         {
+          "name": "maxTranslationError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxAngleErrorDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sampleResidualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -564,7 +614,25 @@
           "label": "Pose Pairs JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs."
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses."
+        },
+        {
+          "name": "maxTranslationError",
+          "label": "Max Sample Translation Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001
+        },
+        {
+          "name": "maxAngleErrorDeg",
+          "label": "Max Sample Angle Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 180,
+          "step": 0.01
         },
         {
           "name": "sourceFrame",
@@ -592,7 +660,7 @@
           "defaultValue": "mm"
         }
       ],
-      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Outputs a Pose2D and composable Transform2D. This node does not implement 3D hand-eye calibration.",
+      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Reports translation/angle RMS plus per-sample residuals, worst sample index, and optional residual gates. Rejects duplicate robot poses. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -625,6 +693,21 @@
           "required": true
         },
         {
+          "name": "viewStats",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "worstViewRms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "worstViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -636,10 +719,28 @@
           "label": "Views JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence."
+          "description": "{imageWidth,imageHeight,views:[{objectPoints:[[X,Y,Z],...],imagePoints:[[u,v],...]}]}; provide at least 3 varied views. Connected calibrationDataJson takes precedence. Prefer the Calibration Wizard / Hand-Eye Wizard (Devices → Calibration → Intrinsics) to accumulate and gate views."
+        },
+        {
+          "name": "maxViewRms",
+          "label": "Max Per-View Reprojection RMS (px, 0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100,
+          "step": 0.1
+        },
+        {
+          "name": "maxRms",
+          "label": "Max Model RMS (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences or accumulated calibration.detectBoard views. Requires at least three varied views.",
+      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views. viewStats reports per-view coverage and planar/camera-pose reprojection RMS/max; worstViewIndex and outlierViewIndex flag suspect views. maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -690,6 +791,26 @@
           "name": "calibrationDataJson",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "blurVariance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "coverageX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -800,9 +921,33 @@
           "min": 0.1,
           "max": 255,
           "step": 0.1
+        },
+        {
+          "name": "minBlurVariance",
+          "label": "Min Blur Variance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1
+        },
+        {
+          "name": "minCoverage",
+          "label": "Min Coverage Fraction (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "rejectWeakViews",
+          "label": "Reject Weak Views",
+          "type": "boolean",
+          "defaultValue": false
         }
       ],
-      "description": "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Require exactly rows*columns candidates and a consistent projective lattice. Append a view to optional calibrationDataJson (maximum 100 views), then connect it to cameraIntrinsics. Use varied views; missing boards return found=false without appending.",
+      "description": "Extract a complete isolated chessboard inner-corner or symmetric circle grid with JLVision. Reports blurVariance (Laplacian), coverage, and a Pass/Warn/Fail quality verdict with guidance. Optional minBlurVariance/minCoverage gates plus rejectWeakViews skip appending failed views. Append up to 100 views into calibrationDataJson for cameraIntrinsics or the Calibration Wizard.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -840,6 +985,16 @@
         {
           "name": "maxError",
           "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
           "required": true
         },
         {
@@ -911,7 +1066,7 @@
           "description": "Four or more image/world point pairs. Nine points are recommended for MVP validation."
         }
       ],
-      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame.",
+      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -1469,13 +1624,33 @@
           "required": true
         },
         {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "determinant",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Compose A:S→M with B:M→T to produce S→T, enforcing frame/unit compatibility. For image geometry, compose roi.transform (ReferenceImage→CurrentImage) as A with image.crop (CurrentImage→CropImage) as B.",
+      "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1498,6 +1673,41 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1509,14 +1719,16 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Frame the transform maps from; must be non-empty."
         },
         {
           "name": "targetFrame",
           "label": "Target Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Frame the transform maps to; must be non-empty."
         },
         {
           "name": "unit",
@@ -1553,7 +1765,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "unit",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite translation along the target frame X axis."
         },
         {
           "name": "y",
@@ -1564,7 +1777,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "unit",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite translation along the target frame Y axis."
         },
         {
           "name": "angleDeg",
@@ -1575,10 +1789,11 @@
           "max": 3600,
           "step": 0.001,
           "unit": "deg",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite counter-clockwise rotation in degrees."
         }
       ],
-      "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames.",
+      "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1616,13 +1831,28 @@
           "required": true
         },
         {
+          "name": "dx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "dy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Distance between two points only when frame and unit match.",
+      "description": "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1645,6 +1875,31 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1660,7 +1915,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Finite X coordinate in the selected frame and unit."
         },
         {
           "name": "y",
@@ -1671,14 +1927,16 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Finite Y coordinate in the selected frame and unit."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Point"
+          "group": "Point",
+          "description": "Named coordinate frame the point belongs to; must be non-empty."
         },
         {
           "name": "unit",
@@ -1697,12 +1955,17 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
-          "group": "Point"
+          "group": "Point",
+          "description": "Engineering unit of X/Y; downstream frame/unit checks compare against this value."
         }
       ],
-      "description": "Create a constant coordinate-aware reference point.",
+      "description": "Create a constant coordinate-aware reference point with strict finite-value, frame and unit validation. Emits the point plus scalar x/y, frame, unit and a JSON diagnostics payload for downstream debugging.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1725,6 +1988,36 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1739,7 +2032,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite X position in the selected frame and unit."
         },
         {
           "name": "y",
@@ -1749,7 +2043,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite Y position in the selected frame and unit."
         },
         {
           "name": "thetaDeg",
@@ -1760,14 +2055,16 @@
           "max": 3600,
           "step": 0.001,
           "unit": "deg",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite heading in degrees; the normalized -180..180 value is reported in diagnostics."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Named frame the pose is expressed in; must be non-empty."
         },
         {
           "name": "unit",
@@ -1786,12 +2083,17 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Engineering unit of X/Y."
         }
       ],
-      "description": "Create a constant frame-aware 2D pose.",
+      "description": "Create a constant frame-aware 2D pose with strict finite-value, frame and unit validation. Emits the pose plus scalar x/y/theta, frame, unit, normalized angle (in diagnostics) and a JSON diagnostics payload.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1814,6 +2116,26 @@
           "required": true
         },
         {
+          "name": "transformCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "frameCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "frames",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1829,7 +2151,7 @@
           "description": "Static rigid transforms. Runtime dynamic transforms can still be composed as normal workflow data."
         }
       ],
-      "description": "Build a bidirectional frame graph and resolve transforms by named frame path.",
+      "description": "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1857,13 +2179,33 @@
           "required": true
         },
         {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "determinant",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Invert a Transform2D and swap source/target frame and units.",
+      "description": "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1891,6 +2233,36 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1902,10 +2274,11 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Tool",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Child/tool frame named by the new transform; must differ from the pose frame."
         }
       ],
-      "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame. Useful for dynamic Tool→RobotBase transforms.",
+      "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1938,6 +2311,26 @@
           "required": true
         },
         {
+          "name": "hopCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -1949,17 +2342,19 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Resolve"
+          "group": "Resolve",
+          "description": "Frame to resolve from; must exist in the frame tree."
         },
         {
           "name": "targetFrame",
           "label": "Target Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Resolve"
+          "group": "Resolve",
+          "description": "Frame to resolve to; an unreachable target fails deterministically."
         }
       ],
-      "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required.",
+      "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1992,13 +2387,38 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform a frame-aware point through another engineering-frame Transform2D with frame/unit validation.",
+      "description": "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2031,13 +2451,43 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform a frame-aware pose through another engineering-frame Transform2D with frame/unit validation.",
+      "description": "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2080,13 +2530,33 @@
           "required": true
         },
         {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line.",
+      "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2129,13 +2599,28 @@
           "required": true
         },
         {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point.",
+      "description": "Convert an image-space Point2D into a frame/unit-aware coordinate point through a validated Transform2D. Rejects non-finite points and singular transforms; emits frame, unit and JSON diagnostics alongside the point.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2168,13 +2653,43 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Transform X/Y and local orientation into a named target frame.",
+      "description": "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2402,6 +2917,46 @@
           "required": true
         },
         {
+          "name": "mean",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "stdDev",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "min",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "max",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "aboveThresholdFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "similarity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        },
+        {
+          "name": "changedPixelCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2421,11 +2976,34 @@
             {
               "label": "Signed image-reference",
               "value": "signed"
+            },
+            {
+              "label": "Normalized (image-ref)/(image+ref)",
+              "value": "normalized"
             }
           ]
+        },
+        {
+          "name": "scale",
+          "label": "Difference Scale",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.001,
+          "max": 1000,
+          "step": 0.1
+        },
+        {
+          "name": "threshold",
+          "label": "Exceedance Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "description": "When > 0, also report the fraction of pixels whose absolute difference reaches this value, the changed-pixel count and an 8-connected change region for downstream region tools."
         }
       ],
-      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.",
+      "description": "Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences, normalized mode reports the illumination ratio in [-1,1]. Mean/stdDev/min/max and a global SSIM-style similarity (whole-image statistics, 1 = identical) are always reported; when threshold > 0 the thresholded change region and changed-pixel count are also emitted. No automatic alignment is performed (use defect.referenceCompare for registration and grading).",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2488,6 +3066,21 @@
           "required": true
         },
         {
+          "name": "defects",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "maxDefectArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "grade",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2532,9 +3125,114 @@
           "max": 99999999,
           "step": 1,
           "unit": "px²"
+        },
+        {
+          "name": "maxArea",
+          "label": "Maximum Defect Area (0=unbounded)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
+        },
+        {
+          "name": "registrationTolerance",
+          "label": "Registration Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 25,
+          "step": 1,
+          "unit": "px",
+          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. 0 disables registration."
+        },
+        {
+          "name": "compensation",
+          "label": "Illumination Compensation",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Offset Only",
+              "value": "offset"
+            },
+            {
+              "label": "Gain + Offset",
+              "value": "gainoffset"
+            }
+          ],
+          "description": "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."
+        },
+        {
+          "name": "morphologyOpen",
+          "label": "Morphology Open Kernel",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "description": "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd."
+        },
+        {
+          "name": "morphologyClose",
+          "label": "Morphology Close Kernel",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "description": "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."
+        },
+        {
+          "name": "variationK",
+          "label": "Variation Model K (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "When > 0, a pixel must differ by at least threshold + K * local reference standard deviation (variation-model style; local variation is estimated from the single reference)."
+        },
+        {
+          "name": "variationWindow",
+          "label": "Variation Window",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "unit": "px",
+          "description": "Odd window for the local variation estimate."
+        },
+        {
+          "name": "majorArea",
+          "label": "Major Defect Area",
+          "type": "number",
+          "defaultValue": 500,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
+        },
+        {
+          "name": "criticalArea",
+          "label": "Critical Defect Area",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
         }
       ],
-      "description": "Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "description": "Golden-template defect comparison (PatInspect/variation-model style): optional small-shift registration and illumination compensation align the good reference, differences are thresholded, morphology cleans the mask, defects are split, area-filtered and graded minor/major/critical. defects JSON lists area and bounding box per defect; grade is the worst defect grade (none when clean). Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3203,18 +3901,48 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "circle",
           "dataType": "Circle",
-          "required": true
+          "required": false
         },
         {
           "name": "center",
           "dataType": "Point2D",
-          "required": true
+          "required": false
         },
         {
           "name": "radius",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "circles",
+          "dataType": "String",
           "required": true
         },
         {
@@ -3276,9 +4004,43 @@
           "max": 500,
           "step": 1,
           "group": "Detection"
+        },
+        {
+          "name": "blurSize",
+          "label": "Blur Kernel",
+          "type": "number",
+          "defaultValue": 9,
+          "min": 3,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "group": "Detection",
+          "description": "Gaussian pre-blur kernel; must be odd (3-15)."
+        },
+        {
+          "name": "refineBand",
+          "label": "Refinement Band",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0.5,
+          "max": 25,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Refinement",
+          "description": "Edge points within this radial distance of a candidate are used for the geometric circle refit."
+        },
+        {
+          "name": "maxCircles",
+          "label": "Max Circles",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "Detection"
         }
       ],
-      "description": "JLVision subpixel contour segmentation and geometric circle fitting.",
+      "description": "Detect multiple circles: candidates are refined against Canny edge points with a robust geometric circle fit and ranked by inlier support (not largest radius). Returns found=false when no circle qualifies; circles JSON lists center, radius, RMS error and inliers per circle.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3319,6 +4081,26 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "chainCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "longestChain",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "chains",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -3346,9 +4128,29 @@
           "step": 1,
           "unit": "gray",
           "group": "Edge"
+        },
+        {
+          "name": "blurSize",
+          "label": "Blur Kernel (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 7,
+          "step": 2,
+          "unit": "px",
+          "group": "Edge",
+          "description": "Optional Gaussian pre-blur; must be 0, 3, 5, or 7."
+        },
+        {
+          "name": "subpixel",
+          "label": "Subpixel Chain Points",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Edge",
+          "description": "Refine chain points along the local gradient (parabolic peak interpolation) and include them in the chains JSON, stride-sampled to at most 200 points per chain."
         }
       ],
-      "description": "Canny edge extraction. Supports image-space ROI and returns a binary edge image.",
+      "description": "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first), optionally with subpixel-refined chain points. Thresholds must satisfy 0 <= low <= high <= 255.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3384,18 +4186,43 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "line",
           "dataType": "Line2D",
-          "required": true
+          "required": false
         },
         {
           "name": "length",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "angle",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "lines",
+          "dataType": "String",
           "required": true
         },
         {
@@ -3436,9 +4263,63 @@
           "step": 1,
           "unit": "px",
           "group": "Detection"
+        },
+        {
+          "name": "cannyLow",
+          "label": "Canny Low Threshold",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        },
+        {
+          "name": "cannyHigh",
+          "label": "Canny High Threshold",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        },
+        {
+          "name": "maxLines",
+          "label": "Max Lines",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "Detection"
+        },
+        {
+          "name": "angleToleranceDeg",
+          "label": "Collinear Angle Tolerance",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 45,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Merging"
+        },
+        {
+          "name": "distanceTolerance",
+          "label": "Collinear Distance Tolerance",
+          "type": "number",
+          "defaultValue": 6,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "unit": "px",
+          "group": "Merging"
         }
       ],
-      "description": "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
+      "description": "Detect multiple lines: collinear segments are clustered and refit with robust total least squares. Returns found=false (instead of failing) when no line qualifies; lines JSON lists every line with length, angle, RMS/max fit error and inlier support. The primary line/length/angle ports carry the longest line.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3579,7 +4460,7 @@
           "step": 2,
           "unit": "px",
           "group": "Sampling",
-          "description": "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the expected edge; larger values smooth local noise but may merge nearby features."
         },
         {
           "name": "minContrast",
@@ -3696,10 +4577,20 @@
           "name": "condition",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "branch",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Choose the true or false path from the Boolean condition input, then converge the paths at a Join.",
+      "description": "Choose the true or false path from the Boolean condition input, then converge the paths at a Join. Also emits the condition, the selected branch name (true/false) and JSON diagnostics for run tracing.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3730,6 +4621,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -3744,10 +4640,11 @@
           "min": 0,
           "max": 600000,
           "step": 10,
-          "unit": "ms"
+          "unit": "ms",
+          "description": "Requested wait in milliseconds (0-600000); cancellation stops the wait immediately."
         }
       ],
-      "description": "Wait for the configured duration; cancellation stops the wait immediately.",
+      "description": "Wait for the configured duration; cancellation stops the wait immediately. Reports requested and measured elapsed time in JSON diagnostics; out-of-range delays fail deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3856,10 +4753,15 @@
           "name": "next",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Converge selected If/Switch branches. A real incoming branch is required by structured workflow compilation.",
+      "description": "Converge selected If/Switch branches. A real incoming branch is required by structured workflow compilation. Emits a JSON diagnostics marker so merged runs remain traceable in node summaries.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3953,6 +4855,16 @@
           "name": "classId",
           "dataType": "Integer",
           "required": false
+        },
+        {
+          "name": "isEmpty",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -3963,7 +4875,8 @@
           "defaultValue": 100,
           "min": 1,
           "max": 500,
-          "step": 1
+          "step": 1,
+          "description": "Hard item-count limit (1-500); exceeding it fails the loop instead of silently truncating."
         }
       ],
       "description": "Sequentially execute the structured body once for each DetectionList item in input order. The body receives current index/center/circle/rectangle/x/y and optional confidence/classId; the loop fails when item count exceeds maxItems.",
@@ -4009,6 +4922,21 @@
           "name": "condition",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -4051,10 +4979,11 @@
           "defaultValue": 15000,
           "min": -99999999,
           "max": 99999999,
-          "step": 1
+          "step": 1,
+          "description": "Finite comparison threshold; equality uses a 1e-9 absolute tolerance."
         }
       ],
-      "description": "Workflow Core conditional marker.",
+      "description": "Workflow Core numeric conditional: compares a finite input against a threshold with a strict operator set (unknown operators fail). Emits condition, echoed value, signed margin (value - threshold) and JSON diagnostics, then schedules the selected branch.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4079,10 +5008,15 @@
           "name": "next",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition.",
+      "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4102,10 +5036,15 @@
           "name": "repeat",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump.",
+      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump. Emits a JSON diagnostics boundary marker.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4138,10 +5077,15 @@
           "name": "branch2",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [],
-      "description": "Start two Workflow Core parallel paths.",
+      "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4173,13 +5117,18 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Set the automatic inspection disposition (OK/NG) for traceability. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
+      "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -4202,6 +5151,21 @@
       "outputs": [
         {
           "name": "selected",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "caseCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
           "dataType": "String",
           "required": true
         },
@@ -4296,10 +5260,11 @@
           "name": "casesJson",
           "label": "Cases (JSON string array)",
           "type": "textarea",
-          "defaultValue": "[\"OK\",\"NG\"]"
+          "defaultValue": "[\"OK\",\"NG\"]",
+          "description": "JSON array of 1-16 non-empty unique case labels; malformed JSON or duplicates fail deterministically."
         }
       ],
-      "description": "Choose one matching path. casesJson entries map in order to case1-case16; unmatched values take the default path. Converge all configured paths at Flow Merge.",
+      "description": "Choose one matching path. casesJson entries map in order to case1-case16; unmatched values take the default path and report matched=false. Converge all configured paths at Flow Merge. Emits case count and JSON diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4353,6 +5318,11 @@
           "name": "attempts",
           "dataType": "Integer",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         }
       ],
       "parameters": [
@@ -4363,7 +5333,8 @@
           "defaultValue": 0,
           "min": 0,
           "max": 3,
-          "step": 1
+          "step": 1,
+          "description": "Automatic retries for eligible deterministic compute bodies only; cancellation is never retried."
         },
         {
           "name": "retryDelayMs",
@@ -4373,7 +5344,8 @@
           "min": 0,
           "max": 5000,
           "step": 10,
-          "unit": "ms"
+          "unit": "ms",
+          "description": "Delay between retry attempts in milliseconds."
         }
       ],
       "description": "Catch body failures and route to success or error. Automatic retries are limited to linear deterministic built-in Pipeline compute nodes with no declared actions; cancellation is never retried. Connect body/success/error to flow.merge case1/case2/default.",
@@ -4417,13 +5389,33 @@
           "required": true
         },
         {
+          "name": "signedAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lineALength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lineBLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Acute angle between two Line2D values in degrees.",
+      "description": "Acute (0-90 deg) and signed (-180..180 deg) angle between two non-degenerate Line2D values, with both line lengths, parallel/perpendicular flags in JSON diagnostics, and overlay lines for visual debugging.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4464,13 +5456,58 @@
           "required": true
         },
         {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinSegments",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Intersect two infinite Line2D values and return Point2D.",
+      "parameters": [
+        {
+          "name": "parallelTolerance",
+          "label": "Parallel Tolerance",
+          "type": "number",
+          "defaultValue": 1E-09,
+          "min": 0,
+          "max": 0.1,
+          "step": 1E-09,
+          "group": "Validation",
+          "description": "Minimum |determinant| below which lines are rejected as parallel/coincident instead of returning an unstable point."
+        },
+        {
+          "name": "requireWithinSegments",
+          "label": "Require Within Segments",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "When true, reject intersections that lie outside either finite segment; when false, intersect the infinite lines."
+        }
+      ],
+      "description": "Intersect two Line2D values with strict parallel/degenerate validation. Reports the point, segment parameters (withinSegments), inter-line angle and a JSON diagnostics payload; optionally requires the crossing to lie inside both finite segments.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4511,13 +5548,43 @@
           "required": true
         },
         {
+          "name": "dx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "dy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "midX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "midY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Euclidean distance between two Point2D values.",
+      "description": "Euclidean distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Non-finite inputs are rejected deterministically instead of propagating NaN downstream.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4556,6 +5623,31 @@
           "name": "isAnomaly",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "heatmap",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "peakX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "peakY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "areaFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "suggestedThreshold",
+          "dataType": "Double",
+          "required": false
         },
         {
           "name": "result",
@@ -4642,7 +5734,8 @@
           "name": "swapRB",
           "label": "Swap Red and Blue",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
         },
         {
           "name": "crop",
@@ -4658,9 +5751,26 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.01
+        },
+        {
+          "name": "thresholdMode",
+          "label": "Threshold Mode",
+          "type": "select",
+          "defaultValue": "manual",
+          "options": [
+            {
+              "label": "Manual Threshold",
+              "value": "manual"
+            },
+            {
+              "label": "Otsu Auto (spatial maps)",
+              "value": "otsu"
+            }
+          ],
+          "description": "Otsu derives the effective threshold from the spatial anomaly map distribution (suggestedThreshold); scalar outputs always use the manual threshold."
         }
       ],
-      "description": "Run an ONNX anomaly model with a single scalar float32 output tensor; compare its score with the configured threshold.",
+      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the manual threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above the effective threshold (isAnomaly follows the peak). thresholdMode=otsu uses the Otsu threshold of the map itself as the effective threshold.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4710,6 +5820,26 @@
           "required": true
         },
         {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "entropy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "classCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -4789,7 +5919,8 @@
           "name": "swapRB",
           "label": "Swap Red and Blue",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
         },
         {
           "name": "crop",
@@ -4798,17 +5929,42 @@
           "defaultValue": false
         },
         {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "scores",
+          "options": [
+            {
+              "label": "Logits / scores (optional softmax)",
+              "value": "scores"
+            },
+            {
+              "label": "YOLO26 classify (already softmax)",
+              "value": "yolo26"
+            }
+          ],
+          "description": "YOLO26-cls ONNX exports [1,C] probabilities with softmax already in the graph; choose yolo26 to skip a second softmax."
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterbox Resize",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Preserve aspect with gray (114) padding. Usually off for classifiers."
+        },
+        {
           "name": "labels",
           "label": "Class Labels",
           "type": "text",
           "defaultValue": "",
-          "description": "Optional comma-separated labels in model class order."
+          "description": "Optional comma-separated labels in model class order; the count must match the model class count or the field must stay empty."
         },
         {
           "name": "applySoftmax",
           "label": "Apply Softmax",
           "type": "boolean",
-          "defaultValue": true
+          "defaultValue": true,
+          "description": "Ignored when layout=yolo26 (probabilities are already normalized)."
         },
         {
           "name": "topK",
@@ -4817,10 +5973,11 @@
           "defaultValue": 5,
           "min": 1,
           "max": 100,
-          "step": 1
+          "step": 1,
+          "description": "Number of ranked classes in the result JSON (clamped to the class count); values below 1 fail."
         }
       ],
-      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Supported output layouts: [1,C] and [1,C,1,1]; output result is JSON.",
+      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Output [1,C] or [1,C,1,1]. layout=scores applies optional numerically stable softmax; layout=yolo26 matches Ultralytics YOLO26-cls ONNX (already softmaxed, probabilities are validated and never re-softmaxed). Label lists must match the class count or be empty; unknown layouts and invalid topK fail deterministically. Emits top-K JSON plus best label/index/confidence, winner margin, distribution entropy, class count and JSON diagnostics. No training/evaluation is performed. Tip: set swapRB=true for RGB-trained YOLO models.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -4944,13 +6101,34 @@
           "name": "swapRB",
           "label": "Swap Red and Blue",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
         },
         {
           "name": "crop",
           "label": "Center Crop After Resize",
           "type": "boolean",
           "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "xyxy",
+          "options": [
+            {
+              "label": "Rows [x1,y1,x2,y2,score,class]",
+              "value": "xyxy"
+            },
+            {
+              "label": "YOLO (cx,cy,w,h + class scores)",
+              "value": "yolo"
+            },
+            {
+              "label": "YOLOv5 (with objectness)",
+              "value": "yolov5"
+            }
+          ]
         },
         {
           "name": "coordinates",
@@ -4967,6 +6145,13 @@
               "value": "pixels"
             }
           ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Enable for Ultralytics YOLO: preprocess uses gray (114) letterbox AND coordinates are un-padded before mapping to the source."
         },
         {
           "name": "confidenceThreshold",
@@ -4996,7 +6181,7 @@
           "step": 1
         }
       ],
-      "description": "Run an ONNX detector with output rows [x1,y1,x2,y2,score,classId], as [N,6] or [1,N,6]. Coordinates can be normalized or input-image pixels.",
+      "description": "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6] (YOLO26 end-to-end nms=False export is typically [1,300,6]); layout yolo expects YOLOv8/YOLO26 raw cx,cy,w,h plus per-class scores as [1,C,N]; layout yolov5 adds objectness. Enable letterbox so preprocess pads like Ultralytics and coordinates un-pad correctly. Class-aware NMS is applied here (not embedded).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5009,8 +6194,484 @@
       "declaresActions": false
     },
     {
+      "type": "inference.instanceSegmentation",
+      "displayName": "ONNX Instance Segmentation (YOLO-Seg)",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "mask",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "instances",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "protoOutputName",
+          "label": "Prototype Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Second ONNX output (mask prototypes). Leave empty with outputName empty to use the model's first two outputs in order."
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "yolo26-seg",
+          "options": [
+            {
+              "label": "YOLO26 / YOLOv8-Seg dual head",
+              "value": "yolo26-seg"
+            }
+          ],
+          "description": "Expects detection tensor [1,4+nc+32,N] and prototypes [1,32,H,W] (mask dim may differ)."
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "pixels",
+          "options": [
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            },
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            }
+          ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on: Ultralytics exports assume letterbox preprocess; disable only for stretch-trained custom exports."
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "NMS IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "maskThreshold",
+          "label": "Mask Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Instances",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        }
+      ],
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box; letterbox-aware remap to source), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not OBB. For keypoints use inference.pose. Embedded-NMS / single-tensor e2e seg exports are unsupported—use raw dual-head ONNX.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.pose",
+      "displayName": "ONNX Pose (YOLO-Pose)",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "keypoints",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "yolo",
+          "options": [
+            {
+              "label": "YOLO raw (YOLOv8/YOLO26 nms=None)",
+              "value": "yolo"
+            },
+            {
+              "label": "YOLO26 end-to-end xyxy+kpts",
+              "value": "xyxy"
+            }
+          ],
+          "description": "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57]."
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "pixels",
+          "options": [
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            },
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            }
+          ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on: Ultralytics letterbox preprocess and coordinate un-padding."
+        },
+        {
+          "name": "numKeypoints",
+          "label": "Keypoint Count",
+          "type": "number",
+          "defaultValue": 17,
+          "min": 1,
+          "max": 128,
+          "step": 1,
+          "description": "COCO pose uses 17. Must match the exported model."
+        },
+        {
+          "name": "keypointDims",
+          "label": "Keypoint Dims",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 2,
+          "max": 3,
+          "step": 1,
+          "description": "3 = x,y,conf (Ultralytics default); 2 = x,y only."
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "NMS IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "keypointThreshold",
+          "label": "Keypoint Draw Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Keypoints / skeleton bones below this confidence are skipped on the overlay."
+        },
+        {
+          "name": "drawSkeleton",
+          "label": "Draw COCO Skeleton",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "When numKeypoints=17, draw the standard COCO-17 skeleton on the overlay."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Poses",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        }
+      ],
+      "description": "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
       "type": "inference.segmentation",
-      "displayName": "ONNX Segmentation",
+      "displayName": "ONNX Semantic Segmentation",
       "category": "Inference",
       "inputs": [
         {
@@ -5028,6 +6689,41 @@
         {
           "name": "mask",
           "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "classes",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "classCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "dominantClass",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "dominantFraction",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "meanConfidence",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lowConfidenceFraction",
+          "dataType": "Double",
           "required": true
         },
         {
@@ -5110,13 +6806,38 @@
           "name": "swapRB",
           "label": "Swap Red and Blue",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
         },
         {
           "name": "crop",
           "label": "Center Crop After Resize",
           "type": "boolean",
           "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "logits",
+          "options": [
+            {
+              "label": "Logits [1,C,H,W] (argmax)",
+              "value": "logits"
+            },
+            {
+              "label": "YOLO26 semantic class map",
+              "value": "yolo26-semantic"
+            }
+          ],
+          "description": "logits keeps legacy multi-channel scores; yolo26-semantic matches Ultralytics YOLO26-sem ONNX where argmax is already in the graph ([1,H,W])."
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterbox Resize",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Preserve aspect with gray (114) padding. Enable when the YOLO26-sem export used letterbox."
         },
         {
           "name": "binaryThreshold",
@@ -5126,10 +6847,20 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.01,
-          "description": "Used only when the output has one channel; multi-class output uses per-pixel argmax."
+          "description": "Used only for layout=logits with one channel; multi-class logits use per-pixel argmax. Ignored for yolo26-semantic."
+        },
+        {
+          "name": "lowConfidenceThreshold",
+          "label": "Low Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01,
+          "description": "Fraction of pixels whose winning score is below this value is reported as lowConfidenceFraction. For yolo26-semantic, scores are treated as 1.0."
         }
       ],
-      "description": "Run an ONNX semantic segmentation model with strict output layout [1,C,H,W], 1<=C<=256; emit an 8-bit class-label mask resized to the source dimensions.",
+      "description": "Semantic segmentation only. layout=logits: [1,C,H,W] argmax mask. layout=yolo26-semantic: YOLO26-sem ONNX class map [1,H,W]/[H,W]/[1,1,H,W] (argmax already applied). Emits label mask, colour overlay, per-class stats. For YOLO instance masks (yolo26n-seg) use inference.instanceSegmentation.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5169,6 +6900,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -5197,10 +6933,11 @@
               "label": "NOT (a)",
               "value": "not"
             }
-          ]
+          ],
+          "description": "Strictly one of and/or/xor/not; NOT uses input a only, unknown operations fail."
         }
       ],
-      "description": "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+      "description": "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -5240,6 +6977,16 @@
         {
           "name": "transform",
           "dataType": "Transform2D",
+          "required": false
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
           "required": false
         },
         {
@@ -5311,9 +7058,16 @@
           "min": 0.01,
           "max": 1,
           "step": 0.01
+        },
+        {
+          "name": "subpixelRefine",
+          "label": "Subpixel Refinement",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Parabolically refine the match translation to subpixel precision. Applied only when the found angle is within 5 degrees (rotated matches keep the integer result)."
         }
       ],
-      "description": "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform only when found; gate downstream warp on found.",
+      "description": "NCC rigid registration at fixed scale. Select a distinctive reference patch with margin in the scene. Outputs current-pixel to reference-pixel transform, match angle and patch centre only when found; gate downstream warp on found. Optional subpixel refinement improves translation for near-axis-aligned matches.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5843,9 +7597,98 @@
           "step": 1,
           "unit": "px",
           "group": "Multi-target"
+        },
+        {
+          "name": "engine",
+          "label": "Shape Engine",
+          "type": "select",
+          "defaultValue": "native",
+          "options": [
+            {
+              "label": "Native JLVision shape model",
+              "value": "native"
+            },
+            {
+              "label": "Managed chamfer (cross-platform)",
+              "value": "managedChamfer"
+            },
+            {
+              "label": "Auto (native, chamfer fallback)",
+              "value": "auto"
+            }
+          ],
+          "group": "Managed Chamfer",
+          "description": "managedChamfer builds a contour model from the template image (templateRoi crop, centre origin) and searches a chamfer distance transform; it ignores trained native models. auto falls back to chamfer only when the native library is unavailable."
+        },
+        {
+          "name": "chamferTolerancePx",
+          "label": "Chamfer Tolerance",
+          "type": "number",
+          "defaultValue": 2.5,
+          "min": 0.5,
+          "max": 10,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Managed Chamfer",
+          "description": "Edge distance (px) that still counts as covered model contour. Higher tolerates more occlusion/blur but admits more clutter."
+        },
+        {
+          "name": "chamferAngleStepDeg",
+          "label": "Chamfer Angle Step",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 30,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Managed Chamfer",
+          "description": "Coarse angular sampling for the managed engine; refinement halves the step locally. Angle remains discrete, not continuous."
+        },
+        {
+          "name": "chamferScaleStepPercent",
+          "label": "Chamfer Scale Step",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "unit": "%",
+          "group": "Managed Chamfer",
+          "description": "Scale sampling between Search Minimum/Maximum Scale for the managed engine."
+        },
+        {
+          "name": "chamferCannyLow",
+          "label": "Chamfer Canny Low",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Managed Chamfer"
+        },
+        {
+          "name": "chamferCannyHigh",
+          "label": "Chamfer Canny High",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Managed Chamfer"
+        },
+        {
+          "name": "chamferMaxModelPoints",
+          "label": "Chamfer Max Model Points",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 16,
+          "max": 2000,
+          "step": 1,
+          "group": "Managed Chamfer",
+          "description": "Contour points kept after subsampling the template edges; more points are slower but describe finer shape detail."
         }
       ],
-      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height.",
+      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height. The managedChamfer engine is a cross-platform edge-distance alternative (coverage + distance score, partial-occlusion tolerant, multi-target); it is conceptually in the HALCON shape-model / PatMax direction but not parity: discrete angle/scale, no polarity, XLD refinement, deformation or clutter model.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -6272,7 +8115,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."
         },
         {
           "name": "maxRadiusDeviation",
@@ -6485,7 +8329,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "edgeThreshold",
@@ -6708,7 +8553,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "minContrast",
@@ -6901,13 +8747,34 @@
           "required": true
         },
         {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Two-dimensional offset between fitted circle centres. Return centre distance, twice that distance and the A-to-B offset vector, all in image pixels. Radii do not affect the centre-offset calculation.",
+      "parameters": [
+        {
+          "name": "maxCenterDistance",
+          "label": "Max Centre Distance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "description": "Optional concentricity tolerance in px; withinTolerance reports centreDistance <= limit (always true when off)."
+        }
+      ],
+      "description": "Two-dimensional offset between fitted circle centres. Returns centre distance, diametral offset (twice the distance), the A-to-B offset vector and an optional tolerance verdict, all in image pixels. Radii do not affect the centre-offset calculation. Emits JSON diagnostics with offset angle.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6958,13 +8825,23 @@
           "required": true
         },
         {
+          "name": "relation",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Return center distance and signed edge-to-edge gap; overlap produces a negative gap.",
+      "description": "Return center distance and signed edge-to-edge gap between two circles; overlap produces a negative gap. Classifies the relation as separate, tangent, overlapping or contained and emits JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7215,13 +9092,23 @@
           "required": true
         },
         {
+          "name": "isEmpty",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Return the number of items in a DetectionList.",
+      "description": "Return the number of items in a DetectionList, with an isEmpty flag and JSON diagnostics. The list is validated for finite geometry before counting.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7312,6 +9199,11 @@
           "name": "classId",
           "dataType": "Integer",
           "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
         },
         {
           "name": "next",
@@ -7481,6 +9373,16 @@
           "required": true
         },
         {
+          "name": "rejectedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -7542,7 +9444,7 @@
           "step": 1
         }
       ],
-      "description": "Filter DetectionList items by area, circularity, optional confidence and class ID; missing optional values do not match configured filters.",
+      "description": "Filter DetectionList items by area, circularity, optional confidence and class ID with strict finite/ordered bound validation; missing optional values do not match configured filters. Emits kept count, rejected count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7635,13 +9537,54 @@
           "required": true
         },
         {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "outlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Algebraic least-squares circle fit from at least three connected Point2D inputs (up to 12).",
+      "parameters": [
+        {
+          "name": "maxRmsError",
+          "label": "Max RMS Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 0.1,
+          "description": "Optional quality gate: fail when the robust fit RMS residual exceeds this value."
+        }
+      ],
+      "description": "Robust geometric circle fit (algebraic start, Gauss-Newton refinement, MAD outlier rejection) from at least three connected Point2D inputs (up to 12). Outputs RMS/max radial residuals and the inlier point count.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7734,13 +9677,54 @@
           "required": true
         },
         {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "outlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "Orthogonal least-squares line fit from two or more connected Point2D inputs (up to 12).",
+      "parameters": [
+        {
+          "name": "maxRmsError",
+          "label": "Max RMS Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 0.1,
+          "description": "Optional quality gate: fail when the robust fit RMS residual exceeds this value."
+        }
+      ],
+      "description": "Robust total-least-squares line fit (Tukey outlier rejection) from two or more connected Point2D inputs (up to 12). Outputs RMS/max perpendicular residuals and the inlier point count.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7789,6 +9773,11 @@
         },
         {
           "name": "cdfJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
           "dataType": "String",
           "required": true
         },
@@ -7886,33 +9875,63 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "x",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "y",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "area",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "radius",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "center",
           "dataType": "Point2D",
-          "required": true
+          "required": false
         },
         {
           "name": "circle",
           "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "circularity",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "blobs",
+          "dataType": "String",
           "required": true
         },
         {
@@ -7932,7 +9951,7 @@
           "step": 10
         }
       ],
-      "description": "Find the largest contour and return typed geometry.",
+      "description": "Find the largest blob and return typed geometry plus shape features (circularity, bounding-box size). blobs JSON lists every blob at or above Min Area, largest first; no qualifying blob returns found=false instead of failing.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7975,13 +9994,39 @@
           "required": true
         },
         {
+          "name": "measuredAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "For two fitted line segments, report the acute angular error from parallel (degrees) and the endpoint drift of B perpendicular to datum A (pixels). Drift depends on B length. Endpoint reversal does not change results.",
+      "parameters": [
+        {
+          "name": "maxAngleErrorDeg",
+          "label": "Max Angle Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 90,
+          "step": 0.1,
+          "description": "Optional parallelism tolerance; withinTolerance reports |angleError| <= limit."
+        }
+      ],
+      "description": "For two fitted line segments, report the acute angular error from parallel (degrees), the measured inter-line angle and the endpoint drift of B perpendicular to datum A (pixels). Drift depends on B length. Endpoint reversal does not change results. Optional angle tolerance verdict and JSON diagnostics are included.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -8032,13 +10077,39 @@
           "required": true
         },
         {
+          "name": "measuredAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
-      "parameters": [],
-      "description": "For two fitted line segments, report angular error from 90 degrees and endpoint drift of B along datum A (pixels). Drift depends on B length. Endpoint reversal does not change results. Geometry-only indicators use the supplied fitted lines.",
+      "parameters": [
+        {
+          "name": "maxAngleErrorDeg",
+          "label": "Max Angle Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 90,
+          "step": 0.1,
+          "description": "Optional perpendicularity tolerance; withinTolerance reports |angleError| <= limit."
+        }
+      ],
+      "description": "For two fitted line segments, report angular error from 90 degrees, the measured inter-line angle and endpoint drift of B along datum A (pixels). Drift depends on B length. Endpoint reversal does not change results. Optional angle tolerance verdict and JSON diagnostics are included. Geometry-only: uses the supplied fitted lines.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -8290,6 +10361,90 @@
           }
         },
         {
+          "name": "minWidth",
+          "label": "Min Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the lower bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "maxWidth",
+          "label": "Max Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the upper bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "minHeight",
+          "label": "Min Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the lower bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "maxHeight",
+          "label": "Max Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px",
+          "description": "0 disables the upper bound.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
+          "name": "minRectangularity",
+          "label": "Min Rectangularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "description": "Area / bounding-box area, 1 = perfect rectangle.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "all"
+            ]
+          }
+        },
+        {
           "name": "maxCount",
           "label": "Max Count",
           "type": "number",
@@ -8321,6 +10476,10 @@
             {
               "label": "Y (top to bottom)",
               "value": "y"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
             }
           ],
           "visibleWhen": {
@@ -8343,7 +10502,7 @@
           }
         }
       ],
-      "description": "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+      "description": "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -8389,6 +10548,26 @@
           "required": true
         },
         {
+          "name": "signedDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "projectionT",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinSegment",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -8399,10 +10578,11 @@
           "name": "segment",
           "label": "Clamp to Segment",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Clamp the projection to the finite segment; otherwise measure to the infinite line and report withinSegment separately."
         }
       ],
-      "description": "Measure perpendicular distance to an infinite line or its finite segment.",
+      "description": "Measure perpendicular distance to an infinite line or its finite segment. Emits unsigned and signed distance, projection parameter t, within-segment flag and JSON diagnostics; degenerate lines fail deterministically.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -8612,6 +10792,31 @@
           "required": true
         },
         {
+          "name": "width",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "aspectRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -8627,10 +10832,11 @@
           "max": 99999999,
           "step": 10,
           "unit": "px²",
-          "group": "Contour"
+          "group": "Contour",
+          "description": "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically."
         }
       ],
-      "description": "Minimum-area rotated rectangle around the largest accepted contour.",
+      "description": "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -8980,6 +11186,16 @@
           "required": true
         },
         {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9011,8 +11227,13 @@
             {
               "label": "Perimeter",
               "value": "perimeter"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
             }
-          ]
+          ],
+          "description": "Sort key; ties keep input order (stable) and indices are refreshed after sorting. Unknown keys fail."
         },
         {
           "name": "descending",
@@ -9021,7 +11242,7 @@
           "defaultValue": true
         }
       ],
-      "description": "Sort a DetectionList by a selected numeric field and refresh result indices.",
+      "description": "Sort a DetectionList by area, position, circularity, perimeter or confidence (stable for ties) and refresh result indices. Emits count and JSON diagnostics; empty lists pass through with empty=true.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -9299,6 +11520,16 @@
           "required": true
         },
         {
+          "name": "foregroundRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9322,7 +11553,8 @@
           "defaultValue": 5,
           "min": 0,
           "max": 50,
-          "step": 1
+          "step": 1,
+          "description": "Finite constant subtracted from the local threshold; larger values reduce foreground."
         },
         {
           "name": "method",
@@ -9338,7 +11570,8 @@
               "label": "Gaussian",
               "value": "gaussian"
             }
-          ]
+          ],
+          "description": "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."
         },
         {
           "name": "invert",
@@ -9347,7 +11580,7 @@
           "defaultValue": false
         }
       ],
-      "description": "Local adaptive threshold for uneven illumination (color input is auto-converted to gray).",
+      "description": "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9380,6 +11613,11 @@
         {
           "name": "image",
           "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
           "required": true
         },
         {
@@ -9436,6 +11674,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9484,10 +11727,11 @@
               "label": "Value",
               "value": "value"
             }
-          ]
+          ],
+          "description": "Channel to extract: gray/B/G/R, HSV hue/saturation/value, or average/max gray. Color/HSV channels require a color input; unknown values fail."
         }
       ],
-      "description": "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
+      "description": "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image; color channels require a color input and unknown channels fail deterministically. Emits JSON diagnostics with channel and size.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -9660,6 +11904,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9673,7 +11922,8 @@
           "defaultValue": 5,
           "min": 3,
           "max": 31,
-          "step": 2
+          "step": 2,
+          "description": "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."
         },
         {
           "name": "sigmaX",
@@ -9696,7 +11946,7 @@
           "description": "0 mirrors sigmaX."
         }
       ],
-      "description": "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value.",
+      "description": "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Validates finite, non-negative sigma values and emits JSON diagnostics with effective kernel, size and channels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9732,6 +11982,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9756,10 +12011,11 @@
               "label": "Max",
               "value": "max"
             }
-          ]
+          ],
+          "description": "Conversion mode: BT.601 luminance, channel average, or per-pixel channel maximum. Unknown modes fail instead of silently using luminance."
         }
       ],
-      "description": "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through).",
+      "description": "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through unchanged). Strictly validates the mode and emits JSON diagnostics with input/output channels and size.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -9793,6 +12049,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -9895,6 +12156,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -9908,10 +12174,11 @@
           "defaultValue": 5,
           "min": 3,
           "max": 31,
-          "step": 2
+          "step": 2,
+          "description": "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise."
         }
       ],
-      "description": "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required).",
+      "description": "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). Emits JSON diagnostics with the effective kernel, image size and channel count.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -9944,6 +12211,11 @@
         {
           "name": "image",
           "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
           "required": true
         },
         {
@@ -9998,6 +12270,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -10317,6 +12594,16 @@
           "required": true
         },
         {
+          "name": "foregroundRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -10327,10 +12614,11 @@
           "name": "invert",
           "label": "Invert",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "Invert the binary output (dark objects become foreground)."
         }
       ],
-      "description": "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring.",
+      "description": "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -10501,6 +12789,21 @@
           "required": true
         },
         {
+          "name": "outputWidth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "outputHeight",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -10515,7 +12818,8 @@
           "min": 1,
           "max": 16384,
           "step": 1,
-          "unit": "px"
+          "unit": "px",
+          "description": "Output width in pixels (1-16384)."
         },
         {
           "name": "height",
@@ -10525,7 +12829,8 @@
           "min": 1,
           "max": 16384,
           "step": 1,
-          "unit": "px"
+          "unit": "px",
+          "description": "Output height in pixels (1-16384)."
         },
         {
           "name": "interpolation",
@@ -10549,10 +12854,11 @@
               "label": "Area",
               "value": "area"
             }
-          ]
+          ],
+          "description": "Resampling interpolation; unknown values fail instead of defaulting."
         }
       ],
-      "description": "Resize an image using an explicit interpolation method.",
+      "description": "Resize an image using an explicit interpolation method. Emits output dimensions, scale factors (in JSON diagnostics) and validates the size range deterministically.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -10580,6 +12886,21 @@
           "required": true
         },
         {
+          "name": "outputWidth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "outputHeight",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -10594,16 +12915,18 @@
           "min": -360,
           "max": 360,
           "step": 1,
-          "unit": "deg"
+          "unit": "deg",
+          "description": "Finite rotation angle in degrees (counter-clockwise positive in image coordinates via OpenCV)."
         },
         {
           "name": "expand",
           "label": "Expand Canvas",
           "type": "boolean",
-          "defaultValue": true
+          "defaultValue": true,
+          "description": "Grow the canvas so no corners are cropped; otherwise keep the input size."
         }
       ],
-      "description": "Rotate around the image center; optionally expand the canvas to retain all pixels.",
+      "description": "Rotate around the image center; optionally expand the canvas to retain all pixels. Emits output dimensions, normalized angle (in JSON diagnostics) and rejects non-finite angles.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -10960,6 +13283,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -11056,6 +13384,10 @@
             {
               "label": "1D Barcodes",
               "value": "1d"
+            },
+            {
+              "label": "2D Codes (DataMatrix/PDF417/Aztec)",
+              "value": "2d"
             }
           ]
         },
@@ -11072,7 +13404,7 @@
           "defaultValue": true
         }
       ],
-      "description": "Decode QR Code and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points.",
+      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -11216,6 +13548,21 @@
           "required": true
         },
         {
+          "name": "wordCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "words",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "chars",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -11240,12 +13587,142 @@
           "type": "text",
           "defaultValue": "eng",
           "description": "Tesseract language codes, e.g. eng or eng+chi_sim."
+        },
+        {
+          "name": "psm",
+          "label": "Page Segmentation Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic",
+              "value": "auto"
+            },
+            {
+              "label": "Auto with OSD",
+              "value": "autoOsd"
+            },
+            {
+              "label": "Single Block",
+              "value": "singleblock"
+            },
+            {
+              "label": "Single Line",
+              "value": "singleline"
+            },
+            {
+              "label": "Single Word",
+              "value": "singleword"
+            },
+            {
+              "label": "Single Character",
+              "value": "singlechar"
+            },
+            {
+              "label": "Sparse Text",
+              "value": "sparsetext"
+            }
+          ]
+        },
+        {
+          "name": "oem",
+          "label": "OCR Engine Mode",
+          "type": "select",
+          "defaultValue": "default",
+          "options": [
+            {
+              "label": "Default (LSTM)",
+              "value": "default"
+            },
+            {
+              "label": "LSTM Only",
+              "value": "lstm"
+            },
+            {
+              "label": "Legacy Only",
+              "value": "legacy"
+            },
+            {
+              "label": "Legacy + LSTM",
+              "value": "combined"
+            }
+          ]
+        },
+        {
+          "name": "whitelist",
+          "label": "Character Whitelist",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional allowed characters, e.g. 0123456789 for numeric fields. Control characters are rejected."
+        },
+        {
+          "name": "blacklist",
+          "label": "Character Blacklist",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional forbidden characters (tessedit_char_blacklist). A character cannot be in both whitelist and blacklist."
+        },
+        {
+          "name": "dpi",
+          "label": "Image DPI (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1200,
+          "step": 1
+        },
+        {
+          "name": "upscale",
+          "label": "Upscale Factor",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.5,
+          "max": 4,
+          "step": 0.25,
+          "description": "Resize before OCR; small print often reads better at 2x. Word boxes are mapped back to source pixels."
+        },
+        {
+          "name": "binarize",
+          "label": "Binarize",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None (grayscale)",
+              "value": "none"
+            },
+            {
+              "label": "Otsu",
+              "value": "otsu"
+            },
+            {
+              "label": "Adaptive Gaussian",
+              "value": "adaptive"
+            }
+          ]
+        },
+        {
+          "name": "invert",
+          "label": "Invert Image",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Enable for light text on a dark background."
+        },
+        {
+          "name": "minConfidence",
+          "label": "Minimum Word Confidence",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words."
         }
       ],
-      "description": "Run Tesseract 5 OCR on the image. The configured tessdata directory must include each requested language model.",
+      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, per-word JSON and per-character JSON (chars, from Tesseract box output; empty when the model produces none), with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
+        "supportsRoi": true,
         "emitsOverlay": false,
         "deterministic": true,
         "supportsRunNode": true,
@@ -11694,6 +14171,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -11756,6 +14238,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -11816,6 +14303,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -11939,6 +14431,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -12171,6 +14668,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12311,6 +14813,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12398,6 +14905,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12483,6 +14995,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12550,6 +15067,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -12752,6 +15274,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12870,6 +15397,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12954,6 +15486,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -13197,6 +15734,16 @@
           "required": true
         },
         {
+          "name": "eccentricity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13259,7 +15806,7 @@
           "group": "Rotation"
         }
       ],
-      "description": "Planar compensation hook for J4 rotation-center/TCP eccentricity. Outputs a compensated robot target but does not send it to hardware.",
+      "description": "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13409,6 +15956,21 @@
           "required": true
         },
         {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13484,7 +16046,7 @@
           "group": "Pick Offset"
         }
       ],
-      "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame).",
+      "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame). Validates frame, finite pose/offsets and guidance mode; pick offset is applied in pose-local coordinates. Emits frame, unit and JSON diagnostics. Does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13517,6 +16079,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13545,10 +16112,11 @@
               "label": "Divide (a / b)",
               "value": "divide"
             }
-          ]
+          ],
+          "description": "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add."
         }
       ],
-      "description": "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+      "description": "Combine two measurements with one of the four basic operations; division by zero, overflow and unknown operations fail explicitly instead of producing NaN/Infinity or silently defaulting. Emits JSON diagnostics with operands, operation and result.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13576,6 +16144,16 @@
           "required": true
         },
         {
+          "name": "isInteger",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13589,10 +16167,11 @@
           "defaultValue": 0,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Finite constant within the signed 64-bit integer range; non-finite values fail deterministically."
         }
       ],
-      "description": "Emit a constant number (with an integer variant) for comparisons, arithmetic and thresholds.",
+      "description": "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13620,6 +16199,21 @@
           "required": true
         },
         {
+          "name": "inside",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13633,7 +16227,8 @@
           "defaultValue": 0,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Inclusive lower bound; reversed bounds are swapped and reported in diagnostics."
         },
         {
           "name": "max",
@@ -13642,16 +16237,18 @@
           "defaultValue": 100,
           "min": -1000000000,
           "max": 1000000000,
-          "step": 1
+          "step": 1,
+          "description": "Inclusive upper bound; must be finite."
         },
         {
           "name": "invert",
           "label": "Invert",
           "type": "boolean",
-          "defaultValue": false
+          "defaultValue": false,
+          "description": "When true, pass means the value lies outside the inclusive window."
         }
       ],
-      "description": "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+      "description": "Inclusive range check (min/max are swapped when configured in reverse and flagged in diagnostics); invert for exclusive windows. Emits pass, raw inside flag, signed margin to the nearest bound (negative outside) and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

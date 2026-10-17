@@ -330,6 +330,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
+        services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(
             sp.GetRequiredService<SqliteMetadataDatabase>(),
             sp.GetRequiredService<CalibrationWorkspaceService>()));
@@ -379,6 +380,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<OnnxDetectionNode>();
         services.AddSingleton<OnnxSegmentationNode>();
         services.AddSingleton<OnnxAnomalyNode>();
+        services.AddSingleton<OnnxInstanceSegmentationNode>();
+        services.AddSingleton<OnnxPoseNode>();
         services.AddSingleton<CameraIntrinsicCalibrationNode>();
         services.AddSingleton<ImageUndistortNode>();
         services.AddSingleton<PlanarHandEyeCalibrationNode>();

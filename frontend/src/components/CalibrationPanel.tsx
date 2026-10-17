@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
+import CalibrationIntrinsicsWizard from './CalibrationIntrinsicsWizard';
+import CalibrationHandEyeWizard from './CalibrationHandEyeWizard';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -13,6 +15,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   canApplyToSelectedNode: boolean;
+  selectedNodeType?: string;
   onApplyToSelectedNode: (parameters: Record<string, unknown>) => void;
 };
 
@@ -41,7 +44,7 @@ function verificationGrid(): CalibrationWorkspacePoint[] {
   ].map((x) => ({ ...x, imageX: 100 + x.worldX * 10, imageY: 100 + x.worldY * 10, enabled: true, source: 'Verification' }));
 }
 
-export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode, onApplyToSelectedNode }: Props) {
+export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode, selectedNodeType, onApplyToSelectedNode }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
   const [sourceFrame, setSourceFrame] = useState('ImagePixel');
   const [targetFrame, setTargetFrame] = useState('Workpiece');
@@ -210,8 +213,16 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   };
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={1480} title="标定工作区 · V0.20" destroyOnHidden>
+    <Modal open={open} onCancel={onClose} footer={null} width={1480} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
       {contextHolder}
+      <Tabs
+        items={[
+          {
+            key: 'planar',
+            label: '平面九点标定',
+            children: (
+              <>
+
       <div className="calibration-toolbar">
         <Space wrap>
           <Input value={sourceFrame} onChange={(e) => { setSourceFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="源坐标系" style={{ width: 205 }} />
@@ -286,6 +297,34 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
         />
         {selectedAsset && <div className="calibration-publication-history">{selectedAsset.publicationHistory.map((x, i) => <Tag key={`${x.at}-${i}`}>{x.action} V{x.version}</Tag>)}</div>}
       </div>
-    </Modal>
+    
+              </>
+            )
+          },
+          {
+            key: 'intrinsics',
+            label: '相机内参向导',
+            children: (
+              <CalibrationIntrinsicsWizard
+                canApplyToSelectedNode={canApplyToSelectedNode}
+                selectedNodeType={selectedNodeType}
+                onApplyToSelectedNode={onApplyToSelectedNode}
+              />
+            )
+          },
+          {
+            key: 'handeye',
+            label: '手眼向导',
+            children: (
+              <CalibrationHandEyeWizard
+                canApplyToSelectedNode={canApplyToSelectedNode}
+                selectedNodeType={selectedNodeType}
+                onApplyToSelectedNode={onApplyToSelectedNode}
+              />
+            )
+          }
+        ]}
+      />
+</Modal>
   );
 }
