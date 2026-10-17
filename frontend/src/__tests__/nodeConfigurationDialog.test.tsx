@@ -833,6 +833,42 @@ describe('caliper geometry input guidance', () => {
   it.each([
     ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine', '上游搜索线与测量图像坐标不匹配'],
     ['circle', 'feature.circle', 'measure.caliperCircle', 'circle', 'circle', '上游圆与测量图像坐标不匹配']
+  ])('blocks connected %s geometry from before an affine image warp', (_geometryLabel, sourceType, targetType, outputPort, inputPort, mismatchTitle) => {
+    const geometryCatalog = fallbackCatalog.find(item => item.type === sourceType)!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === targetType)!;
+    const warpCatalog = fallbackCatalog.find(item => item.type === 'image.warpAffine')!;
+    const transformCatalog = fallbackCatalog.find(item => item.type === 'coordinate.transformConstant')!;
+    const geometryNode: Node = { id: 'geometry', position: { x: 0, y: 0 }, data: {
+      typeKey: sourceType, label: '变换前几何', inputs: geometryCatalog.inputs, parameters: {}
+    } };
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetType, label: '卡尺测量', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const warpNode: Node = { id: 'warp', position: { x: 0, y: 0 }, data: {
+      typeKey: warpCatalog.type, label: '仿射变换图像', inputs: warpCatalog.inputs, parameters: {}
+    } };
+    const transformNode: Node = { id: 'transform', position: { x: 0, y: 0 }, data: {
+      typeKey: transformCatalog.type, label: '像素仿射变换', inputs: transformCatalog.inputs,
+      parameters: { sourceFrame: 'px', targetFrame: 'px', unit: 'px', x: 10, y: 0, angleDeg: 0 }
+    } };
+    const sourceImage: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '变换前图像' } };
+    const edges = [
+      { id: 'geometry-image', source: sourceImage.id, sourceHandle: 'image', target: geometryNode.id, targetHandle: 'image' },
+      { id: 'warp-image', source: sourceImage.id, sourceHandle: 'image', target: warpNode.id, targetHandle: 'image' },
+      { id: 'warp-transform', source: transformNode.id, sourceHandle: 'transform', target: warpNode.id, targetHandle: 'transform' },
+      { id: 'measurement-image', source: warpNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'measurement-geometry', source: geometryNode.id, sourceHandle: outputPort, target: measurementNode.id, targetHandle: inputPort }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, geometryNode, warpNode, transformNode, sourceImage], edges });
+
+    expect(dialog.getByText(mismatchTitle)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine', '上游搜索线与测量图像坐标不匹配'],
+    ['circle', 'feature.circle', 'measure.caliperCircle', 'circle', 'circle', '上游圆与测量图像坐标不匹配']
   ])('allows connected %s geometry and measurement images from the same crop frame without a transform', (_geometryLabel, sourceType, targetType, outputPort, inputPort, mismatchTitle) => {
     const { dialog } = mountCropFrameMeasurement(sourceType, targetType, outputPort, inputPort, false);
 

@@ -16,7 +16,7 @@ import { fallbackCatalogRaw } from '../catalog';
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
 const cropMaskFrameChangingNodeTypes = new Set([
-  'image.crop', 'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
+  'image.crop', 'image.resize', 'image.rotate', 'image.perspective', 'image.warpaffine', 'image.undistort', 'image.register'
 ]);
 
 function inputEdge(edges: Edge[], nodeId: string, portName: string) {
