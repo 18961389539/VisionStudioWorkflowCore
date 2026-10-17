@@ -69,6 +69,18 @@ const maxInteractiveCircleRadius = (center: Point, width: number, height: number
 const clampCircleCenter = (value: number, radius: number, limit: number) => radius * 2 <= limit
   ? clamp(value, radius, limit - radius)
   : clamp(value, 0, limit);
+function clampCaliperCircleCenter(center: Point, radius: number, band: number, width: number, height: number): Point {
+  const searchableRadius = Math.min(10_000_000, Math.max(0, radius + band));
+  const x = clamp(center.x, -searchableRadius, width + searchableRadius);
+  const y = clamp(center.y, -searchableRadius, height + searchableRadius);
+  const nearest = { x: clamp(x, 0, width), y: clamp(y, 0, height) };
+  const dx = x - nearest.x;
+  const dy = y - nearest.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= searchableRadius || distance === 0) return { x, y };
+  const fraction = searchableRadius / distance;
+  return { x: nearest.x + dx * fraction, y: nearest.y + dy * fraction };
+}
 
 function circleArcSpan(start: number, end: number) {
   const rawSpan = end - start;
@@ -1003,10 +1015,10 @@ export default function ImageViewer({
           x: origin.center.x + current.x - start.x,
           y: origin.center.y + current.y - start.y
         };
-        setMeasurementDraft({ ...origin, center: {
+        setMeasurementDraft({ ...origin, center: mode === 'center' ? {
           x: clampCircleCenter(center.x, origin.radius, actualWidth),
           y: clampCircleCenter(center.y, origin.radius, actualHeight)
-        } });
+        } : clampCaliperCircleCenter(center, origin.radius, origin.band ?? 0, actualWidth, actualHeight) });
       } else if (mode === 'radius') {
         const startDistance = Math.hypot(start.x - origin.center.x, start.y - origin.center.y);
         const currentDistance = Math.hypot(current.x - origin.center.x, current.y - origin.center.y);
@@ -1276,7 +1288,7 @@ export default function ImageViewer({
             <Button size="small" type={geometryDrawMode ? 'primary' : 'default'}
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
-                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带'
+                ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，拖动圆周可平移并将圆心移出图像边缘，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带'
                 : measurementGeometry.profileCount !== undefined
                   ? '箭头由起点指向终点；蓝色起点、紫色终点，青色控制点对称调整沿边缘的采样跨度。拖动端点或线段可微调搜索线'
                   : '箭头由起点指向终点；蓝色起点、紫色终点。拖动端点或线段可微调搜索线'}>
