@@ -34,12 +34,20 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
         var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
         // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
         var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
+        var minimumConfidence = node.GetDouble("minimumConfidence", 0);
+        if (!double.IsFinite(minimumConfidence) || minimumConfidence is < 0 or > 1)
+            throw new InvalidOperationException("Classification minimumConfidence must be finite and between 0 and 1.");
+        if (minimumConfidence > 0 && layout == "scores" && !applySoftmax)
+            throw new InvalidOperationException("Classification minimumConfidence requires probabilities; enable applySoftmax or choose layout=yolo26.");
+        var topK = node.GetInt("topK", 5);
+        if (topK is < 1 or > 100) throw new InvalidOperationException("Classification topK must be between 1 and 100.");
         var labelsText = node.GetString("labels", string.Empty);
         var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
-        var rank = InferenceStats.RankClassification(scores, layout, applySoftmax, node.GetInt("topK", 5), labels);
+        var rank = InferenceStats.RankClassification(scores, layout, applySoftmax, topK, labels);
         var best = rank.Top[0];
-        var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)));
-        var json = JsonSerializer.Serialize(new { classes = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }), outputShape = shape, layout, margin = rank.Margin, entropy = rank.Entropy });
+        var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
+        var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)));
+        var json = JsonSerializer.Serialize(new { classes = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }), outputShape = shape, layout, margin = rank.Margin, entropy = rank.Entropy, minimumConfidence, accepted });
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -47,12 +55,13 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                 ["label"] = VisionValue.String(best.Label),
                 ["classIndex"] = VisionValue.Integer(best.Index),
                 ["confidence"] = VisionValue.Double(best.Score),
+                ["accepted"] = VisionValue.Boolean(accepted),
                 ["margin"] = VisionValue.Double(rank.Margin),
                 ["entropy"] = VisionValue.Double(rank.Entropy),
                 ["classCount"] = VisionValue.Integer(rank.ClassCount),
                 ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["diagnostics"] = diag }));
     }
 }
 

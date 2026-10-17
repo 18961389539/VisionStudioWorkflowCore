@@ -307,3 +307,9 @@ Usage and limits are documented in [Reference Defect Compare](reference-defect-c
 
 Usage and limitations are documented in [Planar Calibration](planar-calibration.md). Lens distortion correction, automatic outlier rejection, and binding runtime solves directly to immutable calibration assets remain open product gaps.
 
+## Follow-up implementation: image classification
+
+`inference.classification` adds an optional minimum-probability gate and an `accepted` output for workflow routing. The gate is available only when scores represent probabilities (Softmax logits or YOLO26-cls probabilities); disabled by default, it preserves existing classifier behavior. `topK` is explicitly limited to 1–100 at execution. The baseline **66** score has not been rerated.
+
+Usage and limits are documented in [ONNX Image Classification](onnx-classification.md). Multi-image batching, multi-crop aggregation, and calibration of classifier confidence remain open product gaps.
+
