@@ -301,3 +301,9 @@ After the baseline audit, `defect.referenceCompare` was extended to accept one t
 The earlier **74** score and `<=74` cap describe only the baseline snapshot; this implementation has not yet been rescored against the full audit rubric. Remaining product gaps include persistent/cached model assets, subpixel/rotation/scale registration, and a larger managed sample set.
 Usage and limits are documented in [Reference Defect Compare](reference-defect-comparison.md).
 
+## Follow-up implementation: planar calibration
+
+`calibration.planar` now normalizes image and target coordinates and solves the overdetermined homography with column-pivoted QR instead of normal equations. The node returns per-pair residual JSON and the worst pair index, and can fail on configured RMSE or single-point error limits. The calibration workspace uses the same solver, exposes the same quality gates before saving or applying a calibration, and validates coordinate frames, units, finite verification points, and input size limits. The baseline **63** score has not been rerated against the full audit rubric.
+
+Usage and limitations are documented in [Planar Calibration](planar-calibration.md). Lens distortion correction, automatic outlier rejection, and binding runtime solves directly to immutable calibration assets remain open product gaps.
+

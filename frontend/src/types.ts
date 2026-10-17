@@ -905,6 +905,8 @@ export type CalibrationWorkspaceRequest = {
   verificationPoints: CalibrationWorkspacePoint[];
   heatmapColumns: number;
   heatmapRows: number;
+  maxRmse?: number;
+  maxPointError?: number;
 };
 
 export type CalibrationWorkspaceResult = {

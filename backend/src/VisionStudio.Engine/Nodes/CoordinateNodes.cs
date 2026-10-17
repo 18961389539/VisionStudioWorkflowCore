@@ -4,22 +4,147 @@ namespace VisionStudio.Engine.Nodes;
 public sealed record CalibrationPair(double ImageX, double ImageY, double WorldX, double WorldY);
 public static class CalibrationMath
 {
-    public static VisionTransform2D SolveHomography(IReadOnlyList<CalibrationPair> pairs, string sourceFrame, string targetFrame, string unit)
+    private sealed record NormalizedPoints(double[,] Values, double Scale, double MeanX, double MeanY, double NormalizationScale);
+
+    public static VisionTransform2D SolveHomography(IReadOnlyList<CalibrationPair> pairs, string sourceFrame, string targetFrame, string unit, CancellationToken cancellationToken = default)
     {
         if (pairs.Count < 4) throw new InvalidOperationException("Planar calibration requires at least 4 point pairs.");
         foreach (var p in pairs) if (!double.IsFinite(p.ImageX) || !double.IsFinite(p.ImageY) || !double.IsFinite(p.WorldX) || !double.IsFinite(p.WorldY)) throw new InvalidOperationException("Planar calibration pairs must all be finite.");
-        var ata = new double[8,8]; var atb = new double[8];
-        foreach (var p in pairs) { AddRow([p.ImageX,p.ImageY,1,0,0,0,-p.WorldX*p.ImageX,-p.WorldX*p.ImageY], p.WorldX, ata, atb); AddRow([0,0,0,p.ImageX,p.ImageY,1,-p.WorldY*p.ImageX,-p.WorldY*p.ImageY], p.WorldY, ata, atb); }
-        var h = Solve(ata, atb);
-        return new VisionTransform2D(sourceFrame,targetFrame,unit,h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1);
+        var image = Normalize(pairs, imageSpace: true);
+        var world = Normalize(pairs, imageSpace: false);
+        var rows = checked(pairs.Count * 2);
+        var design = new double[rows, 8]; var right = new double[rows];
+        for (var i = 0; i < pairs.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var x = image.Values[i, 0]; var y = image.Values[i, 1];
+            var u = world.Values[i, 0]; var v = world.Values[i, 1]; var row = i * 2;
+            design[row, 0] = x; design[row, 1] = y; design[row, 2] = 1;
+            design[row, 6] = -u * x; design[row, 7] = -u * y; right[row] = u;
+            design[row + 1, 3] = x; design[row + 1, 4] = y; design[row + 1, 5] = 1;
+            design[row + 1, 6] = -v * x; design[row + 1, 7] = -v * y; right[row + 1] = v;
+        }
+
+        var normalized = SolveLeastSquaresQr(design, right, cancellationToken);
+        var normalizedHomography = new double[3, 3]
+        {
+            { normalized[0], normalized[1], normalized[2] },
+            { normalized[3], normalized[4], normalized[5] },
+            { normalized[6], normalized[7], 1d }
+        };
+        var sourceNormalization = new double[3, 3]
+        {
+            { image.NormalizationScale / image.Scale, 0, -image.MeanX * image.NormalizationScale },
+            { 0, image.NormalizationScale / image.Scale, -image.MeanY * image.NormalizationScale },
+            { 0, 0, 1 }
+        };
+        var targetDenormalization = new double[3, 3]
+        {
+            { world.Scale / world.NormalizationScale, 0, world.Scale * world.MeanX },
+            { 0, world.Scale / world.NormalizationScale, world.Scale * world.MeanY },
+            { 0, 0, 1 }
+        };
+        var homography = Multiply(Multiply(targetDenormalization, normalizedHomography), sourceNormalization);
+        var scale = homography[2, 2];
+        if (!double.IsFinite(scale) || Math.Abs(scale) < 1e-14)
+            throw new InvalidOperationException("Planar calibration produced a homography that cannot be represented with a finite H22=1 scale.");
+        for (var row = 0; row < 3; row++) for (var column = 0; column < 3; column++) homography[row, column] /= scale;
+        if (homography.Cast<double>().Any(value => !double.IsFinite(value)))
+            throw new InvalidOperationException("Planar calibration produced non-finite transform coefficients.");
+        return new VisionTransform2D(sourceFrame, targetFrame, unit,
+            homography[0, 0], homography[0, 1], homography[0, 2],
+            homography[1, 0], homography[1, 1], homography[1, 2],
+            homography[2, 0], homography[2, 1], homography[2, 2]);
     }
-    private static void AddRow(double[] row, double b, double[,] ata, double[] atb) { for (var i=0;i<8;i++) { atb[i]+=row[i]*b; for (var j=0;j<8;j++) ata[i,j]+=row[i]*row[j]; } }
-    private static double[] Solve(double[,] a, double[] b)
+
+    private static NormalizedPoints Normalize(IReadOnlyList<CalibrationPair> pairs, bool imageSpace)
     {
-        var n=b.Length; var aug=new double[n,n+1];
-        for(var r=0;r<n;r++){for(var c=0;c<n;c++)aug[r,c]=a[r,c];aug[r,n]=b[r];}
-        for(var col=0;col<n;col++) { var pivot=col; for(var r=col+1;r<n;r++) if(Math.Abs(aug[r,col])>Math.Abs(aug[pivot,col])) pivot=r; if(Math.Abs(aug[pivot,col])<1e-12) throw new InvalidOperationException("Calibration point geometry is singular or poorly conditioned."); if(pivot!=col) for(var c=col;c<=n;c++) (aug[col,c],aug[pivot,c])=(aug[pivot,c],aug[col,c]); var div=aug[col,col]; for(var c=col;c<=n;c++) aug[col,c]/=div; for(var r=0;r<n;r++) if(r!=col){var f=aug[r,col]; for(var c=col;c<=n;c++) aug[r,c]-=f*aug[col,c];} }
-        var x=new double[n]; for(var i=0;i<n;i++) x[i]=aug[i,n]; return x;
+        double X(CalibrationPair point) => imageSpace ? point.ImageX : point.WorldX;
+        double Y(CalibrationPair point) => imageSpace ? point.ImageY : point.WorldY;
+        var scale = pairs.Max(point => Math.Max(Math.Abs(X(point)), Math.Abs(Y(point))));
+        if (scale == 0) scale = 1;
+        var meanX = pairs.Average(point => X(point) / scale); var meanY = pairs.Average(point => Y(point) / scale);
+        var values = new double[pairs.Count, 2]; double meanDistance = 0;
+        for (var i = 0; i < pairs.Count; i++)
+        {
+            var x = X(pairs[i]) / scale - meanX; var y = Y(pairs[i]) / scale - meanY;
+            values[i, 0] = x; values[i, 1] = y;
+            meanDistance += Hypot(x, y) / pairs.Count;
+        }
+        if (!double.IsFinite(meanDistance) || meanDistance < 1e-15)
+            throw new InvalidOperationException($"Planar calibration {(imageSpace ? "image" : "world")} points have insufficient spatial spread.");
+        var normalizationScale = Math.Sqrt(2) / meanDistance;
+        for (var i = 0; i < pairs.Count; i++) { values[i, 0] *= normalizationScale; values[i, 1] *= normalizationScale; }
+        return new(values, scale, meanX, meanY, normalizationScale);
+    }
+
+    private static double[] SolveLeastSquaresQr(double[,] a, double[] b, CancellationToken cancellationToken)
+    {
+        var rows = a.GetLength(0); const int columns = 8;
+        var permutation = Enumerable.Range(0, columns).ToArray(); var firstDiagonal = 0d;
+        for (var k = 0; k < columns; k++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var pivotColumn = k; var largestNormSquared = -1d;
+            for (var column = k; column < columns; column++)
+            {
+                double normSquared = 0;
+                for (var row = k; row < rows; row++) normSquared += a[row, column] * a[row, column];
+                if (normSquared > largestNormSquared) { largestNormSquared = normSquared; pivotColumn = column; }
+            }
+            if (pivotColumn != k)
+            {
+                for (var row = 0; row < rows; row++) (a[row, k], a[row, pivotColumn]) = (a[row, pivotColumn], a[row, k]);
+                (permutation[k], permutation[pivotColumn]) = (permutation[pivotColumn], permutation[k]);
+            }
+            var norm = Math.Sqrt(Math.Max(0d, largestNormSquared));
+            if (k == 0) firstDiagonal = norm;
+            if (!double.IsFinite(norm) || norm <= Math.Max(1e-12, firstDiagonal * 1e-12))
+                throw new InvalidOperationException("Calibration point geometry is rank-deficient or poorly conditioned after coordinate normalization.");
+            var alpha = a[k, k] >= 0 ? -norm : norm;
+            var vector = new double[rows - k]; vector[0] = a[k, k] - alpha;
+            for (var row = k + 1; row < rows; row++) vector[row - k] = a[row, k];
+            double vectorNormSquared = 0; foreach (var value in vector) vectorNormSquared += value * value;
+            if (!double.IsFinite(vectorNormSquared) || vectorNormSquared <= 1e-30)
+                throw new InvalidOperationException("Calibration point geometry is rank-deficient or poorly conditioned after coordinate normalization.");
+            var beta = 2d / vectorNormSquared;
+            for (var column = k + 1; column < columns; column++)
+            {
+                double dot = 0; for (var row = k; row < rows; row++) dot += vector[row - k] * a[row, column];
+                var factor = beta * dot; for (var row = k; row < rows; row++) a[row, column] -= factor * vector[row - k];
+            }
+            double rhsDot = 0; for (var row = k; row < rows; row++) rhsDot += vector[row - k] * b[row];
+            var rhsFactor = beta * rhsDot; for (var row = k; row < rows; row++) b[row] -= rhsFactor * vector[row - k];
+            a[k, k] = alpha; for (var row = k + 1; row < rows; row++) a[row, k] = 0;
+        }
+        var pivotedSolution = new double[columns];
+        for (var row = columns - 1; row >= 0; row--)
+        {
+            var value = b[row]; for (var column = row + 1; column < columns; column++) value -= a[row, column] * pivotedSolution[column];
+            pivotedSolution[row] = value / a[row, row];
+        }
+        var result = new double[columns]; for (var i = 0; i < columns; i++) result[permutation[i]] = pivotedSolution[i];
+        return result;
+    }
+
+    private static double[,] Multiply(double[,] a, double[,] b)
+    {
+        var result = new double[3, 3];
+        for (var row = 0; row < 3; row++) for (var column = 0; column < 3; column++)
+            for (var k = 0; k < 3; k++) result[row, column] += a[row, k] * b[k, column];
+        return result;
+    }
+
+    private static double Hypot(double x, double y) { var max = Math.Max(Math.Abs(x), Math.Abs(y)); return max == 0 ? 0 : max * Math.Sqrt((x / max) * (x / max) + (y / max) * (y / max)); }
+
+    public static double Distance(double dx, double dy) => Hypot(dx, dy);
+
+    public static double RootMeanSquare(IEnumerable<double> values)
+    {
+        var array = values.ToArray();
+        if (array.Length == 0) return 0;
+        var scale = array.Max(value => Math.Abs(value));
+        return scale == 0 ? 0 : scale * Math.Sqrt(array.Average(value => (value / scale) * (value / scale)));
     }
 }
 public sealed class PlanarCalibrationNode : IVisionNodeExecutor
@@ -38,15 +163,29 @@ public sealed class PlanarCalibrationNode : IVisionNodeExecutor
         var unit=CoordinateValidation.RequireUnit(node.GetString("targetUnit","mm"),"targetUnit","mm","cm","m","px");
         var assetVersion=node.GetInt("assetVersion",0);
         if (assetVersion < 0) throw new InvalidOperationException("calibration.planar assetVersion must be >= 0.");
-        var transform=CalibrationMath.SolveHomography(pairs,source,target,unit);
+        var transform=CalibrationMath.SolveHomography(pairs,source,target,unit,cancellationToken);
         var det=CoordinateValidation.ValidateTransform(transform,"calibration.planar result");
-        var errors=pairs.Select(p=>{var q=transform.Apply(new VisionPoint2D(p.ImageX,p.ImageY)); return Math.Sqrt(Math.Pow(q.X-p.WorldX,2)+Math.Pow(q.Y-p.WorldY,2));}).ToArray();
+        var residuals=pairs.Select((p,index)=>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var predicted=transform.Apply(new VisionPoint2D(p.ImageX,p.ImageY));
+            var dx=predicted.X-p.WorldX; var dy=predicted.Y-p.WorldY;
+            return new { pairIndex=index, imageX=p.ImageX, imageY=p.ImageY, worldX=p.WorldX, worldY=p.WorldY,
+                predictedX=predicted.X, predictedY=predicted.Y, dx, dy, error=CalibrationMath.Distance(dx,dy) };
+        }).ToArray();
+        var errors=residuals.Select(residual=>residual.error).ToArray();
         if (errors.Any(e=>!double.IsFinite(e))) throw new InvalidOperationException("calibration.planar produced non-finite residuals.");
-        var rmse=Math.Sqrt(errors.Select(e=>e*e).Average()); var max=errors.Max(); var worst=Array.IndexOf(errors,max);
-        var diag=CoordinateValidation.Diagnostics(Type,("pointCount",pairs.Count),("rmse",rmse),("maxError",max),("worstPairIndex",worst),("determinant",det),("sourceFrame",source),("targetFrame",target),("unit",unit));
+        var rmse=CalibrationMath.RootMeanSquare(errors); var max=errors.Max(); var worst=Array.IndexOf(errors,max);
+        var maxRmse=CoordinateValidation.RequireFinite(node.GetDouble("maxRmse",0),"maxRmse");
+        var maxPointError=CoordinateValidation.RequireFinite(node.GetDouble("maxPointError",0),"maxPointError");
+        if (maxRmse < 0 || maxPointError < 0) throw new InvalidOperationException("calibration.planar maxRmse and maxPointError must be >= 0 (0 disables the gate).");
+        if (maxRmse > 0 && rmse > maxRmse) throw new InvalidOperationException($"calibration.planar RMSE {rmse:F6} {unit} exceeds maxRmse {maxRmse:F6} {unit}.");
+        if (maxPointError > 0 && max > maxPointError) throw new InvalidOperationException($"calibration.planar pair {worst} error {max:F6} {unit} exceeds maxPointError {maxPointError:F6} {unit}.");
+        var residualsJson=JsonSerializer.Serialize(residuals);
+        var diag=CoordinateValidation.Diagnostics(Type,("pointCount",pairs.Count),("rmse",rmse),("maxError",max),("worstPairIndex",worst),("maxRmse",maxRmse),("maxPointError",maxPointError),("determinant",det),("sourceFrame",source),("targetFrame",target),("unit",unit));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string,VisionValue>{{"transform",VisionValue.Transform(transform)},{"rmse",VisionValue.Double(rmse)},{"maxError",VisionValue.Double(max)},{"pointCount",VisionValue.Integer(pairs.Count)},{"diagnostics",VisionValue.String(diag)}},
-            new Dictionary<string,object?>{{"points",pairs.Count},{"sourceFrame",source},{"targetFrame",target},{"unit",unit},{"assetId",string.IsNullOrWhiteSpace(node.GetString("assetId",""))?null:node.GetString("assetId","")},{"assetVersion",assetVersion>0?assetVersion:null},{"rmse",Math.Round(rmse,6)},{"maxError",Math.Round(max,6)},{"worstPairIndex",worst},{"diagnostics",diag}}));
+            new Dictionary<string,VisionValue>{{"transform",VisionValue.Transform(transform)},{"rmse",VisionValue.Double(rmse)},{"maxError",VisionValue.Double(max)},{"pointCount",VisionValue.Integer(pairs.Count)},{"worstPairIndex",VisionValue.Integer(worst)},{"residualsJson",VisionValue.String(residualsJson)},{"diagnostics",VisionValue.String(diag)}},
+            new Dictionary<string,object?>{{"points",pairs.Count},{"sourceFrame",source},{"targetFrame",target},{"unit",unit},{"assetId",string.IsNullOrWhiteSpace(node.GetString("assetId",""))?null:node.GetString("assetId","")},{"assetVersion",assetVersion>0?assetVersion:null},{"rmse",Math.Round(rmse,6)},{"maxError",Math.Round(max,6)},{"worstPairIndex",worst},{"residualsJson",residualsJson},{"diagnostics",diag}}));
     }
 }
 public sealed class TransformPointNode : IVisionNodeExecutor

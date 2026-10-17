@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "48a4e5fb0235276d4bd377152d8be915557ffa1c65c9b4ea2ff3b50b5308d627",
+  "hash": "5d46859b6edd61aff2a0cfa02d09d0b9dd9d021aa25cbb0989ccc6023f6799a4",
   "items": [
     {
       "type": "image.acquire",
@@ -993,6 +993,16 @@
           "required": true
         },
         {
+          "name": "worstPairIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "residualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -1035,6 +1045,10 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
           "group": "Frames"
@@ -1058,6 +1072,30 @@
           "group": "Provenance"
         },
         {
+          "name": "maxRmse",
+          "label": "Maximum Calibration RMSE (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Quality Gate",
+          "description": "Fail the node when the fit RMSE exceeds this value; 0 disables the gate."
+        },
+        {
+          "name": "maxPointError",
+          "label": "Maximum Point Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Quality Gate",
+          "description": "Fail the node when any calibration pair residual exceeds this value; 0 disables the gate."
+        },
+        {
           "name": "pairsJson",
           "label": "Calibration Pairs JSON",
           "type": "textarea",
@@ -1066,7 +1104,7 @@
           "description": "Four or more image/world point pairs. Nine points are recommended for MVP validation."
         }
       ],
-      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
+      "description": "Coordinate-normalized, rank-revealing least-squares planar homography from image coordinates to a named target frame. Requires at least four finite, spatially distributed pairs; reports per-pair residuals and supports optional RMSE and maximum-point-error gates. Singular or poorly conditioned geometry fails deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

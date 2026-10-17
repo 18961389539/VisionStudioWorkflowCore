@@ -39,7 +39,9 @@ public sealed record CalibrationWorkspaceRequest(
     IReadOnlyList<CalibrationWorkspacePoint> Points,
     IReadOnlyList<CalibrationWorkspacePoint>? VerificationPoints = null,
     int HeatmapColumns = 5,
-    int HeatmapRows = 5);
+    int HeatmapRows = 5,
+    double MaxRmse = 0,
+    double MaxPointError = 0);
 
 public sealed record CalibrationWorkspaceResult(
     VisionTransform2D Transform,
@@ -112,17 +114,31 @@ public sealed class CalibrationWorkspaceService
 {
     public CalibrationWorkspaceResult Solve(CalibrationWorkspaceRequest request)
     {
+        if (request.Points.Count > 10000) throw new ApiValidationException("At most 10000 calibration points are allowed.");
+        if ((request.VerificationPoints?.Count ?? 0) > 10000) throw new ApiValidationException("At most 10000 verification points are allowed.");
+        var sourceFrame = CoordinateValidation.RequireFrame(request.SourceFrame, "sourceFrame");
+        var targetFrame = CoordinateValidation.RequireFrame(request.TargetFrame, "targetFrame");
+        var targetUnit = CoordinateValidation.RequireUnit(request.TargetUnit, "targetUnit", "mm", "cm", "m", "px");
         var used = request.Points.Where(x => x.Enabled).OrderBy(x => x.Index).ToArray();
         if (used.Length < 4) throw new ApiValidationException("At least 4 enabled calibration points are required.");
         var pairs = used.Select(x => new CalibrationPair(x.ImageX, x.ImageY, x.WorldX, x.WorldY)).ToArray();
-        var transform = CalibrationMath.SolveHomography(pairs, request.SourceFrame, request.TargetFrame, request.TargetUnit);
+        var transform = CalibrationMath.SolveHomography(pairs, sourceFrame, targetFrame, targetUnit);
         var residuals = Evaluate(transform, used);
-        var rmse = Math.Sqrt(residuals.Select(x => x.Error * x.Error).Average());
+        var rmse = CalibrationMath.RootMeanSquare(residuals.Select(x => x.Error));
         var max = residuals.Max(x => x.Error);
+        if (!double.IsFinite(request.MaxRmse) || request.MaxRmse < 0 || !double.IsFinite(request.MaxPointError) || request.MaxPointError < 0)
+            throw new ApiValidationException("Calibration quality limits must be finite and >= 0 (0 disables each gate).");
+        if (request.MaxRmse > 0 && rmse > request.MaxRmse)
+            throw new ApiValidationException($"Calibration RMSE {rmse:F6} {targetUnit} exceeds maxRmse {request.MaxRmse:F6} {targetUnit}.");
+        if (request.MaxPointError > 0 && max > request.MaxPointError)
+        {
+            var worst = residuals.MaxBy(point => point.Error)!;
+            throw new ApiValidationException($"Calibration point {worst.Index} error {max:F6} {targetUnit} exceeds maxPointError {request.MaxPointError:F6} {targetUnit}.");
+        }
 
         var verificationPoints = (request.VerificationPoints ?? []).Where(x => x.Enabled).OrderBy(x => x.Index).ToArray();
         var verificationResiduals = Evaluate(transform, verificationPoints);
-        double? verificationRmse = verificationResiduals.Count == 0 ? null : Math.Sqrt(verificationResiduals.Select(x => x.Error * x.Error).Average());
+        double? verificationRmse = verificationResiduals.Count == 0 ? null : CalibrationMath.RootMeanSquare(verificationResiduals.Select(x => x.Error));
         double? verificationMax = verificationResiduals.Count == 0 ? null : verificationResiduals.Max(x => x.Error);
 
         var heatmapSource = verificationResiduals.Count > 0 ? verificationResiduals : residuals;
@@ -135,9 +151,12 @@ public sealed class CalibrationWorkspaceService
         var result = new List<CalibrationResidual>(points.Count);
         foreach (var point in points)
         {
+            if (!double.IsFinite(point.ImageX) || !double.IsFinite(point.ImageY) || !double.IsFinite(point.WorldX) || !double.IsFinite(point.WorldY))
+                throw new ApiValidationException($"Calibration point {point.Index} must contain only finite coordinates.");
             var predicted = transform.Apply(new VisionPoint2D(point.ImageX, point.ImageY));
             var dx = predicted.X - point.WorldX;
             var dy = predicted.Y - point.WorldY;
+            if (!double.IsFinite(dx) || !double.IsFinite(dy)) throw new ApiValidationException($"Calibration point {point.Index} produced a non-finite residual.");
             result.Add(new CalibrationResidual(
                 point.Index,
                 point.ImageX,
@@ -148,7 +167,7 @@ public sealed class CalibrationWorkspaceService
                 predicted.Y,
                 dx,
                 dy,
-                Math.Sqrt(dx * dx + dy * dy),
+                CalibrationMath.Distance(dx, dy),
                 point.Source));
         }
         return result;

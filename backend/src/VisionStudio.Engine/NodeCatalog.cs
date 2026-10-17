@@ -573,6 +573,8 @@ public static class BuiltInNodeCatalog
                 new("rmse", VisionDataType.Double),
                 new("maxError", VisionDataType.Double),
                 new("pointCount", VisionDataType.Integer),
+                new("worstPairIndex", VisionDataType.Integer),
+                new("residualsJson", VisionDataType.String),
                 new("diagnostics", VisionDataType.String),
                 Next
             ],
@@ -583,16 +585,19 @@ public static class BuiltInNodeCatalog
                 [
                     new("mm", "mm"),
                     new("cm", "cm"),
-                    new("m", "m")
+                    new("m", "m"),
+                    new("px", "px")
                 ], Group: "Frames"),
                 new("assetId", "Calibration Asset ID", "text", "", Group: "Provenance", Description: "Optional immutable calibration asset provenance."),
                 new("assetVersion", "Calibration Asset Version", "number", 0, 0, 999999, 1, Group: "Provenance"),
+                new("maxRmse", "Maximum Calibration RMSE (0=off)", "number", 0, 0, 1000000000, 0.001, Unit: "target", Group: "Quality Gate", Description: "Fail the node when the fit RMSE exceeds this value; 0 disables the gate."),
+                new("maxPointError", "Maximum Point Error (0=off)", "number", 0, 0, 1000000000, 0.001, Unit: "target", Group: "Quality Gate", Description: "Fail the node when any calibration pair residual exceeds this value; 0 disables the gate."),
                 new("pairsJson", "Calibration Pairs JSON", "textarea",
                     "[{\"imageX\":100,\"imageY\":100,\"worldX\":0,\"worldY\":0},{\"imageX\":320,\"imageY\":100,\"worldX\":22,\"worldY\":0},{\"imageX\":540,\"imageY\":100,\"worldX\":44,\"worldY\":0},{\"imageX\":100,\"imageY\":240,\"worldX\":0,\"worldY\":14},{\"imageX\":320,\"imageY\":240,\"worldX\":22,\"worldY\":14},{\"imageX\":540,\"imageY\":240,\"worldX\":44,\"worldY\":14},{\"imageX\":100,\"imageY\":380,\"worldX\":0,\"worldY\":28},{\"imageX\":320,\"imageY\":380,\"worldX\":22,\"worldY\":28},{\"imageX\":540,\"imageY\":380,\"worldX\":44,\"worldY\":28}]",
                     Group: "Calibration",
                     Description: "Four or more image/world point pairs. Nine points are recommended for MVP validation.")
             ],
-            "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
+            "Coordinate-normalized, rank-revealing least-squares planar homography from image coordinates to a named target frame. Requires at least four finite, spatially distributed pairs; reports per-pair residuals and supports optional RMSE and maximum-point-error gates. Singular or poorly conditioned geometry fails deterministically.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
