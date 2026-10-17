@@ -32,18 +32,18 @@ const persistPixelated = (value: boolean) => {
 };
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-function caliperLineProfileSpanHandles(geometry: Extract<MeasurementGeometry, { type: 'line' }>): { start: Point; end: Point } | undefined {
-  if (geometry.profileCount === undefined) return undefined;
+function caliperLineProfileSpanHandles(geometry: Extract<MeasurementGeometry, { type: 'line' }>,
+  width: number, height: number): { start: Point; end: Point } | undefined {
+  if (geometry.profileCount === undefined || width <= 0 || height <= 0) return undefined;
   const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
   const length = Math.hypot(dx, dy);
   if (length <= 0) return undefined;
   const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
   const tangent = { x: -dy / length, y: dx / length };
   const midpoint = { x: (geometry.start.x + geometry.end.x) / 2, y: (geometry.start.y + geometry.end.y) / 2 };
-  return {
-    start: { x: midpoint.x - tangent.x * span / 2, y: midpoint.y - tangent.y * span / 2 },
-    end: { x: midpoint.x + tangent.x * span / 2, y: midpoint.y + tangent.y * span / 2 }
-  };
+  return clipSegmentToImage(
+    { x: midpoint.x - tangent.x * span / 2, y: midpoint.y - tangent.y * span / 2 },
+    { x: midpoint.x + tangent.x * span / 2, y: midpoint.y + tangent.y * span / 2 }, width, height);
 }
 function caliperLineProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'line' }>,
   width: number, height: number): Point | undefined {
@@ -555,7 +555,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
     const apertureCount = geometry.profileWidth === undefined ? 0 : Math.max(1, count);
     const halfProfileWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
-    const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry) : undefined;
+    const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry, imageWidth, imageHeight) : undefined;
     const profileWidthHandle = editable ? caliperLineProfileWidthHandle(geometry, imageWidth, imageHeight) : undefined;
     return <Group listening={false}>
       {apertureCount > 0 && Array.from({ length: apertureCount }, (_, index) => {
@@ -949,7 +949,8 @@ export default function ImageViewer({
   const hitMeasurementHandle = (target: MeasurementGeometry, screen: Point): MeasurementDragMode | undefined => {
     const near = (point: Point) => Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)) <= HANDLE_HIT;
     if (target.type === 'line') {
-      const profileHandles = target.profileCount !== undefined ? caliperLineProfileSpanHandles(target) : undefined;
+      const profileHandles = target.profileCount !== undefined
+        ? caliperLineProfileSpanHandles(target, actualWidth, actualHeight) : undefined;
       const candidates: [MeasurementDragMode, Point][] = [['start', target.start], ['end', target.end]];
       if (profileHandles) candidates.push(['profileStart', profileHandles.start], ['profileEnd', profileHandles.end]);
       const widthHandle = caliperLineProfileWidthHandle(target, actualWidth, actualHeight);
@@ -1110,10 +1111,12 @@ export default function ImageViewer({
           const length = Math.hypot(dx, dy);
           if (length > 0) {
             const tangent = { x: -dy / length, y: dx / length };
-            const midpoint = { x: (origin.start.x + origin.end.x) / 2, y: (origin.start.y + origin.end.y) / 2 };
-            const profilePoint = boundedMeasurementPoint(ip);
-            const halfSpan = Math.abs((profilePoint.x - midpoint.x) * tangent.x + (profilePoint.y - midpoint.y) * tangent.y);
-            setMeasurementDraft({ ...origin, profileSpan: clamp(halfSpan * 2, 1, 10_000) });
+            const delta = (current.x - start.x) * tangent.x + (current.y - start.y) * tangent.y;
+            const direction = mode === 'profileStart' ? -1 : 1;
+            const initialSpan = origin.profileSpan && origin.profileSpan > 0 ? origin.profileSpan : length;
+            const profileSpan = Math.abs(delta) < 1e-9 ? origin.profileSpan
+              : clamp(initialSpan + direction * 2 * delta, 1, 10_000);
+            setMeasurementDraft({ ...origin, profileSpan });
           }
         } else {
           // Keep clipped search lines draggable: constrain their bounds to keep some

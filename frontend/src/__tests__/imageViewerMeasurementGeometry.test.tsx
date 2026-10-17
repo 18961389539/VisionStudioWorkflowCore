@@ -413,6 +413,27 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('keeps line-caliper span handles visible and preserves span when dragging from a clipped handle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 }, profileSpan: 200, profileCount: 5 }, onChange);
+
+    const startHandle = screen.getByTestId('measurement-profile-span-start');
+    const endHandle = screen.getByTestId('measurement-profile-span-end');
+    expect(Number(startHandle.getAttribute('data-x'))).toBeCloseTo(50, 5);
+    expect(Number(startHandle.getAttribute('data-y'))).toBeCloseTo(0, 5);
+    expect(Number(endHandle.getAttribute('data-x'))).toBeCloseTo(50, 5);
+    expect(Number(endHandle.getAttribute('data-y'))).toBeCloseTo(99, 5);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 12 }); // clipped start handle at image (50, 0)
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 12 }); // a zero-distance move must not collapse the span
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 23.8 }); // move 5 px toward the center
+    fireEvent.mouseUp(document.body, { clientX: 200, clientY: 23.8 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'line', profileSpan: 190 });
+  });
+
   it('shows radial search direction from the inner to outer end of a circle caliper', () => {
     imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
       angleStartDeg: 0, angleEndDeg: 90 }, vi.fn());
