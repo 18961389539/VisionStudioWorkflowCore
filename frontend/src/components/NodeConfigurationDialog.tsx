@@ -429,6 +429,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const [baseline] = useState(() => configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem));
   const [draft, setDraft] = useState(() => cloneParameters(baseline));
   const [cropClearUndo, setCropClearUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
+  const [measurementFitUndo, setMeasurementFitUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
   const [previewNodeId, setPreviewNodeId] = useState(node.id);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [trainBusy, setTrainBusy] = useState(false);
@@ -458,6 +459,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   useEffect(() => {
     if (cropClearUndo && cropClearUndo.afterFingerprint !== draftFingerprint) setCropClearUndo(undefined);
   }, [cropClearUndo, draftFingerprint]);
+  useEffect(() => {
+    if (measurementFitUndo && measurementFitUndo.afterFingerprint !== draftFingerprint) setMeasurementFitUndo(undefined);
+  }, [measurementFitUndo, draftFingerprint]);
   const dirty = draftFingerprint !== parameterFingerprint(baseline);
   // 与打开弹窗时的值不同的参数项数：用于参数区“已改 N 项”与关闭确认
   const changedCount = [...new Set([...Object.keys(baseline), ...Object.keys(draft)])]
@@ -582,6 +586,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const legacyCropBoundsPresent = isImageCrop && ['x', 'y', 'width', 'height'].some(key => draft[key] !== undefined && draft[key] !== null);
   const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
     && cropClearUndo.afterFingerprint === draftFingerprint);
+  const measurementFitUndoAvailable = Boolean(measurementFitUndo && measurementFitUndo.afterFingerprint === draftFingerprint);
   const searchLineInputEdge = ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? inputEdge(edges, node.id, 'searchLine')
     : undefined;
@@ -976,22 +981,24 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       description: `${measurementBoundsContext}搜索线约有 ${(length - clippedLength).toFixed(1)} px 位于图像外；运行时只会在图像内的 ${clippedLength.toFixed(1)} px 段上采样。`
     };
   })();
+  const measurementGeometryParameters = (current: NodeParameters, geometry: MeasurementGeometry,
+    options?: { preserveValues?: boolean }): NodeParameters => {
+    if (geometry.type === 'line') return { ...current, startX: geometry.start.x, startY: geometry.start.y,
+      endX: geometry.end.x, endY: geometry.end.y,
+      ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
+      ...(catalogItem.type === 'measure.caliperLine' && geometry.profileSpan !== undefined ? { edgeLength: geometry.profileSpan } : {}) };
+    const startAngle = geometry.angleStartDeg ?? -180;
+    const endAngle = geometry.angleEndDeg ?? 180;
+    const normalizedArc = normalizeCaliperCircleArc(startAngle, endAngle);
+    return { ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
+      ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
+      angleStartDeg: options?.preserveValues ? startAngle : normalizedArc.start,
+      angleEndDeg: options?.preserveValues ? endAngle : normalizedArc.end,
+      radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) };
+  };
   const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
     if (locked || searchLineInputEdge) return;
-    if (geometry.type === 'line') {
-      setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y,
-        ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
-        ...(catalogItem.type === 'measure.caliperLine' && geometry.profileSpan !== undefined ? { edgeLength: geometry.profileSpan } : {}) }));
-    } else {
-      const startAngle = geometry.angleStartDeg ?? -180;
-      const endAngle = geometry.angleEndDeg ?? 180;
-      const normalizedArc = normalizeCaliperCircleArc(startAngle, endAngle);
-      setDraft(current => ({ ...current, ...(circleInputEdge ? {} : { centerX: geometry.center.x, centerY: geometry.center.y, radius: geometry.radius }),
-        ...(geometry.profileWidth !== undefined ? { sampleWidth: geometry.profileWidth } : {}),
-        angleStartDeg: options?.preserveValues ? startAngle : normalizedArc.start,
-        angleEndDeg: options?.preserveValues ? endAngle : normalizedArc.end,
-        radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));
-    }
+    setDraft(current => measurementGeometryParameters(current, geometry, options));
   };
   const fitMeasurementGeometryToImage = () => {
     if (locked || !measurementGeometry || !measurementImageFrameReady || showCurrentMeasurementImage) return;
@@ -1012,17 +1019,30 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         height / Math.max(Math.abs(tangent.y), 1e-6)) * 0.625;
       const profileSpan = measurementGeometry.profileSpan !== undefined && measurementGeometry.profileSpan > 0
         ? Math.min(measurementGeometry.profileSpan, availableSpan) : measurementGeometry.profileSpan;
-      updateMeasurementGeometry({ ...measurementGeometry,
+      const fittedGeometry: MeasurementGeometry = { ...measurementGeometry,
         start: { x: center.x - direction.x * length / 2, y: center.y - direction.y * length / 2 },
         end: { x: center.x + direction.x * length / 2, y: center.y + direction.y * length / 2 },
-        ...(profileSpan === undefined ? {} : { profileSpan }) });
+        ...(profileSpan === undefined ? {} : { profileSpan }) };
+      const next = measurementGeometryParameters(draft, fittedGeometry);
+      if (parameterFingerprint(next) === draftFingerprint) return;
+      setMeasurementFitUndo({ previous: cloneParameters(draft), afterFingerprint: parameterFingerprint(next) });
+      setDraft(next);
       return;
     }
     const minDimension = Math.min(width, height);
     const band = Math.max(1, Math.min(measurementGeometry.band ?? 8, minDimension * 0.15));
     const maxRadius = Math.max(1, minDimension / 2 - band - 1);
     const radius = Math.max(1, Math.min(minDimension / 4.8, maxRadius));
-    updateMeasurementGeometry({ ...measurementGeometry, center: { x: width / 2, y: height / 2 }, radius, band });
+    const fittedGeometry: MeasurementGeometry = { ...measurementGeometry, center: { x: width / 2, y: height / 2 }, radius, band };
+    const next = measurementGeometryParameters(draft, fittedGeometry);
+    if (parameterFingerprint(next) === draftFingerprint) return;
+    setMeasurementFitUndo({ previous: cloneParameters(draft), afterFingerprint: parameterFingerprint(next) });
+    setDraft(next);
+  };
+  const undoMeasurementGeometryFit = () => {
+    if (!measurementFitUndoAvailable || !measurementFitUndo) return;
+    setDraft(cloneParameters(measurementFitUndo.previous));
+    setMeasurementFitUndo(undefined);
   };
   const imageInputSourceId = inputEdge(edges, node.id, 'image')?.source;
   const roiSourceNode = roiInputEdge ? nodes.find((item) => item.id === roiInputEdge.source) : undefined;
@@ -1569,6 +1589,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               title="将搜索线或标称圆居中并缩放到当前几何图像内；必要时收窄沿边缘跨度或径向搜索带，保留阈值、极性、数量和圆弧设置。">
               适配几何到图像
             </Button>}
+          {measurementFitUndoAvailable && <Button size="small" disabled={locked} onClick={undoMeasurementGeometryFit}
+            title="撤销最近一次适配几何到图像">撤销几何适配</Button>}
         </div>
         <div className="node-image-provenance"><span>{displayImageSource.label}</span>
           {imageCatalogLoading && <span>正在加载节点图像…</span>}

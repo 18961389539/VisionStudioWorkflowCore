@@ -844,6 +844,14 @@ describe('caliper geometry fitting', () => {
       expect(dialog.getByTestId('line-geometry').getAttribute('data-end-y')).toBe('50');
       if (type === 'measure.caliperLine') expect(dialog.getByTestId('line-geometry').getAttribute('data-profile-span')).toBe('62.5');
     });
+    fireEvent.click(dialog.getByRole('button', { name: '撤销几何适配' }));
+    await waitFor(() => {
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('120');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-start-y')).toBe('240');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-end-x')).toBe('520');
+      expect(dialog.getByTestId('line-geometry').getAttribute('data-end-y')).toBe('240');
+      if (type === 'measure.caliperLine') expect(dialog.getByTestId('line-geometry').getAttribute('data-profile-span')).toBe('200');
+    });
   });
 
   it('centers the nominal circle, limits an oversized search band, and preserves its arc', async () => {
@@ -868,6 +876,14 @@ describe('caliper geometry fitting', () => {
       expect(fitted.getAttribute('data-band')).toBe('15');
       expect(fitted.getAttribute('data-angle-start')).toBe('-180');
       expect(fitted.getAttribute('data-angle-end')).toBe('180');
+    });
+    fireEvent.click(dialog.getByRole('button', { name: '撤销几何适配' }));
+    await waitFor(() => {
+      const restored = dialog.getByTestId('circle-geometry');
+      expect(restored.getAttribute('data-center-x')).toBe('320');
+      expect(restored.getAttribute('data-center-y')).toBe('240');
+      expect(restored.getAttribute('data-radius')).toBe('100');
+      expect(restored.getAttribute('data-band')).toBe('60');
     });
   });
 });
