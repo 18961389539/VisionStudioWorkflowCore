@@ -376,20 +376,42 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
         angleStepDeg: geometryNumber('angleStepDeg', 5), centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
+  const circleSamplingMode = String(draft.samplingMode ?? (draft.angleStepDeg !== undefined ? 'step' : 'count')).toLowerCase();
+  const circleSamplingGeometry: Extract<MeasurementGeometry, { type: 'circle' }> | undefined = isCaliperCircle ? {
+    type: 'circle', center: { x: geometryNumber('centerX', 320), y: geometryNumber('centerY', 240) },
+    radius: geometryNumber('radius', 100),
+    angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
+    samplingMode: circleSamplingMode,
+    caliperCount: geometryNumber('caliperCount', 72), angleStepDeg: geometryNumber('angleStepDeg', 5)
+  } : undefined;
+  const circleSamplingAngles = circleSamplingGeometry ? buildCaliperCircleAngles(circleSamplingGeometry) : [];
   const circleSamplingNotice = (() => {
-    const samplingMode = String(draft.samplingMode ?? (draft.angleStepDeg !== undefined ? 'step' : 'count')).toLowerCase();
-    if (!isCaliperCircle || samplingMode !== 'step') return undefined;
+    if (!circleSamplingGeometry || circleSamplingMode !== 'step') return undefined;
     const requestedStep = Math.max(0.5, Math.min(45, geometryNumber('angleStepDeg', 5)));
-    const angles = buildCaliperCircleAngles({
-      type: 'circle', center: { x: 0, y: 0 }, radius: 1,
-      angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
-      samplingMode: 'step', angleStepDeg: requestedStep
-    });
+    const angles = circleSamplingAngles;
     if (angles.length < 2) return undefined;
     const effectiveStep = angles[1] - angles[0];
     if (effectiveStep <= requestedStep + 1e-9) return undefined;
     const stepText = Number(effectiveStep.toFixed(3)).toString();
     return `此圆弧按 ${requestedStep}° 步长会超过卡尺数量上限；预览和执行将使用 ${angles.length} 条卡尺，实际步长约 ${stepText}°。如需精确控制数量，可切换到计数模式。`;
+  })();
+  const circleFitConditionNotice = (() => {
+    const angles = circleSamplingAngles;
+    if (!circleSamplingGeometry || angles.length < 3) return undefined;
+    const points = angles.map(angle => angle * Math.PI / 180);
+    const centerX = points.reduce((sum, angle) => sum + Math.cos(angle), 0) / points.length;
+    const centerY = points.reduce((sum, angle) => sum + Math.sin(angle), 0) / points.length;
+    let xx = 0; let yy = 0; let xy = 0;
+    for (const angle of points) {
+      const dx = Math.cos(angle) - centerX;
+      const dy = Math.sin(angle) - centerY;
+      xx += dx * dx; yy += dy * dy; xy += dx * dy;
+    }
+    const spread = xx + yy;
+    const normalizedDeterminant = spread > 0 ? (xx * yy - xy * xy) / (spread * spread) : 0;
+    // Keep the authoring preview aligned with the backend's minimum normalized circle-fit spread.
+    if (normalizedDeterminant > 2e-3) return undefined;
+    return '当前圆弧的理论测点分布接近直线，可能触发退化圆拟合。请扩大角度覆盖；单纯增加卡尺数量不能替代更宽的圆弧。';
   })();
   const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
     if (locked || searchLineInputEdge) return;
@@ -932,6 +954,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="测量图像来自裁剪节点"
           description={<span>如果裁剪使用圆形、多边形或笔刷 ROI，选区外像素会清零，可能形成伪边缘。请将“{nodeLabels[measurementImageSource!.id] ?? measurementImageSource!.id}”的 croppedRoi 输出接到本节点 roi 输入，以屏蔽选区外区域；矩形裁剪通常无需此处理。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
+        {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {searchLineInputEdge && <Alert showIcon type="info"
           title={`搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
           description={transformInputEdge

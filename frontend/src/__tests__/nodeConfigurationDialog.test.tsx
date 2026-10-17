@@ -692,6 +692,19 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.queryByText('请修正参数后再运行或应用')).toBeNull();
   });
 
+  it('warns when many circle calipers still cover too narrow an arc for a stable fit', () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'narrow-circle', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 50, centerY: 50, radius: 20, samplingMode: 'count',
+        angleStartDeg: 0, angleEndDeg: 10, caliperCount: 72, minValidCalipers: 3 } } };
+    const imageNode: Node = { id: 'circle-image', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'circle-image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, imageNode], edges });
+
+    expect(dialog.getByText(/理论测点分布接近直线/)).toBeTruthy();
+    expect(dialog.queryByText('请修正参数后再运行或应用')).toBeNull();
+  });
+
   it('allows preview when a connected searchLine replaces malformed local endpoints', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
