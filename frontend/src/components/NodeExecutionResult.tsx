@@ -219,6 +219,12 @@ export default function NodeExecutionResult({ nodeId, catalog, result, receivedA
     : undefined;
   const prominentSummaryKeys = insufficientSamplesKey
     ? ['found', insufficientSamplesKey, ...reportSummaryKeys.filter(key => !['found', 'x', 'y', 'edgeX', 'edgeY', 'strength', insufficientSamplesKey, 'reason'].includes(key))].slice(0, 5)
+    : report?.summary.reason === 'no-edge-above-threshold'
+    ? catalog.type === 'measure.caliperLine'
+      ? ['found', 'sampleCount', 'rejectedCalipers', 'caliperCount', 'minContrast'].filter(key => key in report.summary).slice(0, 5)
+      : catalog.type === 'measure.caliperCircle'
+        ? ['found', 'sampleCount', 'rejectedSpokes', 'spokes', 'minContrast'].filter(key => key in report.summary).slice(0, 5)
+        : ['found', 'sampleCount', 'minContrast', 'polarity', 'direction'].filter(key => key in report.summary).slice(0, 5)
     : report?.summary.reason === 'insufficient-valid-calipers'
     ? ['found', 'sampleCount', 'minValidCalipers', catalog.type === 'measure.caliperCircle' ? 'rejectedSpokes' : 'rejectedCalipers', 'ignoredByFit']
       .filter(key => key in report.summary).slice(0, 5)

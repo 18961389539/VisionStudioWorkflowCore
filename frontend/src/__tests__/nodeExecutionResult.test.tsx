@@ -236,6 +236,45 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByText(/搜索线内没有达到最小对比度/)).toBeTruthy();
   });
 
+  it('surfaces the edge threshold and search settings when a single profile finds no edge', () => {
+    const caliperResult = result(false, 'no-edge-above-threshold');
+    caliperResult.nodeReports[0].summary = {
+      found: false, reason: 'no-edge-above-threshold', sampleCount: 64,
+      minContrast: 8, polarity: 'rising', direction: 'firstfromstart'
+    };
+    mount('measure.caliper', caliperResult);
+
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('有效采样数 64');
+    expect(summary.textContent).toContain('最小对比度 8');
+    expect(summary.textContent).toContain('边缘极性 rising');
+    expect(summary.textContent).toContain('搜索顺序 firstfromstart');
+  });
+
+  it('surfaces rejected caliper counts and contrast when line or circle profiles find no edge', () => {
+    const lineResult = result(false, 'no-edge-above-threshold');
+    lineResult.nodeReports[0].summary = {
+      found: false, reason: 'no-edge-above-threshold', sampleCount: 0,
+      rejectedCalipers: 9, caliperCount: 9, minContrast: 8
+    };
+    mount('measure.caliperLine', lineResult);
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('拒绝卡尺数 9');
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('最小对比度 8');
+
+    cleanup();
+    const circleResult = result(false, 'no-edge-above-threshold');
+    circleResult.nodeReports[0].nodeType = 'measure.caliperCircle';
+    circleResult.nodeReports[0].summary = {
+      found: false, reason: 'no-edge-above-threshold', sampleCount: 0,
+      rejectedSpokes: 12, spokes: 12, minContrast: 10
+    };
+    mount('measure.caliperCircle', circleResult);
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('未采纳卡尺数 12');
+    expect(summary.textContent).toContain('径向卡尺数 12');
+    expect(summary.textContent).toContain('最小对比度 10');
+  });
+
   it('explains when circle points cannot support a stable fit', () => {
     mount('measure.caliperCircle', result(false, 'degenerate-circle-fit'));
 
