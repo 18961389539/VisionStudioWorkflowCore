@@ -33,6 +33,8 @@ internal static class SubpixelEdgeCore
         var profile = new double[steps + 1];
         points = new VisionPoint2D[steps + 1];
         var half = sampleWidth / 2;
+        var rows = gray.Rows;
+        var columns = gray.Cols;
 
         for (var i = 0; i <= steps; i++)
         {
@@ -46,17 +48,51 @@ internal static class SubpixelEdgeCore
             var count = 0;
             for (var w = -half; w <= half; w++)
             {
-                var px = (int)Math.Round(x + nx * w);
-                var py = (int)Math.Round(y + ny * w);
-                if (px < 0 || py < 0 || px >= gray.Cols || py >= gray.Rows) continue;
-                if (mask is not null && mask.At<byte>(py, px) == 0) continue;
-                sum += gray.At<byte>(py, px);
+                var sampleX = x + nx * w;
+                var sampleY = y + ny * w;
+                if (!TryBilinearSample(gray, mask, sampleX, sampleY, rows, columns, out var intensity)) continue;
+                sum += intensity;
                 count++;
             }
             profile[i] = count > 0 ? sum / count : double.NaN;
         }
 
         return profile;
+    }
+
+    private static bool TryBilinearSample(Mat gray, Mat? mask, double x, double y, int rows, int columns, out double intensity)
+    {
+        intensity = 0;
+        if (!double.IsFinite(x) || !double.IsFinite(y)) return false;
+        var nearestX = (int)Math.Round(x);
+        var nearestY = (int)Math.Round(y);
+        if (nearestX < 0 || nearestY < 0 || nearestX >= columns || nearestY >= rows
+            || mask is not null && mask.At<byte>(nearestY, nearestX) == 0)
+            return false;
+
+        var x0 = (int)Math.Floor(x);
+        var y0 = (int)Math.Floor(y);
+        var xFraction = x - x0;
+        var yFraction = y - y0;
+        double weightedSum = 0;
+        double totalWeight = 0;
+        for (var dy = 0; dy <= 1; dy++)
+        for (var dx = 0; dx <= 1; dx++)
+        {
+            var weight = (dx == 0 ? 1 - xFraction : xFraction) * (dy == 0 ? 1 - yFraction : yFraction);
+            if (weight <= 0) continue;
+            var px = x0 + dx;
+            var py = y0 + dy;
+            if (px < 0 || py < 0 || px >= columns || py >= rows
+                || mask is not null && mask.At<byte>(py, px) == 0)
+                continue;
+            weightedSum += gray.At<byte>(py, px) * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight <= 0) return false;
+        intensity = weightedSum / totalWeight;
+        return double.IsFinite(intensity);
     }
 
     public static int NormalizeSampleWidth(int sampleWidth)

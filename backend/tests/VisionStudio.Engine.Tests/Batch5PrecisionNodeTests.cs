@@ -507,7 +507,8 @@ public sealed class Batch5PrecisionNodeTests
 
         Assert.True(Convert.ToBoolean(result.Summary["found"]));
         Assert.Equal(0, Convert.ToDouble(result.Summary["radialSearchMinRadius"]));
-        Assert.InRange(result.Outputs["radius"].Require<double>("radius"), 4.2, 5.3);
+        // The inner edge is the rendered radius-4 circle; subpixel interpolation should not add a half-pixel bias.
+        Assert.InRange(result.Outputs["radius"].Require<double>("radius"), 3.8, 4.2);
         var overlays = result.Overlays ?? [];
         var points = overlays.Where(overlay => overlay.Id.StartsWith("caliper-circle-point-", StringComparison.Ordinal)).ToArray();
         Assert.Equal(25, overlays.Count(overlay => overlay.Id.StartsWith("caliper-circle-search-", StringComparison.Ordinal)));

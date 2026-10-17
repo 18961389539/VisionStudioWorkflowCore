@@ -511,6 +511,32 @@ public sealed class Batch5CaliperRegressionTests
         (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 
+    [Theory]
+    [InlineData(60.0)]
+    [InlineData(60.25)]
+    [InlineData(60.5)]
+    [InlineData(60.75)]
+    public async Task CaliperMeasurement_SubpixelSamplingIsInvariantToPixelPhase(double edgeX)
+    {
+        using var mat = new Mat(64, 128, MatType.CV_8UC1);
+        var rows = mat.Rows;
+        var columns = mat.Cols;
+        for (var y = 0; y < rows; y++)
+        for (var x = 0; x < columns; x++)
+        {
+            var intensity = 20 + 200 / (1 + Math.Exp(-(x - edgeX) * 1.5));
+            mat.Set(y, x, (byte)Math.Round(intensity));
+        }
+        using var input = VisionImage.Own(mat.Clone());
+        var result = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliper", """{"startX":20.25,"startY":32.5,"endX":100.25,"endY":32.5,"sampleWidth":1,"edgeThreshold":5,"polarity":"rising","refine":"parabolic"}"""),
+            CancellationToken.None);
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]));
+        Assert.InRange(result.Outputs["point"].Require<VisionPoint2D>("point").X, edgeX - 0.05, edgeX + 0.05);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
     [Fact]
     public async Task SingleCaliper_RoiMaskExcludesEdgesOutsideTheSelectedRegion()
     {
