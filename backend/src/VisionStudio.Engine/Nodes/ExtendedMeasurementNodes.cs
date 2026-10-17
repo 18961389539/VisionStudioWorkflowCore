@@ -51,8 +51,13 @@ internal static class MultiPointFit
         return points;
     }
 
-    public static VisionLine2D Line(VisionPoint2D[] p) => JLVisionPointFitting.Line(p);
-    public static VisionCircle Circle(VisionPoint2D[] p) => JLVisionPointFitting.Circle(p);
+    // Robust pure-managed fitting (shared with feature.line/feature.circle): Tukey/MAD
+    // outlier rejection with RMS/max residuals and inlier counts, replacing the
+    // native-only algebraic fit that reported no quality metrics at all.
+    public static GeometryFitting.LineFit LineFit(VisionPoint2D[] p) => GeometryFitting.FitLine(p);
+    public static GeometryFitting.CircleFit CircleFit(VisionPoint2D[] p) => GeometryFitting.FitCircle(p);
+    public static VisionLine2D Line(VisionPoint2D[] p) => LineFit(p).Line;
+    public static VisionCircle Circle(VisionPoint2D[] p) => CircleFit(p).Circle;
 
 }
 
@@ -74,8 +79,8 @@ public sealed class FitLineNode : IVisionNodeExecutor
     public string Type => "measure.fitLine";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var line = MultiPointFit.Line(points);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg }));
+        cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var fit = MultiPointFit.LineFit(points); var line = fit.Line;
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount }));
     }
 }
 
@@ -84,7 +89,7 @@ public sealed class FitCircleNode : IVisionNodeExecutor
     public string Type => "measure.fitCircle";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var circle = MultiPointFit.Circle(points);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X,circle.Y)), ["radius"] = VisionValue.Double(circle.Radius) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius }));
+        cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var fit = MultiPointFit.CircleFit(points); var circle = fit.Circle;
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X,circle.Y)), ["radius"] = VisionValue.Double(circle.Radius), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount }));
     }
 }

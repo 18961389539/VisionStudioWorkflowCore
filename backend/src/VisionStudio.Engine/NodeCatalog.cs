@@ -372,12 +372,13 @@ public static class BuiltInNodeCatalog
             "Edge / Canny",
             "Feature",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), Next],
+            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("chainCount", VisionDataType.Integer), new("longestChain", VisionDataType.Integer), new("chains", VisionDataType.String), Next],
             [
                 new("lowThreshold", "Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge"),
-                new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge")
+                new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("blurSize", "Blur Kernel (0=off)", "number", 0, 0, 7, 2, Unit: "px", Group: "Edge", Description: "Optional Gaussian pre-blur; must be 0, 3, 5, or 7.")
             ],
-            "Canny edge extraction. Supports image-space ROI and returns a binary edge image.",
+            "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first). Thresholds must satisfy 0 <= low <= high <= 255.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -387,17 +388,26 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [
                 new("image", VisionDataType.Image),
-                new("line", VisionDataType.Line2D),
-                new("length", VisionDataType.Double),
-                new("angle", VisionDataType.Double),
+                new("found", VisionDataType.Boolean),
+                new("line", VisionDataType.Line2D, Required: false),
+                new("length", VisionDataType.Double, Required: false),
+                new("angle", VisionDataType.Double, Required: false),
+                new("rmsError", VisionDataType.Double, Required: false),
+                new("count", VisionDataType.Integer),
+                new("lines", VisionDataType.String),
                 Next
             ],
             [
                 new("houghThreshold", "Minimum Edge Evidence", "number", 45, 1, 500, 1, Group: "Detection"),
                 new("minLength", "Min Length", "number", 60, 1, 4000, 1, Unit: "px", Group: "Detection"),
-                new("maxGap", "Max Gap", "number", 12, 0, 1000, 1, Unit: "px", Group: "Detection")
+                new("maxGap", "Max Gap", "number", 12, 0, 1000, 1, Unit: "px", Group: "Detection"),
+                new("cannyLow", "Canny Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("cannyHigh", "Canny High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge"),
+                new("maxLines", "Max Lines", "number", 10, 1, 100, 1, Group: "Detection"),
+                new("angleToleranceDeg", "Collinear Angle Tolerance", "number", 5, 0.5, 45, 0.5, Unit: "deg", Group: "Merging"),
+                new("distanceTolerance", "Collinear Distance Tolerance", "number", 6, 0, 1000, 1, Unit: "px", Group: "Merging")
             ],
-            "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
+            "Detect multiple lines: collinear segments are clustered and refit with robust total least squares. Returns found=false (instead of failing) when no line qualifies; lines JSON lists every line with length, angle, RMS/max fit error and inlier support. The primary line/length/angle ports carry the longest line.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -407,9 +417,13 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [
                 new("image", VisionDataType.Image),
-                new("circle", VisionDataType.Circle),
-                new("center", VisionDataType.Point2D),
-                new("radius", VisionDataType.Double),
+                new("found", VisionDataType.Boolean),
+                new("circle", VisionDataType.Circle, Required: false),
+                new("center", VisionDataType.Point2D, Required: false),
+                new("radius", VisionDataType.Double, Required: false),
+                new("rmsError", VisionDataType.Double, Required: false),
+                new("count", VisionDataType.Integer),
+                new("circles", VisionDataType.String),
                 Next
             ],
             [
@@ -417,9 +431,12 @@ public static class BuiltInNodeCatalog
                 new("maxRadius", "Max Radius", "number", 180, 1, 5000, 1, Unit: "px", Group: "Geometry"),
                 new("minDist", "Min Center Distance", "number", 40, 1, 5000, 1, Unit: "px", Group: "Detection"),
                 new("edgeThreshold", "Edge Threshold", "number", 100, 1, 500, 1, Group: "Detection"),
-                new("centerThreshold", "Center Threshold", "number", 24, 1, 500, 1, Group: "Detection")
+                new("centerThreshold", "Center Threshold", "number", 24, 1, 500, 1, Group: "Detection"),
+                new("blurSize", "Blur Kernel", "number", 9, 3, 15, 2, Unit: "px", Group: "Detection", Description: "Gaussian pre-blur kernel; must be odd (3-15)."),
+                new("refineBand", "Refinement Band", "number", 3, 0.5, 25, 0.5, Unit: "px", Group: "Refinement", Description: "Edge points within this radial distance of a candidate are used for the geometric circle refit."),
+                new("maxCircles", "Max Circles", "number", 10, 1, 100, 1, Group: "Detection")
             ],
-            "JLVision subpixel contour segmentation and geometric circle fitting.",
+            "Detect multiple circles: candidates are refined against Canny edge points with a robust geometric circle fit and ranked by inlier support (not largest radius). Returns found=false when no circle qualifies; circles JSON lists center, radius, RMS error and inliers per circle.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
