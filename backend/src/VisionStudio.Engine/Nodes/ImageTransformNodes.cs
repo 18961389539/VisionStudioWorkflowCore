@@ -215,7 +215,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
                 {
                     X = Math.Round(roi.X ?? 0) - cropX,
                     Y = Math.Round(roi.Y ?? 0) - cropY,
-                    Radius = Math.Round(roi.Radius ?? 0)
+                    Radius = (roi.Radius ?? 0) > 0 ? Math.Max(1, Math.Round(roi.Radius!.Value)) : 0
                 };
             case VisionRoiType.Polygon:
             {

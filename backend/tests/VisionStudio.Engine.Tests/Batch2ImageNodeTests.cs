@@ -39,6 +39,29 @@ public sealed class Batch2ImageNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 
+    [Theory]
+    [InlineData(0.1)]
+    [InlineData(0.5)]
+    public async Task CropKeepsPositiveSubpixelCircleRoisUsable(double radius)
+    {
+        using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(90));
+        var json = JsonSerializer.Serialize(new { roi = new { type = "Circle", x = 5, y = 5, radius } });
+
+        var result = await RunImage(new ImageCropNode(), Image(source), json);
+
+        using var cropped = ImageFrom(result);
+        using var mask = result.Outputs["roiMask"].Require<VisionImage>("roiMask");
+        var croppedRoi = result.Outputs["croppedRoi"].Require<VisionRoi>("croppedRoi");
+        using var translatedMask = croppedRoi.BuildMask(cropped.Mat.Size());
+        using var translatedBinary = new Mat();
+        Cv2.InRange(translatedMask, Scalar.All(1), Scalar.All(255), translatedBinary);
+        Assert.True(cropped.Width > 0 && cropped.Height > 0);
+        Assert.True(Convert.ToInt32(result.Summary["selectedPixels"]) > 0);
+        Assert.True(Cv2.CountNonZero(mask.Mat) > 0);
+        Assert.Equal(radius > 0 ? 1 : 0, croppedRoi.Radius);
+        Assert.Equal(0d, Cv2.Norm(mask.Mat, translatedBinary, NormTypes.INF));
+    }
+
     [Fact]
     public void RoiMaskRejectsUnsupportedRuntimeTypesInsteadOfReturningAnEmptyMask()
     {
@@ -77,6 +100,7 @@ public sealed class Batch2ImageNodeTests
 
         Assert.Equal(0, Cv2.CountNonZero(rectangle));
         Assert.Equal(0, Cv2.CountNonZero(circle));
+        Assert.Throws<InvalidOperationException>(() => new VisionRoi(VisionRoiType.Circle, X: 4, Y: 4, Radius: -0.1).BuildMask(new Size(16, 16)));
     }
 
     [Fact]

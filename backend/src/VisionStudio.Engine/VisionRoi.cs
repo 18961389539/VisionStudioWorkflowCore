@@ -44,10 +44,17 @@ public static class VisionRoiOpenCvExtensions
                 {
                     var x = checked(RasterCoordinate(roi.X ?? 0) - originX);
                     var y = checked(RasterCoordinate(roi.Y ?? 0) - originY);
-                    var radius = RasterCoordinate(roi.Radius ?? 0);
-                    if (radius < 0) throw new InvalidOperationException("ROI radius must be non-negative.");
-                    if (radius > 0)
+                    var sourceRadius = roi.Radius ?? 0;
+                    CheckCoordinate(sourceRadius);
+                    if (sourceRadius < 0) throw new InvalidOperationException("ROI radius must be non-negative.");
+                    var radius = RasterCoordinate(sourceRadius);
+                    if (sourceRadius > 0)
+                    {
+                        // A valid subpixel circle must still select image pixels. OpenCV's integer
+                        // circle rasterizer treats radius 0 as empty, so retain a one-pixel minimum.
+                        radius = Math.Max(1, radius);
                         Cv2.Circle(mask, new Point(x, y), radius, Scalar.All(255), -1, LineTypes.AntiAlias);
+                    }
                     break;
                 }
                 case VisionRoiType.Polygon:
