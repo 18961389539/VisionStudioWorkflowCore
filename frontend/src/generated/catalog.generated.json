@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "808f7ab949d36bea885bcc187bc6065ac580dedde532349ab2a20e4632b0e8b2",
+  "hash": "b6d7363ff04d0ef2488cb0c42c07afc7498ba73181a6c2e7f8b8694feffa9da7",
   "items": [
     {
       "type": "image.acquire",
@@ -93,6 +93,26 @@
           "label": "Trigger Before Grab",
           "type": "boolean",
           "defaultValue": false
+        },
+        {
+          "name": "exposureUs",
+          "label": "Exposure (us, 0=leave)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000000,
+          "step": 100,
+          "description": "Applied through the camera device layer before grabbing; 0 leaves the current exposure unchanged. Cameras without exposure support fail deterministically."
+        },
+        {
+          "name": "gainDb",
+          "label": "Gain (dB, -1=leave)",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 48,
+          "step": 0.5,
+          "description": "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."
         }
       ],
       "description": "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
@@ -2699,6 +2719,27 @@
           "description": "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."
         },
         {
+          "name": "variationK",
+          "label": "Variation Model K (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 20,
+          "step": 0.5,
+          "description": "When > 0, a pixel must differ by at least threshold + K * local reference standard deviation (variation-model style; local variation is estimated from the single reference)."
+        },
+        {
+          "name": "variationWindow",
+          "label": "Variation Window",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "unit": "px",
+          "description": "Odd window for the local variation estimate."
+        },
+        {
           "name": "majorArea",
           "label": "Major Defect Area",
           "type": "number",
@@ -3413,6 +3454,16 @@
           "required": false
         },
         {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "confidence",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "count",
           "dataType": "Integer",
           "required": true
@@ -3617,9 +3668,17 @@
           "unit": "px",
           "group": "Edge",
           "description": "Optional Gaussian pre-blur; must be 0, 3, 5, or 7."
+        },
+        {
+          "name": "subpixel",
+          "label": "Subpixel Chain Points",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Edge",
+          "description": "Refine chain points along the local gradient (parabolic peak interpolation) and include them in the chains JSON, stride-sampled to at most 200 points per chain."
         }
       ],
-      "description": "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first). Thresholds must satisfy 0 <= low <= high <= 255.",
+      "description": "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first), optionally with subpixel-refined chain points. Thresholds must satisfy 0 <= low <= high <= 255.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3676,6 +3735,11 @@
         },
         {
           "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "confidence",
           "dataType": "Double",
           "required": false
         },
@@ -4923,6 +4987,11 @@
           "required": false
         },
         {
+          "name": "suggestedThreshold",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -5330,6 +5399,10 @@
             {
               "label": "YOLO (cx,cy,w,h + class scores)",
               "value": "yolo"
+            },
+            {
+              "label": "YOLOv5 (with objectness)",
+              "value": "yolov5"
             }
           ]
         },
@@ -11806,6 +11879,11 @@
           "required": true
         },
         {
+          "name": "chars",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -11955,7 +12033,7 @@
           "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words."
         }
       ],
-      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, and per-word JSON with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
+      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, per-word JSON and per-character JSON (chars, from Tesseract box output; empty when the model produces none), with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

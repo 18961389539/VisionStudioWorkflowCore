@@ -104,7 +104,7 @@ const parameterNames: Record<string, string> = {
   'Target Gray (0=auto)': '目标灰度（0 为自动）', 'Minimum Bright-dark Gain': '最小明暗场增益',
   'Correction Output': '校正输出类型', 'Defect Polarity': '缺陷明暗方向', 'Defect Contrast': '缺陷对比度',
   'Background Window': '背景均值窗口', 'Difference Mode': '差分模式',
-  'Reference Difference Threshold': '标准图差异阈值', 'Minimum Defect Area': '最小缺陷面积', 'Difference Scale': '差分缩放', 'Exceedance Threshold (0=off)': '超阈值统计门限（0 为关）', 'Output Layout': '输出布局', 'Letterboxed Input': '信箱式（Letterbox）输入', 'Subpixel Refinement': '亚像素细化', 'Max Per-View Reprojection RMS (px, 0=off)': '逐视图重投影 RMS 上限（px，0 为关）', 'Max Model RMS (0=off)': '模型 RMS 上限（0 为关）', 'Min Width': '最小宽度', 'Max Width': '最大宽度', 'Min Height': '最小高度', 'Max Height': '最大高度', 'Min Rectangularity': '最小矩形度',
+  'Reference Difference Threshold': '标准图差异阈值', 'Minimum Defect Area': '最小缺陷面积', 'Difference Scale': '差分缩放', 'Subpixel Chain Points': '亚像素链点', 'Exposure (us, 0=leave)': '曝光（微秒，0 为不改）', 'Gain (dB, -1=leave)': '增益（dB，-1 为不改）', 'Variation Model K (0=off)': '变差模型系数 K（0 为关）', 'Variation Window': '变差估计窗口', 'YOLOv5 (with objectness)': 'YOLOv5（含目标置信度）', 'Exceedance Threshold (0=off)': '超阈值统计门限（0 为关）', 'Output Layout': '输出布局', 'Letterboxed Input': '信箱式（Letterbox）输入', 'Subpixel Refinement': '亚像素细化', 'Max Per-View Reprojection RMS (px, 0=off)': '逐视图重投影 RMS 上限（px，0 为关）', 'Max Model RMS (0=off)': '模型 RMS 上限（0 为关）', 'Min Width': '最小宽度', 'Max Width': '最大宽度', 'Min Height': '最小高度', 'Max Height': '最大高度', 'Min Rectangularity': '最小矩形度',
   'Maximum Defect Area (0=unbounded)': '最大缺陷面积（0 为不限）', 'Registration Tolerance': '配准容差（像素）', 'Illumination Compensation': '光照补偿', 'Morphology Open Kernel': '形态学开运算核', 'Morphology Close Kernel': '形态学闭运算核', 'Major Defect Area': '重要缺陷面积', 'Critical Defect Area': '严重缺陷面积',
   'Blur Kernel (0=off)': '模糊核（0 为关）', 'Blur Kernel': '模糊核', 'Canny Low Threshold': 'Canny 低阈值', 'Canny High Threshold': 'Canny 高阈值', 'Max Lines': '最大直线数', 'Max Circles': '最大圆数', 'Collinear Angle Tolerance': '共线角度容差', 'Collinear Distance Tolerance': '共线距离容差', 'Refinement Band': '拟合细化带宽',
   'Page Segmentation Mode': '页面分割模式', 'OCR Engine Mode': 'OCR 引擎模式', 'Character Whitelist': '字符白名单', 'Image DPI (0=auto)': '图像 DPI（0 为自动）', 'Upscale Factor': '放大倍数', 'Binarize': '二值化', 'Invert Image': '图像反色', 'Minimum Word Confidence': '最低词置信度',
@@ -571,7 +571,14 @@ const parameterDescriptions: Record<string, string> = {
   'calibration.cameraIntrinsics.maxViewRms': '逐视图重投影 RMS 上限（0 为关）：某视图超限会报错并指出视图序号，先检查该视图角点。',
   'calibration.cameraIntrinsics.maxRms': '模型 RMS 上限（0 为关）：整体标定误差超限时拒绝该模型。',
   'measure.blobs.minRectangularity': '最小矩形度：面积/外接框面积，细长或 L 形目标该值低。',
-  'measure.blobs.minWidth': '最小外接框宽度（像素，0 为不限）。', 'measure.blobs.maxWidth': '最大外接框宽度（像素，0 为不限）。',
+  'measure.blobs.minWidth': '最小外接框宽度（像素，0 为不限）。',
+  'feature.edge.subpixel': '亚像素链点：沿局部梯度方向抛物线细化链点并写入 chains JSON（每链最多 200 点）；关时只给长度/外接框。',
+  'feature.line.confidence': '直线置信度由内点比例与 RMS 误差合成（输出在 lines JSON 与主输出）。',
+  'image.acquire.exposureUs': '曝光时间（微秒，0 为不改）：取图前经设备层下发；相机不支持曝光时会明确报错。',
+  'image.acquire.gainDb': '增益（dB，-1 为不改）：取图前经设备层下发；相机不支持增益时会明确报错。',
+  'defect.referenceCompare.variationK': '变差模型系数 K（0 为关）：缺陷门限 = 阈值 + K×参考图局部标准差，纹理区自动更宽容；变差由单张参考图局部估计，多样本变差模型需多参考输入，暂不支持。',
+  'defect.referenceCompare.variationWindow': '变差估计窗口（奇数）：计算参考图局部标准差的邻域大小。',
+  'inference.detection.layout.yolov5': 'YOLOv5 布局：含 objectness 通道，最终分数 = objectness × 类别分。', 'measure.blobs.maxWidth': '最大外接框宽度（像素，0 为不限）。',
   'measure.blobs.minHeight': '最小外接框高度（像素，0 为不限）。', 'measure.blobs.maxHeight': '最大外接框高度（像素，0 为不限）。'
 };
 
