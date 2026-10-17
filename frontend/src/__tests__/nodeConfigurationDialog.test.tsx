@@ -598,14 +598,15 @@ describe('ROI input coordinate frame guidance', () => {
     const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '裁剪输入图像' } };
     const otherImage: Node = { id: 'other-image', position: { x: 0, y: 0 }, data: { label: 'ROI 来源图像' } };
     const edges = [
-      { id: 'crop-image', source: inputImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
-      { id: 'roi-image', source: otherImage.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
-      { id: 'crop-roi', source: roiNode.id, sourceHandle: 'roi', target: cropNode.id, targetHandle: 'roi' }
+      { id: 'crop-image', source: inputImage.id, sourceHandle: 'IMAGE', target: cropNode.id, targetHandle: 'IMAGE' },
+      { id: 'roi-image', source: otherImage.id, sourceHandle: 'IMAGE', target: roiNode.id, targetHandle: 'DEBUGIMAGE' },
+      { id: 'crop-roi', source: roiNode.id, sourceHandle: 'ROI', target: cropNode.id, targetHandle: 'ROI' }
     ];
     const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, inputImage, otherImage], edges });
 
     expect(dialog.getByText('ROI 与目标图像坐标系不匹配')).toBeTruthy();
     expect(dialog.getByText(/上游 ROI 与目标图像“裁剪输入图像”不在同一像素坐标系/)).toBeTruthy();
+    expect(dialog.getByText(/裁剪区域来自上游：定位修正 ROI/)).toBeTruthy();
     expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -642,9 +643,9 @@ describe('ROI input coordinate frame guidance', () => {
     const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '源图像' } };
     const edges = [
       { id: 'roi-crop-image', source: inputImage.id, sourceHandle: 'image', target: roiCrop.id, targetHandle: 'image' },
-      { id: 'measurement-crop-image', source: inputImage.id, sourceHandle: 'image', target: measurementCrop.id, targetHandle: 'image' },
-      { id: 'measurement-image', source: measurementCrop.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
-      { id: 'measurement-roi', source: roiCrop.id, sourceHandle: 'croppedRoi', target: measurementNode.id, targetHandle: 'roi' }
+      { id: 'measurement-crop-image', source: inputImage.id, sourceHandle: 'IMAGE', target: measurementCrop.id, targetHandle: 'IMAGE' },
+      { id: 'measurement-image', source: measurementCrop.id, sourceHandle: 'IMAGE', target: measurementNode.id, targetHandle: 'IMAGE' },
+      { id: 'measurement-roi', source: roiCrop.id, sourceHandle: 'CROPPEDROI', target: measurementNode.id, targetHandle: 'ROI' }
     ];
     const { dialog } = mount({ node: measurementNode, catalogItem: measurementCatalog,
       nodes: [measurementNode, roiCrop, measurementCrop, inputImage], edges });

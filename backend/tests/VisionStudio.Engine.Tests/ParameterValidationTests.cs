@@ -547,9 +547,9 @@ public sealed class ParameterValidationTests
         [
             new EdgeDefinition("scene-roi-control", "scene", "next", "roi", "exec", "control"),
             new EdgeDefinition("roi-crop-control", "roi", "next", "crop", "exec", "control"),
-            new EdgeDefinition("scene-crop-image", "scene", "image", "crop", "image", "data"),
-            new EdgeDefinition("other-roi-image", "other", "image", "roi", "debugImage", "data"),
-            new EdgeDefinition("corrected-roi", "roi", "roi", "crop", "roi", "data")
+            new EdgeDefinition("scene-crop-image", "scene", "IMAGE", "crop", "IMAGE", "data"),
+            new EdgeDefinition("other-roi-image", "other", "IMAGE", "roi", "DEBUGIMAGE", "data"),
+            new EdgeDefinition("corrected-roi", "roi", "ROI", "crop", "ROI", "data")
         ]);
 
         var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));

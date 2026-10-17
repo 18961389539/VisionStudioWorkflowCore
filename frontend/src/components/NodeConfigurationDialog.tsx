@@ -19,6 +19,19 @@ const cropMaskFrameChangingNodeTypes = new Set([
   'image.crop', 'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
 ]);
 
+function inputEdge(edges: Edge[], nodeId: string, portName: string) {
+  const expected = portName.toLowerCase();
+  return edges.find((edge) => edge.target === nodeId && edge.targetHandle?.toLowerCase() === expected);
+}
+
+function hasInputEdge(edges: Edge[], nodeId: string, portName: string) {
+  return Boolean(inputEdge(edges, nodeId, portName));
+}
+
+function outputPortMatches(edge: Edge | undefined, nodeId: string, portName: string) {
+  return edge?.source === nodeId && edge.sourceHandle?.toLowerCase() === portName.toLowerCase();
+}
+
 function imageFramePreservingNodeTypes(catalogItems: NodeCatalogItem[]) {
   // Mirror the workflow compiler: image-to-image nodes keep the pixel frame unless they
   // are an explicit spatial transform. Deriving this from the active catalog also covers plugins.
@@ -43,7 +56,7 @@ function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: s
     const upstreamHandle = type === 'roi.transform' ? 'debugImage'
       : preservingTypes.has(type) ? 'image' : undefined;
     if (!upstreamHandle) return false;
-    currentId = edges.find((edge) => edge.target === currentId && edge.targetHandle === upstreamHandle)?.source;
+    currentId = inputEdge(edges, currentId, upstreamHandle)?.source;
   }
   return false;
 }
@@ -60,7 +73,7 @@ function imageFramesSharePixelPreservingAncestor(firstImageNodeId: string | unde
       const upstreamHandle = type === 'roi.transform' ? 'debugImage'
         : preservingTypes.has(type) ? 'image' : undefined;
       if (!upstreamHandle) break;
-      currentId = edges.find((edge) => edge.target === currentId && edge.targetHandle === upstreamHandle)?.source;
+      currentId = inputEdge(edges, currentId, upstreamHandle)?.source;
     }
     return visited;
   };
@@ -144,7 +157,7 @@ function transformSourceLineage(nodes: Node[], edges: Edge[], sourceId: string |
     if (!source) return [];
     const inputHandles = source.data.typeKey === 'coordinate.transformCompose' ? ['transformA', 'transformB'] : [];
     const ancestors = inputHandles.flatMap((handle) => {
-      const input = edges.find((edge) => edge.target === source.id && edge.targetHandle === handle);
+      const input = inputEdge(edges, source.id, handle);
       return input ? visit(input.source) : [];
     });
     return [source, ...ancestors];
@@ -383,10 +396,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const [discardOpen, setDiscardOpen] = useState(false);
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
-  const roiInputEdge = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'roi');
+  const roiInputEdge = inputEdge(edges, node.id, 'roi');
   const measurementNodeTypes = ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'];
   const measurementImageInputEdge = measurementNodeTypes.includes(catalogItem.type)
-    ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')
+    ? inputEdge(edges, node.id, 'image')
     : undefined;
   const measurementImageSource = nodes.find((item) => item.id === measurementImageInputEdge?.source);
   const roiSourceMayMaskCropBounds = (sourceId: string, visited = new Set<string>()): boolean => {
@@ -395,7 +408,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     const source = nodes.find((item) => item.id === sourceId);
     if (source?.data.typeKey === 'roi.transform') return true;
     if (source?.data.typeKey !== 'image.crop') return true;
-    const sourceRoiEdge = edges.find((edge) => edge.target === sourceId && edge.targetHandle === 'roi');
+    const sourceRoiEdge = inputEdge(edges, sourceId, 'roi');
     if (sourceRoiEdge) return roiSourceMayMaskCropBounds(sourceRoiEdge.source, visited);
     const sourceRoi = (source.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
     return sourceRoi ? sourceRoi.type !== 'Rectangle' : false;
@@ -411,7 +424,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       visited.add(currentNode.id);
       const type = String(currentNode.data.typeKey ?? '').toLowerCase();
       if (type === 'image.crop') {
-        const cropRoiEdge = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === 'roi');
+        const cropRoiEdge = inputEdge(edges, currentNode.id, 'roi');
         const cropRoi = (currentNode.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
         const masksOutsideSelection = cropRoiEdge
           ? roiSourceMayMaskCropBounds(cropRoiEdge.source)
@@ -422,7 +435,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       } else if (cropMaskFrameChangingNodeTypes.has(type)) hasCoordinateChange = true;
       else if (type !== 'roi.transform' && !cropMaskFramePreservingNodeTypes.has(type)) break;
       const imageInputPort = type === 'roi.transform' ? 'debugImage' : 'image';
-      const imageInput = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === imageInputPort);
+      const imageInput = inputEdge(edges, currentNode.id, imageInputPort);
       current = imageInput ? nodes.find((item) => item.id === imageInput.source) : undefined;
     }
     return sources;
@@ -430,11 +443,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const directCropMaskSource = cropMaskSources.length === 1 && cropMaskSources[0].maskIsInCurrentFrame
     ? cropMaskSources[0].node : undefined;
   const croppedRoiConnected = Boolean(directCropMaskSource
-    && roiInputEdge?.source === directCropMaskSource.id && roiInputEdge?.sourceHandle === 'croppedRoi');
+    && outputPortMatches(roiInputEdge, directCropMaskSource.id, 'croppedRoi'));
   const croppedImageNeedsRoiWarning = Boolean(measurementNodeTypes.includes(catalogItem.type)
     && cropMaskSources.length > 0 && !croppedRoiConnected);
-  const connectedInputPorts = catalogItem.inputs.filter((input) => edges.some((edge) =>
-    edge.target === node.id && edge.targetHandle === input.name)).map((input) => input.name);
+  const connectedInputPorts = catalogItem.inputs.filter((input) => hasInputEdge(edges, node.id, input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
   const isShapeMatch = catalogItem.type === 'match.shape';
   const isImageCrop = catalogItem.type === 'image.crop';
@@ -442,9 +454,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const isCaliperCircle = catalogItem.type === 'measure.caliperCircle';
   const roiImageInputPort = isRoiTransform ? 'debugImage'
     : ['image.crop', 'region.fromRoi', ...measurementNodeTypes].includes(catalogItem.type) ? 'image' : undefined;
-  const roiImageInputEdge = roiImageInputPort
-    ? edges.find((edge) => edge.target === node.id && edge.targetHandle?.toLowerCase() === roiImageInputPort.toLowerCase())
-    : undefined;
+  const roiImageInputEdge = roiImageInputPort ? inputEdge(edges, node.id, roiImageInputPort) : undefined;
   const roiSourceImageFrameNodeIds = roiSourceFrameNodeIdsForEdge(roiInputEdge, nodes, edges, catalogItems);
   const roiImageInputSourceNode = nodes.find((item) => item.id === roiImageInputEdge?.source);
   const connectedRoiImageFrameMismatch = Boolean(roiSourceImageFrameNodeIds.length && roiImageInputEdge
@@ -484,7 +494,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const trainingStale = Boolean(trainedModelData && trainingSettingsWithDefaults && parameterFingerprint(trainingSettingsWithDefaults) !== parameterFingerprint(currentTrainingSettings));
   const shapeSearchBlocked = isShapeMatch && (!trainedModelData && !legacyWorkflow || trainingStale);
   const trainingBusy = trainBusy;
-  const templateSourceNodeId = edges.find((edge) => edge.target === node.id && (edge.targetHandle === 'template' || edge.targetHandle?.endsWith('template')))?.source;
+  const templateSourceNodeId = edges.find((edge) => edge.target === node.id
+    && (edge.targetHandle?.toLowerCase() === 'template' || edge.targetHandle?.toLowerCase().endsWith('template')))?.source;
   const trainingSourceKey = templateSourceNodeId ?? String(draft.templatePath ?? '');
   const capturedTrainingImage = trainingImage?.sourceKey === trainingSourceKey ? trainingImage : undefined;
   const hasLosslessTrainingImage = Boolean(capturedTrainingImage?.data || trainedSourceImage || trainingSamples.length);
@@ -502,14 +513,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
     && cropClearUndo.afterFingerprint === draftFingerprint);
   const searchLineInputEdge = ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
-    ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'searchLine')
+    ? inputEdge(edges, node.id, 'searchLine')
     : undefined;
   const circleInputEdge = isCaliperCircle
-    ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'circle')
+    ? inputEdge(edges, node.id, 'circle')
     : undefined;
   const circleSourceNode = circleInputEdge ? nodes.find((item) => item.id === circleInputEdge.source) : undefined;
   const transformInputEdge = ['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
-    ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'transform')
+    ? inputEdge(edges, node.id, 'transform')
     : undefined;
   const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
   const connectedGeometryEdge = circleInputEdge ?? searchLineInputEdge;
@@ -573,13 +584,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     : undefined;
   const cropTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'image.crop');
   const cropMeasurementReferenceNodeId = cropTransformNode
-    ? edges.find((edge) => edge.target === cropTransformNode.id && edge.targetHandle === 'image')?.source
+    ? inputEdge(edges, cropTransformNode.id, 'image')?.source
     : undefined;
   const debugImageSourceId = isRoiTransform
-    ? edges.find(edge => edge.target === node.id && edge.targetHandle === 'debugImage')?.source
+    ? inputEdge(edges, node.id, 'debugImage')?.source
     : undefined;
-  const debugImageConnected = isRoiTransform && edges.some((edge) => edge.target === node.id && edge.targetHandle === 'debugImage');
-  const poseEdge = edges.find(edge => edge.target === node.id && edge.targetHandle === 'currentPose');
+  const debugImageConnected = isRoiTransform && hasInputEdge(edges, node.id, 'debugImage');
+  const poseEdge = inputEdge(edges, node.id, 'currentPose');
   const poseSource = nodes.find(item => item.id === poseEdge?.source);
   const poseSourceParameters = (poseSource?.data.parameters ?? {}) as NodeParameters;
   const referenceBindings = parameterFingerprint({
@@ -860,10 +871,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         radialBand: options?.preserveValues ? geometry.band ?? 0 : Math.max(1, Math.min(500, geometry.band ?? 1)) }));
     }
   };
-  const imageInputSourceId = edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')?.source;
+  const imageInputSourceId = inputEdge(edges, node.id, 'image')?.source;
   const roiSourceNode = roiInputEdge ? nodes.find((item) => item.id === roiInputEdge.source) : undefined;
   const roiSourceDebugImageId = roiInputEdge
-    ? edges.find((edge) => edge.target === roiInputEdge.source && edge.targetHandle === 'debugImage')?.source
+    ? inputEdge(edges, roiInputEdge.source, 'debugImage')?.source
     : undefined;
   // RoiTransform overlays are in the debugImage coordinate frame. Only copy them onto an input
   // image when that exact frame is connected, so a different preprocessed image is never misled.
