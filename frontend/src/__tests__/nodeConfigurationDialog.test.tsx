@@ -584,6 +584,97 @@ describe('crop workspace with a connected ROI', () => {
   });
 });
 
+describe('ROI input coordinate frame guidance', () => {
+  const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+  const roiCatalog = fallbackCatalog.find(item => item.type === 'roi.transform')!;
+
+  it('blocks a crop ROI from a different image frame before preview', () => {
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const roiNode: Node = { id: 'roi', position: { x: 0, y: 0 }, data: {
+      typeKey: roiCatalog.type, label: '定位修正 ROI', inputs: roiCatalog.inputs, parameters: {}
+    } };
+    const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '裁剪输入图像' } };
+    const otherImage: Node = { id: 'other-image', position: { x: 0, y: 0 }, data: { label: 'ROI 来源图像' } };
+    const edges = [
+      { id: 'crop-image', source: inputImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'roi-image', source: otherImage.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      { id: 'crop-roi', source: roiNode.id, sourceHandle: 'roi', target: cropNode.id, targetHandle: 'roi' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, inputImage, otherImage], edges });
+
+    expect(dialog.getByText('ROI 与目标图像坐标系不匹配')).toBeTruthy();
+    expect(dialog.getByText(/上游 ROI 与目标图像“裁剪输入图像”不在同一像素坐标系/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('allows a corrected ROI and crop input from the same image frame', () => {
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const roiNode: Node = { id: 'roi', position: { x: 0, y: 0 }, data: {
+      typeKey: roiCatalog.type, label: '定位修正 ROI', inputs: roiCatalog.inputs, parameters: {}
+    } };
+    const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '源图像' } };
+    const edges = [
+      { id: 'crop-image', source: inputImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'roi-image', source: inputImage.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      { id: 'crop-roi', source: roiNode.id, sourceHandle: 'roi', target: cropNode.id, targetHandle: 'roi' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, inputImage], edges });
+
+    expect(dialog.queryByText('ROI 与目标图像坐标系不匹配')).toBeNull();
+    expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(['measure.caliperLine', 'measure.caliperCircle'])('blocks a measurement ROI from another crop frame for %s', measurementType => {
+    const measurementCatalog = fallbackCatalog.find(item => item.type === measurementType)!;
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: measurementType, label: '卡尺测量', inputs: measurementCatalog.inputs, parameters: {}
+    } };
+    const roiCrop: Node = { id: 'roi-crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: 'ROI 裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const measurementCrop: Node = { id: 'measurement-crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '测量图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '源图像' } };
+    const edges = [
+      { id: 'roi-crop-image', source: inputImage.id, sourceHandle: 'image', target: roiCrop.id, targetHandle: 'image' },
+      { id: 'measurement-crop-image', source: inputImage.id, sourceHandle: 'image', target: measurementCrop.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: measurementCrop.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'measurement-roi', source: roiCrop.id, sourceHandle: 'croppedRoi', target: measurementNode.id, targetHandle: 'roi' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: measurementCatalog,
+      nodes: [measurementNode, roiCrop, measurementCrop, inputImage], edges });
+
+    expect(dialog.getByText('ROI 与目标图像坐标系不匹配')).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('allows a measurement mask from the crop that supplies its image', () => {
+    const measurementCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: measurementCatalog.type, label: '卡尺找线', inputs: measurementCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const inputImage: Node = { id: 'input-image', position: { x: 0, y: 0 }, data: { label: '源图像' } };
+    const edges = [
+      { id: 'crop-image', source: inputImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: cropNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'measurement-roi', source: cropNode.id, sourceHandle: 'croppedRoi', target: measurementNode.id, targetHandle: 'roi' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: measurementCatalog,
+      nodes: [measurementNode, cropNode, inputImage], edges });
+
+    expect(dialog.queryByText('ROI 与目标图像坐标系不匹配')).toBeNull();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
 describe('caliper geometry input guidance', () => {
   const mountCropFrameMeasurement = (sourceType: string, targetType: string, outputPort: string, inputPort: string, separateGeometryFrame: boolean) => {
     const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;

@@ -181,6 +181,21 @@ function geometrySourceImageFrameNodeIds(geometryEdge: Edge | undefined, nodes: 
   return frameSource ? [frameSource] : [];
 }
 
+function roiSourceFrameNodeIdsForEdge(roiEdge: Edge | undefined, nodes: Node[], edges: Edge[], catalogItems: NodeCatalogItem[]): string[] {
+  if (!roiEdge) return [];
+  const source = nodes.find((item) => item.id === roiEdge.source);
+  const type = String(source?.data.typeKey ?? '').toLowerCase();
+  const sourceCatalog = catalogItems.find((item) => item.type.toLowerCase() === type);
+  const output = sourceCatalog?.outputs.find((port) => port.name.toLowerCase() === String(roiEdge.sourceHandle ?? '').toLowerCase());
+  if (output?.dataType.toLowerCase() !== 'roi') return [];
+  if (type === 'image.crop' && output.name.toLowerCase() === 'croppedroi') return [source.id];
+  if (type === 'roi.transform' && output.name.toLowerCase() === 'roi') {
+    const frameSource = edges.find((edge) => edge.target === source.id && edge.targetHandle?.toLowerCase() === 'debugimage')?.source;
+    return frameSource ? [frameSource] : [];
+  }
+  return [];
+}
+
 function transformMappedImageFrameNodeIds(transformNodes: Node[], edges: Edge[]) {
   return [...new Set(transformNodes.flatMap((node) => {
     const type = String(node.data.typeKey ?? '').toLowerCase();
@@ -425,6 +440,19 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const isImageCrop = catalogItem.type === 'image.crop';
   const isRoiTransform = catalogItem.type === 'roi.transform';
   const isCaliperCircle = catalogItem.type === 'measure.caliperCircle';
+  const roiImageInputPort = isRoiTransform ? 'debugImage'
+    : ['image.crop', 'region.fromRoi', ...measurementNodeTypes].includes(catalogItem.type) ? 'image' : undefined;
+  const roiImageInputEdge = roiImageInputPort
+    ? edges.find((edge) => edge.target === node.id && edge.targetHandle?.toLowerCase() === roiImageInputPort.toLowerCase())
+    : undefined;
+  const roiSourceImageFrameNodeIds = roiSourceFrameNodeIdsForEdge(roiInputEdge, nodes, edges, catalogItems);
+  const roiImageInputSourceNode = nodes.find((item) => item.id === roiImageInputEdge?.source);
+  const connectedRoiImageFrameMismatch = Boolean(roiSourceImageFrameNodeIds.length && roiImageInputEdge
+    && roiSourceImageFrameNodeIds.some((roiFrameNodeId) =>
+      !imageFramesSharePixelPreservingAncestor(roiFrameNodeId, roiImageInputEdge.source, nodes, edges, cropMaskFramePreservingNodeTypes)));
+  const connectedRoiImageFrameMismatchMessage = connectedRoiImageFrameMismatch
+    ? `上游 ROI 与目标图像“${String(roiImageInputSourceNode?.data.label ?? roiImageInputEdge!.source)}”不在同一像素坐标系。请将 ROI 与图像接到同一裁剪/变换分支；若目标图像来自裁剪节点，请连接该裁剪节点的 croppedRoi 输出。当前已阻止测试运行。`
+    : undefined;
   const trainedModelData = typeof draft.trainedModelData === 'string' ? draft.trainedModelData : '';
   const trainedSourceImage = typeof draft.trainedSourceImage === 'string' ? draft.trainedSourceImage : '';
   const legacyWorkflow = isShapeMatch && draft.modelMode === 'legacy';
@@ -940,7 +968,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     setImageSource('input');
   };
   const runPreview = async () => {
-    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || measurementGeometryConflict) return;
+    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || measurementGeometryConflict
+      || connectedRoiImageFrameMismatch) return;
     if (isShapeMatch) { setShapeWorkspaceTab('search'); setShapeImageKind(undefined); setRegionEditMode('search'); }
     setTrainingView(false);
     setShowSavedTrainingImage(false);
@@ -1377,6 +1406,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           </Space>} />}
         {roiMaskInputConnected && <Alert showIcon type="info" title={`ROI 掩膜来自上游：${nodeLabels[roiInputEdge!.source] ?? roiInputEdge!.source}`}
           description="此节点的 roi 输入优先于本地选区，且按当前图像坐标解释。请在上游编辑区域；当前节点不会再次移动 ROI。" />}
+        {connectedRoiImageFrameMismatch && <Alert showIcon type="error" title="ROI 与目标图像坐标系不匹配"
+          description={connectedRoiImageFrameMismatchMessage} />}
         {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="上游裁剪可能形成伪边缘"
           description={directCropMaskSource
             ? <span>如果裁剪使用圆形、多边形或笔刷 ROI，选区外像素会清零，可能形成伪边缘。请将“{nodeLabels[directCropMaskSource.id] ?? directCropMaskSource.id}”的 croppedRoi 输出接到本节点 roi 输入，以屏蔽选区外采样；灰度转换等不改变坐标的处理可以放在两者之间，模糊等邻域滤波后请避开 ROI 边界测量。</span>
@@ -1505,8 +1536,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           {!cropRoiInputConnected && draft.roi && <Button size="small" disabled={locked} onClick={clearCropSelection}>清除选区（使用整图）</Button>}
           {cropClearUndoAvailable && <Button size="small" disabled={locked} onClick={undoCropSelectionClear}>撤销清除选区</Button>}
           <Button type="primary" size="small" onClick={() => void runPreview()} loading={previewBusy}
-            disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}
-            title={previewBlockedReason || '按当前 ROI 预览裁剪图像与 ROI 蒙版'}>预览裁剪结果</Button>
+            disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || connectedRoiImageFrameMismatch}
+            title={connectedRoiImageFrameMismatchMessage || previewBlockedReason || '按当前 ROI 预览裁剪图像与 ROI 蒙版'}>预览裁剪结果</Button>
         </div>}
         {issues.length > 0 && <Alert type="error" title="请修正参数后再运行或应用" description={issues.join('；')} />}
         <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
@@ -1528,7 +1559,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           <Tooltip title={measurementGeometryConflictMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
             <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
               onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
-              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryConflict || connectedRoiImageFrameMismatch || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>

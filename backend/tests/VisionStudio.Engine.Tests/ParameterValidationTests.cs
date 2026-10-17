@@ -535,6 +535,31 @@ public sealed class ParameterValidationTests
     }
 
     [Fact]
+    public void CropRejectsCorrectedRoiFromADifferentImageFrame()
+    {
+        var workflow = new WorkflowDefinition("mismatched-crop-input-roi", "Mismatched crop input ROI",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("other", "image.synthetic", null, null, null),
+            new NodeDefinition("roi", "roi.transform", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-roi-control", "scene", "next", "roi", "exec", "control"),
+            new EdgeDefinition("roi-crop-control", "roi", "next", "crop", "exec", "control"),
+            new EdgeDefinition("scene-crop-image", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("other-roi-image", "other", "image", "roi", "debugImage", "data"),
+            new EdgeDefinition("corrected-roi", "roi", "roi", "crop", "roi", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("Node 'crop' ROI input 'roi'", error.Message);
+        Assert.Contains("other.image", error.Message);
+        Assert.Contains("scene.image", error.Message);
+    }
+
+    [Fact]
     public void MeasurementAcceptsCroppedRoiFromTheMatchingCropImageFrame()
     {
         var workflow = new WorkflowDefinition("matching-crop-roi", "Matching crop ROI",
