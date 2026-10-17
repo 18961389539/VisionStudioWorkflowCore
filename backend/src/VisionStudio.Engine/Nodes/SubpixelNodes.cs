@@ -504,6 +504,7 @@ public sealed class CaliperLineNode : IVisionNodeExecutor
                         ["sampleWidth"] = sampleWidth,
                         ["polarity"] = polarity,
                         ["direction"] = direction,
+                        ["refine"] = refine,
                         ["lineClampedToImage"] = baseClamped || anyProfileClipped,
                         ["profilesIntersectingImage"] = caliperCount - outsideImage,
                         ["profilesOutsideImage"] = outsideImage,

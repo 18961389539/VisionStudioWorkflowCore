@@ -43,11 +43,12 @@ public sealed class Batch5CaliperRegressionTests
         using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
 
         var line = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
-            Node("measure.caliperLine", """{"startX":10,"startY":20,"endX":30,"endY":20,"edgeLength":0,"caliperCount":5,"minContrast":17,"sampleWidth":7}"""),
+            Node("measure.caliperLine", """{"startX":10,"startY":20,"endX":30,"endY":20,"edgeLength":0,"caliperCount":5,"minContrast":17,"sampleWidth":7,"refine":"none"}"""),
             CancellationToken.None);
         Assert.Equal(17d, Convert.ToDouble(line.Summary["minContrast"]));
         Assert.Equal(0d, Convert.ToDouble(line.Summary["edgeLength"]));
         Assert.Equal(20d, Convert.ToDouble(line.Summary["effectiveCaliperSpan"]));
+        Assert.Equal("none", Convert.ToString(line.Summary["refine"]));
         (line.Outputs["image"].Value as IDisposable)?.Dispose();
 
         var circle = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
