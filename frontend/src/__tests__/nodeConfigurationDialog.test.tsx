@@ -403,14 +403,15 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
-  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'])(
-    'keeps the corrected ROI overlay visible when the crop input passes through %s', async (measurementType) => {
+  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle',
+    'feature.line', 'feature.circle', 'measure.blobs', 'region.fromRoi'])(
+    'keeps the corrected ROI overlay visible when the crop input passes through %s', async (imageNodeType) => {
       vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
         { nodeId: 'crop', portName: 'image', width: 100, height: 100 },
         { nodeId: 'measurement', portName: 'image', width: 100, height: 100 },
         { nodeId: 'source', portName: 'image', width: 100, height: 100 }
       ] }) })));
-      const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: { typeKey: measurementType, label: '卡尺' } };
+      const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: { typeKey: imageNodeType, label: '图像节点' } };
       const edges = [
         { id: 'measurement-source', source: 'source', sourceHandle: 'image', target: 'measurement', targetHandle: 'image' },
         { id: 'measurement-crop', source: 'measurement', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
@@ -424,6 +425,29 @@ describe('crop workspace with a connected ROI', () => {
       expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
     }
   );
+
+  it('uses runtime image ports to preserve ROI overlays through plugin image pass-through nodes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'plugin', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const pluginCatalog: NodeCatalogItem = { type: 'plugin.imagePassThrough', displayName: 'Image pass-through', category: 'Plugin',
+      inputs: [{ name: 'image', label: 'Image', dataType: 'Image', required: true }],
+      outputs: [{ name: 'image', label: 'Image', dataType: 'Image', required: true }], parameters: [] };
+    const pluginNode: Node = { id: 'plugin', position: { x: 0, y: 0 }, data: { typeKey: pluginCatalog.type, label: pluginCatalog.displayName } };
+    const edges = [
+      { id: 'plugin-source', source: 'source', sourceHandle: 'image', target: 'plugin', targetHandle: 'image' },
+      { id: 'plugin-crop', source: 'plugin', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog,
+      catalogItems: [...fallbackCatalog, pluginCatalog], nodes: [cropNode, roiNode, imageNode, pluginNode], edges, result });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/plugin/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
 
   it('shows the corrected ROI overlay when crop and reference image use sibling pixel-preserving branches', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
@@ -724,6 +748,57 @@ describe('caliper geometry input guidance', () => {
     const masked = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges: [...edges,
       { id: 'crop-mask', source: cropNode.id, sourceHandle: 'croppedRoi', target: lineNode.id, targetHandle: 'roi' }] });
     expect(masked.dialog.queryByText('上游裁剪可能形成伪边缘')).toBeNull();
+  });
+
+  it.each(['feature.line', 'feature.circle', 'measure.blobs', 'region.fromRoi'])(
+    'keeps crop-mask guidance through %s image outputs', (imageNodeType) => {
+      const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+      const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+      const imageNodeCatalog = fallbackCatalog.find(item => item.type === imageNodeType)!;
+      const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+        typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+      } };
+      const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+        typeKey: cropCatalog.type, label: '非矩形裁剪', inputs: cropCatalog.inputs,
+        parameters: { roi: { type: 'Polygon', points: [{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 30, y: 50 }] } }
+      } };
+      const imageNode: Node = { id: 'image-pass', position: { x: 0, y: 0 }, data: {
+        typeKey: imageNodeCatalog.type, label: imageNodeCatalog.displayName, inputs: imageNodeCatalog.inputs, parameters: {}
+      } };
+      const nodes = [lineNode, cropNode, imageNode];
+      const edges = [
+        { id: 'crop-pass', source: cropNode.id, sourceHandle: 'image', target: imageNode.id, targetHandle: 'image' },
+        { id: 'pass-line', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+      ];
+      const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges });
+
+      expect(dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+      expect(dialog.getByText(/“非矩形裁剪”的 croppedRoi 输出/)).toBeTruthy();
+    }
+  );
+
+  it('traces crop-mask guidance through the ROI transform debug-image input', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const roiCatalog = fallbackCatalog.find(item => item.type === 'roi.transform')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+      typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '非矩形裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Circle', x: 40, y: 40, radius: 20 } }
+    } };
+    const roiNode: Node = { id: 'roi', position: { x: 0, y: 0 }, data: {
+      typeKey: roiCatalog.type, label: '定位修正 ROI', inputs: roiCatalog.inputs, parameters: {}
+    } };
+    const edges = [
+      { id: 'crop-roi', source: cropNode.id, sourceHandle: 'image', target: roiNode.id, targetHandle: 'debugImage' },
+      { id: 'roi-line', source: roiNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+    ];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, cropNode, roiNode], edges });
+
+    expect(dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+    expect(dialog.getByText(/“非矩形裁剪”的 croppedRoi 输出/)).toBeTruthy();
   });
 
   it('keeps crop-mask guidance when a geometric image transform changes the pixel frame', () => {

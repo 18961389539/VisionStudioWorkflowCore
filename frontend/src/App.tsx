@@ -1952,7 +1952,7 @@ function Editor() {
       </main>
 
       {nodeConfigurationId && configurationNode && configurationCatalog && <NodeConfigurationDialog key={nodeConfigurationId} initialTab={configurationTab} open
-        node={configurationNode} catalogItem={configurationCatalog} nodes={nodes} edges={edges} disabled={anyBusy}
+        node={configurationNode} catalogItem={configurationCatalog} catalogItems={catalog} nodes={nodes} edges={edges} disabled={anyBusy}
         result={result} resultReceivedAt={resultReceivedAt} resultStale={resultStale}
         onClose={() => setNodeConfigurationId(undefined)} onApply={applyNodeParameters}
         onPreview={(parameters) => previewNode(nodeConfigurationId, parameters)} previewBlockedReason={configurationPreviewBlockedReason} />}

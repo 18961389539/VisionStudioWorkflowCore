@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
 import type { NodeCatalogItem, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi } from '../types';
@@ -11,21 +11,27 @@ import { runImageEntryForPort, useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
+import { fallbackCatalogRaw } from '../catalog';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
-const cropMaskFramePreservingNodeTypes = new Set([
-  'image.grayscale', 'image.channel', 'image.colorConvert', 'image.blur.gaussian', 'image.blur.median', 'image.filter',
-  'image.sharpen', 'image.contrastNormalize', 'image.illuminationNormalize', 'image.threshold',
-  'image.threshold.adaptive', 'image.threshold.otsu', 'image.morphology', 'image.topHat', 'image.bottomHat',
-  'image.morphGradient', 'image.reduceDomain', 'feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine',
-  'measure.caliperCircle'
-]);
 const cropMaskFrameChangingNodeTypes = new Set([
-  'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
+  'image.crop', 'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
 ]);
 
-function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: string | undefined, nodes: Node[], edges: Edge[]) {
+function imageFramePreservingNodeTypes(catalogItems: NodeCatalogItem[]) {
+  // Mirror the workflow compiler: image-to-image nodes keep the pixel frame unless they
+  // are an explicit spatial transform. Deriving this from the active catalog also covers plugins.
+  const imageTypes = new Set(['image', 'domainimage']);
+  return new Set(catalogItems.filter((item) => {
+    const type = item.type.toLowerCase();
+    if (cropMaskFrameChangingNodeTypes.has(type) || type === 'roi.transform') return false;
+    return item.inputs.some((port) => port.name.toLowerCase() === 'image' && imageTypes.has(port.dataType.toLowerCase()))
+      && item.outputs.some((port) => imageTypes.has(port.dataType.toLowerCase()));
+  }).map((item) => item.type.toLowerCase()));
+}
+
+function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: string | undefined, nodes: Node[], edges: Edge[], preservingTypes: ReadonlySet<string>) {
   if (!imageNodeId || !sourceNodeId) return false;
   let currentId: string | undefined = imageNodeId;
   const visited = new Set<string>();
@@ -33,9 +39,9 @@ function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: s
     if (currentId === sourceNodeId) return true;
     visited.add(currentId);
     const current = nodes.find((item) => item.id === currentId);
-    const type = String(current?.data.typeKey ?? '');
+    const type = String(current?.data.typeKey ?? '').toLowerCase();
     const upstreamHandle = type === 'roi.transform' ? 'debugImage'
-      : cropMaskFramePreservingNodeTypes.has(type) ? 'image' : undefined;
+      : preservingTypes.has(type) ? 'image' : undefined;
     if (!upstreamHandle) return false;
     currentId = edges.find((edge) => edge.target === currentId && edge.targetHandle === upstreamHandle)?.source;
   }
@@ -43,16 +49,16 @@ function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: s
 }
 
 function imageFramesSharePixelPreservingAncestor(firstImageNodeId: string | undefined, secondImageNodeId: string | undefined,
-  nodes: Node[], edges: Edge[]) {
+  nodes: Node[], edges: Edge[], preservingTypes: ReadonlySet<string>) {
   const ancestors = (sourceNodeId: string | undefined) => {
     const visited = new Set<string>();
     let currentId = sourceNodeId;
     while (currentId && !visited.has(currentId)) {
       visited.add(currentId);
       const current = nodes.find((item) => item.id === currentId);
-      const type = String(current?.data.typeKey ?? '');
+      const type = String(current?.data.typeKey ?? '').toLowerCase();
       const upstreamHandle = type === 'roi.transform' ? 'debugImage'
-        : cropMaskFramePreservingNodeTypes.has(type) ? 'image' : undefined;
+        : preservingTypes.has(type) ? 'image' : undefined;
       if (!upstreamHandle) break;
       currentId = edges.find((edge) => edge.target === currentId && edge.targetHandle === upstreamHandle)?.source;
     }
@@ -91,6 +97,7 @@ function clipLineToImage(start: { x: number; y: number }, end: { x: number; y: n
 type Props = {
   node: Node;
   catalogItem: NodeCatalogItem;
+  catalogItems?: NodeCatalogItem[];
   nodes: Node[];
   edges: Edge[];
   open: boolean;
@@ -207,7 +214,8 @@ function mapMeasurementGeometry(geometry: MeasurementGeometry, transform: RigidP
     angleEndDeg: (geometry.angleEndDeg ?? 180) + rotation };
 }
 
-export default function NodeConfigurationDialog({ node, catalogItem, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
+export default function NodeConfigurationDialog({ node, catalogItem, catalogItems = fallbackCatalogRaw, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
+  const cropMaskFramePreservingNodeTypes = useMemo(() => imageFramePreservingNodeTypes(catalogItems), [catalogItems]);
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
   const [shapeWorkspaceTab, setShapeWorkspaceTab] = useState<'training' | 'search'>(() => {
@@ -309,7 +317,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     while (current && !visited.has(current.id)) {
       const currentNode = current;
       visited.add(currentNode.id);
-      const type = String(currentNode.data.typeKey ?? '');
+      const type = String(currentNode.data.typeKey ?? '').toLowerCase();
       if (type === 'image.crop') {
         const cropRoiEdge = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === 'roi');
         const cropRoi = (currentNode.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
@@ -320,8 +328,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           sources.push({ node: currentNode, maskIsInCurrentFrame: cropsAfterCurrent === 0 && !hasCoordinateChange });
         cropsAfterCurrent++;
       } else if (cropMaskFrameChangingNodeTypes.has(type)) hasCoordinateChange = true;
-      else if (!cropMaskFramePreservingNodeTypes.has(type)) break;
-      const imageInput = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === 'image');
+      else if (type !== 'roi.transform' && !cropMaskFramePreservingNodeTypes.has(type)) break;
+      const imageInputPort = type === 'roi.transform' ? 'debugImage' : 'image';
+      const imageInput = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === imageInputPort);
       current = imageInput ? nodes.find((item) => item.id === imageInput.source) : undefined;
     }
     return sources;
@@ -709,9 +718,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   // RoiTransform overlays are in the debugImage coordinate frame. Only copy them onto an input
   // image when that exact frame is connected, so a different preprocessed image is never misled.
   const roiOverlayFrameMatchesInput = roiSourceNode?.data.typeKey === 'roi.transform'
-    && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges)
-      || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)
-      || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
+    && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges, cropMaskFramePreservingNodeTypes)
+      || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges, cropMaskFramePreservingNodeTypes)
+      || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges, cropMaskFramePreservingNodeTypes)));
   const connectedRoiInputOverlays = freshInputResult && roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
     ? (freshInputResult.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
