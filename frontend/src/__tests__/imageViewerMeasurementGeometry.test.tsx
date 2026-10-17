@@ -1171,6 +1171,28 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('continues a brush stroke outside the viewer and commits it on release', () => {
+    const onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    fireEvent.click(screen.getByText('笔刷'));
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 129.2, clientY: 59.2 }); // image (20,20)
+    fireEvent.mouseLeave(stage);
+    fireEvent.mouseMove(document.body, { clientX: 152.8, clientY: 59.2 }); // image (30,20)
+    fireEvent.mouseUp(document.body, { clientX: 152.8, clientY: 59.2 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const committed = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(committed.type).toBe('Brush');
+    if (committed.type === 'Brush') {
+      expect(committed.strokes).toHaveLength(1);
+      expect(committed.strokes[0].points.at(-1)?.x).toBeCloseTo(30);
+      expect(committed.strokes[0].points.at(-1)?.y).toBeCloseTo(20);
+    }
+  });
+
   it('does not start a brush move from a pixel erased by a later stroke', () => {
     const onRoiChange = vi.fn();
     const roi: VisionRoi = { type: 'Brush', strokes: [
