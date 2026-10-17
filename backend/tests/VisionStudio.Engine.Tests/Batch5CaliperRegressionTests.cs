@@ -112,6 +112,28 @@ public sealed class Batch5CaliperRegressionTests
         (circle.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 
+    [Theory]
+    [InlineData("feature.edgeSubpixel", """{"startX":10,"startY":20,"endX":80,"endY":20,"sampleWidth":4}""")]
+    [InlineData("measure.caliper", """{"startX":10,"startY":20,"endX":80,"endY":20,"sampleWidth":4}""")]
+    [InlineData("measure.caliperLine", """{"startX":10,"startY":20,"endX":80,"endY":20,"caliperCount":3,"sampleWidth":4}""")]
+    [InlineData("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":0,"angleEndDeg":180,"sampleWidth":4}""")]
+    public async Task CaliperNodesReportTheEffectiveOddProjectionWidth(string type, string parameters)
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+        IVisionNodeExecutor executor = type switch
+        {
+            "feature.edgeSubpixel" => new EdgeSubpixelNode(),
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+
+        var result = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(image)), Node(type, parameters), CancellationToken.None);
+
+        Assert.Equal(5, Convert.ToInt32(result.Summary["sampleWidth"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
     [Fact]
     public async Task CaliperCircleReportsWhenCoordinateCorrectionMovesTheCenterOutOfRange()
     {
