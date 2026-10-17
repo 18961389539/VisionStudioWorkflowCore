@@ -49,11 +49,28 @@ internal static class OnnxInferenceHelpers
         using var resized = new Mat();
         if (node.GetBool("crop", false))
         {
+            if (node.GetBool("letterbox", false))
+                throw new InvalidOperationException("ONNX preprocessing cannot enable crop and letterbox together.");
             var factor = Math.Max((double)width / bgr.Width, (double)height / bgr.Height);
             using var scaled = new Mat();
             JLVisionOperators.Resize(bgr, scaled, new Size(Math.Max(width, (int)Math.Round(bgr.Width * factor)), Math.Max(height, (int)Math.Round(bgr.Height * factor))));
             using var cropped = new Mat(scaled, new Rect((scaled.Width - width) / 2, (scaled.Height - height) / 2, width, height));
             cropped.CopyTo(resized);
+        }
+        else if (node.GetBool("letterbox", false))
+        {
+            // Ultralytics-style letterbox: preserve aspect, pad with 114 gray, centered.
+            var factor = Math.Min((double)width / bgr.Width, (double)height / bgr.Height);
+            var newW = Math.Max(1, (int)Math.Round(bgr.Width * factor));
+            var newH = Math.Max(1, (int)Math.Round(bgr.Height * factor));
+            using var scaled = new Mat();
+            JLVisionOperators.Resize(bgr, scaled, new Size(newW, newH));
+            resized.Create(height, width, MatType.CV_8UC3);
+            resized.SetTo(new Scalar(114, 114, 114));
+            var padX = (width - newW) / 2;
+            var padY = (height - newH) / 2;
+            using var roi = new Mat(resized, new Rect(padX, padY, newW, newH));
+            scaled.CopyTo(roi);
         }
         else JLVisionOperators.Resize(bgr, resized, new Size(width, height));
         var pixels = checked(width * height);
@@ -80,23 +97,47 @@ internal static class OnnxInferenceHelpers
 
     public static OnnxOutputTensor Forward(OnnxModelSession net, string outputName, string modelPath, CancellationToken cancellationToken = default)
     {
+        var outputs = ForwardOutputs(net, string.IsNullOrEmpty(outputName) ? null : [outputName], modelPath, cancellationToken);
+        return outputs[0];
+    }
+
+    /// <summary>
+    /// Run the session and return one or more outputs. When <paramref name="outputNames"/> is null or empty,
+    /// every graph output is returned in model order (needed for YOLO-Seg dual heads).
+    /// </summary>
+    public static OnnxOutputTensor[] ForwardOutputs(OnnxModelSession net, IReadOnlyList<string>? outputNames, string modelPath, CancellationToken cancellationToken = default)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         if (net.Input is null) throw new InvalidOperationException("ONNX image input has not been prepared.");
         var name = net.Session.InputMetadata.Keys.Single();
-        var output = string.IsNullOrEmpty(outputName) ? net.Session.OutputMetadata.Keys.First() : outputName;
-        if (!net.Session.OutputMetadata.ContainsKey(output)) throw new InvalidOperationException($"ONNX output '{output}' does not exist.");
+        string[] requested;
+        if (outputNames is null || outputNames.Count == 0)
+            requested = net.Session.OutputMetadata.Keys.ToArray();
+        else
+        {
+            requested = outputNames.Select(n => n.Trim()).Where(n => n.Length > 0).ToArray();
+            if (requested.Length == 0) requested = net.Session.OutputMetadata.Keys.ToArray();
+            foreach (var output in requested)
+                if (!net.Session.OutputMetadata.ContainsKey(output))
+                    throw new InvalidOperationException($"ONNX output '{output}' does not exist.");
+        }
+        if (requested.Length == 0) throw new InvalidOperationException("ONNX model has no outputs.");
         using var options = new RunOptions();
         using var cancellation = cancellationToken.Register(() => options.Terminate = true);
         try
         {
-            using var result = net.Session.Run(new[] { NamedOnnxValue.CreateFromTensor(name, net.Input) }, new[] { output }, options);
-            var tensor = result.Single().AsTensor<float>();
-            var values = tensor.ToArray();
+            using var result = net.Session.Run(new[] { NamedOnnxValue.CreateFromTensor(name, net.Input) }, requested, options);
+            var list = new OnnxOutputTensor[requested.Length];
+            for (var i = 0; i < requested.Length; i++)
+            {
+                var tensor = result[i].AsTensor<float>();
+                list[i] = new(tensor.ToArray(), tensor.Dimensions.ToArray());
+            }
             cancellationToken.ThrowIfCancellationRequested();
-            return new(values, tensor.Dimensions.ToArray());
+            return list;
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested) { throw new OperationCanceledException(cancellationToken); }
-        catch (Exception ex) { throw new InvalidOperationException($"ONNX model '{modelPath}' inference failed for output '{output}': {ex.Message}", ex); }
+        catch (Exception ex) { throw new InvalidOperationException($"ONNX model '{modelPath}' inference failed: {ex.Message}", ex); }
     }
     public static float[] ReadFloatTensor(OnnxOutputTensor tensor, string contract)
     {

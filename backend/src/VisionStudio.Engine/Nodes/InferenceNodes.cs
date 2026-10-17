@@ -8,7 +8,8 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-/// <summary>Runs a configured ONNX image classification head: [1,C] or [1,C,1,1] float32 logits/scores.</summary>
+/// <summary>Runs a configured ONNX image classification head: [1,C] or [1,C,1,1] float32 logits/scores.
+/// layout=yolo26 treats the tensor as already-softmaxed class probabilities (Ultralytics YOLO26-cls ONNX).</summary>
 public sealed class OnnxClassificationNode : IVisionNodeExecutor
 {
     public string Type => "inference.classification";
@@ -29,7 +30,12 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
         if (!valid)
             throw new InvalidOperationException($"Classification output must have shape [1,C] or [1,C,1,1]; received [{string.Join(',', shape)}].");
         var scores = OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
-        if (node.GetBool("applySoftmax", true))
+        var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
+        if (layout is not ("scores" or "yolo26"))
+            throw new InvalidOperationException($"Unsupported classification layout '{layout}'. Supported values are 'scores' and 'yolo26'.");
+        // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
+        var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
+        if (applySoftmax)
         {
             var max = scores.Max();
             var exp = scores.Select(x => Math.Exp(x - max)).ToArray();
@@ -42,7 +48,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
             .OrderByDescending(x => x.score).ThenBy(x => x.index).Take(topK)
             .Select(x => new { index = x.index, label = LabelAt(labels, x.index), score = x.score }).ToArray();
         var best = top[0];
-        var json = JsonSerializer.Serialize(new { classes = top, outputShape = shape });
+        var json = JsonSerializer.Serialize(new { classes = top, outputShape = shape, layout });
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
@@ -51,14 +57,15 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                 ["classIndex"] = VisionValue.Integer(best.index),
                 ["confidence"] = VisionValue.Double(best.score)
             },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = top.Length, ["applySoftmax"] = node.GetBool("applySoftmax", true) }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout }));
     }
 
     private static string LabelAt(string[] labels, int index)
         => index < labels.Length && !string.IsNullOrWhiteSpace(labels[index]) ? labels[index] : index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
-/// <summary>Runs an ONNX detector whose output is strictly rows of [x1,y1,x2,y2,score,classId].</summary>
+/// <summary>Runs an ONNX detector. Layouts: xyxy rows, YOLO (YOLOv8/YOLO26 raw), yolov5 (with objectness).
+/// YOLO26 end-to-end export (nms=False) uses xyxy with shape [1,300,6].</summary>
 public sealed class OnnxDetectionNode : IVisionNodeExecutor
 {
     public string Type => "inference.detection";
@@ -79,22 +86,21 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var rows = shape.Length == 2 && shape[1] == 6
             ? shape[0]
             : shape.Length == 3 && shape[0] == 1 && shape[2] == 6 ? shape[1] : 0;
-        var isYoloLayout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant() is "yolo" or "yolov5";
+        var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
+        if (layout is not ("xyxy" or "yolo" or "yolov5"))
+            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy', 'yolo' and 'yolov5'.");
+        var isYoloLayout = layout is "yolo" or "yolov5";
         if (rows <= 0 && !isYoloLayout)
             throw new InvalidOperationException($"Detection output must have shape [N,6] or [1,N,6] with rows [x1,y1,x2,y2,score,classId]; received [{string.Join(',', shape)}].");
         var values = OnnxInferenceHelpers.ReadFloatTensor(output, "detection");
         var threshold = node.GetDouble("confidenceThreshold", 0.25);
         var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
         var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
-        var normalized = node.GetString("coordinates", "normalized").Trim().Equals("normalized", StringComparison.OrdinalIgnoreCase);
         if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1)
             throw new InvalidOperationException("Detection confidenceThreshold and nmsThreshold must be finite values from 0 to 1.");
         var coordinates = node.GetString("coordinates", "normalized").Trim().ToLowerInvariant();
         if (coordinates is not ("normalized" or "pixels"))
             throw new InvalidOperationException($"Unsupported detection coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
-        var layout = node.GetString("layout", "xyxy").Trim().ToLowerInvariant();
-        if (layout is not ("xyxy" or "yolo" or "yolov5"))
-            throw new InvalidOperationException($"Unsupported detection layout '{layout}'. Supported values are 'xyxy', 'yolo' and 'yolov5'.");
         var letterbox = node.GetBool("letterbox", false);
 
         var candidates = new List<DetectionCandidate>();
@@ -103,8 +109,6 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         var inputWidth = node.GetInt("inputWidth", 224);
         var inputHeight = node.GetInt("inputHeight", 224);
         if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("Detection inputWidth/inputHeight must be positive.");
-        // Input-pixel -> source-pixel mapping. Letterbox mode inverts the symmetric
-        // padding used when the source was resized into the model input preserving aspect.
         double MapX(double inputX)
         {
             if (!letterbox) return inputX * sourceWidth / inputWidth;
@@ -121,8 +125,6 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         {
             if (score is < 0 or > 1 || classId < 0)
                 throw new InvalidOperationException($"Detection row {rowIndex} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
-            // Coordinates arrive normalized to the model input or in input pixels; both
-            // are converted to input pixels first, then mapped back to the source.
             if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
             var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, sourceWidth);
             var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, sourceHeight);
@@ -132,9 +134,10 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
             candidates.Add(new DetectionCandidate(left, top, right, bottom, score, classId));
         }
 
-        if (layout == "yolo")
+        if (isYoloLayout)
         {
-            // YOLOv8-style heads: cx, cy, w, h + per-class scores (no objectness).
+            // YOLOv8 / YOLO26 raw heads: cx, cy, w, h + per-class scores (no objectness).
+            // YOLOv5: objectness at channel 4, class scores after.
             var yolo = InferenceStats.DecodeYolo(values, shape, useObjectness: layout == "yolov5");
             for (var i = 0; i < yolo.Length; i++)
             {
@@ -147,6 +150,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
         }
         else
         {
+            // xyxy / YOLO26 end-to-end (nms=False): [N,6] or [1,N,6]
             for (var i = 0; i < rows; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -154,7 +158,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
                 var rawClassId = values[offset + 5];
                 if (rawClassId < 0 || rawClassId > int.MaxValue || Math.Abs(rawClassId - MathF.Round(rawClassId)) > 1e-4f)
                     throw new InvalidOperationException($"Detection row {i} has an invalid score or classId; score must be within [0,1] and classId must be a non-negative integer.");
-                AddCandidate(values[offset], values[offset + 1], values[offset + 2], values[offset + 3], values[offset + 4], (int)rawClassId, i);
+                AddCandidate(values[offset], values[offset + 1], values[offset + 2], values[offset + 3], values[offset + 4], (int)MathF.Round(rawClassId), i);
             }
         }
         var kept = new List<DetectionCandidate>();
@@ -200,7 +204,7 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
     private sealed record DetectionCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId);
 }
 
-/// <summary>Runs an ONNX semantic segmentation head with output [1,C,H,W] and emits an 8-bit label mask.</summary>
+/// <summary>ONNX semantic segmentation. layout=logits expects [1,C,H,W]; layout=yolo26-semantic expects YOLO26 class map [1,H,W]/[H,W]/[1,1,H,W].</summary>
 public sealed class OnnxSegmentationNode : IVisionNodeExecutor
 {
     public string Type => "inference.segmentation";
@@ -218,50 +222,74 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
         using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var shape = OnnxInferenceHelpers.Shape(output);
-        if (shape.Length != 4 || shape[0] != 1 || shape[1] is < 1 or > 256 || shape[2] < 1 || shape[3] < 1)
-            throw new InvalidOperationException($"Segmentation output must have shape [1,C,H,W] with 1<=C<=256; received [{string.Join(',', shape)}].");
+        var layout = node.GetString("layout", "logits").Trim().ToLowerInvariant();
+        if (layout is not ("logits" or "yolo26-semantic" or "classmap"))
+            throw new InvalidOperationException($"Unsupported segmentation layout '{layout}'. Supported values are 'logits' and 'yolo26-semantic'.");
+        if (layout == "classmap") layout = "yolo26-semantic";
+
+        byte[] labels;
+        float[] bestScores;
+        int height, width, channels;
         var values = OnnxInferenceHelpers.ReadFloatTensor(output, "segmentation");
-        var channels = shape[1];
-        var height = shape[2];
-        var width = shape[3];
         var threshold = node.GetDouble("binaryThreshold", 0.5);
         if (!double.IsFinite(threshold)) throw new InvalidOperationException("binaryThreshold must be finite.");
-        using var modelMask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
-        var labels = new byte[height * width];
-        var bestScores = new float[height * width];
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
+
+        if (layout == "yolo26-semantic")
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            byte label;
-            float winningScore;
-            if (channels == 1)
-            {
-                winningScore = values[y * width + x];
-                label = winningScore >= threshold ? (byte)1 : (byte)0;
-            }
-            else
-            {
-                var bestClass = 0;
-                var bestScore = float.NegativeInfinity;
-                for (var c = 0; c < channels; c++)
-                {
-                    var score = values[(c * height + y) * width + x];
-                    if (score > bestScore) { bestScore = score; bestClass = c; }
-                }
-                label = (byte)bestClass;
-                winningScore = bestScore;
-            }
-            modelMask.Set(y, x, label);
-            labels[y * width + x] = label;
-            bestScores[y * width + x] = winningScore;
+            var decoded = InferenceStats.DecodeClassMap(values, shape);
+            labels = decoded.Labels;
+            height = decoded.Height;
+            width = decoded.Width;
+            channels = 0; // class map: no per-pixel logits
+            bestScores = Enumerable.Repeat(1f, labels.Length).ToArray();
         }
-        // Per-class reporting (ViDi/HALCON DL segmentation style): area, image fraction,
-        // mean winning score, bounding box and centroid per class present in the mask.
-        // Box/centroid are scaled from model resolution to source pixels.
+        else
+        {
+            if (shape.Length != 4 || shape[0] != 1 || shape[1] is < 1 or > 256 || shape[2] < 1 || shape[3] < 1)
+                throw new InvalidOperationException($"Segmentation output must have shape [1,C,H,W] with 1<=C<=256; received [{string.Join(',', shape)}].");
+            channels = shape[1];
+            height = shape[2];
+            width = shape[3];
+            labels = new byte[height * width];
+            bestScores = new float[height * width];
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                byte label;
+                float winningScore;
+                if (channels == 1)
+                {
+                    winningScore = values[y * width + x];
+                    label = winningScore >= threshold ? (byte)1 : (byte)0;
+                }
+                else
+                {
+                    var bestClass = 0;
+                    var bestScore = float.NegativeInfinity;
+                    for (var c = 0; c < channels; c++)
+                    {
+                        var score = values[(c * height + y) * width + x];
+                        if (score > bestScore) { bestScore = score; bestClass = c; }
+                    }
+                    label = (byte)bestClass;
+                    winningScore = bestScore;
+                }
+                labels[y * width + x] = label;
+                bestScores[y * width + x] = winningScore;
+            }
+        }
+
+        using var modelMask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
+        for (var i = 0; i < labels.Length; i++)
+            modelMask.Set(i / width, i % width, labels[i]);
+
         var lowConfidenceThreshold = node.GetDouble("lowConfidenceThreshold", 0.5);
         if (!double.IsFinite(lowConfidenceThreshold)) throw new InvalidOperationException("lowConfidenceThreshold must be finite.");
-        var classCountTotal = channels == 1 ? 2 : channels;
+        var classCountTotal = layout == "yolo26-semantic"
+            ? Math.Max(1, labels.Max() + 1)
+            : (channels == 1 ? 2 : channels);
+        if (classCountTotal > 256) classCountTotal = 256;
         var boxStats = InferenceStats.SegmentationClassBoxes(labels, bestScores, classCountTotal, width, height)
             .Where(s => s.PixelCount > 0).ToArray();
         var classStats = boxStats.Select(s => new InferenceStats.ClassStat(s.ClassId, s.PixelCount, s.Fraction, s.MeanScore)).ToArray();
@@ -270,33 +298,20 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
         var meanConfidence = bestScores.Length == 0 ? 0 : bestScores.Average(v => (double)v);
         var lowConfidenceFraction = bestScores.Length == 0 ? 0 : (double)bestScores.Count(v => v < lowConfidenceThreshold) / bestScores.Length;
         var mask = new Mat();
-        try { JLVisionOperators.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest); }
-        catch { mask.Dispose(); throw; }
-        // Colour overlay: source image tinted per non-background class with the
-        // deterministic palette, so a human can see where each class landed.
-        var overlay = new Mat();
         try
         {
-            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
-            else if (source.Channels() == 3) source.CopyTo(overlay);
-            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
-            else throw new InvalidOperationException($"Segmentation overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
-            mask.GetArray(out byte[] maskBytes);
-            overlay.GetArray(out Vec3b[] basePixels);
-            for (var i = 0; i < maskBytes.Length; i++)
+            if (node.GetBool("letterbox", false))
             {
-                var label = maskBytes[i];
-                if (label == 0) continue;
-                var color = InferenceStats.SegmentationColorBgr(label);
-                var px = basePixels[i];
-                basePixels[i] = new Vec3b(
-                    (byte)Math.Clamp((px.Item0 + color.B) / 2, 0, 255),
-                    (byte)Math.Clamp((px.Item1 + color.G) / 2, 0, 255),
-                    (byte)Math.Clamp((px.Item2 + color.R) / 2, 0, 255));
+                var inputWidth = node.GetInt("inputWidth", 224);
+                var inputHeight = node.GetInt("inputHeight", 224);
+                using var cropped = UnletterboxMask(modelMask, source.Width, source.Height, inputWidth, inputHeight);
+                JLVisionOperators.Resize(cropped, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest);
             }
-            overlay.SetArray(basePixels);
+            else
+                JLVisionOperators.Resize(modelMask, mask, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Nearest);
         }
-        catch { overlay.Dispose(); throw; }
+        catch { mask.Dispose(); throw; }
+        var overlay = BuildOverlay(source, mask);
         var segOutputs = new Dictionary<string, VisionValue>
         {
             ["mask"] = VisionValue.Image(VisionImage.Own(mask)),
@@ -318,7 +333,224 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
             segOutputs["dominantFraction"] = VisionValue.Double(dominant.Fraction);
         }
         return ValueTask.FromResult(new NodeExecutorResult(segOutputs,
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["classChannels"] = channels, ["maskWidth"] = source.Width, ["maskHeight"] = source.Height, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction, ["meanConfidence"] = meanConfidence, ["lowConfidenceFraction"] = lowConfidenceFraction, ["lowConfidenceThreshold"] = lowConfidenceThreshold }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["layout"] = layout, ["classChannels"] = channels, ["maskWidth"] = source.Width, ["maskHeight"] = source.Height, ["classCount"] = classStats.Length, ["dominantClass"] = dominant?.ClassId, ["dominantFraction"] = dominant?.Fraction, ["meanConfidence"] = meanConfidence, ["lowConfidenceFraction"] = lowConfidenceFraction, ["lowConfidenceThreshold"] = lowConfidenceThreshold }));
+    }
+
+
+    /// <summary>Crop letterbox padding from a model-resolution mask, then the caller resizes to source.</summary>
+    internal static Mat UnletterboxMask(Mat modelMask, int sourceWidth, int sourceHeight, int inputWidth, int inputHeight)
+    {
+        var scale = Math.Min((double)inputWidth / sourceWidth, (double)inputHeight / sourceHeight);
+        var newW = Math.Max(1, (int)Math.Round(sourceWidth * scale));
+        var newH = Math.Max(1, (int)Math.Round(sourceHeight * scale));
+        var padX = (inputWidth - newW) / 2;
+        var padY = (inputHeight - newH) / 2;
+        if (padX < 0 || padY < 0 || padX + newW > modelMask.Width || padY + newH > modelMask.Height)
+            throw new InvalidOperationException("Letterbox mask crop is outside the model mask bounds; check inputWidth/inputHeight.");
+        using var roi = new Mat(modelMask, new Rect(padX, padY, newW, newH));
+        var cropped = new Mat();
+        roi.CopyTo(cropped);
+        return cropped;
+    }
+
+    internal static Mat BuildOverlay(Mat source, Mat mask)
+    {
+        var overlay = new Mat();
+        try
+        {
+            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
+            else if (source.Channels() == 3) source.CopyTo(overlay);
+            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
+            else throw new InvalidOperationException($"Segmentation overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
+            mask.GetArray(out byte[] maskBytes);
+            overlay.GetArray(out Vec3b[] basePixels);
+            for (var i = 0; i < maskBytes.Length; i++)
+            {
+                var label = maskBytes[i];
+                if (label == 0) continue;
+                var color = InferenceStats.SegmentationColorBgr(label);
+                var px = basePixels[i];
+                basePixels[i] = new Vec3b(
+                    (byte)Math.Clamp((px.Item0 + color.B) / 2, 0, 255),
+                    (byte)Math.Clamp((px.Item1 + color.G) / 2, 0, 255),
+                    (byte)Math.Clamp((px.Item2 + color.R) / 2, 0, 255));
+            }
+            overlay.SetArray(basePixels);
+            return overlay;
+        }
+        catch { overlay.Dispose(); throw; }
+    }
+}
+
+/// <summary>
+/// YOLO26 / YOLOv8 instance segmentation ONNX: dual outputs
+/// (1) boxes+scores+mask coeffs [1, 4+nc+32, N] and (2) prototypes [1, 32, mh, mw].
+/// Emits detections, a combined class-id mask (last instance wins on overlap), overlay and instance JSON.
+/// Does not embed NMS in the graph; class-aware NMS runs here. Pose/OBB heads are not supported.
+/// </summary>
+public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
+{
+    public string Type => "inference.instanceSegmentation";
+
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = context.RequireImage("image").Mat;
+        if (node.GetBool("crop", false))
+            throw new InvalidOperationException("Instance segmentation with crop=true is unsupported. Set crop=false.");
+        using var net = OnnxInferenceHelpers.LoadNet(node);
+        var modelPath = OnnxInferenceHelpers.ResolvePath(node);
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        cancellationToken.ThrowIfCancellationRequested();
+        var detName = node.GetString("outputName", string.Empty).Trim();
+        var protoName = node.GetString("protoOutputName", string.Empty).Trim();
+        string[]? names = null;
+        if (detName.Length > 0 && protoName.Length > 0) names = [detName, protoName];
+        else if (detName.Length > 0 || protoName.Length > 0)
+            throw new InvalidOperationException("Instance segmentation requires both outputName and protoOutputName, or leave both empty to use the model's first two outputs.");
+        var outputs = OnnxInferenceHelpers.ForwardOutputs(net, names, modelPath, cancellationToken);
+        if (outputs.Length < 2)
+            throw new InvalidOperationException($"YOLO-Seg models must expose at least two outputs (detections + prototypes); received {outputs.Length}.");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var det = outputs[0];
+            var proto = outputs[1];
+            // Prefer the 4D tensor as prototypes if the user ordered them backwards.
+            if (det.Dimensions.Length == 4 && proto.Dimensions.Length != 4)
+            { var tmp = det; det = proto; proto = tmp; }
+            var detShape = OnnxInferenceHelpers.Shape(det);
+            var protoShape = OnnxInferenceHelpers.Shape(proto);
+            if (protoShape.Length != 4 || protoShape[0] != 1 || protoShape[1] < 1)
+                throw new InvalidOperationException($"YOLO-Seg prototype output must have shape [1,maskDim,H,W]; received [{string.Join(',', protoShape)}].");
+            var maskDim = protoShape[1];
+            var protoH = protoShape[2];
+            var protoW = protoShape[3];
+            var detValues = OnnxInferenceHelpers.ReadFloatTensor(det, "instance-seg-det");
+            var protoValues = OnnxInferenceHelpers.ReadFloatTensor(proto, "instance-seg-proto");
+            var candidates = InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim);
+            var threshold = node.GetDouble("confidenceThreshold", 0.25);
+            var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
+            var maskThreshold = (float)node.GetDouble("maskThreshold", 0.5);
+            var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
+            if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !float.IsFinite(maskThreshold))
+                throw new InvalidOperationException("Instance segmentation thresholds must be finite values from 0 to 1.");
+            var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
+            if (coordinates is not ("normalized" or "pixels"))
+                throw new InvalidOperationException($"Unsupported coordinates '{coordinates}'. Supported values are 'normalized' and 'pixels'.");
+            // YOLO26/v8-seg raw exports use input-pixel xywh; default coordinates=pixels.
+            var letterbox = node.GetBool("letterbox", true);
+            var inputWidth = node.GetInt("inputWidth", 640);
+            var inputHeight = node.GetInt("inputHeight", 640);
+            if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("inputWidth/inputHeight must be positive.");
+            double MapX(double inputX)
+            {
+                if (!letterbox) return inputX * source.Width / inputWidth;
+                var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+                return (inputX - (inputWidth - source.Width * scale) / 2) / scale;
+            }
+            double MapY(double inputY)
+            {
+                if (!letterbox) return inputY * source.Height / inputHeight;
+                var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+                return (inputY - (inputHeight - source.Height * scale) / 2) / scale;
+            }
+
+            var scored = new List<(InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom)>();
+            for (var i = 0; i < candidates.Length; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var c = candidates[i];
+                if (c.Score < threshold || !double.IsFinite(c.Score)) continue;
+                var x1 = c.CenterX - c.Width / 2; var y1 = c.CenterY - c.Height / 2;
+                var x2 = c.CenterX + c.Width / 2; var y2 = c.CenterY + c.Height / 2;
+                if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
+                var left = Math.Clamp(Math.Min(MapX(x1), MapX(x2)), 0, source.Width);
+                var top = Math.Clamp(Math.Min(MapY(y1), MapY(y2)), 0, source.Height);
+                var right = Math.Clamp(Math.Max(MapX(x1), MapX(x2)), 0, source.Width);
+                var bottom = Math.Clamp(Math.Max(MapY(y1), MapY(y2)), 0, source.Height);
+                if (right <= left || bottom <= top) continue;
+                scored.Add((c, left, top, right, bottom));
+            }
+            var kept = new List<(InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom)>();
+            foreach (var candidate in scored.OrderByDescending(x => x.Cand.Score))
+            {
+                if (kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
+                kept.Add(candidate);
+                if (kept.Count == maxCount) break;
+            }
+
+            var combined = new byte[source.Height * source.Width];
+            var instancePayload = new List<object>();
+            var detections = new List<VisionDetection>();
+            for (var i = 0; i < kept.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var (c, left, top, right, bottom) = kept[i];
+                // Mask coeffs are in input-pixel space relative to the letterboxed input.
+                double InvMapX(double srcX)
+                {
+                    if (!letterbox) return srcX * inputWidth / source.Width;
+                    var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+                    return srcX * scale + (inputWidth - source.Width * scale) / 2;
+                }
+                double InvMapY(double srcY)
+                {
+                    if (!letterbox) return srcY * inputHeight / source.Height;
+                    var scale = Math.Min((double)inputWidth / source.Width, (double)inputHeight / source.Height);
+                    return srcY * scale + (inputHeight - source.Height * scale) / 2;
+                }
+                var boxInInputL = InvMapX(left); var boxInInputT = InvMapY(top);
+                var boxInInputR = InvMapX(right); var boxInInputB = InvMapY(bottom);
+                var instanceMask = InferenceStats.ComposeYoloSegMask(
+                    protoValues, maskDim, protoH, protoW, c.MaskCoeffs,
+                    boxInInputL, boxInInputT, boxInInputR, boxInInputB,
+                    inputWidth, inputHeight, source.Width, source.Height, maskThreshold);
+                var area = 0;
+                for (var p = 0; p < instanceMask.Length; p++)
+                {
+                    if (instanceMask[p] == 0) continue;
+                    area++;
+                    // Store classId+1 so background stays 0; clamp to byte.
+                    var label = (byte)Math.Clamp(c.ClassId + 1, 1, 255);
+                    combined[p] = label;
+                }
+                var w = right - left; var h = bottom - top;
+                detections.Add(new VisionDetection(i, left, top, w, h, area, 0, 0,
+                    new VisionCircle((left + right) / 2, (top + bottom) / 2, Math.Sqrt(w * w + h * h) / 2),
+                    new VisionRectangle2D(left, top, w, h), c.Score, c.ClassId));
+                instancePayload.Add(new { index = i, classId = c.ClassId, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area });
+            }
+
+            using var maskMat = new Mat(source.Height, source.Width, MatType.CV_8UC1);
+            maskMat.SetArray(combined);
+            var maskOut = maskMat.Clone();
+            var overlay = OnnxSegmentationNode.BuildOverlay(source, maskOut);
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["detections"] = VisionValue.Detections(detections.ToArray()),
+                    ["count"] = VisionValue.Integer(detections.Count),
+                    ["mask"] = VisionValue.Image(VisionImage.Own(maskOut)),
+                    ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
+                    ["instances"] = VisionValue.String(JsonSerializer.Serialize(instancePayload)),
+                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, detShape, protoShape, instances = instancePayload }))
+                },
+                new Dictionary<string, object?> { ["count"] = detections.Count, ["maskDim"] = maskDim, ["letterbox"] = letterbox, ["layout"] = "yolo26-seg", ["detShape"] = detShape, ["protoShape"] = protoShape }));
+        }
+        finally { foreach (var o in outputs) o.Dispose(); }
+    }
+
+    private static double BoxIoU(
+        (InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom) a,
+        (InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom) b)
+    {
+        var iw = Math.Max(0, Math.Min(a.Right, b.Right) - Math.Max(a.Left, b.Left));
+        var ih = Math.Max(0, Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Top, b.Top));
+        var intersection = iw * ih;
+        var areaA = (a.Right - a.Left) * (a.Bottom - a.Top);
+        var areaB = (b.Right - b.Left) * (b.Bottom - b.Top);
+        return intersection / (areaA + areaB - intersection + 1e-9);
     }
 }
 
@@ -370,9 +602,6 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         var thresholdMode = node.GetString("thresholdMode", "manual").Trim().ToLowerInvariant();
         if (thresholdMode is not ("manual" or "otsu")) throw new InvalidOperationException("Anomaly thresholdMode must be manual or otsu.");
         var suggestedThreshold = InferenceStats.OtsuThreshold(values);
-        // Otsu auto-threshold (HALCON DL threshold aid as an operating mode, not only a
-        // suggestion): the effective threshold drives isAnomaly/areaFraction. Scalar
-        // outputs keep the manual threshold because one value has no distribution.
         var effectiveThreshold = thresholdMode == "otsu" ? suggestedThreshold : threshold;
         var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, effectiveThreshold);
         threshold = effectiveThreshold;

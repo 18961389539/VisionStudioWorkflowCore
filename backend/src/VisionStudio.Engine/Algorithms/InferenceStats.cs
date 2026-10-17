@@ -157,4 +157,114 @@ public static class InferenceStats
         }
         return result;
     }
+
+    public sealed record YoloSegCandidate(double CenterX, double CenterY, double Width, double Height, double Score, int ClassId, float[] MaskCoeffs);
+
+    /// <summary>
+    /// Decode YOLO instance-seg detection head: channels are cx,cy,w,h + class scores + mask_dim coefficients.
+    /// Accepts [1,C,N], [1,N,C], [N,C]. Coordinates stay in the tensor's own units.
+    /// </summary>
+    public static YoloSegCandidate[] DecodeYoloSeg(float[] values, IReadOnlyList<int> shape, int maskDim = 32)
+    {
+        if (maskDim < 1) throw new InvalidOperationException("YOLO-Seg maskDim must be positive.");
+        int channels, count; bool channelsFirst;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] >= 4 + 1 + maskDim && shape[2] > 0) { channels = shape[1]; count = shape[2]; channelsFirst = true; }
+        else if (shape.Count == 3 && shape[0] == 1 && shape[2] >= 4 + 1 + maskDim && shape[1] > 0) { channels = shape[2]; count = shape[1]; channelsFirst = false; }
+        else if (shape.Count == 2 && shape[1] >= 4 + 1 + maskDim && shape[0] > 0) { channels = shape[1]; count = shape[0]; channelsFirst = false; }
+        else throw new InvalidOperationException($"YOLO-Seg detection output must have shape [1,C,N], [1,N,C] or [N,C] with C>=4+classes+maskDim; received [{string.Join(',', shape)}].");
+        if (values.Length != channels * count) throw new InvalidOperationException("YOLO-Seg tensor element count does not match its shape.");
+        var classCount = channels - 4 - maskDim;
+        if (classCount < 1) throw new InvalidOperationException("YOLO-Seg output must include at least one class score channel.");
+        float At(int n, int c) => channelsFirst ? values[c * count + n] : values[n * channels + c];
+        var result = new YoloSegCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var bestClass = 0; var bestScore = double.NegativeInfinity;
+            for (var c = 0; c < classCount; c++)
+            {
+                var score = At(n, 4 + c);
+                if (score > bestScore) { bestScore = score; bestClass = c; }
+            }
+            var coeffs = new float[maskDim];
+            for (var m = 0; m < maskDim; m++) coeffs[m] = At(n, 4 + classCount + m);
+            result[n] = new(At(n, 0), At(n, 1), At(n, 2), At(n, 3), bestScore, bestClass, coeffs);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Compose one instance mask from prototype tensor [maskDim, protoH, protoW] and coefficients,
+    /// then crop to the box (in proto / input pixels) and bilinear-resize into an output buffer of outH×outW.
+    /// Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).
+    /// </summary>
+    public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, int inputWidth, int inputHeight, int outWidth, int outHeight, float maskThreshold = 0.5f)
+    {
+        if (prototypes.Length != maskDim * protoH * protoW) throw new InvalidOperationException("Prototype buffer size does not match maskDim*protoH*protoW.");
+        if (coeffs.Length != maskDim) throw new InvalidOperationException("Mask coefficient count must equal maskDim.");
+        if (inputWidth < 1 || inputHeight < 1 || outWidth < 1 || outHeight < 1) throw new InvalidOperationException("Mask sizes must be positive.");
+        // Linear combo at proto resolution
+        var proto = new float[protoH * protoW];
+        for (var y = 0; y < protoH; y++)
+        for (var x = 0; x < protoW; x++)
+        {
+            var sum = 0f;
+            var pix = y * protoW + x;
+            for (var m = 0; m < maskDim; m++) sum += coeffs[m] * prototypes[m * protoH * protoW + pix];
+            proto[pix] = 1f / (1f + MathF.Exp(-sum)); // sigmoid
+        }
+        // Map box from input pixels into proto pixels
+        var scaleX = (double)protoW / inputWidth; var scaleY = (double)protoH / inputHeight;
+        var left = (int)Math.Clamp(Math.Floor(Math.Min(boxLeft, boxRight) * scaleX), 0, protoW - 1);
+        var top = (int)Math.Clamp(Math.Floor(Math.Min(boxTop, boxBottom) * scaleY), 0, protoH - 1);
+        var right = (int)Math.Clamp(Math.Ceiling(Math.Max(boxLeft, boxRight) * scaleX), left + 1, protoW);
+        var bottom = (int)Math.Clamp(Math.Ceiling(Math.Max(boxTop, boxBottom) * scaleY), top + 1, protoH);
+        // Zero outside the box in proto space (Ultralytics crop_mask)
+        for (var y = 0; y < protoH; y++)
+        for (var x = 0; x < protoW; x++)
+            if (x < left || x >= right || y < top || y >= bottom) proto[y * protoW + x] = 0;
+
+        // Nearest upsample proto -> input size, then map input -> out (caller may already be source size)
+        var inputMask = new float[inputHeight * inputWidth];
+        for (var y = 0; y < inputHeight; y++)
+        for (var x = 0; x < inputWidth; x++)
+        {
+            var px = Math.Clamp((int)(x * scaleX), 0, protoW - 1);
+            var py = Math.Clamp((int)(y * scaleY), 0, protoH - 1);
+            inputMask[y * inputWidth + x] = proto[py * protoW + px];
+        }
+        var result = new byte[outHeight * outWidth];
+        for (var y = 0; y < outHeight; y++)
+        for (var x = 0; x < outWidth; x++)
+        {
+            var ix = Math.Clamp((int)((double)x * inputWidth / outWidth), 0, inputWidth - 1);
+            var iy = Math.Clamp((int)((double)y * inputHeight / outHeight), 0, inputHeight - 1);
+            result[y * outWidth + x] = inputMask[iy * inputWidth + ix] >= maskThreshold ? (byte)255 : (byte)0;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Interpret a YOLO26 semantic class-map tensor as per-pixel class IDs.
+    /// Accepts [1,H,W], [H,W], or [1,1,H,W]. Values are rounded to nearest integer in 0..255.
+    /// </summary>
+    public static (byte[] Labels, int Height, int Width) DecodeClassMap(float[] values, IReadOnlyList<int> shape)
+    {
+        int height, width;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] > 0) { height = shape[1]; width = shape[2]; }
+        else if (shape.Count == 2 && shape[0] > 0 && shape[1] > 0) { height = shape[0]; width = shape[1]; }
+        else if (shape.Count == 4 && shape[0] == 1 && shape[1] == 1 && shape[2] > 0 && shape[3] > 0) { height = shape[2]; width = shape[3]; }
+        else throw new InvalidOperationException($"YOLO26 semantic class map must have shape [1,H,W], [H,W] or [1,1,H,W]; received [{string.Join(',', shape)}].");
+        if (values.Length != height * width) throw new InvalidOperationException("Class-map element count does not match its shape.");
+        var labels = new byte[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        {
+            var v = values[i];
+            if (!float.IsFinite(v)) throw new InvalidOperationException("Class-map contains a non-finite value.");
+            var id = (int)Math.Round(v);
+            if (id is < 0 or > 255) throw new InvalidOperationException($"Class-map value {v} is outside the supported label range 0..255.");
+            labels[i] = (byte)id;
+        }
+        return (labels, height, width);
+    }
+
 }
