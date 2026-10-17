@@ -34,7 +34,9 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
                     ["image"] = VisionValue.Image(replayImage),
                     ["sequence"] = VisionValue.Integer(replaySequence),
                     ["timestamp"] = VisionValue.String(replayTimestamp),
-                    ["cameraId"] = VisionValue.String(replayCameraId)
+                    ["cameraId"] = VisionValue.String(replayCameraId),
+                    ["width"] = VisionValue.Integer(replayImage.Width),
+                    ["height"] = VisionValue.Integer(replayImage.Height)
                 },
                 new Dictionary<string, object?>
                 {
@@ -46,13 +48,16 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
         }
 
         var cameraId = node.GetString("cameraId", "virtual-1");
+        if (string.IsNullOrWhiteSpace(cameraId)) throw new InvalidOperationException("Acquire Image requires a non-empty cameraId.");
         var timeoutMs = node.GetInt("timeoutMs", 1500);
+        if (timeoutMs is < 50 or > 10000) throw new InvalidOperationException("Acquire Image timeoutMs must be between 50 and 10000 ms.");
         var autoStart = node.GetBool("autoStart", node.GetBool("autoOpen", true));
         var triggerBeforeGrab = node.GetBool("triggerBeforeGrab", false);
         var frameModeText = node.GetString("frameMode", "Latest");
-        var frameMode = Enum.TryParse<CameraFrameMode>(frameModeText, true, out var parsed)
-            ? parsed
-            : CameraFrameMode.Latest;
+        // Previously an unknown mode silently fell back to Latest, so a typo such as
+        // frameMode=NextFrame waited on the wrong frame without any signal.
+        if (!Enum.TryParse<CameraFrameMode>(frameModeText, true, out var frameMode) || !Enum.IsDefined(frameMode))
+            throw new InvalidOperationException($"Unsupported frameMode '{frameModeText}'. Supported values are: {string.Join(", ", Enum.GetNames<CameraFrameMode>())}.");
 
         var lease = await cameraManager.AcquireAsync(
             cameraId,
@@ -69,7 +74,9 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
                 ["image"] = VisionValue.Image(image),
                 ["sequence"] = VisionValue.Integer(lease.Sequence),
                 ["timestamp"] = VisionValue.String(lease.Timestamp.ToString("O")),
-                ["cameraId"] = VisionValue.String(lease.CameraId)
+                ["cameraId"] = VisionValue.String(lease.CameraId),
+                ["width"] = VisionValue.Integer(image.Width),
+                ["height"] = VisionValue.Integer(image.Height)
             },
             new Dictionary<string, object?>
             {

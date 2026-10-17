@@ -42,13 +42,39 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             objects.Add(view.ObjectPoints.Select(p => new Point3f((float)p[0], (float)p[1], (float)p[2])).ToArray());
             images.Add(ip);
         }
+        // Per-view quality reporting before trusting the model: point coverage plus,
+        // for planar boards, a homography reprojection error per view. A single bad
+        // view (mis-detected corners) is the most common cause of a poor calibration,
+        // and a global RMS alone hides it.
+        var viewStats = request.Views.Select((view, index) =>
+        {
+            var stat = CalibrationViewAnalysis.Analyze(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight);
+            return new { index, pointCount = stat.PointCount, coverageX = Math.Round(stat.CoverageX, 4), coverageY = Math.Round(stat.CoverageY, 4), reprojectionRms = stat.ReprojectionRms, reprojectionMax = stat.ReprojectionMax };
+        }).ToArray();
+        var maxViewRms = node.GetDouble("maxViewRms", 0);
+        if (!double.IsFinite(maxViewRms) || maxViewRms < 0) throw new InvalidOperationException("maxViewRms must be finite and non-negative (0 disables the per-view gate).");
+        if (maxViewRms > 0)
+        {
+            var bad = viewStats.FirstOrDefault(v => v.reprojectionRms is not null && v.reprojectionRms > maxViewRms);
+            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has planar reprojection RMS {bad.reprojectionRms:0.###} px above maxViewRms {maxViewRms:0.###}; check that view's detected points.");
+        }
         CameraCalibrationModel model;
         try { model = JLVisionCalibration.Calibrate(request, cancellationToken); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"JLVision intrinsic calibration failed: {ex.Message}", ex); }
         var rms = model.Rms;
+        var maxRms = node.GetDouble("maxRms", 0);
+        if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("maxRms must be finite and non-negative (0 disables the model gate).");
+        if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms) }, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
+        var worstViewRms = viewStats.Where(v => v.reprojectionRms is not null).Select(v => v.reprojectionRms!.Value).DefaultIfEmpty(0).Max();
+        var outputs = new Dictionary<string, VisionValue>
+        {
+            ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms),
+            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(viewStats))
+        };
+        if (viewStats.Any(v => v.reprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["worstViewRms"] = worstViewRms, ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
     }
 }
 

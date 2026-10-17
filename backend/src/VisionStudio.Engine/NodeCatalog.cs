@@ -17,6 +17,8 @@ public static class BuiltInNodeCatalog
                 new("sequence", VisionDataType.Integer),
                 new("timestamp", VisionDataType.String),
                 new("cameraId", VisionDataType.String),
+                new("width", VisionDataType.Integer),
+                new("height", VisionDataType.Integer),
                 Next
             ],
             [
@@ -307,16 +309,22 @@ public static class BuiltInNodeCatalog
                 new("minArea", "Min Area", "number", 100, 0, 99999999, 10),
                 new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
                 new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Description: "4*pi*A/P^2, 1 = perfect circle.", VisibleWhen: new("mode", ["all"])),
+                new("minWidth", "Min Width", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
+                new("maxWidth", "Max Width", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
+                new("minHeight", "Min Height", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
+                new("maxHeight", "Max Height", "number", 0, 0, 99999999, 1, Unit: "px", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
+                new("minRectangularity", "Min Rectangularity", "number", 0, 0, 1, 0.05, Description: "Area / bounding-box area, 1 = perfect rectangle.", VisibleWhen: new("mode", ["all"])),
                 new("maxCount", "Max Count", "number", 20, 1, 200, 1, VisibleWhen: new("mode", ["all"])),
                 new("sortBy", "Sort By", "select", "area", Options:
                 [
                     new("Area", "area"),
                     new("X (left to right)", "x"),
-                    new("Y (top to bottom)", "y")
+                    new("Y (top to bottom)", "y"),
+                    new("Circularity", "circularity")
                 ], VisibleWhen: new("mode", ["all"])),
                 new("descending", "Descending", "boolean", true, VisibleWhen: new("mode", ["all"]))
             ],
-            "Analyze either all filtered/sorted blobs or only the largest one. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+            "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
