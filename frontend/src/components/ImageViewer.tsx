@@ -98,6 +98,7 @@ export function buildCaliperCircleAngles(geometry: Extract<MeasurementGeometry, 
 /** 控制点命中半径（屏幕像素），缩放后仍保持同样的手感 */
 const HANDLE_HIT = 10;
 const MAX_POLYGON_HANDLES = 32;
+const MIN_EDGE_HANDLE_SPAN = 18;
 
 function closestHandle<T extends string>(candidates: readonly (readonly [T, Point])[], screen: Point, view: ViewState): T | undefined {
   let selected: T | undefined;
@@ -415,12 +416,23 @@ function RoiShape({ roi, scale, draft = false }: { roi?: VisionRoi; scale: numbe
 function RoiHandles({ roi, scale, imageWidth, imageHeight }: { roi: VisionRoi; scale: number; imageWidth: number; imageHeight: number }) {
   if (roi.type === 'Brush') return null;
   const size = 9 / scale;
-  const handles: { index: number; point: Point }[] = roi.type === 'Rectangle'
-    ? [{ index: 0, point: { x: roi.x, y: roi.y } }, { index: 1, point: { x: roi.x + roi.width, y: roi.y } },
-      { index: 2, point: { x: roi.x, y: roi.y + roi.height } }, { index: 3, point: { x: roi.x + roi.width, y: roi.y + roi.height } }]
-    : roi.type === 'Circle'
-      ? [{ index: 0, point: circleRadiusHandle({ x: roi.x, y: roi.y }, roi.radius, imageWidth, imageHeight) }]
-      : polygonHandleIndices(roi.points.length).map(index => ({ index, point: roi.points[index] }));
+  let handles: { index: number; point: Point }[];
+  if (roi.type === 'Rectangle') {
+    handles = [
+      { index: 0, point: { x: roi.x, y: roi.y } }, { index: 1, point: { x: roi.x + roi.width, y: roi.y } },
+      { index: 2, point: { x: roi.x, y: roi.y + roi.height } }, { index: 3, point: { x: roi.x + roi.width, y: roi.y + roi.height } }
+    ];
+    if (roi.height * scale >= MIN_EDGE_HANDLE_SPAN) handles.push(
+      { index: 4, point: { x: roi.x, y: roi.y + roi.height / 2 } },
+      { index: 5, point: { x: roi.x + roi.width, y: roi.y + roi.height / 2 } });
+    if (roi.width * scale >= MIN_EDGE_HANDLE_SPAN) handles.push(
+      { index: 6, point: { x: roi.x + roi.width / 2, y: roi.y } },
+      { index: 7, point: { x: roi.x + roi.width / 2, y: roi.y + roi.height } });
+  } else if (roi.type === 'Circle') {
+    handles = [{ index: 0, point: circleRadiusHandle({ x: roi.x, y: roi.y }, roi.radius, imageWidth, imageHeight) }];
+  } else {
+    handles = polygonHandleIndices(roi.points.length).map(index => ({ index, point: roi.points[index] }));
+  }
   if (handles.length === 0) return null;
   return <Group listening={false}>
     {handles.map(({ index, point }) => (
@@ -729,6 +741,14 @@ export default function ImageViewer({
         ['nw', { x: target.x, y: target.y }], ['ne', { x: target.x + target.width, y: target.y }],
         ['sw', { x: target.x, y: target.y + target.height }], ['se', { x: target.x + target.width, y: target.y + target.height }]
       ];
+      if (target.height * view.scale >= MIN_EDGE_HANDLE_SPAN) {
+        handles.push(['w', { x: target.x, y: target.y + target.height / 2 }],
+          ['e', { x: target.x + target.width, y: target.y + target.height / 2 }]);
+      }
+      if (target.width * view.scale >= MIN_EDGE_HANDLE_SPAN) {
+        handles.push(['n', { x: target.x + target.width / 2, y: target.y }],
+          ['s', { x: target.x + target.width / 2, y: target.y + target.height }]);
+      }
       return closestHandle(handles, screen, view);
     }
     if (target.type === 'Circle') {

@@ -597,6 +597,29 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('resizes a rectangle from its edge midpoint without moving the whole ROI', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Rectangle', x: 30, y: 30, width: 30, height: 24 };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} />);
+    expect(screen.getAllByTestId('roi-handle')).toHaveLength(8);
+
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 223.6, clientY: 111.12 }); // east edge midpoint (60, 42)
+    fireEvent.mouseMove(stage, { clientX: 233.04, clientY: 111.12 }); // widen by four image pixels
+    fireEvent.mouseUp(document.body, { clientX: 233.04, clientY: 111.12 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const resized = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(resized.type).toBe('Rectangle');
+    if (resized.type === 'Rectangle') {
+      expect(resized.x).toBeCloseTo(30);
+      expect(resized.y).toBeCloseTo(30);
+      expect(resized.width).toBeCloseTo(34);
+      expect(resized.height).toBeCloseTo(24);
+    }
+  });
+
   it('moves a brush ROI by dragging a painted pixel and clamps its strokes to the image', () => {
     const onRoiChange = vi.fn();
     const roi: VisionRoi = { type: 'Brush', strokes: [
