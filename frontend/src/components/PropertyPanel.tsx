@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
@@ -16,6 +16,8 @@ type Props = {
   roiFields?: { key: string; label: string; emptyText?: string; showEmpty?: boolean }[];
 };
 
+const polygonVertexPageSize = 50;
+
 function sameValue(a: unknown, b: unknown) {
   if (typeof a === 'number' && typeof b === 'number') return a === b;
   return String(a) === String(b);
@@ -29,6 +31,25 @@ function isVisionRoi(value: unknown): value is VisionRoi {
 
 /** ROI 结构化编辑：形状 + 位置/尺寸数值；数值与图像查看器中的拖动互为镜像 */
 function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boolean; onChange: (roi: VisionRoi) => void }) {
+  const [polygonPage, setPolygonPage] = useState(0);
+  const polygonPointCount = roi.type === 'Polygon' ? roi.points.length : 0;
+  const polygonPageCount = Math.max(1, Math.ceil(polygonPointCount / polygonVertexPageSize));
+  const currentPolygonPage = Math.min(polygonPage, polygonPageCount - 1);
+  const polygonPageStart = currentPolygonPage * polygonVertexPageSize;
+  const visiblePolygonPoints = roi.type === 'Polygon'
+    ? roi.points.slice(polygonPageStart, polygonPageStart + polygonVertexPageSize) : [];
+  useEffect(() => { setPolygonPage(0); }, [roi.type]);
+  useEffect(() => {
+    if (polygonPage >= polygonPageCount) setPolygonPage(polygonPageCount - 1);
+  }, [polygonPage, polygonPageCount]);
+  const changePolygonPoint = (index: number, axis: 'x' | 'y', value: number | null) => {
+    if (roi.type !== 'Polygon') return;
+    const points = roi.points.slice();
+    const point = { ...points[index] };
+    if (axis === 'x') point.x = Number(value ?? 0); else point.y = Number(value ?? 0);
+    points[index] = point;
+    onChange({ ...roi, points });
+  };
   const field = (label: string, value: number, apply: (next: number) => void) => (
     <label className="roi-field" key={label}>
       <span>{label}</span>
@@ -69,20 +90,37 @@ function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boo
     <div>
       <div className="roi-grid">
         <Tag color="red">多边形</Tag>
-        <span className="roi-polygon-note">{roi.points.length} 个顶点 · 拖动图像上的控制点或输入坐标</span>
+        <span className="roi-polygon-note">{roi.points.length} 个顶点 · {roi.points.length > polygonVertexPageSize
+          ? `当前编辑 ${polygonPageStart + 1}–${Math.min(polygonPageStart + polygonVertexPageSize, roi.points.length)} · 可拖动图像控制点或输入坐标`
+          : '拖动图像上的控制点或输入坐标'}</span>
       </div>
+      {roi.points.length > polygonVertexPageSize && <div className="roi-polygon-pagination">
+        <Button size="small" disabled={disabled || currentPolygonPage <= 0} onClick={() => setPolygonPage(currentPolygonPage - 1)}>上一组</Button>
+        <InputNumber size="small" aria-label="顶点组" min={1} max={polygonPageCount} step={1} precision={0}
+          disabled={disabled} value={currentPolygonPage + 1}
+          onChange={(value) => {
+            if (value !== null && Number.isFinite(Number(value)))
+              setPolygonPage(Math.max(0, Math.min(polygonPageCount - 1, Math.round(Number(value)) - 1)));
+          }} />
+        <span className="roi-polygon-note">/ {polygonPageCount} 组</span>
+        <Button size="small" disabled={disabled || currentPolygonPage >= polygonPageCount - 1}
+          onClick={() => setPolygonPage(currentPolygonPage + 1)}>下一组</Button>
+      </div>}
       <div className="roi-polygon-vertices">
-        {roi.points.map((point, index) => (
-          <div className="roi-vertex-row" key={index}>
-            <span>点 {index + 1}</span>
-            <InputNumber size="small" aria-label={`点 ${index + 1} X`} value={Number(point.x.toFixed(2))}
-              disabled={disabled} onChange={(value) => onChange({ ...roi, points: roi.points.map((item, i) => i === index ? { ...item, x: Number(value ?? 0) } : item) })} />
-            <InputNumber size="small" aria-label={`点 ${index + 1} Y`} value={Number(point.y.toFixed(2))}
-              disabled={disabled} onChange={(value) => onChange({ ...roi, points: roi.points.map((item, i) => i === index ? { ...item, y: Number(value ?? 0) } : item) })} />
-            <Button type="text" size="small" danger aria-label={`删除点 ${index + 1}`} title="删除此顶点" disabled={disabled || roi.points.length <= 3}
-              onClick={() => onChange({ ...roi, points: roi.points.filter((_, i) => i !== index) })}>×</Button>
-          </div>
-        ))}
+        {visiblePolygonPoints.map((point, localIndex) => {
+          const index = polygonPageStart + localIndex;
+          return (
+            <div className="roi-vertex-row" key={index}>
+              <span>点 {index + 1}</span>
+              <InputNumber size="small" aria-label={`点 ${index + 1} X`} value={Number(point.x.toFixed(2))}
+                disabled={disabled} onChange={(value) => changePolygonPoint(index, 'x', value)} />
+              <InputNumber size="small" aria-label={`点 ${index + 1} Y`} value={Number(point.y.toFixed(2))}
+                disabled={disabled} onChange={(value) => changePolygonPoint(index, 'y', value)} />
+              <Button type="text" size="small" danger aria-label={`删除点 ${index + 1}`} title="删除此顶点" disabled={disabled || roi.points.length <= 3}
+                onClick={() => onChange({ ...roi, points: roi.points.filter((_, i) => i !== index) })}>×</Button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

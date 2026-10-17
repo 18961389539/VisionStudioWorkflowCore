@@ -959,6 +959,8 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .roi-field { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--vs-text-3); }
 .roi-field .ant-input-number { width: 74px; }
 .roi-polygon-note { font-size: 11px; color: var(--vs-text-4); }
+.roi-polygon-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+.roi-polygon-pagination .ant-input-number { width: 58px; }
 .roi-polygon-vertices { display: grid; gap: 4px; margin-top: 7px; }
 .roi-vertex-row { display: grid; grid-template-columns: 32px minmax(54px, 1fr) minmax(54px, 1fr) 24px; align-items: center; gap: 5px; color: var(--vs-text-3); font-size: 11px; }
 .roi-vertex-row .ant-input-number { width: 100%; }
