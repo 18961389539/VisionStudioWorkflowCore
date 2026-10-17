@@ -87,6 +87,21 @@ describe('ROI reference capture', () => {
     expect(imageFrameFingerprint('synthetic', [synthetic(base)], [])).toBe(baseline);
   });
 
+  it('tracks image-frame dependencies when imported node and port names use different casing', () => {
+    const image = (centerX: number): Node => ({ id: 'scene', position: { x: 0, y: 0 }, data: {
+      typeKey: 'image.synthetic', parameters: { width: 640, height: 480, centerX }
+    } });
+    const crop: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: 'IMAGE.CROP', inputs: [{ name: 'IMAGE', dataType: 'image' }], parameters: { roi: { type: 'Rectangle', x: 10, y: 10, width: 30, height: 20 } }
+    } };
+    const uppercaseEdge: Edge = { id: 'crop-image', source: 'scene', sourceHandle: 'IMAGE', target: 'crop', targetHandle: 'IMAGE' };
+    const baseline = imageFrameFingerprint('crop', [crop, image(300)], [uppercaseEdge]);
+
+    expect(imageFrameFingerprint('crop', [crop, image(301)], [uppercaseEdge])).not.toBe(baseline);
+    expect(imageFrameFingerprint('crop', [crop, image(300)], [{ ...uppercaseEdge, sourceHandle: 'image', targetHandle: 'image' }]))
+      .toBe(baseline);
+  });
+
   it('tracks the complete pose-producing graph while excluding training-only sample payloads', () => {
     const matcher = (parameters: Record<string, unknown>): Node => ({ id: 'matcher', position: { x: 0, y: 0 }, data: {
       typeKey: 'match.shape', inputs: [
@@ -201,5 +216,36 @@ describe('ROI reference capture', () => {
     const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 0 });
 
     expect(moved[2].data.parameters).toEqual(nodes[2].data.parameters);
+  });
+
+  it('rebases measurement geometry through case-insensitive transform and compose ports', () => {
+    const nodes = [
+      { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'ROI.TRANSFORM', parameters: { baseX: 100, baseY: 50 } } },
+      { id: 'compose', position: { x: 0, y: 0 }, data: { typeKey: 'COORDINATE.TRANSFORMCOMPOSE', parameters: {} } },
+      { id: 'measure', position: { x: 0, y: 0 }, data: { typeKey: 'MEASURE.CALIPERLINE', parameters: { startX: 130, startY: 60, endX: 150, endY: 70 } } }
+    ];
+    const edges: Edge[] = [
+      { id: 'roi-compose', source: 'roi', sourceHandle: 'TRANSFORM', target: 'compose', targetHandle: 'TRANSFORMA' },
+      { id: 'compose-measure', source: 'compose', sourceHandle: 'TRANSFORM', target: 'measure', targetHandle: 'TRANSFORM' }
+    ];
+
+    const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 0 });
+
+    expect(moved[2].data.parameters).toMatchObject({ startX: 230, startY: 80, endX: 250, endY: 90 });
+  });
+
+  it('recognizes a case-insensitive connected circle and does not rebase shadowed local values', () => {
+    const nodes = [
+      { id: 'roi', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', parameters: { baseX: 100, baseY: 50 } } },
+      { id: 'measure', position: { x: 0, y: 0 }, data: { typeKey: 'measure.caliperCircle', parameters: { centerX: 130, centerY: 60, radius: 8 } } }
+    ];
+    const edges: Edge[] = [
+      { id: 'roi-measure-transform', source: 'roi', sourceHandle: 'transform', target: 'measure', targetHandle: 'TRANSFORM' },
+      { id: 'circle-measure', source: 'geometry', sourceHandle: 'circle', target: 'measure', targetHandle: 'CIRCLE' }
+    ];
+
+    const moved = applyReferenceParameters(nodes, edges, 'roi', { baseX: 200, baseY: 70, baseThetaDeg: 0 });
+
+    expect(moved[1].data.parameters).toEqual(nodes[1].data.parameters);
   });
 });

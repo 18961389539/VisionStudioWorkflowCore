@@ -44,6 +44,15 @@ const coordinateInputPorts: Record<string, string[]> = {
   'calibration.cameraIntrinsics': ['calibrationDataJson']
 };
 
+function portNameIs(actual: string | undefined, expected: string): boolean {
+  return actual?.toLowerCase() === expected.toLowerCase();
+}
+
+function coordinateNamesForType<T>(catalog: Record<string, T>, type: string): T | undefined {
+  const key = Object.keys(catalog).find(candidate => candidate.toLowerCase() === type.toLowerCase());
+  return key === undefined ? undefined : catalog[key];
+}
+
 function graphSourceFingerprint(sourceNodeId: string | undefined, nodes: Node[], edges: Edge[], includeAllParameters: boolean): string {
   if (!sourceNodeId) return parameterFingerprint(null);
   const byId = new Map(nodes.map(node => [node.id, node]));
@@ -58,44 +67,47 @@ function graphSourceFingerprint(sourceNodeId: string | undefined, nodes: Node[],
     if (!node) return { nodeId, missing: true };
     active.add(nodeId);
     const type = typeof node.data.typeKey === 'string' ? node.data.typeKey : '';
+    const normalizedType = type.toLowerCase();
     const parameters = (node.data.parameters ?? {}) as NodeParameters;
     const nodeEdges = edges.filter(edge => edge.target === nodeId);
-    const connectedPorts = new Set(nodeEdges.map(edge => edge.targetHandle ?? ''));
+    const connectedPorts = new Set(nodeEdges.map(edge => edge.targetHandle?.toLowerCase() ?? ''));
     const keys = (includeAllParameters ? Object.keys(parameters).filter(key =>
       // Trained model bytes are large; the persisted model hash identifies them. Training samples are
       // authoring inputs and do not affect matching until a new trained model is produced.
-      key !== 'trainedModelData' && key !== 'trainingSamples') : (coordinateParameters[type] ?? [])).filter(key => {
-      if (type === 'image.crop' && (connectedPorts.has('roi') || (parameters.roi != null && key !== 'roi'))) return false;
-      if (type === 'image.undistort' && connectedPorts.has('calibrationJson') && key === 'calibrationJson') return false;
-      if (type === 'calibration.cameraIntrinsics' && connectedPorts.has('calibrationDataJson') && key === 'calibrationDataJson') return false;
-      if (type === 'calibration.detectBoard' && connectedPorts.has('calibrationDataJson') && key === 'calibrationDataJson') return false;
-      if (type === 'roi.transform' && connectedPorts.has('roi') && key === 'roi') return false;
+      key !== 'trainedModelData' && key !== 'trainingSamples')
+      : (coordinateNamesForType(coordinateParameters, normalizedType) ?? [])).filter(key => {
+      if (normalizedType === 'image.crop' && (connectedPorts.has('roi') || (parameters.roi != null && key !== 'roi'))) return false;
+      if (normalizedType === 'image.undistort' && connectedPorts.has('calibrationjson') && key === 'calibrationJson') return false;
+      if (normalizedType === 'calibration.cameraintrinsics' && connectedPorts.has('calibrationdatajson') && key === 'calibrationDataJson') return false;
+      if (normalizedType === 'calibration.detectboard' && connectedPorts.has('calibrationdatajson') && key === 'calibrationDataJson') return false;
+      if (normalizedType === 'roi.transform' && connectedPorts.has('roi') && key === 'roi') return false;
       return true;
     });
     const nodeInputs = Array.isArray(node.data.inputs) ? node.data.inputs as { name?: string; dataType?: string }[] : [];
-    const imagePorts = new Set(nodeInputs.filter(port => port.dataType === 'Image' || port.dataType === 'DomainImage')
-      .map(port => port.name).filter((name): name is string => typeof name === 'string'));
+    const imagePorts = new Set(nodeInputs.filter(port => ['image', 'domainimage'].includes(String(port.dataType ?? '').toLowerCase()))
+      .map(port => port.name?.toLowerCase()).filter((name): name is string => typeof name === 'string'));
     if (imagePorts.size === 0) imagePorts.add('image');
     const valueInputPorts = new Set(nodeInputs.filter(port => typeof port.name === 'string'
       && !['control', 'exec'].includes(String(port.dataType ?? '').toLowerCase()))
-      .map(port => port.name!));
+      .map(port => port.name!.toLowerCase()));
     if (includeAllParameters && valueInputPorts.size === 0) {
       for (const edge of nodeEdges) {
-        const port = edge.targetHandle ?? '';
+        const port = edge.targetHandle?.toLowerCase() ?? '';
         if (port && !['exec', 'next', 'control', 'execution'].includes(port.toLowerCase())) valueInputPorts.add(port);
       }
     }
     const relevantPorts = includeAllParameters
       ? valueInputPorts
-      : new Set([...imagePorts, ...(coordinateInputPorts[type] ?? [])]);
-    if (type === 'image.crop') relevantPorts.add('roi');
-    if (type === 'roi.transform') { relevantPorts.add('roi'); relevantPorts.add('currentPose'); }
-    const parents = nodeEdges.filter(edge => relevantPorts.has(edge.targetHandle ?? ''))
-      .sort((a, b) => `${a.targetHandle}:${a.source}:${a.sourceHandle}`.localeCompare(`${b.targetHandle}:${b.source}:${b.sourceHandle}`))
-      .map(edge => ({ port: edge.targetHandle, sourcePort: edge.sourceHandle, frame: visit(edge.source) }));
+      : new Set([...imagePorts, ...(coordinateNamesForType(coordinateInputPorts, normalizedType) ?? []).map(port => port.toLowerCase())]);
+    if (normalizedType === 'image.crop') relevantPorts.add('roi');
+    if (normalizedType === 'roi.transform') { relevantPorts.add('roi'); relevantPorts.add('currentpose'); }
+    const parents = nodeEdges.filter(edge => relevantPorts.has(edge.targetHandle?.toLowerCase() ?? ''))
+      .sort((a, b) => `${a.targetHandle?.toLowerCase()}:${a.source}:${a.sourceHandle?.toLowerCase()}`
+        .localeCompare(`${b.targetHandle?.toLowerCase()}:${b.source}:${b.sourceHandle?.toLowerCase()}`))
+      .map(edge => ({ port: edge.targetHandle?.toLowerCase(), sourcePort: edge.sourceHandle?.toLowerCase(), frame: visit(edge.source) }));
     const signature = {
       nodeId,
-      type,
+      type: normalizedType,
       parameters: keys.map(key => [key, parameters[key] ?? null]),
       parents
     };
@@ -177,7 +189,7 @@ export function capturedReference(parameters: NodeParameters, summary: Record<st
 export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: string, parameters: NodeParameters): Node[] {
   const source = nodes.find(node => node.id === nodeId);
   const previous = (source?.data.parameters ?? {}) as NodeParameters;
-  const rebase = source?.data.typeKey === 'roi.transform'
+  const rebase = String(source?.data.typeKey ?? '').toLowerCase() === 'roi.transform'
     && ['baseX', 'baseY', 'baseThetaDeg'].some(key => Number(previous[key] ?? 0) !== Number(parameters[key] ?? 0));
   const targets = new Set<string>();
   if (rebase) {
@@ -187,17 +199,17 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
     while (pending.length > 0) {
       const currentId = pending.pop()!;
       for (const edge of edges) {
-        if (edge.source !== currentId || edge.sourceHandle !== 'transform') continue;
+        if (edge.source !== currentId || !portNameIs(edge.sourceHandle, 'transform')) continue;
         const target = nodesById.get(edge.target);
         if (!target) continue;
-        const type = String(target.data.typeKey ?? '');
-        if (type === 'coordinate.transformCompose' && edge.targetHandle === 'transformA') {
+        const type = String(target.data.typeKey ?? '').toLowerCase();
+        if (type === 'coordinate.transformcompose' && portNameIs(edge.targetHandle, 'transformA')) {
           if (!transformPath.has(target.id)) {
             transformPath.add(target.id);
             pending.push(target.id);
           }
-        } else if (edge.targetHandle === 'transform'
-          && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+        } else if (portNameIs(edge.targetHandle, 'transform')
+          && ['feature.edgesubpixel', 'measure.caliper', 'measure.caliperline', 'measure.calipercircle'].includes(type)) {
           targets.add(target.id);
         }
       }
@@ -206,12 +218,12 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
   return nodes.map(node => {
     if (node.id === nodeId) return { ...node, data: { ...node.data, stale: true, parameters } };
     if (!targets.has(node.id)) return node;
-    const type = node.data.typeKey;
+    const type = String(node.data.typeKey ?? '').toLowerCase();
     const current = (node.data.parameters ?? {}) as NodeParameters;
     const move = (x: number, y: number) => rebaseRoi({ type: 'Circle', x, y, radius: 1 }, previous,
       Number(parameters.baseX ?? 0), Number(parameters.baseY ?? 0), Number(parameters.baseThetaDeg ?? 0)) as Extract<VisionRoi, { type: 'Circle' }>;
     let geometry: NodeParameters;
-    if (type === 'measure.caliperCircle' && !edges.some(edge => edge.target === node.id && edge.targetHandle === 'circle')) {
+    if (type === 'measure.calipercircle' && !edges.some(edge => edge.target === node.id && portNameIs(edge.targetHandle, 'circle'))) {
       const center = move(Number(current.centerX ?? 320), Number(current.centerY ?? 240));
       const rotation = -referenceAngleDelta(previous, Number(parameters.baseThetaDeg ?? 0));
       const start = Number(current.angleStartDeg ?? -180) + rotation;
@@ -219,8 +231,8 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
       const turns = Math.round((start + end) / 720) * 360;
       geometry = { centerX: center.x, centerY: center.y,
         angleStartDeg: start - turns, angleEndDeg: end - turns };
-    } else if (['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(String(type))
-      && !edges.some(edge => edge.target === node.id && edge.targetHandle === 'searchLine')) {
+    } else if (['measure.caliper', 'measure.caliperline', 'feature.edgesubpixel'].includes(type)
+      && !edges.some(edge => edge.target === node.id && portNameIs(edge.targetHandle, 'searchLine'))) {
       const start = move(Number(current.startX ?? 120), Number(current.startY ?? 240));
       const end = move(Number(current.endX ?? 520), Number(current.endY ?? 240));
       geometry = { startX: start.x, startY: start.y, endX: end.x, endY: end.y };
