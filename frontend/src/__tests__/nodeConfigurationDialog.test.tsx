@@ -345,6 +345,25 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).not.toContain('roi-transform-corrected-shape');
   });
 
+  it('keeps the current upstream ROI overlay when a local crop test fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const edges = [
+      { id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const onPreview = vi.fn(async () => { throw new Error('local preview failed'); });
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, imageNode], edges, result, onPreview });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    fireEvent.click(dialog.getByRole('button', { name: '运行此节点' }));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledOnce());
+    await waitFor(() => expect(dialog.getByText('上次运行图像 · 当前参数待验证')).toBeTruthy());
+    expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+  });
+
   it('keeps the corrected ROI overlay visible through pixel-coordinate-preserving preprocessing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 },

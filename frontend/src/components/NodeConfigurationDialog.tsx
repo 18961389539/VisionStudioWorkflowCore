@@ -653,7 +653,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges)
       || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)
       || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
-  const connectedRoiInputOverlays = !stale && roiInputEdge && imageSource === 'input'
+  const connectedRoiInputOverlays = !resultStale && roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
     ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
     : [];
