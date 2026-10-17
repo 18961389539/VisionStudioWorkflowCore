@@ -786,7 +786,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     ? measurementGeometryType === 'line'
       ? { type: 'line', start: connectedSearchLine?.start ?? { x: geometryNumber('startX', 120), y: geometryNumber('startY', 240) },
         end: connectedSearchLine?.end ?? { x: geometryNumber('endX', 520), y: geometryNumber('endY', 240) },
-        profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)),
+        profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)), direction: String(draft.direction ?? 'strongest'),
         ...(catalogItem.type === 'measure.caliperLine' ? { profileSpan: Math.max(0, geometryNumber('edgeLength', 0)),
           profileCount: geometryNumber('caliperCount', 9) } : {}) }
       : { type: 'circle', center: connectedCircle ? { x: connectedCircle.x, y: connectedCircle.y }
@@ -795,6 +795,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         angleStartDeg: geometryNumber('angleStartDeg', -180), angleEndDeg: geometryNumber('angleEndDeg', 180),
         caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
         angleStepDeg: geometryNumber('angleStepDeg', 5), profileWidth: effectiveSampleWidth(geometryNumber('sampleWidth', 5)),
+        searchDirection: String(draft.searchDirection ?? 'strongest'),
         centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
   const measurementInputReport = transformInputEdge

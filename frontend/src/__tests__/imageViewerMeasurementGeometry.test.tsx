@@ -27,7 +27,8 @@ vi.mock('react-konva', async () => {
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
-    Arrow: () => <span data-testid="search-arrow" />,
+    Arrow: ({ points, pointerAtBeginning }: { points?: number[]; pointerAtBeginning?: boolean }) =>
+      <span data-testid="search-arrow" data-points={points?.join(',')} data-pointer-at-beginning={pointerAtBeginning} />,
     Image: () => null,
     Line: ({ points, stroke, name }: { points?: number[]; stroke?: string; name?: string }) => name?.startsWith('measurement-profile-band-')
       || name?.startsWith('measurement-circle-profile-band-')
@@ -322,7 +323,14 @@ describe('ImageViewer measurement geometry editing', () => {
 
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
-    expect(screen.getByTestId('search-arrow')).toBeTruthy();
+    expect(screen.getByTestId('search-arrow').getAttribute('data-pointer-at-beginning')).toBe('true');
+  });
+
+  it('reverses the line search arrow when the first edge is searched from the end', () => {
+    imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 }, direction: 'firstfromend' }, vi.fn());
+
+    expect(screen.getByTestId('search-arrow').getAttribute('data-points')).toBe('50,10,10,10');
+    expect(screen.getByTestId('search-arrow').getAttribute('data-pointer-at-beginning')).toBe('false');
   });
 
   it('shows the effective projection-width band for each line caliper', () => {
@@ -440,7 +448,16 @@ describe('ImageViewer measurement geometry editing', () => {
 
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
-    expect(screen.getByTestId('search-arrow')).toBeTruthy();
+    expect(screen.getByTestId('search-arrow').getAttribute('data-pointer-at-beginning')).toBe('true');
+  });
+
+  it('reverses the radial search arrow when the first edge is searched from the outer end', () => {
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: 0, angleEndDeg: 90, searchDirection: 'firstfromend' }, vi.fn());
+
+    expect(screen.getByTestId('search-arrow').getAttribute('data-points')).toBe('75,50,65,50');
+    expect(screen.getByText('起点')).toBeTruthy();
+    expect(screen.getByText('终点')).toBeTruthy();
   });
 
   it('adjusts a radial-caliper projection width from its canvas handle', () => {

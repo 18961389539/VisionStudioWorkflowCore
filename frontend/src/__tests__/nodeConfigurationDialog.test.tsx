@@ -13,8 +13,8 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
       previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
       roi?: VisionRoi;
       roiTargetLabel?: string;
-      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number; profileWidth?: number }
-        | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; profileWidth?: number; centerEditable?: boolean; radiusEditable?: boolean };
+      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number; profileWidth?: number; direction?: string }
+        | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; profileWidth?: number; searchDirection?: string; centerEditable?: boolean; radiusEditable?: boolean };
       measurementGeometryEditable?: boolean;
       onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
     }) =>
@@ -28,11 +28,13 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
           data-center-y={measurementGeometry.center.y} data-radius={measurementGeometry.radius} data-band={measurementGeometry.band}
           data-profile-width={measurementGeometry.profileWidth}
           data-angle-start={measurementGeometry.angleStartDeg} data-angle-end={measurementGeometry.angleEndDeg}
+          data-search-direction={measurementGeometry.searchDirection}
           data-editable={Boolean(measurementGeometryEditable)}
           data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
         {measurementGeometry?.type === 'line' && <span data-testid="line-geometry" data-start-x={measurementGeometry.start.x}
           data-start-y={measurementGeometry.start.y} data-end-x={measurementGeometry.end.x} data-end-y={measurementGeometry.end.y}
           data-profile-span={measurementGeometry.profileSpan} data-profile-width={measurementGeometry.profileWidth}
+          data-direction={measurementGeometry.direction}
           data-editable={Boolean(measurementGeometryEditable)} />}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && measurementGeometry.profileSpan !== undefined
@@ -826,6 +828,26 @@ describe('measurement ROI image coverage preflight', () => {
 });
 
 describe('caliper geometry fitting', () => {
+  it.each([
+    ['measure.caliper', 'line', 'direction', 'data-direction'],
+    ['measure.caliperLine', 'line', 'direction', 'data-direction'],
+    ['measure.caliperCircle', 'circle', 'searchDirection', 'data-search-direction']
+  ] as const)('passes the configured search order to the %s canvas preview', async (type, geometryType, parameter, attribute) => {
+    const item = fallbackCatalog.find(candidate => candidate.type === type)!;
+    const parameters = type === 'measure.caliperCircle'
+      ? { [parameter]: 'firstfromend', centerX: 50, centerY: 50, radius: 20 }
+      : { [parameter]: 'firstfromend', startX: 10, startY: 20, endX: 80, endY: 20 };
+    const caliperNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: {
+      typeKey: type, label: item.displayName, inputs: item.inputs, parameters
+    } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'caliper-image', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: caliperNode, catalogItem: item, nodes: [caliperNode, imageNode], edges, result: report });
+
+    const geometry = await dialog.findByTestId(geometryType === 'line' ? 'line-geometry' : 'circle-geometry');
+    expect(geometry.getAttribute(attribute)).toBe('firstfromend');
+  });
+
   it.each(['measure.caliper', 'measure.caliperLine'])('fits the %s search line into the loaded image', async (type) => {
     const item = fallbackCatalog.find(candidate => candidate.type === type)!;
     const caliperNode: Node = { id: 'test', position: { x: 0, y: 0 }, data: {

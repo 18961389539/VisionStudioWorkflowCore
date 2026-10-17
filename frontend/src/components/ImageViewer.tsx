@@ -16,10 +16,10 @@ type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | 
 type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'profileWidth' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
-  | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number; profileWidth?: number }
+  | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number; profileWidth?: number; direction?: string }
   | { type: 'circle'; center: Point; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number;
       caliperCount?: number; samplingMode?: string; angleStepDeg?: number; profileWidth?: number;
-      centerEditable?: boolean; radiusEditable?: boolean };
+      searchDirection?: string; centerEditable?: boolean; radiusEditable?: boolean };
 
 /** 像素化显示偏好：默认开启——放大时按真实像素方块渲染（最近邻），便于逐像素核对；
  *  关闭则使用画布默认的平滑插值（缩放总览时更顺眼）。与其它显示偏好一样本地持久化。 */
@@ -555,7 +555,11 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
 }) {
   const handleRadius = 5 / scale;
   if (geometry.type === 'line') {
-    const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
+    const searchFromEnd = geometry.direction?.toLowerCase() === 'firstfromend';
+    const searchStrongest = !geometry.direction || geometry.direction.toLowerCase() === 'strongest';
+    const searchStart = searchFromEnd ? geometry.end : geometry.start;
+    const searchEnd = searchFromEnd ? geometry.start : geometry.end;
+    const dx = searchEnd.x - searchStart.x, dy = searchEnd.y - searchStart.y;
     const length = Math.hypot(dx, dy);
     const directionX = length > 0 ? dx / length : 1, directionY = length > 0 ? dy / length : 0;
     const labelOffset = 7 / scale;
@@ -585,15 +589,15 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
         return <Line key={index} points={[geometry.start.x + x, geometry.start.y + y, geometry.end.x + x, geometry.end.y + y]}
           stroke="#91d5ff" opacity={0.6} strokeWidth={0.8 / scale} />;
       })}
-      <Arrow points={[geometry.start.x, geometry.start.y, geometry.end.x, geometry.end.y]} stroke="#fa8c16" fill="#fa8c16"
-        pointerLength={8 / scale} pointerWidth={8 / scale} strokeWidth={2.5 / scale} />
-      <Text x={geometry.start.x - directionX * 15 / scale + labelNormalX} y={geometry.start.y - directionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
+      <Arrow points={[searchStart.x, searchStart.y, searchEnd.x, searchEnd.y]} stroke="#fa8c16" fill="#fa8c16"
+        pointerAtBeginning={searchStrongest} pointerLength={8 / scale} pointerWidth={8 / scale} strokeWidth={2.5 / scale} />
+      <Text x={searchStart.x - directionX * 15 / scale + labelNormalX} y={searchStart.y - directionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
         fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
-      <Text x={geometry.end.x + directionX * 7 / scale + labelNormalX} y={geometry.end.y + directionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
+      <Text x={searchEnd.x + directionX * 7 / scale + labelNormalX} y={searchEnd.y + directionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
         fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
       {editable && <>
-        <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
-        <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={searchStart.x} y={searchStart.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
+        <Circle x={searchEnd.x} y={searchEnd.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
         {profileHandles && <>
           <Circle name="measurement-profile-span-start" x={profileHandles.start.x} y={profileHandles.start.y} radius={handleRadius}
             fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
@@ -625,11 +629,16 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
   };
   const firstSpoke = boundary(angles[0] ?? start);
   const firstSpokeAngle = normalizeCaliperAngle(angles[0] ?? start) * Math.PI / 180;
+  const searchFromEnd = geometry.searchDirection?.toLowerCase() === 'firstfromend';
+  const searchStrongest = !geometry.searchDirection || geometry.searchDirection.toLowerCase() === 'strongest';
+  const firstSearchStart = searchFromEnd ? firstSpoke.slice(2, 4) : firstSpoke.slice(0, 2);
+  const firstSearchEnd = searchFromEnd ? firstSpoke.slice(0, 2) : firstSpoke.slice(2, 4);
+  const searchDirectionX = searchFromEnd ? -Math.cos(firstSpokeAngle) : Math.cos(firstSpokeAngle);
+  const searchDirectionY = searchFromEnd ? -Math.sin(firstSpokeAngle) : Math.sin(firstSpokeAngle);
   const profileHalfWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
   const labelOffset = 7 / scale;
-  const labelNormalX = -Math.sin(firstSpokeAngle) * labelOffset;
-  const labelNormalY = Math.cos(firstSpokeAngle) * labelOffset;
-  const labelDirectionX = Math.cos(firstSpokeAngle), labelDirectionY = Math.sin(firstSpokeAngle);
+  const labelNormalX = -searchDirectionY * labelOffset;
+  const labelNormalY = searchDirectionX * labelOffset;
   return <Group listening={false}>
     {profileHalfWidth > 0 && angles.map((angleDeg, index) => {
       const radians = normalizeCaliperAngle(angleDeg) * Math.PI / 180;
@@ -655,13 +664,14 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       const points = [geometry.center.x + inner * Math.cos(radians), geometry.center.y + inner * Math.sin(radians),
         geometry.center.x + outer * Math.cos(radians), geometry.center.y + outer * Math.sin(radians)];
       return index === 0
-        ? <Arrow key={`spoke-${index}`} points={points} stroke="#fa8c16" fill="#fa8c16" opacity={0.9}
+        ? <Arrow key={`spoke-${index}`} points={searchFromEnd ? [...points.slice(2), ...points.slice(0, 2)] : points}
+          pointerAtBeginning={searchStrongest} stroke="#fa8c16" fill="#fa8c16" opacity={0.9}
           pointerLength={6 / scale} pointerWidth={6 / scale} strokeWidth={1.5 / scale} />
         : <Line key={`spoke-${index}`} points={points} stroke="#91d5ff" opacity={0.55} strokeWidth={0.7 / scale} />;
     })}
-    <Text x={firstSpoke[0] - labelDirectionX * 15 / scale + labelNormalX} y={firstSpoke[1] - labelDirectionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
+    <Text x={firstSearchStart[0] - searchDirectionX * 15 / scale + labelNormalX} y={firstSearchStart[1] - searchDirectionY * 15 / scale + labelNormalY} text="起点" fill="#1677ff"
       fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
-    <Text x={firstSpoke[2] + labelDirectionX * 7 / scale + labelNormalX} y={firstSpoke[3] + labelDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
+    <Text x={firstSearchEnd[0] + searchDirectionX * 7 / scale + labelNormalX} y={firstSearchEnd[1] + searchDirectionY * 7 / scale + labelNormalY} text="终点" fill="#722ed1"
       fontSize={12 / scale} fontStyle="bold" stroke="#fff" strokeWidth={2 / scale} listening={false} />
     {!fullCircle && span > 0 && <>
       <Line points={boundary(normalizeCaliperAngle(start))} stroke="#fa8c16" strokeWidth={1.5 / scale} />
