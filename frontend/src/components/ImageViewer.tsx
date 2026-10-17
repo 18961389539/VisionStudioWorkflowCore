@@ -132,7 +132,7 @@ function polygonHandleIndices(pointCount: number): number[] {
 
 function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 'circle' }>, scale: number, width: number, height: number) {
   const start = geometry.angleStartDeg ?? -180;
-  const { span } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
+  const { span, fullCircle } = circleArcSpan(start, geometry.angleEndDeg ?? 180);
   if (width <= 0 || height <= 0) return undefined;
   const offset = (HANDLE_HIT + 4) / scale;
   const smallCircle = geometry.radius * scale < HANDLE_HIT * 3;
@@ -143,6 +143,21 @@ function caliperCircleArcHandles(geometry: Extract<MeasurementGeometry, { type: 
       y: clamp(geometry.center.y + Math.max(0, radius) * Math.sin(radians), 0, height)
     };
   };
+  if (fullCircle || span === 0) {
+    // Coincident arc endpoints need distinct handles. Keep them clear of both radial-band
+    // controls and the center marker so a full circle can be changed into an arc directly.
+    const band = Math.max(0, geometry.band ?? 0);
+    const innerRadius = Math.max(0, geometry.radius - band);
+    const innerBandHandleRadius = Math.max(innerRadius, innerRadius * scale < HANDLE_HIT * 3 ? offset : 0);
+    const outerRadius = geometry.radius + band;
+    const outerBandHandleRadius = Math.max(outerRadius, outerRadius * scale < HANDLE_HIT * 3 ? offset * 2 : 0);
+    const innerArcRadius = Math.max(0, innerBandHandleRadius - offset);
+    const hasInnerSpace = innerArcRadius * scale >= HANDLE_HIT * 1.5;
+    return {
+      start: atAngle(start, hasInnerSpace ? innerArcRadius : outerBandHandleRadius + offset),
+      end: atAngle(start + span, hasInnerSpace ? outerBandHandleRadius + offset : outerBandHandleRadius + offset * 2)
+    };
+  }
   return {
     start: atAngle(start, geometry.radius + (smallCircle ? offset : -offset)),
     end: atAngle(start + span, geometry.radius + offset * (smallCircle ? 2 : 1))

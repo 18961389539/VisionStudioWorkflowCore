@@ -142,7 +142,7 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByTestId('caliper-circle-angle-start')).toBeTruthy();
     expect(screen.getByTestId('caliper-circle-angle-end')).toBeTruthy();
     const stage = screen.getByTestId('stage');
-    fireEvent.mouseDown(stage, { clientX: 166.8, clientY: 130 }); // blue start handle sits inside the nominal circle
+    fireEvent.mouseDown(stage, { clientX: 178.8, clientY: 130 }); // blue start handle sits inside the radial search band
     fireEvent.mouseMove(stage, { clientX: 200, clientY: 82.8 }); // move start angle to -90 degrees
     fireEvent.mouseUp(document.body, { clientX: 200, clientY: 82.8 });
 
@@ -154,6 +154,25 @@ describe('ImageViewer measurement geometry editing', () => {
       expect(result.angleEndDeg).toBe(180);
       expect(result.center).toEqual({ x: 50, y: 50 });
       expect(result.radius).toBe(20);
+      expect(result.band).toBe(5);
+    }
+  });
+
+  it('keeps a full-circle angle handle separate from the radial-band handle', () => {
+    const onChange = vi.fn();
+    imageView({ type: 'circle', center: { x: 50, y: 50 }, radius: 20, band: 5,
+      angleStartDeg: -90, angleEndDeg: 270 }, onChange);
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 108.6 }); // inner angle handle, clear of the cyan band handle above it
+    fireEvent.mouseMove(stage, { clientX: 247.2, clientY: 130 }); // angleStart to 0°
+    fireEvent.mouseUp(document.body, { clientX: 247.2, clientY: 130 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('circle');
+    if (result.type === 'circle') {
+      expect(result.angleStartDeg).toBeCloseTo(0, 4);
+      expect(result.angleEndDeg).toBe(270);
       expect(result.band).toBe(5);
     }
   });
