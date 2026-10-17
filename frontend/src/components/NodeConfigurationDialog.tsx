@@ -41,6 +41,26 @@ function imageFrameDescendsFrom(imageNodeId: string | undefined, sourceNodeId: s
   return false;
 }
 
+function imageFramesSharePixelPreservingAncestor(firstImageNodeId: string | undefined, secondImageNodeId: string | undefined,
+  nodes: Node[], edges: Edge[]) {
+  const ancestors = (sourceNodeId: string | undefined) => {
+    const visited = new Set<string>();
+    let currentId = sourceNodeId;
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      const current = nodes.find((item) => item.id === currentId);
+      const type = String(current?.data.typeKey ?? '');
+      const upstreamHandle = type === 'roi.transform' ? 'debugImage'
+        : cropMaskFramePreservingNodeTypes.has(type) ? 'image' : undefined;
+      if (!upstreamHandle) break;
+      currentId = edges.find((edge) => edge.target === currentId && edge.targetHandle === upstreamHandle)?.source;
+    }
+    return visited;
+  };
+  const first = ancestors(firstImageNodeId);
+  return [...ancestors(secondImageNodeId)].some((nodeId) => first.has(nodeId));
+}
+
 function clipLineToImage(start: { x: number; y: number }, end: { x: number; y: number }, width: number, height: number) {
   if (width <= 0 || height <= 0) return undefined;
   const dx = end.x - start.x;
@@ -631,7 +651,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   // image when that exact frame is connected, so a different preprocessed image is never misled.
   const roiOverlayFrameMatchesInput = roiSourceNode?.data.typeKey === 'roi.transform'
     && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges)
-      || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
+      || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)
+      || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
   const connectedRoiInputOverlays = !stale && roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
     ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
