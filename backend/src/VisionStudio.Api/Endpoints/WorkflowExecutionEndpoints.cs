@@ -169,11 +169,14 @@ public static class WorkflowExecutionEndpoints
                 })
                 : Results.NotFound());
 
-        app.MapGet("/api/runs/{runId}/nodes/{nodeId}/image", (string runId, string nodeId, RunStore store) =>
+        app.MapGet("/api/runs/{runId}/nodes/{nodeId}/image", (string runId, string nodeId, string? portName, RunStore store) =>
         {
-            var image = store.TryGet(runId, out var artifact)
-                ? artifact.NodeImages.FirstOrDefault(x => x.NodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase))
-                : null;
+            var nodeImages = store.TryGet(runId, out var artifact)
+                ? artifact.NodeImages.Where(x => x.NodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)).ToArray()
+                : [];
+            var image = portName is null
+                ? nodeImages.FirstOrDefault(x => x.PortName.Equals("image", StringComparison.OrdinalIgnoreCase)) ?? nodeImages.FirstOrDefault()
+                : nodeImages.FirstOrDefault(x => x.PortName.Equals(portName, StringComparison.OrdinalIgnoreCase));
             return image is null ? Results.NotFound() : Results.File(image.Jpeg, "image/jpeg");
         });
 

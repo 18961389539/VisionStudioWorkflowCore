@@ -31,7 +31,7 @@ public sealed class VisionWorkflowData : IDisposable
     private long _executionSequence;
     private HashSet<string> _breakpoints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _executedNodes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, RunNodeImage> _nodeImages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<NodeImageKey, RunNodeImage> _nodeImages = new(NodeImageKeyComparer.Instance);
     private const int MaxNodeImages = 32;
     /// <summary>单次运行全部节点图像的 JPEG 字节总预算：高分辨率/多图像节点不能只靠张数上限约束内存。</summary>
     private const long MaxNodeImagesTotalBytes = 16L * 1024 * 1024;
@@ -366,39 +366,65 @@ public sealed class VisionWorkflowData : IDisposable
     public bool CaptureNodeImages { get; private set; }
 
     /// <summary>
-    /// Captures at most one image output (first image-typed port) of a node as JPEG. Live Mats are
-    /// disposed with the run data, so re-executions overwrite the previous capture for the node.
+    /// Captures every image-typed output of a node as JPEG. Live Mats are disposed with the run data,
+    /// so re-executions replace the previous captures for that node.
     /// Bounded by <see cref="MaxNodeImages"/> and a total JPEG byte budget
     /// (<see cref="MaxNodeImagesTotalBytes"/>) and never allowed to fail the run.
     /// </summary>
     public void CaptureNodeImage(string nodeId, IReadOnlyDictionary<string, VisionValue> outputs)
     {
         if (!CaptureNodeImages) return;
+        var captures = new List<RunNodeImage>();
         foreach (var (portName, value) in outputs)
         {
             if (value.Type is not (VisionDataType.Image or VisionDataType.DomainImage) || value.Value is not IVisionImage image || image.NativeImage is not Mat mat) continue;
             try
             {
                 Cv2.ImEncode(".jpg", mat, out var jpeg);
-                // 张数上限、字节预算的读-判-写在同一临界区内完成：并行分支同时捕获时各自的
-                // 记账不会互相覆盖（原实现先读后 Exchange，会让预算记账丢失、上限失效）。
-                lock (_imageGate)
-                {
-                    var replacing = _nodeImages.TryGetValue(nodeId, out var previous);
-                    if (!replacing && _nodeImages.Count >= MaxNodeImages) return;
-                    // 字节记账：重执行覆盖同节点旧图时先扣旧长度；预算用尽则放弃本次捕获（宁缺勿爆内存）。
-                    var nextBytes = _nodeImageBytes - (replacing ? previous!.Jpeg.Length : 0) + jpeg.LongLength;
-                    if (nextBytes > MaxNodeImagesTotalBytes) return;
-                    _nodeImages[nodeId] = new RunNodeImage(nodeId, portName, jpeg, image.Width, image.Height);
-                    _nodeImageBytes = nextBytes;
-                }
+                captures.Add(new RunNodeImage(nodeId, portName, jpeg, image.Width, image.Height));
             }
             catch { /* 图像捕获失败不应影响运行 */ }
-            return;
+        }
+
+        // 更新、移除旧输出以及预算记账作为一个整体串行化。若节点重执行时输出端口集合发生变化，
+        // 不应让上一次执行留下的端口图像继续冒充本次结果。
+        lock (_imageGate)
+        {
+            foreach (var key in _nodeImages.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key.NodeId, nodeId)).ToArray())
+            {
+                if (_nodeImages.TryRemove(key, out var previous)) _nodeImageBytes -= previous.Jpeg.Length;
+            }
+
+            foreach (var capture in captures)
+            {
+                if (_nodeImages.Count >= MaxNodeImages) continue;
+                var nextBytes = _nodeImageBytes + capture.Jpeg.LongLength;
+                if (nextBytes > MaxNodeImagesTotalBytes) continue;
+                _nodeImages[new NodeImageKey(nodeId, capture.PortName)] = capture;
+                _nodeImageBytes = nextBytes;
+            }
         }
     }
 
-    public IReadOnlyList<RunNodeImage> SnapshotNodeImages() => _nodeImages.Values.ToArray();
+    public IReadOnlyList<RunNodeImage> SnapshotNodeImages() => _nodeImages.Values
+        .OrderBy(image => image.NodeId, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(image => image.PortName, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private readonly record struct NodeImageKey(string NodeId, string PortName);
+
+    private sealed class NodeImageKeyComparer : IEqualityComparer<NodeImageKey>
+    {
+        public static NodeImageKeyComparer Instance { get; } = new();
+
+        public bool Equals(NodeImageKey left, NodeImageKey right)
+            => StringComparer.OrdinalIgnoreCase.Equals(left.NodeId, right.NodeId)
+                && StringComparer.OrdinalIgnoreCase.Equals(left.PortName, right.PortName);
+
+        public int GetHashCode(NodeImageKey key)
+            => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(key.NodeId),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(key.PortName));
+    }
 
     public void BeginExecutionTimeline()
     {

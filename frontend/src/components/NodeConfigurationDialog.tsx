@@ -7,7 +7,7 @@ import PropertyPanel from './PropertyPanel';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from './ImageViewer';
 import NodeExecutionResult from './NodeExecutionResult';
 import SplitHandle from './SplitHandle';
-import { useRunImages } from '../useRunImages';
+import { runImageEntryForPort, useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { canonicalParameterGroup } from '../i18n/catalog';
@@ -458,7 +458,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   };
   const nodeLabels = Object.fromEntries(nodes.map((item) => [item.id, String(item.data.label ?? item.id)]));
   const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
-    runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog } =
+    runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog,
+    imageOutputPorts, imageOutputPortName, setImageOutputPortName } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
@@ -531,8 +532,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
     : measurementGeometry);
   const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
-    && (!measurementImageInputEdge?.sourceHandle || runImageCatalog.images[measurementImageSource.id]?.portName === measurementImageInputEdge.sourceHandle)
-    ? runImageCatalog.images[measurementImageSource.id]
+    ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
     : undefined;
   const measurementBoundsWidth = transformInputEdge ? measurementInputImageEntry?.width : imageViewerSource.width;
   const measurementBoundsHeight = transformInputEdge ? measurementInputImageEntry?.height : imageViewerSource.height;
@@ -1219,6 +1219,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             <Segmented size="small" value={imageSource} onChange={(value) => setImageSource(value as 'preview' | 'output' | 'input')}
               options={[{ label: '最终预览', value: 'preview' }, { label: '输出', value: 'output', disabled: !selectedOutputAvailable }, { label: '输入', value: 'input', disabled: !selectedInputAvailable }]} />
           </>}
+          {imageSource === 'output' && imageOutputPorts.length > 1 && <Select size="small" aria-label="输出图像端口"
+            value={imageOutputPortName} style={{ minWidth: 110 }} options={imageOutputPorts.map((entry) => ({ value: entry.portName, label: entry.portName }))}
+            onChange={setImageOutputPortName} />}
         </div>
         <div className="node-image-provenance"><span>{displayImageSource.label}</span>
           {imageCatalogLoading && <span>正在加载节点图像…</span>}

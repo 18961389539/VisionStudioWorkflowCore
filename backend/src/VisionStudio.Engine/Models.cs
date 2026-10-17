@@ -56,7 +56,7 @@ public sealed record ReplayInputArtifact(
     int Height);
 
 /// <summary>
-/// One image output captured while a run executes (interactive debugging support).
+/// One image output port captured while a run executes (interactive debugging support).
 /// Encoded as JPEG at capture time because live Mats are disposed with the run data.
 /// </summary>
 public sealed record RunNodeImage(

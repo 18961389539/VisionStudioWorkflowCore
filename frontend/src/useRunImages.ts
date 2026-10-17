@@ -2,9 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { PortDescriptor, RunResult } from './types';
 
-/** 运行期逐节点图像清单条目（/api/runs/{runId}/images）。 */
+/** 运行期逐节点、逐图像端口的图像清单条目（/api/runs/{runId}/images）。 */
 export type RunImageEntry = { portName: string; width: number; height: number };
-export type RunImageCatalog = { runId: string; images: Record<string, RunImageEntry> };
+export type RunImageCatalog = { runId: string; images: Record<string, Record<string, RunImageEntry>> };
+
+/** 有明确端口时只返回该端口，避免把 roiMask 等输入误显示成节点主图。 */
+export function runImageEntryForPort(catalog: RunImageCatalog | undefined, nodeId: string | undefined, portName?: string | null) {
+  if (!catalog || !nodeId) return undefined;
+  const outputs = catalog.images[nodeId];
+  if (!outputs) return undefined;
+  if (portName) return Object.values(outputs).find((entry) => entry.portName.toLowerCase() === portName.toLowerCase());
+  return Object.values(outputs).find((entry) => entry.portName.toLowerCase() === 'image') ?? Object.values(outputs)[0];
+}
 
 type Params = {
   result?: RunResult;
@@ -23,6 +32,7 @@ type Params = {
 export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: Params) {
   const [runImageCatalog, setRunImageCatalog] = useState<RunImageCatalog>();
   const [imageSource, setImageSource] = useState<'preview' | 'output' | 'input'>('preview');
+  const [requestedOutputPortName, setRequestedOutputPortName] = useState<string>();
   const [catalogRequest, setCatalogRequest] = useState<{ runId: string; loading: boolean; error?: string }>();
   const [catalogAttempt, setCatalogAttempt] = useState(0);
 
@@ -33,6 +43,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     if (!runId) {
       setRunImageCatalog(undefined);
       setImageSource('preview');
+      setRequestedOutputPortName(undefined);
       setCatalogRequest(undefined);
       return;
     }
@@ -47,10 +58,12 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
         const response = await fetch(`/api/runs/${runId}/images`, { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        const images: Record<string, RunImageEntry> = {};
+        const images: RunImageCatalog['images'] = Object.create(null) as RunImageCatalog['images'];
         for (const item of data.images ?? []) {
-          if (typeof item?.nodeId === 'string')
-            images[item.nodeId] = { portName: String(item.portName ?? 'image'), width: Number(item.width ?? 0), height: Number(item.height ?? 0) };
+          if (typeof item?.nodeId !== 'string') continue;
+          const portName = String(item.portName ?? 'image');
+          const outputs = images[item.nodeId] ?? (images[item.nodeId] = Object.create(null) as Record<string, RunImageEntry>);
+          outputs[portName] = { portName, width: Number(item.width ?? 0), height: Number(item.height ?? 0) };
         }
         catalog = { runId, images };
       } catch (reason) {
@@ -77,41 +90,49 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     () => (result && result.previewAvailable ? `/api/runs/${result.runId}/preview?t=${Date.now()}` : undefined),
     [result]);
 
-  // 输入图像解析：选中节点的 Image 输入端所连的上游节点，其输出图像即本节点的输入
-  const imageInputSourceId = useMemo(() => {
+  // 节点输入图像精确解析为边连接的上游输出端口，而不只是上游节点的默认图像端口。
+  const imageInputConnection = useMemo(() => {
     const node = nodes.find((x) => x.id === selectedId);
     if (!node) return undefined;
     const imagePorts = new Set(((node.data?.inputs ?? []) as PortDescriptor[])
       .filter((port) => port.dataType === 'Image').map((port) => port.name));
     if (imagePorts.size === 0) return undefined;
     const edge = edges.find((item) => item.target === selectedId && item.targetHandle && imagePorts.has(item.targetHandle));
-    return edge?.source;
+    return edge ? { nodeId: edge.source, portName: edge.sourceHandle } : undefined;
   }, [edges, nodes, selectedId]);
 
-  const selectedOutputAvailable = Boolean(selectedId && catalog?.images[selectedId]);
-  const selectedInputAvailable = Boolean(imageInputSourceId && catalog?.images[imageInputSourceId]);
+  // 切换节点或运行批次时回到主图，端口选择只影响当前节点的输出检查。
+  useEffect(() => { setRequestedOutputPortName(undefined); }, [selectedId, runId]);
 
-  // 查看器图像来源解析：最终预览 / 选中节点输出 / 选中节点输入（不可用时回退预览并明示原因）
+  const selectedOutputPorts = useMemo(
+    () => Object.values(catalog?.images[selectedId] ?? {}),
+    [catalog, selectedId]);
+  const outputEntry = runImageEntryForPort(catalog, selectedId, requestedOutputPortName);
+  const imageOutputPortName = outputEntry?.portName;
+  const selectedOutputAvailable = selectedOutputPorts.length > 0;
+  const selectedInputAvailable = Boolean(runImageEntryForPort(catalog, imageInputConnection?.nodeId, imageInputConnection?.portName));
+
+  // 查看器图像来源解析：最终预览 / 选中节点输出 / 选中节点的精确输入端口。
   const imageViewerSource = useMemo(() => {
     const label = (id: string) => nodeLabels[id] ?? id;
-    const nodeImage = (nodeId: string) => {
-      const entry = catalog?.images[nodeId];
+    const nodeImage = (nodeId: string, portName?: string | null) => {
+      const entry = runImageEntryForPort(catalog, nodeId, portName);
       return entry && catalog
-        ? { url: `/api/runs/${catalog.runId}/nodes/${nodeId}/image`, width: entry.width, height: entry.height }
+        ? { url: `/api/runs/${catalog.runId}/nodes/${nodeId}/image?portName=${encodeURIComponent(entry.portName)}`, width: entry.width, height: entry.height, portName: entry.portName }
         : undefined;
     };
     if (imageSource === 'output' && selectedId) {
-      const resolved = nodeImage(selectedId);
-      if (resolved) return { ...resolved, label: `输出 · ${label(selectedId)}`, nodeId: selectedId as string | undefined };
+      const resolved = nodeImage(selectedId, requestedOutputPortName);
+      if (resolved) return { ...resolved, label: `输出 · ${label(selectedId)}${resolved.portName === 'image' ? '' : ` · ${resolved.portName}`}`, nodeId: selectedId as string | undefined };
       if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输出图像`}）`, nodeId: undefined as string | undefined };
     }
     if (imageSource === 'input') {
-      const resolved = imageInputSourceId ? nodeImage(imageInputSourceId) : undefined;
-      if (resolved && imageInputSourceId) return { ...resolved, label: `输入 ← ${label(imageInputSourceId)}`, nodeId: imageInputSourceId as string | undefined };
+      const resolved = imageInputConnection ? nodeImage(imageInputConnection.nodeId, imageInputConnection.portName) : undefined;
+      if (resolved && imageInputConnection) return { ...resolved, label: `输入 ← ${label(imageInputConnection.nodeId)}${resolved.portName === 'image' ? '' : ` · ${resolved.portName}`}`, nodeId: imageInputConnection.nodeId as string | undefined };
       if (catalog || result) return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: selectedId ? `最终预览（${imageCatalogLoading ? '节点图像加载中' : imageCatalogError ? '节点图像暂不可用' : `${label(selectedId)} 无输入图像`}）` : '最终预览', nodeId: undefined as string | undefined };
     }
     return { url: previewUrl, width: result?.previewWidth, height: result?.previewHeight, label: '最终预览', nodeId: undefined as string | undefined };
-  }, [catalog, imageInputSourceId, imageSource, nodeLabels, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError]);
+  }, [catalog, imageInputConnection, imageSource, nodeLabels, previewUrl, result, selectedId, imageCatalogLoading, imageCatalogError, requestedOutputPortName]);
 
   // 查看节点图像时只显示该节点自己的覆盖层，避免与上游/下游标注混淆
   const viewerOverlays = useMemo(
@@ -120,9 +141,9 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
 
   // 点击节点即检查其中间结果：选中节点有输出图像时自动切到“输出”；“输入”模式在可解析时保留以便上下游对比
   useEffect(() => {
-    if (!selectedId || !catalog?.images[selectedId]) return;
-    setImageSource((current) => (current === 'input' && imageInputSourceId ? 'input' : 'output'));
-  }, [catalog, imageInputSourceId, selectedId]);
+    if (!selectedId || !selectedOutputAvailable) return;
+    setImageSource((current) => (current === 'input' && imageInputConnection ? 'input' : 'output'));
+  }, [imageInputConnection, selectedId, selectedOutputAvailable]);
 
   return {
     runImageCatalog: catalog,
@@ -134,6 +155,9 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     imageViewerSource,
     viewerOverlays,
     selectedOutputAvailable,
-    selectedInputAvailable
+    selectedInputAvailable,
+    imageOutputPorts: selectedOutputPorts,
+    imageOutputPortName,
+    setImageOutputPortName: setRequestedOutputPortName
   };
 }

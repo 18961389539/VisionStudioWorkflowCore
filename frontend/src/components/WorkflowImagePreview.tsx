@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { Button, Segmented, Tag } from 'antd';
+import { Button, Segmented, Select, Tag } from 'antd';
 import type { RunResult } from '../types';
 import { useRunImages } from '../useRunImages';
 import ImageViewer from './ImageViewer';
@@ -25,7 +25,8 @@ export default function WorkflowImagePreview({ nodes, edges, selectedId, nodeLab
     if (pinnedId && !pinned) setPinnedId(undefined);
   }, [pinnedId, pinned]);
   const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedInputAvailable,
-    selectedOutputAvailable, imageCatalogLoading, imageCatalogError, retryImageCatalog } = useRunImages({
+    selectedOutputAvailable, imageCatalogLoading, imageCatalogError, retryImageCatalog,
+    imageOutputPorts, imageOutputPortName, setImageOutputPortName } = useRunImages({
     result, selectedId: targetId, nodes, edges, nodeLabels
   });
 
@@ -47,6 +48,9 @@ export default function WorkflowImagePreview({ nodes, edges, selectedId, nodeLab
         { label: '节点输入', value: 'input', disabled: !selectedInputAvailable },
         { label: '节点输出', value: 'output', disabled: !selectedOutputAvailable }
       ]} />
+    {imageSource === 'output' && imageOutputPorts.length > 1 && <Select className="preview-source-port" size="small"
+      aria-label="输出图像端口" value={imageOutputPortName} options={imageOutputPorts.map((entry) => ({ value: entry.portName, label: entry.portName }))}
+      onChange={setImageOutputPortName} />}
     <div className="preview-provenance" aria-live="polite">
       <span>{imageViewerSource.label}</span>
       {stale && <Tag color="gold">流程已修改 · 上次结果</Tag>}

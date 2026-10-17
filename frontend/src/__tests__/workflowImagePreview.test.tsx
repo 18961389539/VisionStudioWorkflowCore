@@ -86,6 +86,31 @@ describe('workflow image preview', () => {
     expect(screen.getByText('运行批次：尚未运行')).toBeVisible();
   });
 
+  it('loads the exact connected upstream image port for node input preview', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'source', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'source', portName: 'roiMask', width: 60, height: 60 },
+      { nodeId: 'target', portName: 'image', width: 60, height: 60 }
+    ] }) })));
+    render(<WorkflowImagePreview {...base} edges={[{ id: 'edge', source: 'source', sourceHandle: 'roiMask', target: 'target', targetHandle: 'image' }]} />);
+    await waitFor(() => expect(screen.getByTestId('image-url')).toHaveTextContent('/nodes/target/image'));
+    fireEvent.click(screen.getByRole('radio', { name: '节点输入' }));
+    expect(screen.getByTestId('image-url')).toHaveTextContent('/nodes/source/image?portName=roiMask');
+  });
+
+  it('lets the user inspect a secondary image output port', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'target', portName: 'image', width: 100, height: 100 },
+      { nodeId: 'target', portName: 'roiMask', width: 100, height: 100 }
+    ] }) })));
+    render(<WorkflowImagePreview {...base} />);
+    await waitFor(() => expect(screen.getByTestId('image-url')).toHaveTextContent('/nodes/target/image'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '输出图像端口' }));
+    fireEvent.click((await screen.findAllByText('roiMask')).at(-1)!);
+    expect(screen.getByTestId('image-url')).toHaveTextContent('/nodes/target/image?portName=roiMask');
+  });
+
   it('releases a removed pinned node and does not silently pin it again after undo', async () => {
     availableImages();
     const view = render(<WorkflowImagePreview {...base} />);

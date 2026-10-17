@@ -8,8 +8,8 @@ using VisionStudio.Engine.Runtime;
 namespace VisionStudio.Engine.Tests;
 
 /// <summary>
-/// Per-node image capture for interactive inspection: with CaptureNodeImages enabled every image
-/// output is encoded once as JPEG and survives the run (live Mats are disposed with the run data).
+/// Per-node, per-port image capture for interactive inspection: with CaptureNodeImages enabled every
+/// image output is encoded once as JPEG and survives the run (live Mats are disposed with the run data).
 /// </summary>
 public sealed class RunNodeImageCaptureTests
 {
@@ -49,6 +49,47 @@ public sealed class RunNodeImageCaptureTests
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.NodeImages);
         Assert.Empty(result.NodeImages!);
+    }
+
+    [Fact]
+    public void CaptureNodeImage_StoresEveryImageOutputPort()
+    {
+        using var data = new VisionWorkflowData();
+        data.Configure(new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true));
+        using var image = new Mat(24, 32, MatType.CV_8UC1, Scalar.All(32));
+        using var mask = new Mat(24, 32, MatType.CV_8UC1, Scalar.All(255));
+
+        data.CaptureNodeImage("crop", new Dictionary<string, VisionValue>
+        {
+            ["image"] = new(VisionDataType.Image, VisionImage.Own(image)),
+            ["roiMask"] = new(VisionDataType.Image, VisionImage.Own(mask))
+        });
+
+        Assert.Collection(data.SnapshotNodeImages(),
+            output => { Assert.Equal("image", output.PortName); Assert.Equal("crop", output.NodeId); },
+            output => { Assert.Equal("roiMask", output.PortName); Assert.Equal("crop", output.NodeId); });
+    }
+
+    [Fact]
+    public void CaptureNodeImage_ReexecutionRemovesPortsMissingFromTheLatestOutput()
+    {
+        using var data = new VisionWorkflowData();
+        data.Configure(new VisionRunOptions(DebugRunMode.Full, CaptureNodeImages: true));
+        using var image = new Mat(24, 32, MatType.CV_8UC1, Scalar.All(32));
+        using var mask = new Mat(24, 32, MatType.CV_8UC1, Scalar.All(255));
+
+        data.CaptureNodeImage("crop", new Dictionary<string, VisionValue>
+        {
+            ["image"] = new(VisionDataType.Image, VisionImage.Own(image)),
+            ["roiMask"] = new(VisionDataType.Image, VisionImage.Own(mask))
+        });
+        data.CaptureNodeImage("crop", new Dictionary<string, VisionValue>
+        {
+            ["image"] = new(VisionDataType.Image, VisionImage.Own(image))
+        });
+
+        var output = Assert.Single(data.SnapshotNodeImages());
+        Assert.Equal("image", output.PortName);
     }
 
     [Fact]

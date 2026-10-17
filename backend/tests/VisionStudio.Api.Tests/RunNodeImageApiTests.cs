@@ -83,6 +83,35 @@ public sealed class RunNodeImageApiTests : IClassFixture<VisionStudioApiFactory>
         Assert.Equal(HttpStatusCode.NotFound, missingRun.StatusCode);
     }
 
+    [Fact]
+    public async Task Run_ExposesAndServesEachImageOutputPort()
+    {
+        var run = await _client.PostAsJsonAsync("/api/run", CropWorkflow());
+        Assert.True(run.StatusCode == HttpStatusCode.OK, await run.Content.ReadAsStringAsync());
+        using var runDoc = JsonDocument.Parse(await run.Content.ReadAsStringAsync());
+        var runId = runDoc.RootElement.GetProperty("runId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(runId));
+
+        var catalog = await _client.GetFromJsonAsync<JsonElement>($"/api/runs/{runId}/images");
+        var cropPorts = catalog.GetProperty("images").EnumerateArray()
+            .Where(item => item.GetProperty("nodeId").GetString() == "crop")
+            .Select(item => item.GetProperty("portName").GetString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("image", cropPorts);
+        Assert.Contains("roiMask", cropPorts);
+
+        // The legacy URL remains the primary cropped image; an explicit port retrieves the mask.
+        var image = await _client.GetByteArrayAsync($"/api/runs/{runId}/nodes/crop/image");
+        var mask = await _client.GetByteArrayAsync($"/api/runs/{runId}/nodes/crop/image?portName=roiMask");
+        Assert.Equal(0xFF, image[0]);
+        Assert.Equal(0xD8, image[1]);
+        Assert.Equal(0xFF, mask[0]);
+        Assert.Equal(0xD8, mask[1]);
+        Assert.NotEqual(Convert.ToBase64String(image), Convert.ToBase64String(mask));
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _client.GetAsync($"/api/runs/{runId}/nodes/crop/image?portName=missing")).StatusCode);
+    }
+
     private static object Workflow() => new
     {
         id = "node-image-smoke",
@@ -96,6 +125,22 @@ public sealed class RunNodeImageApiTests : IClassFixture<VisionStudioApiFactory>
         {
             new { id = "c1", sourceNodeId = "source", sourcePort = "next", targetNodeId = "threshold", targetPort = "exec", kind = "control" },
             new { id = "d1", sourceNodeId = "source", sourcePort = "image", targetNodeId = "threshold", targetPort = "image", kind = "data" }
+        }
+    };
+
+    private static object CropWorkflow() => new
+    {
+        id = "node-image-multiple-ports",
+        name = "Node Image Multiple Ports",
+        nodes = new object[]
+        {
+            new { id = "source", type = "image.synthetic", parameters = new { width = 320, height = 240, centerX = 160, centerY = 120, radius = 45 } },
+            new { id = "crop", type = "image.crop", parameters = new { roi = new { type = "Circle", x = 160, y = 120, radius = 22 } } }
+        },
+        edges = new object[]
+        {
+            new { id = "c1", sourceNodeId = "source", sourcePort = "next", targetNodeId = "crop", targetPort = "exec", kind = "control" },
+            new { id = "d1", sourceNodeId = "source", sourcePort = "image", targetNodeId = "crop", targetPort = "image", kind = "data" }
         }
     };
 }
