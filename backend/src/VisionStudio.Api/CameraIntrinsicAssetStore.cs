@@ -288,8 +288,23 @@ public sealed class CameraIntrinsicAssetStore(SqliteMetadataDatabase db)
             model.CameraMatrix[0][0] <= 0 || model.CameraMatrix[1][1] <= 0 ||
             Math.Abs(model.CameraMatrix[2][0]) > 1e-12 || Math.Abs(model.CameraMatrix[2][1]) > 1e-12 || Math.Abs(model.CameraMatrix[2][2] - 1) > 1e-9 ||
             !double.IsFinite(model.Rms) || model.Rms < 0 ||
-            model.NativeCameraParameters?.Any(value => !double.IsFinite(value)) == true)
+            model.NativeCameraParameters?.Any(value => !double.IsFinite(value)) == true ||
+            !HasValidLensModel(model))
             throw new ApiValidationException("Camera intrinsic model must contain valid dimensions, a finite normalized camera matrix, positive focal lengths, finite distortion coefficients, and a non-negative finite RMS.");
+    }
+
+    private static bool HasValidLensModel(CameraCalibrationModel model)
+    {
+        if (model.NativeCameraType is not null && (model.NativeCameraType != "area_scan_polynomial" || model.NativeCameraParameters is not { Length: 12 })) return false;
+        if (model.NativeCameraType is null && model.NativeCameraParameters is not null) return false;
+        return model.LensModel switch
+        {
+            "opencv_fisheye" => model.DistCoeffs.Length == 4 && model.NativeCameraType is null && model.NativeCameraParameters is null,
+            "area_scan_polynomial" => model.NativeCameraType == "area_scan_polynomial" && model.NativeCameraParameters is { Length: 12 },
+            "brown_conrady" => model.NativeCameraType is null,
+            null => true,
+            _ => false
+        };
     }
 
     private static void ValidateJson(string value, string name, int maxLength)

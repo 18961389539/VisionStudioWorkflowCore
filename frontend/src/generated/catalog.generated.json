@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "aa5b51b1bc7b62558c42212934a198b3915e66ebea0d5da7bb31f4016e62a1f4",
+  "hash": "3d993f2d43d6d44cb7d98d33bc36cf5d724847d700c97e8d73fd5ba91713282a",
   "items": [
     {
       "type": "image.acquire",
@@ -778,12 +778,34 @@
           "required": true
         },
         {
+          "name": "fisheyeModelActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [
+        {
+          "name": "cameraModel",
+          "label": "Camera Model",
+          "type": "select",
+          "defaultValue": "pinhole",
+          "options": [
+            {
+              "label": "Pinhole (JLVision polynomial)",
+              "value": "pinhole"
+            },
+            {
+              "label": "Fisheye (OpenCV Kannala-Brandt)",
+              "value": "fisheye"
+            }
+          ],
+          "description": "Select the lens model that matches the camera. Fisheye models use four Kannala-Brandt angular distortion coefficients and OpenCV's fisheye calibrator."
+        },
         {
           "name": "calibrationDataJson",
           "label": "Views JSON",
@@ -799,17 +821,17 @@
           "min": 0,
           "max": 100,
           "step": 0.1,
-          "description": "Pre-fit planar homography RMS gate; only applies to planar target views."
+          "description": "For pinhole, gates the planar homography pre-fit. For fisheye, gates the fitted fisheye per-view reprojection."
         },
         {
           "name": "maxPoseViewRms",
-          "label": "Max Pinhole Pose View RMS (px, 0=off)",
+          "label": "Max Fitted-Model Pose View RMS (px, 0=off)",
           "type": "number",
           "defaultValue": 0,
           "min": 0,
           "max": 100,
           "step": 0.1,
-          "description": "Gate the fitted-K per-view reprojection. It is unavailable when native polynomial distortion is active because that model is not included in this pinhole-only check."
+          "description": "Gate the fitted-camera per-view reprojection; available for fisheye and pinhole solves without active native polynomial distortion."
         },
         {
           "name": "maxRms",
@@ -821,7 +843,7 @@
           "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports per-view coverage and planar/pinhole reprojection RMS/max; maxViewRms, maxPoseViewRms, and maxRms optionally gate acceptance. The pinhole pose metric is not used as an outlier gate when native polynomial distortion is active. No fisheye/telecentric model.",
+      "description": "Calibrate pinhole lenses with the JLVision native area_scan_polynomial model, or fisheye lenses with OpenCV's four-coefficient Kannala-Brandt model. Accepts supplied correspondences, calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports coverage and fitted-model reprojection RMS/max where available; configurable per-view and overall RMS gates reject weak solves. Telecentric models are not supported.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13746,9 +13768,19 @@
           "min": 0,
           "max": 999999,
           "step": 1
+        },
+        {
+          "name": "fisheyeBalance",
+          "label": "Fisheye Balance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "OpenCV fisheye output-field balance: 0 favors a tighter rectified field; 1 preserves more field of view with additional border."
         }
       ],
-      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
+      "description": "Correct lens distortion with JLVision native polynomial/Brown-Conrady models or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

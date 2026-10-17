@@ -79,6 +79,9 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Camera Model': '相机模型',
+  'Fisheye Balance': '鱼眼视场平衡',
+  'Max Fitted-Model Pose View RMS (px, 0=off)': '拟合模型单视图 RMS 上限（px，0 为关）',
   'Parallel Tolerance': '平行容差', 'Require Within Segments': '要求交点位于线段内', 'Max RMS Error (0=off)': '最大 RMS 误差（0 为关闭）', 'Max Centre Distance (0=off)': '最大中心距（0 为关闭）', 'Max Angle Error deg (0=off)': '最大角度误差（度，0 为关闭）', 'Output Width (0=input)': '输出宽度（0 为输入宽度）', 'Character Blacklist': '字符黑名单', 'Low Confidence Threshold': '低置信度阈值', 'Threshold Mode': '阈值模式', 'Manual Threshold': '手动阈值', 'Otsu Auto (spatial maps)': 'Otsu 自动阈值（空间图）',
   'Lower Percentile': '下百分位（%）', 'Upper Percentile': '上百分位（%）',
   'Region Canvas Width': '区域画布宽度', 'Region Canvas Height': '区域画布高度', 'Boundary Side': '边界侧',
@@ -234,6 +237,8 @@ export function canonicalParameterGroup(group?: string): string {
 }
 
 const optionNames: Record<string, string> = {
+  'Pinhole (JLVision polynomial)': '针孔（JLVision 多项式）',
+  'Fisheye (OpenCV Kannala-Brandt)': '鱼眼（OpenCV Kannala-Brandt）',
   'Pixels (px)': '像素 (px)',
   Inner: '内侧', Outer: '外侧',
   'HSV (degrees, 0-1, 0-1)': 'HSV（角度、0–1、0–1）', 'sRGB (0-1)': 'sRGB（归一化 0–1）', 'CIELAB (D65)': 'CIELAB（D65 白点）',
@@ -358,8 +363,8 @@ export const portNames: Record<string, string> = {
   meanCoverageX: '平均 X 向覆盖率', meanCoverageY: '平均 Y 向覆盖率',
   viewStats: '各视图统计 JSON',
   worstViewRms: '最差视图 RMS',
-  worstPoseViewRms: '最差针孔位姿视图 RMS', worstPoseViewIndex: '最差针孔位姿视图索引', outlierViewIndex: '离群视图索引',
-  nativePolynomialDistortionActive: '原生多项式畸变启用',
+  worstPoseViewRms: '最差拟合模型视图 RMS', worstPoseViewIndex: '最差拟合模型视图索引', outlierViewIndex: '离群视图索引',
+  nativePolynomialDistortionActive: '原生多项式畸变启用', fisheyeModelActive: '鱼眼模型启用',
   maxTranslationError: '最大平移残差',
   maxAngleErrorDeg: '最大角度残差',
   worstSampleIndex: '最差样本索引',
@@ -439,7 +444,7 @@ const descriptions: Record<string, string> = {
   'output.exportResult': '将输入结果导出为 JSON 或 CSV，默认拒绝覆盖已有文件。',
   'output.httpRequest': '发送 HTTP 请求，支持超时、取消和响应大小上限；非成功状态会使节点失败。',
   'image.acquire': '从连续采集的相机帧流中获取一帧。选择“最新帧”会复用最新图像；选择“下一帧”会等待新图像。',
-  'image.undistort': '使用 JLVision 相机内参校正镜头畸变；可从内参向导保存、发布和加载不可变版本。将资产 ID/版本应用到节点后，发布和生产依赖校验会核对内嵌模型与版本内容一致。连接上游 calibrationJson 时不要同时绑定静态资产。校正后的像素坐标系发生变化，几何 ROI 应基于校正图像重新创建。',
+  'image.undistort': '使用 JLVision 多项式/Brown-Conrady 或 OpenCV 鱼眼模型校正镜头畸变；可从内参向导保存、发布和加载不可变版本。将资产 ID/版本应用到节点后，发布和生产依赖校验会核对内嵌模型与版本内容一致。连接上游 calibrationJson 时不要同时绑定静态资产。校正后的像素坐标系发生变化，几何 ROI 应基于校正图像重新创建。',
   'frameset.image': '从同步帧组中选取一台相机的图像，不复制底层图像数据。',
   'camera.syncCapture': '向同步组发送一次触发命令，收集每台成员相机的新图像，并输出包含实测时差的帧组。',
   'image.synthetic': '生成 1280×960 测试图像；圆、矩形和线段组成的图案保持固定尺寸，可按样本序号平移/旋转，或用固定随机种子生成可复现的位置。',
@@ -470,7 +475,7 @@ const descriptions: Record<string, string> = {
   'inference.instanceSegmentation': 'ONNX 实例分割（YOLO26/YOLOv8-Seg）：双头（框+掩膜系数与原型），应用类知 NMS，合成实例掩膜（letterbox 正确反变换）后合并为类标签图。不支持语义分割/OBB；姿态请用 inference.pose；不支持图内嵌 NMS / 单张量 e2e seg 导出。',
   'inference.pose': 'ONNX 姿态估计（YOLO26/YOLOv8-Pose）：layout=yolo 为原始多候选头（外部类知 NMS）；layout=xyxy 为 YOLO26 端到端 [x1,y1,x2,y2,score,class,kpts...]。输出框、关键点 JSON 与骨架叠加图。',
   'inference.anomaly': 'ONNX 异常检测：标量分数直接判阈值；空间异常图还会输出归一化热力图、峰值位置和超阈值面积占比。',
-  'calibration.cameraIntrinsics': '相机内参标定：报告每视图覆盖、平面拟合误差与针孔位姿重投影误差；可用单视图、针孔位姿视图和整体 RMS 门限拒绝差结果。针孔视图门限在原生多项式畸变启用时自动拒绝配置，避免误用不含畸变的近似值。',
+  'calibration.cameraIntrinsics': '相机内参标定：支持 JLVision 多项式针孔与 OpenCV 四系数鱼眼模型，报告逐视图覆盖与拟合模型重投影误差，并可用逐视图和整体 RMS 门限拒绝差结果。',
   'image.difference': '图像差分：绝对/有符号/归一化三种模式，可缩放，始终输出均值/标准差/极值；设门限后还输出超阈值像素占比。',
   'measure.blobs': '多斑点分析：面积、圆度、宽高、矩形度多特征组合筛选（HALCON select_shape 式），可按面积/X/Y/圆度排序。',
   'recognition.ocr': 'Tesseract 5 文字识别：支持页面分割/引擎模式、字符白名单、DPI、放大与二值化预处理、矩形 ROI，并输出逐词框和置信度；低置信词可过滤。不支持字体训练。',
@@ -714,8 +719,10 @@ const parameterDescriptions: Record<string, string> = {
   'inference.detection.letterbox': 'Letterbox：开启后预处理用灰边（114）填充，并把检测框坐标反填充回原图。YOLO 系列通常需要开启。',
   'inference.anomaly.threshold': '异常门限：标量输出直接比较；异常图按峰值判定，并统计超门限面积。',
   'image.register.subpixelRefine': '亚像素细化：对相关峰做抛物线插值；仅匹配角度在 5° 内时生效，旋转匹配保持整数结果。',
-  'calibration.cameraIntrinsics.maxViewRms': '单视图平面投影 RMS 上限（0 关闭）；某视图超限会报错并指出视图号，请检查该视图角点。',
-  'calibration.cameraIntrinsics.maxPoseViewRms': '拟合针孔模型逐视图 RMS 上限（0 关闭）；此预检不含 JLVision 原生多项式畸变，畸变启用时不能使用该门限。',
+  'calibration.cameraIntrinsics.cameraModel': '针孔模型走 JLVision 原生多项式标定；鱼眼模型走 OpenCV Kannala-Brandt 四系数标定。选择必须与实际镜头类型一致。',
+  'image.undistort.fisheyeBalance': '仅适用于 OpenCV 鱼眼模型；0 使用更紧的校正视场，1 保留更多鱼眼视场，图像边缘可能包含黑边。',
+  'calibration.cameraIntrinsics.maxViewRms': '逐视图 RMS 上限（0 关闭）；针孔模型使用平面单应性预检，鱼眼模型使用拟合鱼眼模型重投影误差。',
+  'calibration.cameraIntrinsics.maxPoseViewRms': '拟合模型逐视图 RMS 上限（0 关闭）；原生多项式畸变启用时无法准确计算，因此会拒绝此门限。',
   'calibration.cameraIntrinsics.maxRms': '模型 RMS 上限（0 关闭）；整体标定误差超限时拒绝该模型。',
   'measure.blobs.minRectangularity': '最小矩形度：面积/外接框面积，细长或 L 形目标该值低。',
   'measure.blobs.minWidth': '最小外接框宽度（像素，0 为不限）。',

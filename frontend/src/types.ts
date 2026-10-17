@@ -1020,6 +1020,7 @@ export type CalibrationWizardSession = {
   imageHeight?: number | null;
   views: CalibrationWizardView[];
   enabledCount: number;
+  cameraModel: 'pinhole' | 'fisheye';
   model?: unknown;
   lastSolveSummary?: Record<string, unknown> | null;
 };

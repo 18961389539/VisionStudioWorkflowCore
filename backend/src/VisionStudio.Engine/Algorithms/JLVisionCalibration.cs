@@ -4,6 +4,9 @@ using VisionStudio.Engine.Nodes;
 
 namespace VisionStudio.Engine.Algorithms;
 
+internal sealed record FisheyeViewError(double Rms, double Max);
+internal sealed record FisheyeCalibrationResult(CameraCalibrationModel Model, IReadOnlyList<FisheyeViewError> ViewErrors);
+
 internal static class JLVisionCalibration
 {
     public static CameraCalibrationModel Calibrate(CameraCalibrationRequest request, CancellationToken token)
@@ -46,8 +49,127 @@ internal static class JLVisionCalibration
         }
     }
 
-    public static Mat Undistort(Mat source, CameraCalibrationModel model, CancellationToken token)
+    public static FisheyeCalibrationResult CalibrateFisheye(CameraCalibrationRequest request, CancellationToken token)
     {
+        var objectPoints = request.Views.Select(view =>
+        {
+            var points = new Mat(view.ObjectPoints.Count, 1, MatType.CV_32FC3);
+            for (var i = 0; i < view.ObjectPoints.Count; i++)
+                points.Set(i, 0, new Point3f((float)(view.ObjectPoints[i][0] * 0.001), (float)(view.ObjectPoints[i][1] * 0.001), (float)(view.ObjectPoints[i][2] * 0.001)));
+            return points;
+        }).ToArray();
+        var imagePoints = request.Views.Select(view =>
+        {
+            var points = new Mat(view.ImagePoints.Count, 1, MatType.CV_32FC2);
+            for (var i = 0; i < view.ImagePoints.Count; i++)
+                points.Set(i, 0, new Point2f((float)view.ImagePoints[i][0], (float)view.ImagePoints[i][1]));
+            return points;
+        }).ToArray();
+        using var cameraMatrix = new Mat(3, 3, MatType.CV_64FC1, Scalar.All(0));
+        cameraMatrix.Set(0, 0, 1d);
+        cameraMatrix.Set(1, 1, 1d);
+        cameraMatrix.Set(2, 2, 1d);
+        using var distortion = new Mat(4, 1, MatType.CV_64FC1, Scalar.All(0));
+        IEnumerable<Mat>? rotations = null;
+        IEnumerable<Mat>? translations = null;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            var rms = Cv2.FishEye.Calibrate(
+                objectPoints,
+                imagePoints,
+                new Size(request.ImageWidth, request.ImageHeight),
+                cameraMatrix,
+                distortion,
+                out rotations,
+                out translations,
+                FishEyeCalibrationFlags.FixSkew | FishEyeCalibrationFlags.RecomputeExtrinsic | FishEyeCalibrationFlags.CheckCond,
+                new TermCriteria(CriteriaTypes.Count | CriteriaTypes.Eps, 100, 1e-7));
+            token.ThrowIfCancellationRequested();
+            if (!double.IsFinite(rms) || rms < 0 || !double.IsFinite(cameraMatrix.At<double>(0, 0)) || !double.IsFinite(cameraMatrix.At<double>(1, 1)) || cameraMatrix.At<double>(0, 0) <= 0 || cameraMatrix.At<double>(1, 1) <= 0)
+                throw new InvalidOperationException("OpenCV fisheye calibration produced invalid intrinsics or RMS.");
+            var coefficients = ReadFisheyeCoefficients(distortion);
+            if (Enumerable.Range(0, 3).SelectMany(row => Enumerable.Range(0, 3).Select(column => cameraMatrix.At<double>(row, column))).Any(value => !double.IsFinite(value)) || coefficients.Any(value => !double.IsFinite(value)) || Math.Abs(cameraMatrix.At<double>(0, 1)) > 1e-9)
+                throw new InvalidOperationException("OpenCV fisheye calibration produced a non-finite matrix or distortion coefficient, or a non-zero skew.");
+            var viewErrors = new List<FisheyeViewError>(request.Views.Count);
+            var rotationArray = (rotations ?? throw new InvalidOperationException("OpenCV fisheye calibration returned no rotation vectors.")).ToArray();
+            var translationArray = (translations ?? throw new InvalidOperationException("OpenCV fisheye calibration returned no translation vectors.")).ToArray();
+            if (rotationArray.Length != request.Views.Count || translationArray.Length != request.Views.Count)
+                throw new InvalidOperationException("OpenCV fisheye calibration returned incomplete per-view poses.");
+            for (var viewIndex = 0; viewIndex < request.Views.Count; viewIndex++)
+            {
+                token.ThrowIfCancellationRequested();
+                using var projected = new Mat();
+                using var jacobian = new Mat();
+                Cv2.FishEye.ProjectPoints(objectPoints[viewIndex], projected, rotationArray[viewIndex], translationArray[viewIndex], cameraMatrix, distortion, 0, jacobian);
+                var actual = request.Views[viewIndex].ImagePoints;
+                var sumSquared = 0d;
+                var maximum = 0d;
+                for (var pointIndex = 0; pointIndex < actual.Count; pointIndex++)
+                {
+                    var estimate = projected.At<Point2f>(pointIndex, 0);
+                    var dx = estimate.X - actual[pointIndex][0];
+                    var dy = estimate.Y - actual[pointIndex][1];
+                    var error = Math.Sqrt(dx * dx + dy * dy);
+                    if (!double.IsFinite(error)) throw new InvalidOperationException($"OpenCV fisheye calibration produced a non-finite reprojection for view {viewIndex}.");
+                    sumSquared += error * error;
+                    maximum = Math.Max(maximum, error);
+                }
+                viewErrors.Add(new FisheyeViewError(Math.Sqrt(sumSquared / actual.Count), maximum));
+            }
+            var model = new CameraCalibrationModel(
+                request.ImageWidth,
+                request.ImageHeight,
+                [[cameraMatrix.At<double>(0, 0), 0, cameraMatrix.At<double>(0, 2)], [0, cameraMatrix.At<double>(1, 1), cameraMatrix.At<double>(1, 2)], [0, 0, 1]],
+                coefficients,
+                rms,
+                LensModel: "opencv_fisheye");
+            return new FisheyeCalibrationResult(model, viewErrors);
+        }
+        finally
+        {
+            foreach (var pointMat in objectPoints) pointMat.Dispose();
+            foreach (var pointMat in imagePoints) pointMat.Dispose();
+            if (rotations is not null) foreach (var rotation in rotations) rotation.Dispose();
+            if (translations is not null) foreach (var translation in translations) translation.Dispose();
+        }
+    }
+
+    private static double[] ReadFisheyeCoefficients(Mat distortion)
+    {
+        if (distortion.Total() != 4 || distortion.Channels() != 1)
+            throw new InvalidOperationException("OpenCV fisheye calibration returned an invalid distortion vector.");
+        return Enumerable.Range(0, 4).Select(index => distortion.Rows == 1
+            ? distortion.At<double>(0, index)
+            : distortion.At<double>(index, 0)).ToArray();
+    }
+
+    public static Mat Undistort(Mat source, CameraCalibrationModel model, CancellationToken token, double fisheyeBalance = 0)
+    {
+        if (model.LensModel == "opencv_fisheye")
+        {
+            var fisheyeScaleX = (double)source.Width / model.ImageWidth;
+            var fisheyeScaleY = (double)source.Height / model.ImageHeight;
+            using var cameraMatrix = new Mat(3, 3, MatType.CV_64FC1);
+            cameraMatrix.Set(0, 0, model.CameraMatrix[0][0] * fisheyeScaleX);
+            cameraMatrix.Set(0, 1, model.CameraMatrix[0][1] * fisheyeScaleX);
+            cameraMatrix.Set(0, 2, model.CameraMatrix[0][2] * fisheyeScaleX);
+            cameraMatrix.Set(1, 0, model.CameraMatrix[1][0] * fisheyeScaleY);
+            cameraMatrix.Set(1, 1, model.CameraMatrix[1][1] * fisheyeScaleY);
+            cameraMatrix.Set(1, 2, model.CameraMatrix[1][2] * fisheyeScaleY);
+            cameraMatrix.Set(2, 0, model.CameraMatrix[2][0]);
+            cameraMatrix.Set(2, 1, model.CameraMatrix[2][1]);
+            cameraMatrix.Set(2, 2, model.CameraMatrix[2][2]);
+            using var distortion = new Mat(1, 4, MatType.CV_64FC1);
+            for (var i = 0; i < 4; i++) distortion.Set(0, i, model.DistCoeffs[i]);
+            using var rectification = new Mat();
+            using var outputCameraMatrix = new Mat();
+            Cv2.FishEye.EstimateNewCameraMatrixForUndistortRectify(cameraMatrix, distortion, source.Size(), rectification, outputCameraMatrix, fisheyeBalance, source.Size(), 1d);
+            using var undistorted = new Mat();
+            Cv2.FishEye.UndistortImage(source, undistorted, cameraMatrix, distortion, outputCameraMatrix, source.Size());
+            token.ThrowIfCancellationRequested();
+            return undistorted.Clone();
+        }
         using var image = JLVisionImages.FromMat(source);
         if (model.NativeCameraType is not null)
         {

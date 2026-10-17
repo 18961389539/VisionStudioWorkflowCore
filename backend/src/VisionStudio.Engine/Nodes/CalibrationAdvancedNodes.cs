@@ -9,9 +9,9 @@ namespace VisionStudio.Engine.Nodes;
 
 public sealed record CameraCalibrationView(List<List<double>> ObjectPoints, List<List<double>> ImagePoints);
 public sealed record CameraCalibrationRequest(int ImageWidth, int ImageHeight, List<CameraCalibrationView> Views);
-public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms, string? NativeCameraType = null, double[]? NativeCameraParameters = null);
+public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms, string? NativeCameraType = null, double[]? NativeCameraParameters = null, string? LensModel = null);
 
-/// <summary>Intrinsic pinhole calibration from user-provided corresponding chessboard object/image points.</summary>
+/// <summary>Intrinsic pinhole or fisheye calibration from corresponding object/image points.</summary>
 public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
 {
     public string Type => "calibration.cameraIntrinsics";
@@ -24,6 +24,8 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         CameraCalibrationRequest request;
         try { request = JsonSerializer.Deserialize<CameraCalibrationRequest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new JsonException("empty payload"); }
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid calibrationDataJson: {ex.Message}", ex); }
+        var cameraModel = node.GetString("cameraModel", "pinhole").Trim().ToLowerInvariant();
+        if (cameraModel is not ("pinhole" or "fisheye")) throw new InvalidOperationException("cameraModel must be pinhole or fisheye.");
         if (request.ImageWidth is < 16 or > 32768 || request.ImageHeight is < 16 or > 32768) throw new InvalidOperationException("ImageWidth and ImageHeight must each be between 16 and 32768 pixels.");
         if (request.Views is null || request.Views.Count < 3) throw new InvalidOperationException("Intrinsic calibration requires at least three views; use varied board orientations and positions.");
         if (request.Views.Count > 500) throw new InvalidOperationException("Intrinsic calibration accepts at most 500 views.");
@@ -58,21 +60,32 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         }).ToArray();
         var maxViewRms = node.GetDouble("maxViewRms", 0);
         if (!double.IsFinite(maxViewRms) || maxViewRms is < 0 or > 100) throw new InvalidOperationException("maxViewRms must be finite and between 0 and 100 (0 disables the per-view gate).");
-        if (maxViewRms > 0)
+        if (maxViewRms > 0 && cameraModel == "pinhole")
         {
             var bad = viewStats.FirstOrDefault(v => v.reprojectionRms is not null && v.reprojectionRms > maxViewRms);
             if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has planar reprojection RMS {bad.reprojectionRms:0.###} px above maxViewRms {maxViewRms:0.###}; check that view's detected points.");
         }
         CameraCalibrationModel model;
-        try { model = JLVisionCalibration.Calibrate(request, cancellationToken); }
+        FisheyeCalibrationResult? fisheyeResult = null;
+        try
+        {
+            if (cameraModel == "fisheye")
+            {
+                fisheyeResult = JLVisionCalibration.CalibrateFisheye(request, cancellationToken);
+                model = fisheyeResult.Model;
+            }
+            else model = JLVisionCalibration.Calibrate(request, cancellationToken);
+        }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { throw new InvalidOperationException($"JLVision intrinsic calibration failed: {ex.Message}", ex); }
+        catch (Exception ex) { throw new InvalidOperationException($"{(cameraModel == "fisheye" ? "OpenCV fisheye" : "JLVision")} intrinsic calibration failed: {ex.Message}", ex); }
         var rms = model.Rms;
         var maxRms = node.GetDouble("maxRms", 0);
         if (!double.IsFinite(maxRms) || maxRms is < 0 or > 1000) throw new InvalidOperationException("maxRms must be finite and between 0 and 1000 (0 disables the model gate).");
         if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
-        var worstViewRms = viewStats.Where(v => v.reprojectionRms is not null).Select(v => v.reprojectionRms!.Value).DefaultIfEmpty(0).Max();
+        var nativePolynomialDistortionActive = model.NativeCameraType == "area_scan_polynomial"
+            && model.NativeCameraParameters is { Length: 12 }
+            && model.NativeCameraParameters.Skip(1).Take(5).Any(value => Math.Abs(value) > 1e-12);
         // Fuller per-view reprojection through the fitted camera matrix itself:
         // recover each planar view's pose from K^-1 H and reproject (homography alone
         // absorbs pose error, so this is the stricter, model-based number).
@@ -80,31 +93,43 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         var cx = model.CameraMatrix[0][2]; var cy = model.CameraMatrix[1][2];
         var fullViewStats = request.Views.Select((view, index) =>
         {
-            var pose = CalibrationViewAnalysis.AnalyzeWithCamera(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight, fx, fy, cx, cy, model.DistCoeffs);
+            var pose = fisheyeResult is null && !nativePolynomialDistortionActive
+                ? CalibrationViewAnalysis.AnalyzeWithCamera(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight, fx, fy, cx, cy, model.DistCoeffs)
+                : null;
             var homography = viewStats[index];
+            var fittedRms = fisheyeResult is not null ? fisheyeResult.ViewErrors[index].Rms : pose?.ReprojectionRms == homography.reprojectionRms ? null : pose?.ReprojectionRms;
+            var fittedMax = fisheyeResult is not null ? fisheyeResult.ViewErrors[index].Max : pose?.ReprojectionRms == homography.reprojectionRms ? null : pose?.ReprojectionMax;
             return new
             {
                 homography.index, homography.pointCount, homography.coverageX, homography.coverageY,
                 homographyRms = homography.reprojectionRms, homographyMax = homography.reprojectionMax,
-                poseReprojectionRms = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionRms,
-                poseReprojectionMax = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionMax
+                poseReprojectionRms = fittedRms,
+                poseReprojectionMax = fittedMax
             };
         }).ToArray();
+        var worstView = cameraModel == "fisheye"
+            ? fullViewStats.Where(v => v.poseReprojectionRms is not null).OrderByDescending(v => v.poseReprojectionRms!.Value).FirstOrDefault()
+            : fullViewStats.Where(v => v.homographyRms is not null).OrderByDescending(v => v.homographyRms!.Value).FirstOrDefault();
+        var worstViewRms = worstView is null ? 0 : cameraModel == "fisheye" ? worstView.poseReprojectionRms!.Value : worstView.homographyRms!.Value;
+        var worstViewIndex = worstView is null ? (int?)null : worstView.index;
         var worstPoseViewRms = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).DefaultIfEmpty(0).Max();
         var worstPoseViewIndex = fullViewStats.Where(v => v.poseReprojectionRms is not null).OrderByDescending(v => v.poseReprojectionRms!.Value).Select(v => (int?)v.index).FirstOrDefault();
         var poseRmsValues = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).OrderBy(v => v).ToArray();
         var medianPoseRms = poseRmsValues.Length == 0 ? 0d : poseRmsValues.Length % 2 == 1 ? poseRmsValues[poseRmsValues.Length / 2] : (poseRmsValues[poseRmsValues.Length / 2 - 1] + poseRmsValues[poseRmsValues.Length / 2]) / 2d;
-        var nativePolynomialDistortionActive = model.NativeCameraType == "area_scan_polynomial"
-            && model.NativeCameraParameters is { Length: 12 }
-            && model.NativeCameraParameters.Skip(1).Take(5).Any(value => Math.Abs(value) > 1e-12);
+        var fisheyeModelActive = model.LensModel == "opencv_fisheye";
         var maxPoseViewRms = node.GetDouble("maxPoseViewRms", 0);
-        if (!double.IsFinite(maxPoseViewRms) || maxPoseViewRms is < 0 or > 100) throw new InvalidOperationException("maxPoseViewRms must be finite and between 0 and 100 (0 disables the pinhole per-view gate).");
+        if (!double.IsFinite(maxPoseViewRms) || maxPoseViewRms is < 0 or > 100) throw new InvalidOperationException("maxPoseViewRms must be finite and between 0 and 100 (0 disables the fitted-model per-view gate).");
         if (maxPoseViewRms > 0 && nativePolynomialDistortionActive)
-            throw new InvalidOperationException("maxPoseViewRms uses a pinhole-only per-view reprojection. Native polynomial distortion is active, so use maxViewRms and maxRms or disable this gate.");
+            throw new InvalidOperationException("maxPoseViewRms cannot accurately score the native polynomial model. Use maxViewRms and maxRms or disable this gate.");
         if (maxPoseViewRms > 0)
         {
             var bad = fullViewStats.FirstOrDefault(v => v.poseReprojectionRms is not null && v.poseReprojectionRms > maxPoseViewRms);
-            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has fitted-camera reprojection RMS {bad.poseReprojectionRms:0.###} px above maxPoseViewRms {maxPoseViewRms:0.###}; check or disable that view.");
+            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has fitted-model reprojection RMS {bad.poseReprojectionRms:0.###} px above maxPoseViewRms {maxPoseViewRms:0.###}; check or disable that view.");
+        }
+        if (cameraModel == "fisheye" && maxViewRms > 0)
+        {
+            var bad = fullViewStats.FirstOrDefault(v => v.poseReprojectionRms is not null && v.poseReprojectionRms > maxViewRms);
+            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has fitted fisheye reprojection RMS {bad.poseReprojectionRms:0.###} px above maxViewRms {maxViewRms:0.###}; check or disable that view.");
         }
         // Outlier view: pose RMS more than 3x the median (and above 0.5 px) - the view
         // to inspect/remove first, as mature calibrators flag suspect views.
@@ -115,14 +140,15 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(fullViewStats)),
             ["meanCoverageX"] = VisionValue.Double(viewStats.Average(v => v.coverageX)),
             ["meanCoverageY"] = VisionValue.Double(viewStats.Average(v => v.coverageY)),
-            ["nativePolynomialDistortionActive"] = VisionValue.Boolean(nativePolynomialDistortionActive)
+            ["nativePolynomialDistortionActive"] = VisionValue.Boolean(nativePolynomialDistortionActive),
+            ["fisheyeModelActive"] = VisionValue.Boolean(fisheyeModelActive)
         };
-        if (viewStats.Any(v => v.reprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
-        if (worstPoseViewIndex is not null) outputs["worstViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
+        if (fullViewStats.Any(v => v.homographyRms is not null || v.poseReprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
+        if (worstViewIndex is not null) outputs["worstViewIndex"] = VisionValue.Integer(worstViewIndex.Value);
         if (worstPoseViewRms > 0) outputs["worstPoseViewRms"] = VisionValue.Double(worstPoseViewRms);
         if (worstPoseViewIndex is not null) outputs["worstPoseViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
         if (outlierViewIndex is not null) outputs["outlierViewIndex"] = VisionValue.Integer(outlierViewIndex.Value);
-        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["poseRmsModel"] = nativePolynomialDistortionActive ? "pinhole-only; native polynomial distortion omitted" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["cameraModel"] = cameraModel, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["fisheyeModelActive"] = fisheyeModelActive, ["poseRmsModel"] = nativePolynomialDistortionActive ? "not available for native polynomial distortion" : fisheyeModelActive ? "OpenCV fisheye fitted model" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["algorithmBackend"] = fisheyeModelActive ? "OpenCV fisheye" : "JLVision" }));
     }
 }
 
@@ -134,8 +160,11 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var intrinsicAssetId = node.GetString("intrinsicsAssetId", "").Trim();
         var intrinsicAssetVersion = node.GetInt("intrinsicsAssetVersion", 0);
+        var fisheyeBalance = node.GetDouble("fisheyeBalance", 0);
         if (intrinsicAssetVersion < 0 || (intrinsicAssetId.Length > 0) != (intrinsicAssetVersion > 0))
             throw new InvalidOperationException("intrinsicsAssetId and a positive intrinsicsAssetVersion must be provided together, or both left unset.");
+        if (!double.IsFinite(fisheyeBalance) || fisheyeBalance is < 0 or > 1)
+            throw new InvalidOperationException("fisheyeBalance must be finite and between 0 and 1.");
         var source = context.RequireImage("image").Mat;
         CameraCalibrationModel model;
         var calibrationJson = context.TryGetValue("calibrationJson", out var connectedCalibration)
@@ -143,13 +172,29 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
             : node.GetString("calibrationJson", "{}");
         try { model = JsonSerializer.Deserialize<CameraCalibrationModel>(calibrationJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new JsonException("empty payload"); }
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid camera calibration JSON: {ex.Message}", ex); }
-        if (model.ImageWidth < 1 || model.ImageHeight < 1 || model.CameraMatrix is not { Length: 3 } || model.CameraMatrix.Any(r => r is not { Length: 3 } || r.Any(x => !double.IsFinite(x))) || model.DistCoeffs is null || model.DistCoeffs.Length is not (4 or 5 or 8 or 12 or 14) || model.DistCoeffs.Any(x => !double.IsFinite(x)) || model.CameraMatrix[0][0] <= 0 || model.CameraMatrix[1][1] <= 0 || Math.Abs(model.CameraMatrix[2][0]) > 1e-12 || Math.Abs(model.CameraMatrix[2][1]) > 1e-12 || Math.Abs(model.CameraMatrix[2][2]-1) > 1e-9)
+        if (model.ImageWidth < 1 || model.ImageHeight < 1 || model.CameraMatrix is not { Length: 3 } || model.CameraMatrix.Any(r => r is not { Length: 3 } || r.Any(x => !double.IsFinite(x))) || model.DistCoeffs is null || model.DistCoeffs.Length is not (4 or 5 or 8 or 12 or 14) || model.DistCoeffs.Any(x => !double.IsFinite(x)) || model.CameraMatrix[0][0] <= 0 || model.CameraMatrix[1][1] <= 0 || Math.Abs(model.CameraMatrix[2][0]) > 1e-12 || Math.Abs(model.CameraMatrix[2][1]) > 1e-12 || Math.Abs(model.CameraMatrix[2][2]-1) > 1e-9 || !HasValidLensModel(model))
             throw new InvalidOperationException("Calibration JSON must contain a finite 3x3 cameraMatrix, positive focal lengths, and 4/5/8/12/14 finite distCoeffs.");
+        if (fisheyeBalance != 0 && model.LensModel != "opencv_fisheye")
+            throw new InvalidOperationException("fisheyeBalance is only available for OpenCV fisheye calibration models.");
         Mat output;
-        try { output = JLVisionCalibration.Undistort(source, model, cancellationToken); }
+        try { output = JLVisionCalibration.Undistort(source, model, cancellationToken, fisheyeBalance); }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { throw new InvalidOperationException($"JLVision undistortion failed: {ex.Message}", ex); }
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight, ["intrinsicsAssetId"] = intrinsicAssetId.Length == 0 ? null : intrinsicAssetId, ["intrinsicsAssetVersion"] = intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion }));
+        catch (Exception ex) { throw new InvalidOperationException($"{(model.LensModel == "opencv_fisheye" ? "OpenCV fisheye" : "JLVision")} undistortion failed: {ex.Message}", ex); }
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) }, new Dictionary<string, object?> { ["lensModel"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["fisheyeBalance"] = fisheyeBalance, ["sourceSize"] = $"{source.Width}x{source.Height}", ["calibrationSize"] = $"{model.ImageWidth}x{model.ImageHeight}", ["scaledIntrinsics"] = source.Width != model.ImageWidth || source.Height != model.ImageHeight, ["intrinsicsAssetId"] = intrinsicAssetId.Length == 0 ? null : intrinsicAssetId, ["intrinsicsAssetVersion"] = intrinsicAssetVersion == 0 ? null : intrinsicAssetVersion }));
+    }
+
+    private static bool HasValidLensModel(CameraCalibrationModel model)
+    {
+        if (model.NativeCameraType is not null && (model.NativeCameraType != "area_scan_polynomial" || model.NativeCameraParameters is not { Length: 12 })) return false;
+        if (model.NativeCameraType is null && model.NativeCameraParameters is not null) return false;
+        return model.LensModel switch
+        {
+            "opencv_fisheye" => model.DistCoeffs.Length == 4 && model.NativeCameraType is null && model.NativeCameraParameters is null,
+            "area_scan_polynomial" => model.NativeCameraType == "area_scan_polynomial" && model.NativeCameraParameters is { Length: 12 },
+            "brown_conrady" => model.NativeCameraType is null,
+            null => true,
+            _ => false
+        };
     }
 }
 

@@ -40,6 +40,8 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [maxViewRms, setMaxViewRms] = useState(0);
   const [maxRms, setMaxRms] = useState(0);
   const [maxPoseViewRms, setMaxPoseViewRms] = useState(0);
+  const [cameraModel, setCameraModel] = useState<'pinhole' | 'fisheye'>('pinhole');
+  const [fisheyeBalance, setFisheyeBalance] = useState(0);
   const [hints, setHints] = useState<CalibrationWizardHint[]>([]);
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
   const [cameraId, setCameraId] = useState<string>();
@@ -93,6 +95,17 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     setSession(next);
   };
 
+  const changeCameraModel = (next: 'pinhole' | 'fisheye') => {
+    if (next === cameraModel) return;
+    setCameraModel(next);
+    setSession((current) => current ? { ...current, cameraModel: next, model: undefined, lastSolveSummary: null } : current);
+    setSolveSummary(undefined);
+    setViewStatsRows([]);
+    setPinnedAssetId(undefined);
+    setPinnedVersion(0);
+    setPinnedModel(undefined);
+  };
+
   const createSession = async () => {
     setBusy(true);
     try {
@@ -104,6 +117,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '创建向导会话失败');
       setSession(data);
+      setCameraModel(data.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
       setSolveSummary(undefined);
       setViewStatsRows([]);
       setHints([]);
@@ -165,6 +179,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '会话文档导入失败');
       setSession(data);
+      setCameraModel(data.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
       setSolveSummary((data.lastSolveSummary as Record<string, unknown> | null) ?? undefined);
       setStep(data.views?.length ? 2 : 1);
       await loadHints(data.sessionId);
@@ -257,11 +272,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms })
+        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms, cameraModel })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
       setSession(data.session);
+      setCameraModel(data.session?.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
       setSolveSummary(data.result);
       setPinnedAssetId(undefined);
       setPinnedVersion(0);
@@ -331,6 +347,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       let summary: Record<string, unknown> = {};
       try { summary = JSON.parse(snapshot.summaryJson) as Record<string, unknown>; } catch { /* checksum validation already rejects invalid saved JSON */ }
       setSession(restored);
+      setCameraModel(restored.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
       setSolveSummary(summary);
       const stats = summary.viewStats;
       if (typeof stats === 'string') { try { setViewStatsRows(JSON.parse(stats) as Record<string, unknown>[]); } catch { setViewStatsRows([]); } }
@@ -369,17 +386,18 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       if (selectedNodeType === 'calibration.cameraIntrinsics') {
-        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', maxViewRms, maxRms, maxPoseViewRms });
+        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', cameraModel: data.cameraModel ?? cameraModel, maxViewRms, maxRms, maxPoseViewRms });
         messageApi.success('已将视图 JSON 应用到相机内参节点');
       } else if (selectedNodeType === 'image.undistort') {
         const bound = pinMatchesSession && pinnedAssetId
           ? { intrinsicsAssetId: pinnedAssetId, intrinsicsAssetVersion: pinnedVersion }
           : { intrinsicsAssetId: '', intrinsicsAssetVersion: 0 };
-        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '', ...bound });
+        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '', fisheyeBalance, ...bound });
         messageApi.success(pinMatchesSession ? `已应用并绑定内参资产 ${pinnedAssetId} V${pinnedVersion}` : '已将内参模型应用到去畸变节点（未绑定资产版本）');
       } else {
         onApplyToSelectedNode({
           calibrationDataJson: data.calibrationDataJson ?? '',
+          cameraModel: data.cameraModel ?? cameraModel,
           calibrationJson: data.calibrationJson ?? ''
         });
         messageApi.success('已导出标定结果（请选择内参或去畸变节点以精确写入）');
@@ -397,7 +415,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message="相机内参向导（Batch F）"
-        description="会话落盘 · 质量审核与离群处理 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。鱼眼/远心：当前 JLVision 仅支持多项式针孔，尚未支持。" />
+        description="会话落盘 · 质量审核与离群处理 · JLVision 多项式针孔 / OpenCV 鱼眼模型 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。远心标定尚未支持。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
       {hints.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
@@ -490,12 +508,16 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       {step === 3 && session && (
         <Space direction="vertical" size="middle">
           <Space>
+            <Select value={cameraModel} onChange={changeCameraModel} style={{ width: 220 }} options={[
+              { value: 'pinhole', label: '针孔（JLVision 多项式）' },
+              { value: 'fisheye', label: '鱼眼（OpenCV 四系数）' }
+            ]} />
             <InputNumber addonBefore="单视图 RMS 上限" min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="拟合相机单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="拟合模型单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
             <InputNumber addonBefore="模型 RMS 上限" min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
             <Button type="primary" loading={busy} disabled={enabledCount < 3} onClick={calibrate}>运行内参标定</Button>
           </Space>
-          <Typography.Text type="secondary">0 = 关闭门控。单视图门限是平面单应性预检；针孔位姿门限不含 JLVision 原生多项式畸变，畸变启用时会拒绝该门限。</Typography.Text>
+          <Typography.Text type="secondary">0 = 关闭门控。针孔的单视图门限采用平面预检；鱼眼采用拟合鱼眼模型的逐视图重投影误差。拟合模型门限会拒绝无法准确度量的 JLVision 多项式畸变模型。</Typography.Text>
         </Space>
       )}
 
@@ -512,7 +534,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
                 { title: 'covX', render: (_: unknown, r) => Number(r.coverageX ?? 0).toFixed(2) },
                 { title: 'covY', render: (_: unknown, r) => Number(r.coverageY ?? 0).toFixed(2) },
                 { title: 'H-RMS', render: (_: unknown, r) => r.homographyRms == null ? '-' : Number(r.homographyRms).toFixed(3) },
-                { title: 'Pose-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
+                { title: 'Model-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
               ]} />
           )}
           <Space wrap>
@@ -524,6 +546,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
             <Button loading={busy} onClick={() => void refreshIntrinsicAssets()}>刷新资产</Button>
             {pinMatchesSession && pinnedAssetId && <Tag color="green">绑定 {pinnedAssetId} V{pinnedVersion}</Tag>}
           </Space>
+          {selectedNodeType === 'image.undistort' && cameraModel === 'fisheye' && (
+            <Space>
+              <InputNumber addonBefore="鱼眼视场平衡" min={0} max={1} step={0.01} value={fisheyeBalance} onChange={(value) => setFisheyeBalance(Number(value ?? 0))} />
+              <Typography.Text type="secondary">0 收紧校正视场，1 保留更多视场并允许边缘留黑。</Typography.Text>
+            </Space>
+          )}
           <Table size="small" rowKey="id" pagination={false} dataSource={intrinsicAssets} scroll={{ x: 900, y: 220 }}
             columns={[
               { title: '资产', width: 240, render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => <><b>{row.name}</b><div><Typography.Text type="secondary" code>{row.id}</Typography.Text></div></> },

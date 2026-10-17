@@ -323,7 +323,7 @@ Usage and limits are documented in [Template Matching](template-matching.md). Co
 
 The camera-intrinsics node and wizard now expose a fitted-K per-view RMS gate in addition to the planar pre-fit and overall model gates. Since that pose residual omits JLVision's native polynomial distortion, the node rejects this gate when distortion is active and does not mark pinhole-derived views as outliers in that case. Typed outputs now expose worst pose-view errors, coverage, and outlier indexes. Input limits bound calibration sets to 500 views and 100000 total correspondences. The baseline **72** score remains historical and has not been rerated.
 
-Usage and model limits are documented in [Camera Intrinsic Calibration](camera-intrinsics.md). Fisheye and telecentric model support remains a significant gap.
+Usage and model limits are documented in [Camera Intrinsic Calibration](camera-intrinsics.md). At the time of this baseline follow-up, fisheye and telecentric support remained gaps; the later fisheye implementation is recorded below.
 
 ## Follow-up implementation: planar hand-eye calibration
 
@@ -337,5 +337,9 @@ Planar calibration asset reads and publication now recompute the stored workspac
 
 ## Follow-up implementation: camera intrinsic assets
 
-The Intrinsics Wizard can save solved models as immutable, hashed SQLite versions together with the full source-view document and solve summary. Versions support publication and rollback. `image.undistort` can pin an asset version; workflow execution and dependency capture verify the embedded model hash, and manifests record the snapshot hash. Fisheye/telecentric calibration and dynamic upstream-model asset binding remain open gaps.
+The Intrinsics Wizard can save solved models as immutable, hashed SQLite versions together with the full source-view document and solve summary. Versions support publication and rollback. `image.undistort` can pin an asset version; workflow execution and dependency capture verify the embedded model hash, and manifests record the snapshot hash. Telecentric calibration and dynamic upstream-model asset binding remain open gaps; fisheye support is described in the following update.
+
+## Follow-up implementation: fisheye camera intrinsics
+
+`calibration.cameraIntrinsics` and the wizard now support selecting OpenCV's four-coefficient Kannala-Brandt fisheye model alongside the existing JLVision native polynomial pinhole model. The fisheye solve reports fitted-model per-view RMS/max residuals, supports the view and overall RMS gates, serializes its lens model into immutable camera-intrinsic assets, and is consumed by `image.undistort` with resolution-scaled intrinsics and a field-of-view balance control. Telecentric and non-central fisheye models remain unsupported. This extension has not been rescored against the full audit rubric.
 

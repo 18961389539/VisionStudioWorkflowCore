@@ -31,7 +31,7 @@ public sealed record CalibrationWizardAddViewRequest(
 
 public sealed record CalibrationWizardSetEnabledRequest(bool Enabled);
 
-public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0);
+public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0, string CameraModel = "pinhole");
 
 public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
 
@@ -330,10 +330,13 @@ public sealed class CalibrationWizardService
     public async Task<object> SolveAsync(string sessionId, CalibrationWizardSolveRequest request, CancellationToken ct)
     {
         var session = ResolveSession(sessionId);
+        session.SetCameraModel(request.CameraModel);
+        Persist(session);
         var calibRequest = session.BuildRequest();
         var parameters = new Dictionary<string, JsonElement>
         {
             ["calibrationDataJson"] = JsonSerializer.SerializeToElement(JsonSerializer.Serialize(calibRequest)),
+            ["cameraModel"] = JsonSerializer.SerializeToElement(request.CameraModel.Trim().ToLowerInvariant()),
             ["maxViewRms"] = JsonSerializer.SerializeToElement(request.MaxViewRms),
             ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms),
             ["maxPoseViewRms"] = JsonSerializer.SerializeToElement(request.MaxPoseViewRms)
@@ -356,7 +359,8 @@ public sealed class CalibrationWizardService
                 ["outlierViewIndex"] = result.Outputs.TryGetValue("outlierViewIndex", out var oi) ? oi.Require<long>("outlierViewIndex") : null,
                 ["nodeSummary"] = result.Summary,
                 ["calibrationJson"] = json,
-                ["enabledViews"] = calibRequest.Views.Count
+                ["enabledViews"] = calibRequest.Views.Count,
+                ["cameraModel"] = session.Snapshot().CameraModel
             };
             var state = session.StoreSolveResult(model, summary);
             Persist(session);
@@ -384,9 +388,10 @@ public sealed class CalibrationWizardService
                     state.Views.Where(v => v.Enabled).Select(v => v.View).ToList()))
                 : null,
             calibrationJson = state.Model is null ? null : JsonSerializer.Serialize(state.Model),
+            cameraModel = state.CameraModel,
             hints = PoseHints(session),
-            fisheyeSupported = false,
-            fisheyeNote = "Fisheye / telecentric models are not available; JLVision path is polynomial pinhole only."
+            fisheyeSupported = true,
+            fisheyeNote = "Fisheye uses OpenCV's four-coefficient angular model. Telecentric calibration is not supported."
         };
     }
 

@@ -6,10 +6,10 @@ namespace VisionStudio.Engine.Algorithms;
 
 /// <summary>
 /// Guided camera-intrinsics session: accumulate board views with quality gates,
-/// accept/reject, then solve with the existing JLVision calibrator. Supports
+/// accept/reject, then solve with the selected pinhole or fisheye model. Supports
 /// export/import of the full session document (views + results). Live preview and
-/// disk persistence live in the API layer. No fisheye/telecentric model; pose
-/// hints are rule-based occupancy suggestions, not an auto planner.
+/// disk persistence live in the API layer. Telecentric calibration is not supported;
+/// pose hints are rule-based occupancy suggestions, not an auto planner.
 /// </summary>
 public static class CalibrationIntrinsicsWizard
 {
@@ -38,7 +38,8 @@ public static class CalibrationIntrinsicsWizard
         IReadOnlyList<ViewEntry> Views,
         int EnabledCount,
         CameraCalibrationModel? Model,
-        object? LastSolveSummary);
+        object? LastSolveSummary,
+        string CameraModel = "pinhole");
 
     /// <summary>Durable export of a wizard session (views with points + optional solve result).</summary>
     public sealed record SessionDocument(
@@ -49,7 +50,8 @@ public static class CalibrationIntrinsicsWizard
         int? ImageHeight,
         IReadOnlyList<ViewEntry> Views,
         CameraCalibrationModel? Model,
-        object? LastSolveSummary)
+        object? LastSolveSummary,
+        string CameraModel = "pinhole")
     {
         public const string CurrentVersion = "intrinsics-wizard-v1";
     }
@@ -63,6 +65,7 @@ public static class CalibrationIntrinsicsWizard
         private int? _imageHeight;
         private CameraCalibrationModel? _model;
         private object? _lastSolveSummary;
+        private string _cameraModel = "pinhole";
 
         public Session(string sessionId, BoardConfig board)
         {
@@ -85,7 +88,8 @@ public static class CalibrationIntrinsicsWizard
                     _views.Select(CloneEntry).ToArray(),
                     _views.Count(v => v.Enabled),
                     _model,
-                    _lastSolveSummary);
+                    _lastSolveSummary,
+                    _cameraModel);
             }
         }
 
@@ -196,6 +200,23 @@ public static class CalibrationIntrinsicsWizard
             }
         }
 
+        public SessionState SetCameraModel(string cameraModel)
+        {
+            var normalized = (cameraModel ?? "").Trim().ToLowerInvariant();
+            if (normalized is not ("pinhole" or "fisheye"))
+                throw new InvalidOperationException("Camera model must be pinhole or fisheye.");
+            lock (_gate)
+            {
+                if (_cameraModel != normalized)
+                {
+                    _cameraModel = normalized;
+                    _model = null;
+                    _lastSolveSummary = null;
+                }
+                return SnapshotUnlocked();
+            }
+        }
+
         
         public SessionDocument ExportDocument()
         {
@@ -209,7 +230,8 @@ public static class CalibrationIntrinsicsWizard
                     _imageHeight,
                     _views.Select(CloneEntry).ToArray(),
                     _model,
-                    _lastSolveSummary);
+                    _lastSolveSummary,
+                    _cameraModel);
             }
         }
 
@@ -245,7 +267,8 @@ public static class CalibrationIntrinsicsWizard
             _views.Select(CloneEntry).ToArray(),
             _views.Count(v => v.Enabled),
             _model,
-            _lastSolveSummary);
+            _lastSolveSummary,
+            _cameraModel);
 
         private static ViewEntry CloneEntry(ViewEntry e) => e with { View = CloneView(e.View) };
 
@@ -299,6 +322,9 @@ public static class CalibrationIntrinsicsWizard
             if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Failed to allocate a wizard session id.");
             if (document.ImageWidth is int w && document.ImageHeight is int h)
                 session.SetImageSize(w, h);
+            session.SetCameraModel(string.IsNullOrWhiteSpace(document.CameraModel)
+                ? document.Model?.LensModel == "opencv_fisheye" ? "fisheye" : "pinhole"
+                : document.CameraModel);
             session.ImportViews(document.Views ?? Array.Empty<ViewEntry>(), document.Model, document.LastSolveSummary);
             return session;
         }
