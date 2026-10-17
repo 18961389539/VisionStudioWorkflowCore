@@ -386,6 +386,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       : [];
   });
   const [roiImageView, setRoiImageView] = useState<'reference' | 'input' | 'output'>('reference');
+  const [measurementImageView, setMeasurementImageView] = useState<'reference' | 'current'>('reference');
   const [previewError, setPreviewError] = useState<string>();
   const [preview, setPreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string; preserveTrainingWorkspace?: boolean }>();
   const [searchPreview, setSearchPreview] = useState<{ result: RunResult; fingerprint: string; receivedAt: string }>();
@@ -685,6 +686,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     }
   }, [canEditMeasurementGeometry, canDisplayConnectedSearchLine, cropMeasurementReferenceNodeId, measurementGeometryFrameKind, node.id, open,
     selectedInputAvailable, selectedOutputAvailable, setImageSource]);
+  useEffect(() => {
+    if (open) setMeasurementImageView('reference');
+  }, [node.id, open]);
   const measurementImageFrameReady = measurementGeometryFrameKind === 'saved-reference'
     ? previewNodeId === node.id && Boolean(savedMeasurementReference && savedMeasurementReference.width > 0 && savedMeasurementReference.height > 0)
     : measurementGeometryFrameKind === 'transform-input'
@@ -736,6 +740,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
     ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
     : measurementGeometry);
+  const showCurrentMeasurementImage = measurementGeometryFrameKind === 'saved-reference' && measurementImageView === 'current';
+  const viewerMeasurementGeometry = showCurrentMeasurementImage ? mappedMeasurementGeometry : measurementGeometry;
+  const currentMeasurementGeometryUnavailable = showCurrentMeasurementImage && Boolean(measurementGeometry)
+    && !mappedMeasurementGeometry && !measurementTransformInvalid;
   const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
     ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
     : undefined;
@@ -945,7 +953,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const showCapturedTrainingImage = isShapeMatch && shapeWorkspaceTab === 'training' && !showSavedTrainingImage && capturedTrainingImage;
   const shapeImageMatchesTab = shapeImageKind === shapeWorkspaceTab || (shapeWorkspaceTab === 'training' && (showTrainedTemplatePreview || Boolean(showCapturedTrainingImage)));
   const showMeasurementReferenceImage = Boolean((canEditMeasurementGeometry || canDisplayConnectedSearchLine)
-    && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady);
+    && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady && measurementImageView === 'reference');
   const displayImageSource = isRoiTransform && roiImageView === 'reference'
     ? { url: referenceImage ? `data:image/png;base64,${referenceImage}` : '', width: Number(draft.referenceWidth ?? 0),
       height: Number(draft.referenceHeight ?? 0), label: referenceImage ? '已保存基准图像' : '尚未建立基准' }
@@ -1416,7 +1424,17 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               options={[{ label: '已保存基准', value: 'reference', disabled: !referenceImage },
                 { label: '当前输入', value: 'input', disabled: !selectedInputAvailable },
                 { label: '修正结果', value: 'output', disabled: !selectedOutputAvailable }]} />
-          </> : canEditMeasurementGeometry && showMeasurementReferenceImage ? <span>已保存基准图像 · 测量几何坐标</span>
+          </> : (canEditMeasurementGeometry || canDisplayConnectedSearchLine) && measurementGeometryFrameKind === 'saved-reference' && measurementImageFrameReady ? <>
+            <span>卡尺几何图像</span>
+            <Segmented size="small" aria-label="卡尺几何图像坐标系" value={measurementImageView}
+              onChange={(value) => {
+                const next = value as 'reference' | 'current';
+                setMeasurementImageView(next);
+                if (next === 'current') { setPreviewNodeId(node.id); setImageSource('input'); }
+              }}
+              options={[{ label: '基准图像', value: 'reference' },
+                { label: '当前测量图像', value: 'current', disabled: !selectedInputAvailable }]} />
+          </>
             : canEditMeasurementGeometry && measurementGeometryFrameKind === 'transform-input' && cropMeasurementReferenceNodeId
               ? <span>几何基准图像 · {nodeLabels[cropMeasurementReferenceNodeId] ?? cropMeasurementReferenceNodeId}</span>
               : <>
@@ -1462,6 +1480,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {measurementTransformInvalid && <Alert showIcon type="warning" title="当前 transform 不符合卡尺测量要求"
           description="本提示依据最近一次运行报告中的实际输入。卡尺只接受有限、方向保持的 px→px 刚性变换（平移和旋转）；缩放、剪切、透视、镜像或非像素单位会导致测量失败。请改用刚性像素变换，或让测量几何直接使用当前图像坐标。" />}
+        {currentMeasurementGeometryUnavailable && <Alert showIcon type="info" title="尚无当前图像中的卡尺位置"
+          description="运行此节点以读取本次实际使用的 transform；在此之前不会把基准图像坐标直接叠加到当前测量图像。" />}
         {measurementTransformSourceNotice && <Alert showIcon type="info" title="transform 来源可能不适用于卡尺"
           description={measurementTransformSourceNotice} />}
         {transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
@@ -1507,7 +1527,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
           overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined) : undefined} showRoiTools={canEditRoi || isRoiTransform}
-          measurementGeometry={measurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked}
+          measurementGeometry={viewerMeasurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked && !showCurrentMeasurementImage}
           onMeasurementGeometryChange={updateMeasurementGeometry}
           roiEnabled={canEditRoi && !locked && Boolean(displayImageSource.url)} roiTargetLabel={isImageCrop ? '裁剪输入图像' : isRoiTransform ? '基准 ROI' : shapeMode === 'search' ? '搜索区域' : regionEditMode === 'clutter' ? '杂乱区域' : shapeMode === 'training' ? '模型区域' : imageInputSourceId ? `输入图像 · ${nodeLabels[imageInputSourceId] ?? imageInputSourceId}` : String(node.data.label ?? node.id)}
           loading={previewBusy} onRoiChange={(roi) => isImageCrop ? changeCropRoi(roi) : changeParameter(shapeMode === 'search' ? 'searchRoi' : regionEditMode === 'clutter' ? 'clutterRoi' : 'roi', roi)} nodeLabels={nodeLabels} focusTick={focusTick}

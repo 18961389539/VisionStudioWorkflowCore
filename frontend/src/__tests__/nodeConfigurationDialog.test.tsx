@@ -1009,8 +1009,12 @@ describe('caliper geometry input guidance', () => {
       { id: 'pose-transform', source: roiNode.id, sourceHandle: 'transform', target: lineNode.id, targetHandle: 'transform' }
     ];
     const lineResult: RunResult = { ...report, nodeReports: [{ nodeId: lineNode.id, nodeType: lineCatalog.type, success: true,
-      durationMs: 1, summary: {}, inputs: { searchLine: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
-        value: { start: { x: 14, y: 22 }, end: { x: 88, y: 46 } } } } }] };
+      durationMs: 1, summary: {}, inputs: {
+        searchLine: { type: 'Line2D', display: '[(14, 22), (88, 46)]',
+          value: { start: { x: 14, y: 22 }, end: { x: 88, y: 46 } } },
+        transform: { type: 'Transform2D', display: 'translation', value: { sourceUnit: 'px', targetUnit: 'px',
+          h00: 1, h01: 0, h02: 50, h10: 0, h11: 1, h12: 10, h20: 0, h21: 0, h22: 1 } }
+      } }] };
     const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, roiNode, lineSource, imageNode], edges, result: lineResult });
 
     expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
@@ -1020,6 +1024,15 @@ describe('caliper geometry input guidance', () => {
     expect(geometry.getAttribute('data-end-y')).toBe('46');
     expect(geometry.getAttribute('data-editable')).toBe('false');
     expect(dialog.queryByRole('button', { name: '模拟拖动搜索线' })).toBeNull();
+
+    fireEvent.click(dialog.getByRole('radio', { name: '当前测量图像' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/other/image'));
+    const mappedGeometry = dialog.getByTestId('line-geometry');
+    expect(mappedGeometry.getAttribute('data-start-x')).toBe('64');
+    expect(mappedGeometry.getAttribute('data-start-y')).toBe('32');
+    expect(mappedGeometry.getAttribute('data-end-x')).toBe('138');
+    expect(mappedGeometry.getAttribute('data-end-y')).toBe('56');
+    expect(mappedGeometry.getAttribute('data-editable')).toBe('false');
   });
 
   it('shows a connected search line on the crop input image when crop transform is connected', async () => {
