@@ -364,6 +364,26 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
+  it('shows ROI overlays from a fresh crop preview even when the previous workflow result was stale', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 30, height: 40 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const edges = [
+      { id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+      { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+      { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+    ];
+    const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog, nodes: [cropNode, roiNode, imageNode], edges,
+      result, resultStale: true, onPreview: vi.fn(async () => result) });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    expect(dialog.getByTestId('overlay-ids').textContent).not.toContain('roi-transform-corrected-shape');
+    fireEvent.click(dialog.getByRole('button', { name: '预览裁剪结果' }));
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/crop/image'));
+    fireEvent.click(dialog.getByRole('radio', { name: '输入图像' }));
+    await waitFor(() => expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape'));
+  });
+
   it('keeps the corrected ROI overlay visible through pixel-coordinate-preserving preprocessing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 },

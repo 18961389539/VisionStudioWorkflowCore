@@ -413,6 +413,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   }, [preview]);
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
+  const connectedRoiOverlayResult = preview && !previewError && preview.fingerprint === draftFingerprint
+    ? preview.result : !resultStale ? result : undefined;
   const matchReport = (searchPreview?.result ?? result)?.nodeReports.filter(report => report.nodeId === node.id).slice(-1)[0];
   const matchStale = Boolean(previewError) || (searchPreview ? searchPreview.fingerprint !== draftFingerprint : resultStale || dirty);
   const matchNumber = (port: string, summaryKey = port, digits = 2) => {
@@ -653,9 +655,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     && Boolean(imageInputSourceId && (imageFrameDescendsFrom(imageInputSourceId, roiInputEdge?.source, nodes, edges)
       || imageFrameDescendsFrom(imageInputSourceId, roiSourceDebugImageId, nodes, edges)
       || imageFramesSharePixelPreservingAncestor(imageInputSourceId, roiSourceDebugImageId, nodes, edges)));
-  const connectedRoiInputOverlays = !resultStale && roiInputEdge && imageSource === 'input'
+  const connectedRoiInputOverlays = connectedRoiOverlayResult && roiInputEdge && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable && roiOverlayFrameMatchesInput
-    ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
+    ? (connectedRoiOverlayResult.overlays ?? []).filter((overlay) => overlay.nodeId === roiInputEdge.source)
     : [];
   // Measurement nodes pass the input image through unchanged, so their own result overlays
   // remain aligned when users switch to the input image to edit measurement geometry.
