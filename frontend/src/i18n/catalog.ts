@@ -187,7 +187,9 @@ const parameterNames: Record<string, string> = {
   'Target Unit': '目标单位', 'TCP Offset X': 'TCP 偏移 X', 'TCP Offset Y': 'TCP 偏移 Y', Theta: '角度 θ', Threshold: '阈值',
   Timeout: '超时时间', 'Timeout (ms)': '超时时间（毫秒）', 'Transforms JSON': '坐标变换 JSON', 'Trigger Before Grab': '采集前触发',
   Unit: '单位', 'Wait For Complete': '等待执行完成', Width: '宽度', X: 'X 坐标', 'X Tag': 'X 标签', 'X Translation': 'X 平移量',
-  Y: 'Y 坐标', 'Y Tag': 'Y 标签', 'Y Translation': 'Y 平移量'
+  Y: 'Y 坐标', 'Y Tag': 'Y 标签', 'Y Translation': 'Y 平移量',
+  Min: '下限', Max: '上限', 'Template File': '模板文件',
+  'Angle Range (deg)': '角度范围（度）', 'Angle Step (deg)': '角度步长（度）'
 };
 
 const parameterGroups: Record<string, string> = {
@@ -237,7 +239,14 @@ const optionNames: Record<string, string> = {
   Latest: '最新帧', Next: '下一帧', Boolean: '布尔值', Integer: '整数', Number: '数值', String: '文本',
   'Industrial Handshake': '工业握手', Move: '移动', 'Eye-to-Hand': '眼在手外', 'Eye-in-Hand': '眼在手上', Manual: '手动',
   True: '是', False: '否', Any: '任意', Rising: '上升沿', Falling: '下降沿', Positive: '正向', Negative: '负向',
-  Both: '双向', DarkToLight: '由暗到亮', LightToDark: '由亮到暗'
+  Both: '双向', DarkToLight: '由暗到亮', LightToDark: '由亮到暗',
+  mm: '毫米 (mm)', cm: '厘米 (cm)', m: '米 (m)',
+  '>': '大于 (>)', '>=': '大于等于 (>=)', '<': '小于 (<)', '<=': '小于等于 (<=)', '==': '等于 (==)', '!=': '不等于 (!=)',
+  AND: '与 (AND)', OR: '或 (OR)', XOR: '异或 (XOR)', 'NOT (a)': '非（仅 A）',
+  'Add (a + b)': '加 (a + b)', 'Subtract (a - b)': '减 (a − b)', 'Multiply (a * b)': '乘 (a × b)', 'Divide (a / b)': '除 (a ÷ b)',
+  Area: '面积', X: 'X 坐标', Y: 'Y 坐标', Circularity: '圆度', Perimeter: '周长',
+  'Luminance (BT.601)': '亮度（BT.601）', Average: '通道均值', Max: '通道最大值',
+  'Normalized cross-correlation': '归一化互相关', 'Normalized squared difference': '归一化平方差'
 };
 
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
@@ -336,6 +345,7 @@ const descriptions: Record<string, string> = {
   'image.sharpen': '将输入转为 8 位灰度，按 原图+强度×（原图−局部均值）锐化，输出裁剪到 0–255。强度为 0 时保留灰度像素；锐化也会放大噪声。',
   'image.filter': '选择高斯滤波或中值滤波。高斯适合抑制一般噪声；中值更适合去除椒盐噪声并保留边缘。滤波核大小须为奇数，ROI 外像素清零。',
   'image.channel': '从图像生成亮度灰度、通道均值或最大值灰度，也可提取 B/G/R 或 HSV 通道。单通道输入在灰度模式下直接传递。',
+  'image.grayscale': '把彩色图像转为单通道灰度，供阈值和测量使用。亮度按 BT.601；均值和最大值分别取 B/G/R。输入已是单通道时原样输出。',
   'measure.blobs': '可选择提取所有符合条件的斑点，或只保留面积最大的斑点。输出数量、检测列表、首选斑点几何信息和输入图像；无斑点时数量为 0，几何端口留空。',
   'image.threshold': '在手动阈值、自适应局部阈值和 Otsu 全局阈值间切换。自适应与 Otsu 会将彩色图转灰度；手动和 Otsu 提供阈值数值输出。',
   'image.morphology': '选择腐蚀、膨胀、开闭运算清理二值形状，或使用白顶帽、黑底帽、梯度提取灰度特征。灰度模式将彩色输入转为灰度，使用矩形奇数结构元素。支持 ROI，ROI 外清零。',
@@ -369,6 +379,7 @@ const descriptions: Record<string, string> = {
   'measure.caliperCircle': '围绕标称圆径向放置卡尺。测量统一使用 8 位灰度，UInt16 输入会按完整量程缩放到 0–255。无 circle 或 transform 输入时，可在输入图像中重绘标称圆、拖动圆心和半径；径向搜索带、圆弧范围和卡尺分布会同步预览。完整圆不会重复采样起止射线；计数模式下部分圆弧包含首尾端点，兼容步长模式按固定间隔采样，未对齐的终点不会额外补点。终点早于起点时按顺时针跨 0°。径向搜索不会穿过圆心，超出图像的射线会沿原方向裁切。可选从搜索起点/终点取首个边缘或取最强边缘，并在拟合时按阈值剔除少量离群点。“最少有效卡尺数”在剔除后检查，可避免稀疏圆弧产生看似有效的圆。超出半径偏差限制的候选点会以橙色标出；绿色点参与拟合，拟合离群点以红橙色标出。接入 transform 后，基准圆心与圆弧角度一起跟随工件；此时不要再接已修正的圆。ROI 输入使用已修正的当前图像坐标。',
   'measure.fitEllipse': '对至少含五个有效点的轮廓拟合椭圆，输出长短轴和方向。',
   'match.shape': '采用独立的模型区域和搜索区域，显式训练 JLVision 灰度边缘形状模型。支持旋转、均匀或独立缩放、极性控制、多目标定位、运行时绝对/相对对比度门限，以及可选杂乱 ROI 的硬筛选和评分惩罚；最多可用 4 张同尺寸样本，后续样本按首张模型自动对齐区域，再融合稳定轮廓生成单一复合模型。新建节点必须先训练；旧工作流继续按原模板图像方式运行。',
+  'match.template': '用缓存的 JLVision NCC 金字塔模型做亚像素平移和旋转定位。角度为正表示模板相对图像逆时针旋转；角度范围是对称半宽，0 表示不旋转。平方差模式用原生平方差校验 NCC 候选，结果仍受最小匹配分数约束。未连接模板图像时从文件读取；模板大于场景图时节点失败。',
   'roi.transform': '先通过调试图像保存基准图与实际定位位姿，再绘制基准 ROI。将 ROI 输出接到测量区域，将变换输出接到测量 transform，可让搜索位置与方向一起跟随工件。输出变换把 ReferenceImage 映射到 CurrentImage；若还要裁剪，按 ROI 修正变换接组合节点 A、裁剪变换接 B，生成到 CropImage 的完整映射。已修正的几何不要重复变换。',
   'flow.ifBoolean': '根据布尔条件选择真或假分支，再在汇合节点继续执行。',
   'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；未匹配走默认路径，各路径在多路汇合节点汇合。',
@@ -385,7 +396,8 @@ const descriptions: Record<string, string> = {
   'coordinate.transformCompose': '组合 A：S→M 与 B：M→T，生成 S→T，并检查坐标系和单位是否兼容。定位修正 ROI 与裁剪串联时，A 接 roi.transform，B 接 image.crop。',
   'coordinate.transformConstant': '在指定的工程坐标系或图像像素坐标系之间创建二维刚性变换。',
   'coordinate.distance': '仅当坐标系和单位一致时，计算两个坐标点之间的距离。',
-  'coordinate.point': '创建固定的坐标系参考点。', 'coordinate.pose': '创建固定的二维坐标系位姿。',
+  'coordinate.point': '创建固定的坐标系参考点，供距离和坐标变换使用。坐标系名称与长度单位会写入输出；求距离时双方必须一致。切换单位不会换算已经填写的 X/Y。',
+  'coordinate.pose': '创建固定的二维位姿（X、Y 和方向角）。可接到机器人引导或位姿转变换。方向角单位为度；坐标系和长度单位须与下游一致，切换单位不会换算 X/Y。',
   'coordinate.frameTree': '构建双向坐标系图，并按命名路径解析坐标变换。',
   'coordinate.transformInverse': '求二维变换的逆，并交换源坐标系、目标坐标系及其单位。',
   'coordinate.poseToTransform': '将相对父坐标系的位姿解释为从源坐标系到父坐标系的刚性变换。可用于动态工具坐标系变换。',
@@ -396,12 +408,13 @@ const descriptions: Record<string, string> = {
   'coordinate.transformPoint': '将图像空间二维点转换为带坐标系和单位信息的坐标点。',
   'coordinate.transformPose': '将 X、Y 和局部方向转换到指定目标坐标系。',
   'device.readTag': '通过设备管理器读取指定类型的设备标签，返回数值、质量状态和时间戳。',
-  'device.waitTag': '等待设备标签满足条件或超时。适用于 PLC 触发和就绪握手。',
+  'device.waitTag': '按设定间隔轮询设备标签，直到条件成立或超时。适用于 PLC 触发和就绪握手。超时后节点失败；比较值是文本，数值比较会先把它解析成数字。',
   'device.writeTag': '写入通用设备标签。若已连接输入，则优先使用输入；否则使用指定类型的备用值。',
   'device.writeVisionResult': '按顺序向 PLC 写入 OK/NG 和可选的 X/Y/R 结果：就绪位清零、写入数据、就绪位置位。',
   'feature.circle': '使用 JLVision 亚像素轮廓分段及圆拟合，返回圆和中心点。',
   'feature.edge': '提取 Canny 边缘。支持图像感兴趣区域，并返回二值边缘图。',
-  'feature.line': '使用 JLVision 轮廓分段与直线拟合，返回最长直线。', 'flow.if': '流程条件分支。',
+  'feature.line': '使用 JLVision 轮廓分段与直线拟合，返回最长直线。',
+  'flow.if': '把输入数值与比较值按所选运算符比较：成立走真分支，不成立走假分支，两路在汇合节点继续。等于和不等允许 1e-9 的绝对误差。',
   'flow.join': '结构化分支的汇合节点。', 'flow.parallel': '启动两条并行流程分支。',
   'flow.result': '设置用于追溯的自动检测判定（OK/NG）。', 'geometry.angle': '计算两条二维直线之间的锐角，单位为度。',
   'geometry.intersection': '计算两条无限延长直线的交点，并返回二维点。',
@@ -411,7 +424,11 @@ const descriptions: Record<string, string> = {
   'robot.executeTarget': '通过通用二维机器人目标执行移动，支持标准工业握手、超时和重试策略。',
   'robot.j4TcpCompensation': '补偿 J4 旋转中心或 TCP 偏心，输出补偿后的机器人目标，不会直接向硬件发送指令。',
   'robot.currentPose': '从机器人管理器读取当前平面位姿和通用握手状态。',
-  'robot.guidance2d': '根据已转换到 RobotBase（或其他机器人坐标系）的位姿创建通用二维机器人目标。'
+  'robot.guidance2d': '根据已转换到 RobotBase（或其他机器人坐标系）的位姿创建通用二维机器人目标。',
+  'logic.boolean': '对布尔结果做与、或、异或或非。非只使用输入 A，其余运算需要 A 和 B。输出可接到布尔条件分支或检测判定。',
+  'value.arithmetic': '把两个测量值做加、减、乘或除。除数为 0，或结果不是有限数时，节点直接失败，避免把 NaN 或无穷大送进后续判定。',
+  'value.range': '判断数值是否落在闭区间内，端点算通过。上下限填反时自动交换；开启取反后，区间内不通过、区间外通过。',
+  'collection.detections.sort': '按面积、X、Y、圆度或周长重排检测目标，并按新顺序从 0 重写索引。开启降序时大值在前；本节点不筛选、不合并目标。'
 };
 
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
@@ -522,6 +539,33 @@ const parameterDescriptions: Record<string, string> = {
   'flow.if.threshold': '比较阈值：上游数值与该值按比较条件判断后进入对应分支。',
   'device.waitTag.timeoutMs': '等待信号超时（毫秒）：超时后节点失败，产线节拍受它约束。',
   'device.waitTag.pollMs': '轮询间隔（毫秒）：查询 PLC 标签值的频率；越小响应越快、负载越高。',
+  'device.waitTag.deviceId': '要等待的设备 ID，可在设备面板查看，例如 virtual-modbus-1。',
+  'device.waitTag.tagId': '要轮询的标签名，须与设备映射中的标签一致。',
+  'device.waitTag.operator': '是/否判断布尔标签；比较运算符把标签当前值与“比较值”比较。',
+  'device.waitTag.compareValue': '比较用的文本。数值标签会解析成数字；文本标签的等于和不等比较忽略大小写。',
+  'device.waitTag.autoConnect': '开始等待前自动连接设备。设备已经保持连接时可以关闭。',
+  'coordinate.point.x': '参考点的 X，使用所选坐标系和单位。只改变坐标数值，不会按单位自动换算。',
+  'coordinate.point.y': '参考点的 Y，使用所选坐标系和单位。',
+  'coordinate.point.frame': '点所在的坐标系名称。与另一点求距离或做坐标变换时，双方坐标系必须一致。',
+  'coordinate.point.unit': 'X/Y 的长度单位。毫米、厘米、米只标记单位，不换算已经填写的数值。',
+  'coordinate.pose.x': '位姿原点的 X，使用所选坐标系和单位。',
+  'coordinate.pose.y': '位姿原点的 Y，使用所选坐标系和单位。',
+  'coordinate.pose.thetaDeg': '位姿方向角，单位为度。该角度会随位姿输出，供机器人引导或位姿转变换使用。',
+  'coordinate.pose.frame': '位姿所在的坐标系，例如 RobotBase。接到机器人引导时须与期望坐标系一致。',
+  'coordinate.pose.unit': 'X/Y 的长度单位。切换单位不会换算已填写的 X/Y。',
+  'logic.boolean.op': '与要求 A、B 都为真；或要求任一为真；异或要求恰好一个为真；非只对 A 取反，不读取 B。',
+  'value.arithmetic.op': '对输入 a、b 做四则运算。b 为 0 时除法失败；结果不是有限数时节点失败。',
+  'value.range.min': '闭区间下限，端点包含在内。填得比上限大时会与上限对调后再判断。',
+  'value.range.max': '闭区间上限，端点包含在内。填得比下限小时会与下限对调后再判断。',
+  'value.range.invert': '关闭时区间内通过；开启后区间内不通过、区间外通过，用来排除一段取值。',
+  'collection.detections.sort.sortBy': '按目标面积、中心 X、中心 Y、圆度或周长排序。数值相同时保持原来的相对顺序。',
+  'collection.detections.sort.descending': '开启时大值在前。按从左到右或从上到下排列时请关闭。',
+  'image.grayscale.mode': '亮度按 BT.601 加权，适合普通彩色图；通道均值三通道等权；通道最大值保留最亮的 B/G/R。单通道输入忽略此项并原样输出。',
+  'match.template.templatePath': '未连接模板图像时读取的路径，可以是绝对路径，或相对主机工作目录。连接 template 后以输入为准。',
+  'match.template.angleRangeDeg': '旋转搜索的对称半宽（度）。0 不搜索旋转；15 表示搜索 −15°～+15°。范围越大搜索越慢。',
+  'match.template.angleStepDeg': '旋转搜索的角度步长（度）。步长越小角度越密，模型和搜索越慢。',
+  'match.template.minScore': '最低接受分数，范围 0–1。低于该分数视为未找到。平方差模式会先用原生平方差重算分数，再套用此门槛。',
+  'match.template.method': '归一化互相关直接使用 NCC 分数；归一化平方差先提出 NCC 候选，再用原生平方差分数校验，最后仍按最小匹配分数筛选。',
   'robot.executeTarget.timeoutMs': '动作超时（毫秒）：等待机器人到位信号的最长时间。',
   'robot.executeTarget.maxRetries': '失败重试次数：超时或未到位时最多重试几次。',
   'robot.executeTarget.retryDelayMs': '重试间隔（毫秒）：两次重试之间的等待时间。',
