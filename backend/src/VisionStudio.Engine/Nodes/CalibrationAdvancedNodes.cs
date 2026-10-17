@@ -26,13 +26,18 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid calibrationDataJson: {ex.Message}", ex); }
         if (request.ImageWidth is < 16 or > 32768 || request.ImageHeight is < 16 or > 32768) throw new InvalidOperationException("ImageWidth and ImageHeight must each be between 16 and 32768 pixels.");
         if (request.Views is null || request.Views.Count < 3) throw new InvalidOperationException("Intrinsic calibration requires at least three views; use varied board orientations and positions.");
+        if (request.Views.Count > 500) throw new InvalidOperationException("Intrinsic calibration accepts at most 500 views.");
         var objects = new List<IEnumerable<Point3f>>(); var images = new List<IEnumerable<Point2f>>();
+        var totalPointCount = 0;
         foreach (var (view, index) in request.Views.Select((v, i) => (v, i)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (view is null || view.ObjectPoints is null || view.ImagePoints is null || view.ObjectPoints.Count < 6 || view.ObjectPoints.Count != view.ImagePoints.Count)
                 throw new InvalidOperationException($"View {index} must have matching object/image point arrays with at least six points.");
-            if (view.ObjectPoints.Any(p => p is null || p.Count != 3 || p.Any(v => !double.IsFinite(v))) || view.ImagePoints.Any(p => p is null || p.Count != 2 || p.Any(v => !double.IsFinite(v))))
+            if (view.ObjectPoints.Count > 5000) throw new InvalidOperationException($"View {index} exceeds the 5000-point limit.");
+            totalPointCount = checked(totalPointCount + view.ObjectPoints.Count);
+            if (totalPointCount > 100000) throw new InvalidOperationException("Intrinsic calibration accepts at most 100000 total correspondence points.");
+            if (view.ObjectPoints.Any(p => p is null || p.Count != 3 || p.Any(v => !double.IsFinite(v) || !float.IsFinite((float)(v * 0.001)))) || view.ImagePoints.Any(p => p is null || p.Count != 2 || p.Any(v => !double.IsFinite(v))))
                 throw new InvalidOperationException($"View {index} points must be finite [X,Y,Z] and [u,v] arrays.");
             var ip = view.ImagePoints.Select(p => new Point2f((float)p[0], (float)p[1])).ToArray();
             if (ip.Any(p => p.X < 0 || p.Y < 0 || p.X >= request.ImageWidth || p.Y >= request.ImageHeight)) throw new InvalidOperationException($"View {index} contains image points outside the declared image size.");
@@ -52,7 +57,7 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             return new { index, pointCount = stat.PointCount, coverageX = Math.Round(stat.CoverageX, 4), coverageY = Math.Round(stat.CoverageY, 4), reprojectionRms = stat.ReprojectionRms, reprojectionMax = stat.ReprojectionMax };
         }).ToArray();
         var maxViewRms = node.GetDouble("maxViewRms", 0);
-        if (!double.IsFinite(maxViewRms) || maxViewRms < 0) throw new InvalidOperationException("maxViewRms must be finite and non-negative (0 disables the per-view gate).");
+        if (!double.IsFinite(maxViewRms) || maxViewRms is < 0 or > 100) throw new InvalidOperationException("maxViewRms must be finite and between 0 and 100 (0 disables the per-view gate).");
         if (maxViewRms > 0)
         {
             var bad = viewStats.FirstOrDefault(v => v.reprojectionRms is not null && v.reprojectionRms > maxViewRms);
@@ -64,7 +69,7 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         catch (Exception ex) { throw new InvalidOperationException($"JLVision intrinsic calibration failed: {ex.Message}", ex); }
         var rms = model.Rms;
         var maxRms = node.GetDouble("maxRms", 0);
-        if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("maxRms must be finite and non-negative (0 disables the model gate).");
+        if (!double.IsFinite(maxRms) || maxRms is < 0 or > 1000) throw new InvalidOperationException("maxRms must be finite and between 0 and 1000 (0 disables the model gate).");
         if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
         var worstViewRms = viewStats.Where(v => v.reprojectionRms is not null).Select(v => v.reprojectionRms!.Value).DefaultIfEmpty(0).Max();
@@ -89,17 +94,35 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         var worstPoseViewIndex = fullViewStats.Where(v => v.poseReprojectionRms is not null).OrderByDescending(v => v.poseReprojectionRms!.Value).Select(v => (int?)v.index).FirstOrDefault();
         var poseRmsValues = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).OrderBy(v => v).ToArray();
         var medianPoseRms = poseRmsValues.Length == 0 ? 0d : poseRmsValues.Length % 2 == 1 ? poseRmsValues[poseRmsValues.Length / 2] : (poseRmsValues[poseRmsValues.Length / 2 - 1] + poseRmsValues[poseRmsValues.Length / 2]) / 2d;
+        var nativePolynomialDistortionActive = model.NativeCameraType == "area_scan_polynomial"
+            && model.NativeCameraParameters is { Length: 12 }
+            && model.NativeCameraParameters.Skip(1).Take(5).Any(value => Math.Abs(value) > 1e-12);
+        var maxPoseViewRms = node.GetDouble("maxPoseViewRms", 0);
+        if (!double.IsFinite(maxPoseViewRms) || maxPoseViewRms is < 0 or > 100) throw new InvalidOperationException("maxPoseViewRms must be finite and between 0 and 100 (0 disables the pinhole per-view gate).");
+        if (maxPoseViewRms > 0 && nativePolynomialDistortionActive)
+            throw new InvalidOperationException("maxPoseViewRms uses a pinhole-only per-view reprojection. Native polynomial distortion is active, so use maxViewRms and maxRms or disable this gate.");
+        if (maxPoseViewRms > 0)
+        {
+            var bad = fullViewStats.FirstOrDefault(v => v.poseReprojectionRms is not null && v.poseReprojectionRms > maxPoseViewRms);
+            if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has fitted-camera reprojection RMS {bad.poseReprojectionRms:0.###} px above maxPoseViewRms {maxPoseViewRms:0.###}; check or disable that view.");
+        }
         // Outlier view: pose RMS more than 3x the median (and above 0.5 px) - the view
         // to inspect/remove first, as mature calibrators flag suspect views.
-        var outlierViewIndex = medianPoseRms > 0 && worstPoseViewRms > Math.Max(0.5, 3 * medianPoseRms) ? worstPoseViewIndex : null;
+        var outlierViewIndex = !nativePolynomialDistortionActive && medianPoseRms > 0 && worstPoseViewRms > Math.Max(0.5, 3 * medianPoseRms) ? worstPoseViewIndex : null;
         var outputs = new Dictionary<string, VisionValue>
         {
             ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms),
-            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(fullViewStats))
+            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(fullViewStats)),
+            ["meanCoverageX"] = VisionValue.Double(viewStats.Average(v => v.coverageX)),
+            ["meanCoverageY"] = VisionValue.Double(viewStats.Average(v => v.coverageY)),
+            ["nativePolynomialDistortionActive"] = VisionValue.Boolean(nativePolynomialDistortionActive)
         };
         if (viewStats.Any(v => v.reprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
         if (worstPoseViewIndex is not null) outputs["worstViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
-        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
+        if (worstPoseViewRms > 0) outputs["worstPoseViewRms"] = VisionValue.Double(worstPoseViewRms);
+        if (worstPoseViewIndex is not null) outputs["worstPoseViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
+        if (outlierViewIndex is not null) outputs["outlierViewIndex"] = VisionValue.Integer(outlierViewIndex.Value);
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["poseRmsModel"] = nativePolynomialDistortionActive ? "pinhole-only; native polynomial distortion omitted" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
     }
 }
 

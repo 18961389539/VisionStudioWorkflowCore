@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "8e580a019d1c95f2bb6ee790b27e702bf6833e05bd66328b011132d478cf54bd",
+  "hash": "86e0054924d87f969d63683bf704e9e5fab182a64dfc4f6e3c6f3f68448ce145",
   "items": [
     {
       "type": "image.acquire",
@@ -708,6 +708,36 @@
           "required": false
         },
         {
+          "name": "worstPoseViewRms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "worstPoseViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "outlierViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "meanCoverageX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanCoverageY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "nativePolynomialDistortionActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -728,7 +758,18 @@
           "defaultValue": 0,
           "min": 0,
           "max": 100,
-          "step": 0.1
+          "step": 0.1,
+          "description": "Pre-fit planar homography RMS gate; only applies to planar target views."
+        },
+        {
+          "name": "maxPoseViewRms",
+          "label": "Max Pinhole Pose View RMS (px, 0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100,
+          "step": 0.1,
+          "description": "Gate the fitted-K per-view reprojection. It is unavailable when native polynomial distortion is active because that model is not included in this pinhole-only check."
         },
         {
           "name": "maxRms",
@@ -740,7 +781,7 @@
           "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views. viewStats reports per-view coverage and planar/camera-pose reprojection RMS/max; worstViewIndex and outlierViewIndex flag suspect views. maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model.",
+      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports per-view coverage and planar/pinhole reprojection RMS/max; maxViewRms, maxPoseViewRms, and maxRms optionally gate acceptance. The pinhole pose metric is not used as an outlier gate when native polynomial distortion is active. No fisheye/telecentric model.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

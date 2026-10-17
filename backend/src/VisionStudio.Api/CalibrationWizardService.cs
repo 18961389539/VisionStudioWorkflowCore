@@ -31,7 +31,7 @@ public sealed record CalibrationWizardAddViewRequest(
 
 public sealed record CalibrationWizardSetEnabledRequest(bool Enabled);
 
-public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0);
+public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0);
 
 public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
 
@@ -330,7 +330,8 @@ public sealed class CalibrationWizardService
         {
             ["calibrationDataJson"] = JsonSerializer.SerializeToElement(JsonSerializer.Serialize(calibRequest)),
             ["maxViewRms"] = JsonSerializer.SerializeToElement(request.MaxViewRms),
-            ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms)
+            ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms),
+            ["maxPoseViewRms"] = JsonSerializer.SerializeToElement(request.MaxPoseViewRms)
         };
         var node = new NodeDefinition("wizard-intrinsics", "calibration.cameraIntrinsics", "Wizard", null, parameters);
         try
@@ -345,6 +346,9 @@ public sealed class CalibrationWizardService
                 ["viewStats"] = result.Outputs.TryGetValue("viewStats", out var vs) ? vs.Require<string>("viewStats") : null,
                 ["worstViewRms"] = result.Outputs.TryGetValue("worstViewRms", out var wr) ? wr.Require<double>("worstViewRms") : null,
                 ["worstViewIndex"] = result.Outputs.TryGetValue("worstViewIndex", out var wi) ? wi.Require<long>("worstViewIndex") : null,
+                ["worstPoseViewRms"] = result.Outputs.TryGetValue("worstPoseViewRms", out var wpr) ? wpr.Require<double>("worstPoseViewRms") : null,
+                ["worstPoseViewIndex"] = result.Outputs.TryGetValue("worstPoseViewIndex", out var wpi) ? wpi.Require<long>("worstPoseViewIndex") : null,
+                ["outlierViewIndex"] = result.Outputs.TryGetValue("outlierViewIndex", out var oi) ? oi.Require<long>("outlierViewIndex") : null,
                 ["nodeSummary"] = result.Summary,
                 ["calibrationJson"] = json,
                 ["enabledViews"] = calibRequest.Views.Count

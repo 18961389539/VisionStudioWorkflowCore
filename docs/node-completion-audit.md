@@ -319,3 +319,9 @@ Usage and limits are documented in [ONNX Image Classification](onnx-classificati
 
 Usage and limits are documented in [Template Matching](template-matching.md). Continuous scale models, polarity invariance, clutter handling, and deformation tolerance remain in the separate shape-matching family.
 
+## Follow-up implementation: camera intrinsics
+
+The camera-intrinsics node and wizard now expose a fitted-K per-view RMS gate in addition to the planar pre-fit and overall model gates. Since that pose residual omits JLVision's native polynomial distortion, the node rejects this gate when distortion is active and does not mark pinhole-derived views as outliers in that case. Typed outputs now expose worst pose-view errors, coverage, and outlier indexes. Input limits bound calibration sets to 500 views and 100000 total correspondences. The baseline **72** score remains historical and has not been rerated.
+
+Usage and model limits are documented in [Camera Intrinsic Calibration](camera-intrinsics.md). Fisheye and telecentric model support remains a significant gap.
+

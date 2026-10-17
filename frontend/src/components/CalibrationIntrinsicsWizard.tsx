@@ -30,6 +30,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [solveSummary, setSolveSummary] = useState<Record<string, unknown>>();
   const [maxViewRms, setMaxViewRms] = useState(0);
   const [maxRms, setMaxRms] = useState(0);
+  const [maxPoseViewRms, setMaxPoseViewRms] = useState(0);
   const [hints, setHints] = useState<CalibrationWizardHint[]>([]);
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
   const [cameraId, setCameraId] = useState<string>();
@@ -230,7 +231,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxViewRms, maxRms })
+        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
@@ -271,7 +272,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       if (selectedNodeType === 'calibration.cameraIntrinsics') {
-        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '' });
+        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', maxViewRms, maxRms, maxPoseViewRms });
         messageApi.success('已将视图 JSON 应用到相机内参节点');
       } else if (selectedNodeType === 'image.undistort') {
         onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '' });
@@ -389,11 +390,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       {step === 3 && session && (
         <Space direction="vertical" size="middle">
           <Space>
-            <InputNumber addonBefore="单视图 RMS 上限" min={0} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="模型 RMS 上限" min={0} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="单视图 RMS 上限" min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="拟合相机单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="模型 RMS 上限" min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
             <Button type="primary" loading={busy} disabled={enabledCount < 3} onClick={calibrate}>运行内参标定</Button>
           </Space>
-          <Typography.Text type="secondary">0 = 关闭门控。求解使用与节点 calibration.cameraIntrinsics 相同的 JLVision 后端。</Typography.Text>
+          <Typography.Text type="secondary">0 = 关闭门控。单视图门限是平面单应性预检；针孔位姿门限不含 JLVision 原生多项式畸变，畸变启用时会拒绝该门限。</Typography.Text>
         </Space>
       )}
 
