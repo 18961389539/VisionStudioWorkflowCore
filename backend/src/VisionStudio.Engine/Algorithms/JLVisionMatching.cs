@@ -176,6 +176,9 @@ internal static class JLVisionMatching
             var squaredDifference = !shape && method == "sqdiff-normed";
             var acceptLimit = Math.Clamp(node.GetInt("maxTargets", shape ? 5 : 1), 1, shape ? 100 : 50);
             var maximum = !shape && squaredDifference ? 100 : acceptLimit;
+            var duplicateOverlapThreshold = shape ? 0d : node.GetDouble("duplicateOverlapThreshold", 0.3);
+            if (!shape && (!double.IsFinite(duplicateOverlapThreshold) || duplicateOverlapThreshold < 0 || duplicateOverlapThreshold > 1))
+                throw new InvalidOperationException("match.template duplicateOverlapThreshold must be finite and between 0 and 1.");
             VisionRoi? searchRoi;
             if (shape) searchRoi = node.GetRoi("searchRoi");
             else if (context.TryGetValue("searchRoi", out var searchRoiInput)) searchRoi = searchRoiInput.Require<VisionRoi>("searchRoi");
@@ -230,6 +233,7 @@ internal static class JLVisionMatching
                 summary["scaleStepPercent"] = nccScaleStep * 100;
                 summary["scaleSearch"] = Math.Abs(nccScaleMin - 1) < 1e-9 && Math.Abs(nccScaleMax - 1) < 1e-9 ? "fixed" : "discrete-resampled-ncc";
                 summary["maxTargets"] = acceptLimit;
+                summary["duplicateOverlapThreshold"] = duplicateOverlapThreshold;
             }
             if (shape)
             {
@@ -568,6 +572,7 @@ internal static class JLVisionMatching
                 var distance = Math.Max(0, node.GetDouble("minCenterDistance", shape ? 20 : 0));
                 if (distance > 0 && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
                 if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > .3)) continue;
+                if (!shape && duplicateOverlapThreshold > 0 && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) >= duplicateOverlapThreshold)) continue;
                 var degrees = VisionTransform2D.NormalizeAngleDeg(radians * 180 / Math.PI);
                 if (detections.Count >= acceptLimit) continue;
                 if (!outputs["found"].Require<bool>("found"))

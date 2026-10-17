@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "d6ec37419b572a8cb92fed9ea6bf05c502ae2072a1a3aa95b463a02bc664f289",
+  "hash": "8e580a019d1c95f2bb6ee790b27e702bf6833e05bd66328b011132d478cf54bd",
   "items": [
     {
       "type": "image.acquire",
@@ -8126,6 +8126,17 @@
           "description": "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."
         },
         {
+          "name": "duplicateOverlapThreshold",
+          "label": "Duplicate Box IoU Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0.3,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Search",
+          "description": "Suppress later template matches whose axis-aligned box IoU reaches this threshold; 0 disables overlap suppression."
+        },
+        {
           "name": "scaleMinPercent",
           "label": "Scale Min",
           "type": "number",
@@ -8162,7 +8173,7 @@
           "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected."
         }
       ],
-      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches, a search ROI, a template mask, and a discrete uniform scale range are optional; defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
+      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches use score-ordered box-IoU suppression by default; a search ROI, template mask, and discrete uniform scale range are optional. Defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

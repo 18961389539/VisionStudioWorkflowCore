@@ -313,3 +313,9 @@ Usage and limitations are documented in [Planar Calibration](planar-calibration.
 
 Usage and limits are documented in [ONNX Image Classification](onnx-classification.md). Multi-image batching, multi-crop aggregation, and calibration of classifier confidence remain open product gaps.
 
+## Follow-up implementation: template matching
+
+`match.template` already supports a cached NCC pyramid, optional subpixel translation and angle search, discrete uniform scale samples, search ROI, template masks, and multiple targets. Multi-target mode now suppresses duplicate matches in score order using configurable axis-aligned box IoU, while the default one-target behavior remains unchanged. The baseline **61** score is historical and has not been rerated.
+
+Usage and limits are documented in [Template Matching](template-matching.md). Continuous scale models, polarity invariance, clutter handling, and deformation tolerance remain in the separate shape-matching family.
+
