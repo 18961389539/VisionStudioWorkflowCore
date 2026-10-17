@@ -19,7 +19,9 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
       onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
     }) =>
       <div><span data-testid="image-url">{previewUrl}</span><span data-testid="roi-enabled">{roiEnabled ? 'ROI 可编辑' : 'ROI 只读'}</span>
-        <span data-testid="roi-preview-shape" data-type={roi?.type ?? 'none'} data-editable={roiEnabled ? 'true' : 'false'} />
+        <span data-testid="roi-preview-shape" data-type={roi?.type ?? 'none'} data-editable={roiEnabled ? 'true' : 'false'}
+          data-x={roi && 'x' in roi ? roi.x : undefined} data-y={roi && 'y' in roi ? roi.y : undefined}
+          data-width={roi && 'width' in roi ? roi.width : undefined} data-height={roi && 'height' in roi ? roi.height : undefined} />
         <span data-testid="roi-target">{roiTargetLabel}</span><span>{showRoiTools ? 'ROI 工具' : '纯图像预览'}</span>
         <span data-testid="overlay-ids">{overlays.map(overlay => overlay.id).join(',')}</span>
         {measurementGeometry?.type === 'circle' && <span data-testid="circle-geometry" data-center-x={measurementGeometry.center.x}
@@ -542,6 +544,47 @@ describe('crop workspace with a connected ROI', () => {
     const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
     const onPreview = vi.fn(async () => result);
     const { dialog } = mount({ node: outsideCropNode, catalogItem: cropCatalog, nodes: [outsideCropNode, imageNode], edges, result, onPreview });
+
+    expect(await dialog.findByText(/裁剪区域与当前输入图像（100×100）没有像素交集/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onPreview).not.toHaveBeenCalled();
+  });
+
+  it('shows, clears, and restores a partial legacy crop rectangle on the input image', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 200, height: 100 }, { nodeId: 'source', portName: 'image', width: 200, height: 100 }
+    ] }) })));
+    const legacyCropNode: Node = { ...cropNode, data: { ...cropNode.data,
+      parameters: { x: '12', y: 8, width: 80 } } };
+    const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
+    const { dialog } = mount({ node: legacyCropNode, catalogItem: cropCatalog, nodes: [legacyCropNode, imageNode], edges, result });
+
+    await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/source/image'));
+    const previewRoi = dialog.getByTestId('roi-preview-shape');
+    expect(previewRoi.getAttribute('data-type')).toBe('Rectangle');
+    expect(previewRoi.getAttribute('data-editable')).toBe('true');
+    expect(previewRoi.getAttribute('data-x')).toBe('12');
+    expect(previewRoi.getAttribute('data-y')).toBe('8');
+    expect(previewRoi.getAttribute('data-width')).toBe('80');
+    expect(previewRoi.getAttribute('data-height')).toBe('100');
+    expect(dialog.getByText(/正在使用旧版裁剪坐标/)).toBeTruthy();
+
+    fireEvent.click(dialog.getByRole('button', { name: '清除选区（使用整图）' }));
+    expect(dialog.getByTestId('roi-preview-shape').getAttribute('data-type')).toBe('none');
+    expect(dialog.getByRole('button', { name: '撤销清除选区' })).toBeTruthy();
+    fireEvent.click(dialog.getByRole('button', { name: '撤销清除选区' }));
+    expect(dialog.getByTestId('roi-preview-shape').getAttribute('data-height')).toBe('100');
+  });
+
+  it('blocks a partial legacy crop rectangle that misses the known input image', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: 'crop', portName: 'image', width: 100, height: 100 }, { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+    ] }) })));
+    const legacyCropNode: Node = { ...cropNode, data: { ...cropNode.data,
+      parameters: { x: 120, y: 12, width: 20 } } };
+    const edges = [{ id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' }];
+    const onPreview = vi.fn(async () => result);
+    const { dialog } = mount({ node: legacyCropNode, catalogItem: cropCatalog, nodes: [legacyCropNode, imageNode], edges, result, onPreview });
 
     expect(await dialog.findByText(/裁剪区域与当前输入图像（100×100）没有像素交集/)).toBeTruthy();
     expect((dialog.getByRole('button', { name: '预览裁剪结果' }) as HTMLButtonElement).disabled).toBe(true);

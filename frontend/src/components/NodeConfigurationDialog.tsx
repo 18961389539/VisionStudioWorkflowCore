@@ -76,6 +76,26 @@ function connectedRoiGeometry(value: unknown): VisionRoi | undefined {
   return undefined;
 }
 
+function legacyCropRectangle(parameters: NodeParameters, imageWidth: number, imageHeight: number): VisionRoi | undefined {
+  if (!Number.isFinite(imageWidth) || imageWidth < 1 || !Number.isFinite(imageHeight) || imageHeight < 1) return undefined;
+  const read = (key: string, fallback: number) => {
+    const value = parameters[key];
+    if (value === undefined || value === null) return fallback;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+    return fallback;
+  };
+  const x = read('x', 0), y = read('y', 0);
+  const width = read('width', imageWidth), height = read('height', imageHeight);
+  if (x === undefined || y === undefined || width === undefined || height === undefined
+    || Math.abs(x) > 10_000_000 || Math.abs(y) > 10_000_000
+    || width <= 0 || width > 10_000_000 || height <= 0 || height > 10_000_000) return undefined;
+  return { type: 'Rectangle', x, y, width, height };
+}
+
 function outputPortMatches(edge: Edge | undefined, nodeId: string, portName: string) {
   return edge?.source === nodeId && edge.sourceHandle?.toLowerCase() === portName.toLowerCase();
 }
@@ -559,6 +579,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const cropRoiEdge = isImageCrop ? roiInputEdge : undefined;
   const cropRoiSourceId = cropRoiEdge?.source;
   const cropRoiInputConnected = Boolean(cropRoiEdge);
+  const legacyCropBoundsPresent = isImageCrop && ['x', 'y', 'width', 'height'].some(key => draft[key] !== undefined && draft[key] !== null);
   const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
     && cropClearUndo.afterFingerprint === draftFingerprint);
   const searchLineInputEdge = ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
@@ -682,6 +703,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog,
     imageOutputPorts, imageOutputPortName, setImageOutputPortName } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
+  const cropRoiForImage = isImageCrop && !cropRoiInputConnected
+    ? (draft.roi as VisionRoi | null | undefined) ?? (legacyCropBoundsPresent
+      ? legacyCropRectangle(draft, imageViewerSource.width, imageViewerSource.height) : undefined)
+    : undefined;
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
     ? runImageEntryForPort(runImageCatalog, measurementImageSource.id, measurementImageInputEdge?.sourceHandle)
@@ -696,7 +721,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     && imageSource === 'input' && previewNodeId === node.id && selectedInputAvailable);
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
-    const imageExtentIssue = cropRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
+    const imageExtentIssue = cropRoiOutsideImageIssue(cropRoiForImage, imageViewerSource.width, imageViewerSource.height);
     if (imageExtentIssue) issues.push(imageExtentIssue);
   }
   if (measurementNodeTypes.includes(catalogItem.type) && !connectedRoiInput && !resultStale && imageSource === 'input'
@@ -1061,7 +1086,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     });
   };
   const clearCropSelection = () => {
-    if (locked || cropRoiInputConnected || !draft.roi) return;
+    if (locked || cropRoiInputConnected || (!draft.roi && !legacyCropBoundsPresent)) return;
     const next = { ...draft };
     for (const key of ['x', 'y', 'width', 'height']) delete next[key];
     delete next.roi;
@@ -1447,7 +1472,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       ]
       : [{ key: 'searchRoi', label: '搜索区域', emptyText: '未设置 · 使用整幅场景图像', showEmpty: true }]
       : isImageCrop ? cropRoiInputConnected ? []
-        : [{ key: 'roi', label: '裁剪区域', emptyText: '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
+        : [{ key: 'roi', label: '裁剪区域', emptyText: legacyCropBoundsPresent && !draft.roi
+          ? '正在使用旧版裁剪坐标；载入输入图像后可在画布核对或调整' : '未绘制 · 使用旧版坐标或整幅图像', showEmpty: true }]
       : isRoiTransform ? roiInputConnected ? [] : [{ key: 'roi', label: '基准 ROI', emptyText: '设定基准后在基准图上绘制', showEmpty: true }]
         : roiMaskInputConnected || showMeasurementReferenceImage ? [] : undefined;
     return <div ref={bindWorkspace} tabIndex={-1} className={'node-configuration-workspace' + (showImage ? '' : ' without-image')}
@@ -1588,7 +1614,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             ? `本节点几何属于基准图像坐标；当前显示的${showMeasurementReferenceImage ? '已保存基准图像' : '变换输入图像'}可直接拖动或重绘，transform 会在运行时映射到测量图像。ROI 掩膜仍使用当前图像坐标。`
             : '本节点几何属于基准图像坐标；transform 会在运行时映射到测量图像。可从支持的定位修正 ROI 或图像裁剪变换自动打开对应基准图像。ROI 掩膜仍使用当前图像坐标。'} />}
         <div className="node-configuration-viewer"><ImageViewer previewUrl={displayImageSource.url} imageWidth={displayImageSource.width} imageHeight={displayImageSource.height}
-          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
+          overlays={overlaysWithTrainedContour} roi={canEditRoi ? (isImageCrop ? cropRoiForImage : shapeMode === 'search' ? draft.searchRoi as VisionRoi | undefined
             : regionEditMode === 'clutter' ? draft.clutterRoi as VisionRoi | undefined : draft.roi as VisionRoi | undefined)
             : showConnectedRoiPreview ? connectedRoiPreviewGeometry : undefined} showRoiTools={canEditRoi || isRoiTransform}
           measurementGeometry={viewerMeasurementGeometry} measurementGeometryEditable={Boolean(measurementGeometry) && canEditMeasurementGeometry && !locked && !showCurrentMeasurementImage}
@@ -1667,7 +1693,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           {cropRoiInputConnected && <Alert showIcon type="info" title={`裁剪区域来自上游：${nodeLabels[cropRoiSourceId!] ?? cropRoiSourceId}`}
             description="已连接的 roi 输入会覆盖本节点的本地选区。请在上游 ROI 节点编辑；本地选区不会参与本次裁剪。有效运行报告且坐标系匹配时，轮廓会在输入图像上只读显示。"
             style={{ marginBlock: 10 }} />}
-          {!cropRoiInputConnected && draft.roi && <Button size="small" disabled={locked} onClick={clearCropSelection}>清除选区（使用整图）</Button>}
+          {!cropRoiInputConnected && (draft.roi || legacyCropBoundsPresent) && <Button size="small" disabled={locked} onClick={clearCropSelection}>清除选区（使用整图）</Button>}
           {cropClearUndoAvailable && <Button size="small" disabled={locked} onClick={undoCropSelectionClear}>撤销清除选区</Button>}
           <Button type="primary" size="small" onClick={() => void runPreview()} loading={previewBusy}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || connectedRoiImageFrameMismatch}
