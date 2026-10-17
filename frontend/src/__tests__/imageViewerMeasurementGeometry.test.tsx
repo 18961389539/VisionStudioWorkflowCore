@@ -896,6 +896,31 @@ describe('ImageViewer measurement geometry editing', () => {
     ] });
   });
 
+  it('does not let a remote eraser stroke restrict moving the selected brush region', () => {
+    const onRoiChange = vi.fn();
+    const roi: VisionRoi = { type: 'Brush', strokes: [
+      { mode: 'Add', width: 4, points: [{ x: 10, y: 10 }, { x: 14, y: 10 }] },
+      { mode: 'Erase', width: 4, points: [{ x: 90, y: 10 }] }
+    ] };
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} showRoiTools roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    // Move the painted area from x=10..14 to x=94..98, flush with the image's right edge.
+    fireEvent.mouseDown(stage, { clientX: 110.32, clientY: 35.6 }); // image (12, 10)
+    fireEvent.mouseMove(stage, { clientX: 308.56, clientY: 35.6 }); // image (96, 10)
+    fireEvent.mouseUp(document.body, { clientX: 308.56, clientY: 35.6 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const moved = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(moved.type).toBe('Brush');
+    if (moved.type === 'Brush') {
+      expect(moved.strokes[0].points[0].x).toBeCloseTo(94);
+      expect(moved.strokes[0].points[1].x).toBeCloseTo(98);
+      expect(moved.strokes[1].points[0].x).toBeCloseTo(174);
+    }
+  });
+
   it('keeps completed brush paths stable while drawing and commits the active stroke losslessly', () => {
     const onRoiChange = vi.fn();
     const roi: VisionRoi = { type: 'Brush', strokes: [

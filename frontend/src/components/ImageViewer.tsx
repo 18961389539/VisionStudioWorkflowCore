@@ -304,6 +304,9 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
 function brushRoiBounds(roi: Extract<VisionRoi, { type: 'Brush' }>): RoiMoveBounds | undefined {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const stroke of roi.strokes) {
+    // Erase strokes can only remove selected pixels; a remote eraser outside every add stroke
+    // must not shrink the range in which the effective ROI can be moved.
+    if (stroke.mode !== 'Add') continue;
     const radius = stroke.width / 2;
     for (const point of stroke.points) {
       minX = Math.min(minX, point.x - radius);
