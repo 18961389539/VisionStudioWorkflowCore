@@ -141,6 +141,15 @@ internal static partial class JLVisionOperators
     {
         using var image = JLVisionImages.FromMat(source);
         using var edges = image.EdgesSubPix("canny", 1d, (int)low, (int)high);
+        // A constant/blank image yields an empty XLD object; converting that through
+        // RegionToBin produces a channel-less image whose conversion throws. The
+        // correct Canny result there is an all-zero edge map (found=false upstream).
+        if (edges.CountObj() == 0)
+        {
+            using var empty = new Mat(source.Height, source.Width, MatType.CV_8UC1, Scalar.All(0));
+            empty.CopyTo(target);
+            return;
+        }
         using var region = edges.GenRegionContourXld("margin");
         using var binary = region.RegionToBin(255, 0, source.Width, source.Height); JLVisionImages.Store(binary, target);
     }
