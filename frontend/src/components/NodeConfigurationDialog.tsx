@@ -18,7 +18,8 @@ const cropMaskFramePreservingNodeTypes = new Set([
   'image.grayscale', 'image.channel', 'image.colorConvert', 'image.blur.gaussian', 'image.blur.median', 'image.filter',
   'image.sharpen', 'image.contrastNormalize', 'image.illuminationNormalize', 'image.threshold',
   'image.threshold.adaptive', 'image.threshold.otsu', 'image.morphology', 'image.topHat', 'image.bottomHat',
-  'image.morphGradient', 'image.reduceDomain'
+  'image.morphGradient', 'image.reduceDomain', 'feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine',
+  'measure.caliperCircle'
 ]);
 const cropMaskFrameChangingNodeTypes = new Set([
   'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'

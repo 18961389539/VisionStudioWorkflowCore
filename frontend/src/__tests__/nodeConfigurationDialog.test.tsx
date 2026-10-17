@@ -403,6 +403,28 @@ describe('crop workspace with a connected ROI', () => {
     expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
   });
 
+  it.each(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'])(
+    'keeps the corrected ROI overlay visible when the crop input passes through %s', async (measurementType) => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+        { nodeId: 'crop', portName: 'image', width: 100, height: 100 },
+        { nodeId: 'measurement', portName: 'image', width: 100, height: 100 },
+        { nodeId: 'source', portName: 'image', width: 100, height: 100 }
+      ] }) })));
+      const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: { typeKey: measurementType, label: '卡尺' } };
+      const edges = [
+        { id: 'measurement-source', source: 'source', sourceHandle: 'image', target: 'measurement', targetHandle: 'image' },
+        { id: 'measurement-crop', source: 'measurement', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
+        { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },
+        { id: 'roi-debug-image', source: 'source', sourceHandle: 'image', target: 'roi', targetHandle: 'debugImage' }
+      ];
+      const { dialog } = mount({ node: cropNode, catalogItem: cropCatalog,
+        nodes: [cropNode, roiNode, imageNode, measurementNode], edges, result });
+
+      await waitFor(() => expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/measurement/image'));
+      expect(dialog.getByTestId('overlay-ids').textContent).toContain('roi-transform-corrected-shape');
+    }
+  );
+
   it('shows the corrected ROI overlay when crop and reference image use sibling pixel-preserving branches', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
       { nodeId: 'crop', portName: 'image', width: 100, height: 100 },
