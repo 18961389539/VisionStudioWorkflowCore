@@ -79,7 +79,7 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
-  'Parallel Tolerance': '平行容差', 'Require Within Segments': '要求交点位于线段内', 'Character Blacklist': '?????', 'Low Confidence Threshold': '?????', 'Threshold Mode': '????', 'Manual Threshold': '????', 'Otsu Auto (spatial maps)': 'Otsu ???????',
+  'Parallel Tolerance': '平行容差', 'Require Within Segments': '要求交点位于线段内', 'Max RMS Error (0=off)': '最大 RMS 误差（0 为关闭）', 'Max Centre Distance (0=off)': '最大中心距（0 为关闭）', 'Max Angle Error deg (0=off)': '最大角度误差（度，0 为关闭）', 'Output Width (0=input)': '输出宽度（0 为输入宽度）', 'Character Blacklist': '?????', 'Low Confidence Threshold': '?????', 'Threshold Mode': '????', 'Manual Threshold': '????', 'Otsu Auto (spatial maps)': 'Otsu ???????',
   'Lower Percentile': '下百分位（%）', 'Upper Percentile': '上百分位（%）',
   'Region Canvas Width': '区域画布宽度', 'Region Canvas Height': '区域画布高度', 'Boundary Side': '边界侧',
   'Contour Points JSON': '轮廓点列 JSON', 'Closed Contour': '闭合轮廓', 'Wall Samples': '壁厚采样数', 'Wall Start Angle': '壁厚采样起始角度',

@@ -94,6 +94,8 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
     {
         var source = context.RequireImage("image").Mat;
         var mode = node.GetString("mode", "luminance").Trim().ToLowerInvariant();
+        if (mode is not ("luminance" or "bt601" or "gray" or "average" or "mean" or "max")) throw new InvalidOperationException($"image.grayscale mode '{mode}' is unsupported; use luminance, average or max.");
+        cancellationToken.ThrowIfCancellationRequested();
         var mat = new Mat();
         var converted = false;
 
@@ -133,20 +135,23 @@ public sealed class GrayscaleNode : IVisionNodeExecutor
                 foreach (var channel in channels) channel.Dispose();
             }
         }
-        else
+        else if (mode is "luminance" or "bt601" or "gray")
         {
             // luminance：BT.601 加权（OpenCV 默认 BGR2GRAY）。
             JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         }
 
         converted = source.Channels() != 1;
+        var effectiveMode = source.Channels() == 1 ? "passthrough" : mode;
+        var diag = CoordinateValidation.Diagnostics(Type, ("mode", effectiveMode), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()), ("width", mat.Width), ("height", mat.Height));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(mat)) },
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(mat)), ["diagnostics"] = VisionValue.String(diag) },
             new Dictionary<string, object?>
             {
-                ["mode"] = source.Channels() == 1 ? "passthrough" : mode,
+                ["mode"] = effectiveMode,
                 ["autoGray"] = converted,
-                ["channels"] = mat.Channels()
+                ["channels"] = mat.Channels(),
+                ["diagnostics"] = diag
             }));
     }
 
@@ -165,6 +170,8 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
     {
         var source = context.RequireImage("image").Mat;
         var channel = node.GetString("channel", "gray").Trim().ToLowerInvariant();
+        if (channel is not ("gray" or "luminance" or "blue" or "green" or "red" or "hue" or "saturation" or "value" or "average" or "mean" or "max")) throw new InvalidOperationException($"image.channel channel '{channel}' is unsupported; use gray, blue, green, red, hue, saturation, value, average or max.");
+        cancellationToken.ThrowIfCancellationRequested();
         var mat = new Mat();
 
         if (channel is "hue" or "saturation" or "value")
@@ -223,9 +230,10 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
             else JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
         }
 
+        var diag = CoordinateValidation.Diagnostics(Type, ("channel", channel), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()), ("width", mat.Width), ("height", mat.Height));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(mat)) },
-            new Dictionary<string, object?> { ["channel"] = channel, ["channels"] = mat.Channels() }));
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(mat)), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["channel"] = channel, ["channels"] = mat.Channels(), ["diagnostics"] = diag }));
 
         static Mat Bgr(Mat source, Mat scratch)
         {
@@ -245,20 +253,24 @@ public sealed class GaussianBlurNode : IVisionNodeExecutor
         var kernel = PreprocessImageHelpers.OddKernel(node.GetInt("kernelSize", 5), 1, 31);
         var sigmaX = node.GetDouble("sigmaX", 0);
         var sigmaY = node.GetDouble("sigmaY", 0);
+        if (!double.IsFinite(sigmaX) || !double.IsFinite(sigmaY) || sigmaX < 0 || sigmaY < 0) throw new InvalidOperationException("image.blur.gaussian sigmaX/sigmaY must be finite and >= 0 (0 derives sigma from kernel size).");
+        cancellationToken.ThrowIfCancellationRequested();
         var roi = node.GetRoi();
 
         var blurred = new Mat();
         JLVisionOperators.GaussianBlur(source, blurred, new Size(kernel, kernel), sigmaX, sigmaY);
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi);
 
+        var diag = CoordinateValidation.Diagnostics(Type, ("kernelSize", kernel), ("sigmaX", sigmaX), ("sigmaY", sigmaY), ("width", output.Width), ("height", output.Height), ("channels", output.Channels()));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) },
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["diagnostics"] = VisionValue.String(diag) },
             new Dictionary<string, object?>
             {
                 ["kernelSize"] = kernel,
                 ["sigmaX"] = sigmaX <= 0 ? "derived" : sigmaX,
                 ["sigmaY"] = sigmaY <= 0 ? "derived" : sigmaY,
-                ["roi"] = roi?.Type.ToString() ?? "FullImage"
+                ["roi"] = roi?.Type.ToString() ?? "FullImage",
+                ["diagnostics"] = diag
             }));
     }
 }
@@ -273,14 +285,15 @@ public sealed class MedianBlurNode : IVisionNodeExecutor
         // 中值滤波要求奇数核（OpenCV 对偶数核直接抛错）——声明范围 + 运行时奇偶收敛双重保证。
         var kernel = PreprocessImageHelpers.OddKernel(node.GetInt("kernelSize", 5), 3, 31);
         var roi = node.GetRoi();
-
+        cancellationToken.ThrowIfCancellationRequested();
         var blurred = new Mat();
         JLVisionOperators.MedianBlur(source, blurred, kernel);
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi);
 
+        var diag = CoordinateValidation.Diagnostics(Type, ("kernelSize", kernel), ("requestedKernelSize", node.GetInt("kernelSize", 5)), ("width", output.Width), ("height", output.Height), ("channels", output.Channels()));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) },
-            new Dictionary<string, object?> { ["kernelSize"] = kernel, ["roi"] = roi?.Type.ToString() ?? "FullImage" }));
+            new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["kernelSize"] = kernel, ["roi"] = roi?.Type.ToString() ?? "FullImage", ["diagnostics"] = diag }));
     }
 }
 
@@ -379,9 +392,11 @@ public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
         var blockSize = PreprocessImageHelpers.OddKernel(node.GetInt("blockSize", 31), 3, 99);
         var c = node.GetDouble("c", 5);
         var method = node.GetString("method", "mean").Trim().ToLowerInvariant();
+        if (method is not ("mean" or "gaussian")) throw new InvalidOperationException($"image.threshold.adaptive method '{method}' is unsupported; use mean or gaussian.");
+        if (!double.IsFinite(c)) throw new InvalidOperationException("image.threshold.adaptive c must be finite.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
-
+        cancellationToken.ThrowIfCancellationRequested();
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
         try
         {
@@ -393,16 +408,20 @@ public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
                 blockSize, c);
             var output = PreprocessImageHelpers.ApplyRoiMask(binary, roi);
 
+            var fg = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
+            var diag = CoordinateValidation.Diagnostics(Type, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("autoGray", converted));
             return ValueTask.FromResult(new NodeExecutorResult(
-                new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)) },
+                new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["foregroundRatio"] = VisionValue.Double(fg), ["diagnostics"] = VisionValue.String(diag) },
                 new Dictionary<string, object?>
                 {
                     ["blockSize"] = blockSize,
                     ["c"] = c,
-                    ["method"] = method == "gaussian" ? "gaussian" : "mean",
+                    ["method"] = method,
                     ["invert"] = invert,
                     ["autoGray"] = converted,
-                    ["roi"] = roi?.Type.ToString() ?? "FullImage"
+                    ["roi"] = roi?.Type.ToString() ?? "FullImage",
+                    ["foregroundRatio"] = Math.Round(fg, 6),
+                    ["diagnostics"] = diag
                 }));
         }
         finally
@@ -431,11 +450,15 @@ public sealed class OtsuThresholdNode : IVisionNodeExecutor
                 ThresholdTypes.Otsu | (invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             var output = PreprocessImageHelpers.ApplyRoiMask(binary, roi);
 
+            var fg2 = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
+            var diag2 = CoordinateValidation.Diagnostics(Type, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("autoGray", converted));
             return ValueTask.FromResult(new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(VisionImage.Own(output)),
-                    ["threshold"] = VisionValue.Double(computed)
+                    ["threshold"] = VisionValue.Double(computed),
+                    ["foregroundRatio"] = VisionValue.Double(fg2),
+                    ["diagnostics"] = VisionValue.String(diag2)
                 },
                 new Dictionary<string, object?>
                 {

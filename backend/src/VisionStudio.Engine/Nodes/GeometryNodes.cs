@@ -458,8 +458,10 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var sourceImage = context.RequireImage("image");
         var minArea = node.GetDouble("minArea", 500);
+        if (!double.IsFinite(minArea) || minArea <= 0) throw new InvalidOperationException("measure.rotatedRect minArea must be finite and > 0.");
         var roi = node.GetRoi();
 
         using var gray = VisionGeometryHelpers.ToGray(sourceImage.Mat);
@@ -491,7 +493,12 @@ public sealed class RotatedRectangleNode : IVisionNodeExecutor
                 ["rectangle"] = VisionValue.Rectangle(rectangle),
                 ["center"] = VisionValue.Point(new VisionPoint2D(rectangle.X, rectangle.Y)),
                 ["pose"] = VisionValue.Pose(new VisionPose2D(rectangle.X, rectangle.Y, rectangle.AngleDeg)),
-                ["angle"] = VisionValue.Double(rectangle.AngleDeg)
+                ["angle"] = VisionValue.Double(rectangle.AngleDeg),
+                ["width"] = VisionValue.Double(rectangle.Width),
+                ["height"] = VisionValue.Double(rectangle.Height),
+                ["area"] = VisionValue.Double(best.Area),
+                ["aspectRatio"] = VisionValue.Double(Math.Max(rectangle.Width, rectangle.Height) / Math.Max(1e-9, Math.Min(rectangle.Width, rectangle.Height))),
+                ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type, ("width", rectangle.Width), ("height", rectangle.Height), ("angleDeg", rectangle.AngleDeg), ("contourArea", best.Area), ("minArea", minArea), ("candidateContours", contours.Length)))
             },
             new Dictionary<string, object?>
             {

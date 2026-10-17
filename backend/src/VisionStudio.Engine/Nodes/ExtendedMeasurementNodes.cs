@@ -21,7 +21,11 @@ public sealed class PointLineDistanceNode : IVisionNodeExecutor
         var closest = new VisionPoint2D(line.Start.X + t * dx, line.Start.Y + t * dy);
         var distance = MeasurementMath.Hypot(point.X - closest.X, point.Y - closest.Y);
         var connector = new VisionLine2D(point, closest);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["distance"] = VisionValue.Double(distance), ["closestPoint"] = VisionValue.Point(closest) }, new Dictionary<string, object?> { ["distance"] = distance, ["segment"] = node.GetBool("segment", false) }, [new VisionOverlay("point-line-distance", VisionOverlayType.Line, X: point.X, Y: point.Y, X2: closest.X, Y2: closest.Y, Stroke: "#722ed1", StrokeWidth: 2)]));
+        if (!double.IsFinite(distance) || !double.IsFinite(closest.X) || !double.IsFinite(closest.Y)) throw new InvalidOperationException("measure.pointLineDistance produced non-finite output.");
+        var segment = node.GetBool("segment", false); var within = t >= -1e-9 && t <= 1 + 1e-9;
+        var signed = ((point.X - line.Start.X) * dy - (point.Y - line.Start.Y) * dx) / Math.Sqrt(length2);
+        var diag = CoordinateValidation.Diagnostics(Type, ("distance", distance), ("signedDistance", signed), ("projectionT", t), ("withinSegment", within), ("segmentMode", segment), ("closestX", closest.X), ("closestY", closest.Y));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["distance"] = VisionValue.Double(distance), ["closestPoint"] = VisionValue.Point(closest), ["signedDistance"] = VisionValue.Double(signed), ["projectionT"] = VisionValue.Double(t), ["withinSegment"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["distance"] = distance, ["segment"] = segment, ["diagnostics"] = diag }, [new VisionOverlay("point-line-distance", VisionOverlayType.Line, X: point.X, Y: point.Y, X2: closest.X, Y2: closest.Y, Stroke: "#722ed1", StrokeWidth: 2)]));
     }
 }
 
@@ -35,7 +39,10 @@ public sealed class CircleSpacingNode : IVisionNodeExecutor
         if (new[] { a.X, a.Y, b.X, b.Y }.Any(v => !double.IsFinite(v))) throw new InvalidOperationException("Circle centers must be finite.");
         if (!double.IsFinite(a.Radius) || !double.IsFinite(b.Radius) || a.Radius < 0 || b.Radius < 0) throw new InvalidOperationException("Circle radii must be finite and non-negative.");
         var centers = MeasurementMath.Hypot(a.X - b.X, a.Y - b.Y); var gap = centers - a.Radius - b.Radius;
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(centers), ["gap"] = VisionValue.Double(gap), ["measurement"] = VisionValue.Measurement(new VisionMeasurement(gap, "px", "signedCircleGap")) }, new Dictionary<string, object?> { ["centerDistance"] = centers, ["gap"] = gap, ["overlapping"] = gap < 0 }, [new VisionOverlay("circle-centers", VisionOverlayType.Line, X: a.X, Y: a.Y, X2: b.X, Y2: b.Y, Stroke: "#722ed1", StrokeWidth: 1.5)]));
+        if (!double.IsFinite(centers) || !double.IsFinite(gap)) throw new InvalidOperationException("measure.circleSpacing produced non-finite output.");
+        var relation = Math.Abs(gap) < 1e-9 ? "tangent" : gap > 0 ? "separate" : centers + Math.Min(a.Radius, b.Radius) <= Math.Max(a.Radius, b.Radius) + 1e-9 ? "contained" : "overlapping";
+        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", centers), ("gap", gap), ("relation", relation), ("radiusA", a.Radius), ("radiusB", b.Radius));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(centers), ["gap"] = VisionValue.Double(gap), ["measurement"] = VisionValue.Measurement(new VisionMeasurement(gap, "px", "signedCircleGap")), ["relation"] = VisionValue.String(relation), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["centerDistance"] = centers, ["gap"] = gap, ["overlapping"] = gap < 0, ["relation"] = relation, ["diagnostics"] = diag }, [new VisionOverlay("circle-centers", VisionOverlayType.Line, X: a.X, Y: a.Y, X2: b.X, Y2: b.Y, Stroke: "#722ed1", StrokeWidth: 1.5)]));
     }
 }
 
@@ -80,7 +87,11 @@ public sealed class FitLineNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var fit = MultiPointFit.LineFit(points); var line = fit.Line;
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount }));
+        var maxRms = node.GetDouble("maxRmsError", 0); if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("measure.fitLine maxRmsError must be finite and >= 0 (0 disables the gate).");
+        if (maxRms > 0 && fit.RmsError > maxRms) throw new InvalidOperationException($"measure.fitLine RMS error {fit.RmsError:0.####} exceeds maxRmsError {maxRms:0.####}.");
+        if (!double.IsFinite(fit.RmsError) || !double.IsFinite(fit.MaxError)) throw new InvalidOperationException("measure.fitLine produced non-finite residuals.");
+        var outliers = points.Length - fit.InlierCount; var diag = CoordinateValidation.Diagnostics(Type, ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("length", line.Length), ("angleDeg", line.AngleDeg));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["line"] = VisionValue.Line(line), ["length"] = VisionValue.Double(line.Length), ["angle"] = VisionValue.Double(line.AngleDeg), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["length"] = line.Length, ["angleDeg"] = line.AngleDeg, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount, ["diagnostics"] = diag }));
     }
 }
 
@@ -90,6 +101,10 @@ public sealed class FitCircleNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); var points = MultiPointFit.Read(context); var fit = MultiPointFit.CircleFit(points); var circle = fit.Circle;
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X,circle.Y)), ["radius"] = VisionValue.Double(circle.Radius), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount }));
+        var maxRms = node.GetDouble("maxRmsError", 0); if (!double.IsFinite(maxRms) || maxRms < 0) throw new InvalidOperationException("measure.fitCircle maxRmsError must be finite and >= 0 (0 disables the gate).");
+        if (maxRms > 0 && fit.RmsError > maxRms) throw new InvalidOperationException($"measure.fitCircle RMS error {fit.RmsError:0.####} exceeds maxRmsError {maxRms:0.####}.");
+        if (!double.IsFinite(fit.RmsError) || !double.IsFinite(circle.Radius) || circle.Radius <= 0) throw new InvalidOperationException("measure.fitCircle produced a non-finite or non-positive circle.");
+        var outliers = points.Length - fit.InlierCount; var diag = CoordinateValidation.Diagnostics(Type, ("pointCount", points.Length), ("inlierCount", fit.InlierCount), ("outlierCount", outliers), ("rmsError", fit.RmsError), ("maxError", fit.MaxError), ("radius", circle.Radius), ("centerX", circle.X), ("centerY", circle.Y));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["circle"] = VisionValue.Circle(circle), ["center"] = VisionValue.Point(new(circle.X,circle.Y)), ["radius"] = VisionValue.Double(circle.Radius), ["rmsError"] = VisionValue.Double(fit.RmsError), ["maxError"] = VisionValue.Double(fit.MaxError), ["inlierCount"] = VisionValue.Integer(fit.InlierCount), ["pointCount"] = VisionValue.Integer(points.Length), ["outlierCount"] = VisionValue.Integer(outliers), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["pointCount"] = points.Length, ["x"] = circle.X, ["y"] = circle.Y, ["radius"] = circle.Radius, ["rmsError"] = Math.Round(fit.RmsError, 4), ["maxError"] = Math.Round(fit.MaxError, 4), ["inlierCount"] = fit.InlierCount, ["diagnostics"] = diag }));
     }
 }

@@ -140,8 +140,12 @@ public sealed class ConcentricityNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var a = ToleranceGeometry.Circle(context, "circleA"); var b = ToleranceGeometry.Circle(context, "circleB");
         var offset = new VisionPoint2D(b.X - a.X, b.Y - a.Y); var distance = MeasurementMath.Hypot(offset.X, offset.Y);
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance), ["centerOffset"] = VisionValue.Point(offset) },
-            new Dictionary<string, object?> { ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px" },
+        if (!double.IsFinite(distance) || !double.IsFinite(offset.X) || !double.IsFinite(offset.Y)) throw new InvalidOperationException("measure.concentricity produced non-finite output.");
+        var limit = node.GetDouble("maxCenterDistance", 0); if (!double.IsFinite(limit) || limit < 0) throw new InvalidOperationException("measure.concentricity maxCenterDistance must be finite and >= 0 (0 disables the tolerance).");
+        var within = limit <= 0 || distance <= limit; var angle = Math.Atan2(offset.Y, offset.X) * 180 / Math.PI;
+        var diag = CoordinateValidation.Diagnostics(Type, ("centerDistance", distance), ("diametralOffset", 2 * distance), ("offsetAngleDeg", angle), ("maxCenterDistance", limit), ("withinTolerance", within));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["centerDistance"] = VisionValue.Double(distance), ["diametralOffset"] = VisionValue.Double(2 * distance), ["centerOffset"] = VisionValue.Point(offset), ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["centerDistance"] = distance, ["diametralOffset"] = 2 * distance, ["unit"] = "px", ["withinTolerance"] = within, ["diagnostics"] = diag },
             [ToleranceGeometry.Segment("circle-centre-offset", new(new(a.X, a.Y), new(b.X, b.Y)))]));
     }
 }
@@ -194,27 +198,31 @@ public sealed class StraightnessNode : IVisionNodeExecutor
 
 internal static class LineOrientationQuality
 {
-    public static NodeExecutorResult Execute(NodeExecutionContext context, bool perpendicular, CancellationToken token)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string type, bool perpendicular, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         var a = ToleranceGeometry.Line(context, "a"); var b = ToleranceGeometry.Line(context, "b");
         var dot = Math.Clamp(Math.Abs(a.X * b.X + a.Y * b.Y), 0, 1); var cross = Math.Clamp(Math.Abs(a.X * b.Y - a.Y * b.X), 0, 1);
         var angle = Math.Atan2(cross, dot) * 180 / Math.PI; var error = perpendicular ? 90 - angle : angle; var deviation = b.Length * (perpendicular ? dot : cross);
-        return new(new Dictionary<string, VisionValue> { ["angleError"] = VisionValue.Double(error), ["deviation"] = VisionValue.Double(deviation), ["measuredLength"] = VisionValue.Double(b.Length) },
-            new Dictionary<string, object?> { ["angleError"] = error, ["deviation"] = deviation, ["measuredLength"] = b.Length, ["unit"] = "px", ["angleUnit"] = "deg" }, [ToleranceGeometry.Segment("datum-a", a.Line, "A"), ToleranceGeometry.Segment("measured-b", b.Line, "B")]);
+        if (!double.IsFinite(angle) || !double.IsFinite(error) || !double.IsFinite(deviation)) throw new InvalidOperationException($"{type} produced non-finite output.");
+        var limit = node.GetDouble("maxAngleErrorDeg", 0); if (!double.IsFinite(limit) || limit < 0 || limit > 90) throw new InvalidOperationException($"{type} maxAngleErrorDeg must be in [0, 90] (0 disables the tolerance).");
+        var within = limit <= 0 || Math.Abs(error) <= limit;
+        var diag = CoordinateValidation.Diagnostics(type, ("measuredAngleDeg", angle), ("angleErrorDeg", error), ("deviation", deviation), ("measuredLength", b.Length), ("maxAngleErrorDeg", limit), ("withinTolerance", within), ("perpendicular", perpendicular));
+        return new(new Dictionary<string, VisionValue> { ["angleError"] = VisionValue.Double(error), ["deviation"] = VisionValue.Double(deviation), ["measuredLength"] = VisionValue.Double(b.Length), ["measuredAngleDeg"] = VisionValue.Double(angle), ["withinTolerance"] = VisionValue.Boolean(within), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, object?> { ["angleError"] = error, ["deviation"] = deviation, ["measuredLength"] = b.Length, ["unit"] = "px", ["angleUnit"] = "deg", ["withinTolerance"] = within, ["diagnostics"] = diag }, [ToleranceGeometry.Segment("datum-a", a.Line, "A"), ToleranceGeometry.Segment("measured-b", b.Line, "B")]);
     }
 }
 public sealed class ParallelismNode : IVisionNodeExecutor
 {
     public string Type => "measure.parallelism";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-        => ValueTask.FromResult(LineOrientationQuality.Execute(context, false, cancellationToken));
+        => ValueTask.FromResult(LineOrientationQuality.Execute(context, node, Type, false, cancellationToken));
 }
 public sealed class PerpendicularityNode : IVisionNodeExecutor
 {
     public string Type => "measure.perpendicularity";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-        => ValueTask.FromResult(LineOrientationQuality.Execute(context, true, cancellationToken));
+        => ValueTask.FromResult(LineOrientationQuality.Execute(context, node, Type, true, cancellationToken));
 }
 
 public sealed class ContourDeviationNode : IVisionNodeExecutor

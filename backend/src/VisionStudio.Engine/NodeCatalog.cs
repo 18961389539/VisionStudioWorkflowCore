@@ -144,16 +144,16 @@ public static class BuiltInNodeCatalog
             "Grayscale",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("mode", "Mode", "select", "luminance", Options:
+                new("mode", "Mode", "select", "luminance", Description: "Conversion mode: BT.601 luminance, channel average, or per-pixel channel maximum. Unknown modes fail instead of silently using luminance.", Options:
                 [
                     new("Luminance (BT.601)", "luminance"),
                     new("Average", "average"),
                     new("Max", "max")
                 ])
             ],
-            "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through).",
+            "Convert a color image to single-channel gray for thresholding/measurement (single-channel input passes through unchanged). Strictly validates the mode and emits JSON diagnostics with input/output channels and size.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -161,9 +161,9 @@ public static class BuiltInNodeCatalog
             "Channel Extract",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("channel", "Channel", "select", "gray", Options:
+                new("channel", "Channel", "select", "gray", Description: "Channel to extract: gray/B/G/R, HSV hue/saturation/value, or average/max gray. Color/HSV channels require a color input; unknown values fail.", Options:
                 [
                     new("Gray", "gray"),
                     new("Average Gray", "average"),
@@ -176,7 +176,7 @@ public static class BuiltInNodeCatalog
                     new("Value", "value")
                 ])
             ],
-            "Extract one channel (gray/B/G/R or HSV H/S/V) as a single-channel image; color channels require a color input.",
+            "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image; color channels require a color input and unknown channels fail deterministically. Emits JSON diagnostics with channel and size.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -205,13 +205,13 @@ public static class BuiltInNodeCatalog
             "Gaussian Blur",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
                 new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2),
                 new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5, Description: "0 derives sigma from the kernel size."),
                 new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5, Description: "0 mirrors sigmaX.")
             ],
-            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value.",
+            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Validates finite, non-negative sigma values and emits JSON diagnostics with effective kernel, size and channels.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -219,9 +219,9 @@ public static class BuiltInNodeCatalog
             "Median Blur",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
-            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2)],
-            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required).",
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
+            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise.")],
+            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). Emits JSON diagnostics with the effective kernel, image size and channel count.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -264,7 +264,7 @@ public static class BuiltInNodeCatalog
             "Adaptive Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("blockSize", "Block Size", "number", 31, 3, 99, 2, Description: "Local window size (coerced to odd)."),
                 new("c", "C Constant", "number", 5, 0, 50, 1),
@@ -275,7 +275,7 @@ public static class BuiltInNodeCatalog
                 ]),
                 new("invert", "Invert", "boolean", false)
             ],
-            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray).",
+            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -283,9 +283,9 @@ public static class BuiltInNodeCatalog
             "Otsu Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), Next],
-            [new("invert", "Invert", "boolean", false)],
-            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring.",
+            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("invert", "Invert", "boolean", false, Description: "Invert the binary output (dark objects become foreground).")],
+            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -514,10 +514,15 @@ public static class BuiltInNodeCatalog
                 new("center", VisionDataType.Point2D),
                 new("pose", VisionDataType.Pose2D),
                 new("angle", VisionDataType.Double),
+                new("width", VisionDataType.Double),
+                new("height", VisionDataType.Double),
+                new("area", VisionDataType.Double),
+                new("aspectRatio", VisionDataType.Double),
+                new("diagnostics", VisionDataType.String),
                 Next
             ],
-            [new("minArea", "Min Area", "number", 500, 1, 99999999, 10, Unit: "px²", Group: "Contour")],
-            "Minimum-area rotated rectangle around the largest accepted contour.",
+            [new("minArea", "Min Area", "number", 500, 1, 99999999, 10, Unit: "px²", Group: "Contour", Description: "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically.")],
+            "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
