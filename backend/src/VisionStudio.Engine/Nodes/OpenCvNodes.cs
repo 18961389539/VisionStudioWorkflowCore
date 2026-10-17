@@ -326,8 +326,39 @@ public sealed class LargestBlobNode : IVisionNodeExecutor
                 .OrderByDescending(x => x.Area)
                 .FirstOrDefault();
 
+            var blobs = contours
+                .Select(c =>
+                {
+                    var area = JLVisionOperators.ContourArea(c);
+                    var perimeter = 0d;
+                    for (var i = 0; i < c.Length; i++)
+                    {
+                        var a = c[i]; var b = c[(i + 1) % c.Length];
+                        perimeter += Math.Sqrt(Math.Pow(b.X - a.X, 2) + Math.Pow(b.Y - a.Y, 2));
+                    }
+                    return new
+                    {
+                        contour = c, area, perimeter,
+                        circularity = perimeter > 0 ? Math.Min(1, 4 * Math.PI * area / (perimeter * perimeter)) : 0,
+                        x = c.Length == 0 ? 0 : c.Min(q => q.X), y = c.Length == 0 ? 0 : c.Min(q => q.Y),
+                        width = c.Length == 0 ? 0 : c.Max(q => q.X) - c.Min(q => q.X) + 1,
+                        height = c.Length == 0 ? 0 : c.Max(q => q.Y) - c.Min(q => q.Y) + 1
+                    };
+                })
+                .Where(x => x.area >= minArea)
+                .OrderByDescending(x => x.area)
+                .ToArray();
             if (best.Contour is null)
-                throw new InvalidOperationException($"No blob found with area >= {minArea:0.##}.");
+            {
+                // Mature blob tools report "no object" as a result, not a workflow failure.
+                return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
+                {
+                    ["image"] = VisionValue.Image(sourceImage),
+                    ["found"] = VisionValue.Boolean(false),
+                    ["count"] = VisionValue.Integer(0),
+                    ["blobs"] = VisionValue.String("[]")
+                }, new Dictionary<string, object?> { ["found"] = false, ["count"] = 0, ["minArea"] = minArea }));
+            }
 
             JLVisionOperators.MinEnclosingCircle(best.Contour, out Point2f center, out float radius);
             var typedCenter = new VisionPoint2D(center.X, center.Y);
@@ -355,7 +386,13 @@ public sealed class LargestBlobNode : IVisionNodeExecutor
                 ["area"] = VisionValue.Double(best.Area),
                 ["radius"] = VisionValue.Double(radius),
                 ["center"] = VisionValue.Point(typedCenter),
-                ["circle"] = VisionValue.Circle(typedCircle)
+                ["circle"] = VisionValue.Circle(typedCircle),
+                ["found"] = VisionValue.Boolean(true),
+                ["count"] = VisionValue.Integer(blobs.Length),
+                ["circularity"] = VisionValue.Double(blobs[0].circularity),
+                ["width"] = VisionValue.Double(blobs[0].width),
+                ["height"] = VisionValue.Double(blobs[0].height),
+                ["blobs"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(blobs.Select(b => new { area = b.area, perimeter = b.perimeter, circularity = b.circularity, x = b.x, y = b.y, width = b.width, height = b.height })))
             };
             var summary = new Dictionary<string, object?>
             {

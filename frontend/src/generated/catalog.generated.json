@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "6e8a172f70eb51191aeb0d4efa36af50edb3f951e06b0f240f6cbcf44a356f3b",
+  "hash": "4cf0c48aa591f23d101301db9cbc0b5af35a6f5ed4a20786e48efd099392e677",
   "items": [
     {
       "type": "image.acquire",
@@ -2488,6 +2488,21 @@
           "required": true
         },
         {
+          "name": "defects",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "maxDefectArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "grade",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -2532,9 +2547,93 @@
           "max": 99999999,
           "step": 1,
           "unit": "px²"
+        },
+        {
+          "name": "maxArea",
+          "label": "Maximum Defect Area (0=unbounded)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
+        },
+        {
+          "name": "registrationTolerance",
+          "label": "Registration Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 25,
+          "step": 1,
+          "unit": "px",
+          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. 0 disables registration."
+        },
+        {
+          "name": "compensation",
+          "label": "Illumination Compensation",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Offset Only",
+              "value": "offset"
+            },
+            {
+              "label": "Gain + Offset",
+              "value": "gainoffset"
+            }
+          ],
+          "description": "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."
+        },
+        {
+          "name": "morphologyOpen",
+          "label": "Morphology Open Kernel",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "description": "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd."
+        },
+        {
+          "name": "morphologyClose",
+          "label": "Morphology Close Kernel",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "description": "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."
+        },
+        {
+          "name": "majorArea",
+          "label": "Major Defect Area",
+          "type": "number",
+          "defaultValue": 500,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
+        },
+        {
+          "name": "criticalArea",
+          "label": "Critical Defect Area",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 0,
+          "max": 99999999,
+          "step": 1,
+          "unit": "px²"
         }
       ],
-      "description": "Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "description": "Golden-template defect comparison (PatInspect/variation-model style): optional small-shift registration and illumination compensation align the good reference, differences are thresholded, morphology cleans the mask, defects are split, area-filtered and graded minor/major/critical. defects JSON lists area and bounding box per defect; grade is the worst defect grade (none when clean). Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3203,18 +3302,38 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "circle",
           "dataType": "Circle",
-          "required": true
+          "required": false
         },
         {
           "name": "center",
           "dataType": "Point2D",
-          "required": true
+          "required": false
         },
         {
           "name": "radius",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "circles",
+          "dataType": "String",
           "required": true
         },
         {
@@ -3276,9 +3395,43 @@
           "max": 500,
           "step": 1,
           "group": "Detection"
+        },
+        {
+          "name": "blurSize",
+          "label": "Blur Kernel",
+          "type": "number",
+          "defaultValue": 9,
+          "min": 3,
+          "max": 15,
+          "step": 2,
+          "unit": "px",
+          "group": "Detection",
+          "description": "Gaussian pre-blur kernel; must be odd (3-15)."
+        },
+        {
+          "name": "refineBand",
+          "label": "Refinement Band",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0.5,
+          "max": 25,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Refinement",
+          "description": "Edge points within this radial distance of a candidate are used for the geometric circle refit."
+        },
+        {
+          "name": "maxCircles",
+          "label": "Max Circles",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "Detection"
         }
       ],
-      "description": "JLVision subpixel contour segmentation and geometric circle fitting.",
+      "description": "Detect multiple circles: candidates are refined against Canny edge points with a robust geometric circle fit and ranked by inlier support (not largest radius). Returns found=false when no circle qualifies; circles JSON lists center, radius, RMS error and inliers per circle.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3319,6 +3472,26 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "chainCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "longestChain",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "chains",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -3346,9 +3519,21 @@
           "step": 1,
           "unit": "gray",
           "group": "Edge"
+        },
+        {
+          "name": "blurSize",
+          "label": "Blur Kernel (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 7,
+          "step": 2,
+          "unit": "px",
+          "group": "Edge",
+          "description": "Optional Gaussian pre-blur; must be 0, 3, 5, or 7."
         }
       ],
-      "description": "Canny edge extraction. Supports image-space ROI and returns a binary edge image.",
+      "description": "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first). Thresholds must satisfy 0 <= low <= high <= 255.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -3384,18 +3569,38 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "line",
           "dataType": "Line2D",
-          "required": true
+          "required": false
         },
         {
           "name": "length",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "angle",
           "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "lines",
+          "dataType": "String",
           "required": true
         },
         {
@@ -3436,9 +3641,63 @@
           "step": 1,
           "unit": "px",
           "group": "Detection"
+        },
+        {
+          "name": "cannyLow",
+          "label": "Canny Low Threshold",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        },
+        {
+          "name": "cannyHigh",
+          "label": "Canny High Threshold",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "unit": "gray",
+          "group": "Edge"
+        },
+        {
+          "name": "maxLines",
+          "label": "Max Lines",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "Detection"
+        },
+        {
+          "name": "angleToleranceDeg",
+          "label": "Collinear Angle Tolerance",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 45,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Merging"
+        },
+        {
+          "name": "distanceTolerance",
+          "label": "Collinear Distance Tolerance",
+          "type": "number",
+          "defaultValue": 6,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "unit": "px",
+          "group": "Merging"
         }
       ],
-      "description": "Segment and fit JLVision contours; return the longest strongly typed Line2D.",
+      "description": "Detect multiple lines: collinear segments are clustered and refit with robust total least squares. Returns found=false (instead of failing) when no line qualifies; lines JSON lists every line with length, angle, RMS/max fit error and inlier support. The primary line/length/angle ports carry the longest line.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -7638,13 +7897,28 @@
           "required": true
         },
         {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Algebraic least-squares circle fit from at least three connected Point2D inputs (up to 12).",
+      "description": "Robust geometric circle fit (algebraic start, Gauss-Newton refinement, MAD outlier rejection) from at least three connected Point2D inputs (up to 12). Outputs RMS/max radial residuals and the inlier point count.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7737,13 +8011,28 @@
           "required": true
         },
         {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [],
-      "description": "Orthogonal least-squares line fit from two or more connected Point2D inputs (up to 12).",
+      "description": "Robust total-least-squares line fit (Tukey outlier rejection) from two or more connected Point2D inputs (up to 12). Outputs RMS/max perpendicular residuals and the inlier point count.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -7889,33 +8178,63 @@
           "required": true
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "x",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "y",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "area",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "radius",
           "dataType": "Double",
-          "required": true
+          "required": false
         },
         {
           "name": "center",
           "dataType": "Point2D",
-          "required": true
+          "required": false
         },
         {
           "name": "circle",
           "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "circularity",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "blobs",
+          "dataType": "String",
           "required": true
         },
         {
@@ -7935,7 +8254,7 @@
           "step": 10
         }
       ],
-      "description": "Find the largest contour and return typed geometry.",
+      "description": "Find the largest blob and return typed geometry plus shape features (circularity, bounding-box size). blobs JSON lists every blob at or above Min Area, largest first; no qualifying blob returns found=false instead of failing.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -11223,6 +11542,16 @@
           "required": true
         },
         {
+          "name": "wordCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "words",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -11247,12 +11576,135 @@
           "type": "text",
           "defaultValue": "eng",
           "description": "Tesseract language codes, e.g. eng or eng+chi_sim."
+        },
+        {
+          "name": "psm",
+          "label": "Page Segmentation Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic",
+              "value": "auto"
+            },
+            {
+              "label": "Auto with OSD",
+              "value": "autoOsd"
+            },
+            {
+              "label": "Single Block",
+              "value": "singleblock"
+            },
+            {
+              "label": "Single Line",
+              "value": "singleline"
+            },
+            {
+              "label": "Single Word",
+              "value": "singleword"
+            },
+            {
+              "label": "Single Character",
+              "value": "singlechar"
+            },
+            {
+              "label": "Sparse Text",
+              "value": "sparsetext"
+            }
+          ]
+        },
+        {
+          "name": "oem",
+          "label": "OCR Engine Mode",
+          "type": "select",
+          "defaultValue": "default",
+          "options": [
+            {
+              "label": "Default (LSTM)",
+              "value": "default"
+            },
+            {
+              "label": "LSTM Only",
+              "value": "lstm"
+            },
+            {
+              "label": "Legacy Only",
+              "value": "legacy"
+            },
+            {
+              "label": "Legacy + LSTM",
+              "value": "combined"
+            }
+          ]
+        },
+        {
+          "name": "whitelist",
+          "label": "Character Whitelist",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional allowed characters, e.g. 0123456789 for numeric fields. Control characters are rejected."
+        },
+        {
+          "name": "dpi",
+          "label": "Image DPI (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1200,
+          "step": 1
+        },
+        {
+          "name": "upscale",
+          "label": "Upscale Factor",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.5,
+          "max": 4,
+          "step": 0.25,
+          "description": "Resize before OCR; small print often reads better at 2x. Word boxes are mapped back to source pixels."
+        },
+        {
+          "name": "binarize",
+          "label": "Binarize",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None (grayscale)",
+              "value": "none"
+            },
+            {
+              "label": "Otsu",
+              "value": "otsu"
+            },
+            {
+              "label": "Adaptive Gaussian",
+              "value": "adaptive"
+            }
+          ]
+        },
+        {
+          "name": "invert",
+          "label": "Invert Image",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Enable for light text on a dark background."
+        },
+        {
+          "name": "minConfidence",
+          "label": "Minimum Word Confidence",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words."
         }
       ],
-      "description": "Run Tesseract 5 OCR on the image. The configured tessdata directory must include each requested language model.",
+      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, and per-word JSON with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
+        "supportsRoi": true,
         "emitsOverlay": false,
         "deterministic": true,
         "supportsRunNode": true,

@@ -77,3 +77,30 @@ public sealed class BatchAGeometryNodeTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new EdgeNode(), source, """{"lowThreshold":200,"highThreshold":100}"""));
     }
 }
+
+public sealed class BatchBBlobNodeTests
+{
+    [Fact]
+    public async Task BlobReportsFeaturesAndNotFound()
+    {
+        using var source = new Mat(120, 160, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Circle(source, new Point(80, 60), 30, Scalar.All(255), -1);
+        var vision = VisionImage.Own(source.Clone());
+        var node = new NodeDefinition("test", "measure.blob", null, null, JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"minArea":100}"""));
+        try
+        {
+            var result = await new LargestBlobNode().ExecuteAsync(new(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) }), node, CancellationToken.None);
+            Assert.True(result.Outputs["found"].Require<bool>("found"));
+            Assert.True(result.Outputs["circularity"].Require<double>("circularity") > 0.8);
+            using var empty = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(0));
+            var emptyVision = VisionImage.Own(empty.Clone());
+            try
+            {
+                var none = await new LargestBlobNode().ExecuteAsync(new(new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(emptyVision) }), node, CancellationToken.None);
+                Assert.False(none.Outputs["found"].Require<bool>("found"));
+            }
+            finally { emptyVision.Dispose(); }
+        }
+        finally { vision.Dispose(); }
+    }
+}
