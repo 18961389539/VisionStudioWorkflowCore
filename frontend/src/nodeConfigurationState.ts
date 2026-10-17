@@ -134,6 +134,46 @@ export function roiConfigurationIssue(value: unknown, label: string, maxBrushWid
   return `${label}类型无效。`;
 }
 
+function brushSelectionIsExactlyErased(strokes: unknown[]): boolean {
+  if (strokes.length !== 2) return false;
+  const add = strokes.find((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Add') as Record<string, unknown> | undefined;
+  const erase = strokes.find((stroke) => stroke && typeof stroke === 'object' && (stroke as Record<string, unknown>).mode === 'Erase') as Record<string, unknown> | undefined;
+  if (!add || !erase || typeof add.width !== 'number' || !Number.isFinite(add.width)
+    || typeof erase.width !== 'number' || !Number.isFinite(erase.width)
+    || add.width <= 0 || add.width > 1024 || erase.width <= 0 || erase.width > 1024
+    || !Array.isArray(add.points) || !Array.isArray(erase.points) || add.points.length === 0
+    || add.points.length > 500_000 || add.points.length !== erase.points.length)
+    return false;
+
+  // Match System.Math.Round (midpoints to even) used by the backend brush rasterizer.
+  const rasterCoordinate = (value: number) => {
+    const lower = Math.floor(value);
+    const fraction = value - lower;
+    if (fraction < 0.5) return lower;
+    if (fraction > 0.5) return lower + 1;
+    return lower % 2 === 0 ? lower : lower + 1;
+  };
+  const addThickness = Math.max(1, Math.min(1024, rasterCoordinate(add.width)));
+  const eraseThickness = Math.max(1, Math.min(1024, rasterCoordinate(erase.width)));
+  if (addThickness !== eraseThickness) return false;
+  for (let index = 0; index < add.points.length; index++) {
+    const addPoint = add.points[index];
+    const erasePoint = erase.points[index];
+    if (!addPoint || typeof addPoint !== 'object' || !erasePoint || typeof erasePoint !== 'object') return false;
+    const addCoordinates = addPoint as Record<string, unknown>;
+    const eraseCoordinates = erasePoint as Record<string, unknown>;
+    if (typeof addCoordinates.x !== 'number' || !Number.isFinite(addCoordinates.x)
+      || typeof addCoordinates.y !== 'number' || !Number.isFinite(addCoordinates.y)
+      || typeof eraseCoordinates.x !== 'number' || !Number.isFinite(eraseCoordinates.x)
+      || typeof eraseCoordinates.y !== 'number' || !Number.isFinite(eraseCoordinates.y)
+      || Math.abs(addCoordinates.x) > 10_000_000 || Math.abs(addCoordinates.y) > 10_000_000
+      || Math.abs(eraseCoordinates.x) > 10_000_000 || Math.abs(eraseCoordinates.y) > 10_000_000
+      || rasterCoordinate(addCoordinates.x) !== rasterCoordinate(eraseCoordinates.x)
+      || rasterCoordinate(addCoordinates.y) !== rasterCoordinate(eraseCoordinates.y)) return false;
+  }
+  return true;
+}
+
 /** Preflight a local crop ROI when the current input image dimensions are known.
  * For curved and rasterized regions this intentionally detects only definite misses,
  * leaving borderline anti-aliased pixels to the backend rasterizer. */
@@ -196,6 +236,8 @@ export function cropRoiOutsideImageIssue(value: unknown, imageWidth: number, ima
   const margin = roi.type === 'Brush' ? 0 : 2;
   if (maxX < -margin || maxY < -margin || minX > imageWidth - 1 + margin || minY > imageHeight - 1 + margin)
     return `裁剪区域与当前输入图像（${imageWidth}×${imageHeight}）没有像素交集；请将 ROI 移入图像范围。`;
+  if (roi.type === 'Brush' && Array.isArray(roi.strokes) && brushSelectionIsExactlyErased(roi.strokes))
+    return '笔刷裁剪区域被同轨迹、同笔宽的擦除笔迹完全覆盖，预览会失败；请调整擦除笔迹或重新添加选区。';
   return undefined;
 }
 
