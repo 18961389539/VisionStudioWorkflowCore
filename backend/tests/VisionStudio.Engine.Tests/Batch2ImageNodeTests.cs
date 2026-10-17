@@ -35,7 +35,10 @@ public sealed class Batch2ImageNodeTests
     {
         using var source = new Mat(10, 10, MatType.CV_8UC1, Scalar.All(1));
         var emptyCrop = await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new ImageCropNode(), Image(source), """{"x":11,"y":0,"width":2,"height":2}"""));
-        Assert.Contains("没有覆盖任何图像像素", emptyCrop.Message);
+        Assert.Contains("没有覆盖任何像素", emptyCrop.Message);
+        Assert.Contains("矩形裁剪区域", emptyCrop.Message);
+        Assert.Contains("10×10", emptyCrop.Message);
+        Assert.Contains("检查上游位姿/坐标变换", emptyCrop.Message);
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunImage(new PerspectiveCorrectionNode(), Image(source), """{"x1":0,"y1":0,"x2":1,"y2":0,"x3":2,"y3":0,"x4":3,"y4":0,"width":8,"height":8}"""));
     }
 

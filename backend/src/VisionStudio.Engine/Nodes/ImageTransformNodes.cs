@@ -27,7 +27,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
 
         var candidateBounds = CandidateRasterBounds(roi, source.Size(), cancellationToken);
         if (candidateBounds.Width <= 0 || candidateBounds.Height <= 0)
-            throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+            throw NoSelectedPixels(roi, source.Size());
         var useLocalRaster = CanRasterizeAtOffset(roi, candidateBounds.X, candidateBounds.Y, cancellationToken);
         var rasterOriginX = useLocalRaster ? candidateBounds.X : 0;
         var rasterOriginY = useLocalRaster ? candidateBounds.Y : 0;
@@ -37,7 +37,7 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             : roi.BuildMask(source.Size(), cancellationToken);
         using var cropMask = JLVisionOperators.CropBinaryMask(rasterMask, out var localBounds, out var selectedPixels, cancellationToken);
         if (selectedPixels == 0)
-            throw new InvalidOperationException("裁剪区域没有覆盖任何图像像素。");
+            throw NoSelectedPixels(roi, source.Size());
         var bounds = new Rect(rasterOriginX + localBounds.X, rasterOriginY + localBounds.Y, localBounds.Width, localBounds.Height);
         cancellationToken.ThrowIfCancellationRequested();
         using var sourceCrop = new Mat(source, bounds);
@@ -76,6 +76,20 @@ public sealed class ImageCropNode : IVisionNodeExecutor
             maskImage.Dispose();
             throw;
         }
+    }
+
+    private static InvalidOperationException NoSelectedPixels(VisionRoi roi, Size imageSize)
+    {
+        var roiName = roi.Type switch
+        {
+            VisionRoiType.Rectangle => "矩形",
+            VisionRoiType.Circle => "圆形",
+            VisionRoiType.Polygon => "多边形",
+            VisionRoiType.Brush => "笔刷",
+            _ => roi.Type.ToString()
+        };
+        return new InvalidOperationException(
+            $"{roiName}裁剪区域在输入图像（{imageSize.Width}×{imageSize.Height}）中没有覆盖任何像素。请将 ROI 移入图像范围，或检查上游位姿/坐标变换。");
     }
 
     private static Rect CandidateRasterBounds(VisionRoi roi, Size imageSize, CancellationToken cancellationToken)
