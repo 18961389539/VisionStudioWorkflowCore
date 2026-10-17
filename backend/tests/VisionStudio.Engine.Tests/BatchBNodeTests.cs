@@ -84,3 +84,27 @@ public sealed class BatchBNodeTests
         finally { vision.Dispose(); }
     }
 }
+
+public sealed class BatchCNodeTests
+{
+    [Fact]
+    public async Task VariationModelSuppressesTexturedReferenceNoise()
+    {
+        // Reference with checker texture; inspected image differs only by texture phase
+        // noise (+/-20) plus one solid defect block. Native-dependent (JLVision region ops).
+        using var reference = VisionImage.Own(new Mat(32, 32, MatType.CV_8UC1, Scalar.All(100)));
+        using var source = VisionImage.Own(new Mat(32, 32, MatType.CV_8UC1, Scalar.All(100)));
+        for (var y = 0; y < 32; y++) for (var x = 0; x < 32; x++)
+        {
+            var v = (byte)((x + y) % 2 == 0 ? 80 : 120);
+            reference.Mat.Set(y, x, v); source.Mat.Set(y, x, v);
+        }
+        using (var patch = new Mat(source.Mat, new Rect(20, 20, 5, 5))) patch.SetTo(Scalar.All(200));
+        var node = new NodeDefinition("test", "defect.referenceCompare", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"threshold":10,"minArea":2,"variationK":2,"variationWindow":7}"""));
+        var result = await new ReferenceCompareNode().ExecuteAsync(new(new Dictionary<string, VisionValue>
+        { ["image"] = VisionValue.Image(source), ["reference"] = VisionValue.Image(reference) }), node, CancellationToken.None);
+        Assert.Equal(25d, result.Outputs["area"].Require<double>("area"));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+}

@@ -30,7 +30,9 @@ public static class BuiltInNodeCatalog
                 ]),
                 new("timeoutMs", "Timeout (ms)", "number", 1500, 50, 10000, 50),
                 new("autoStart", "Auto Start", "boolean", true),
-                new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false)
+                new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false),
+                new("exposureUs", "Exposure (us, 0=leave)", "number", 0, 0, 10000000, 100, Description: "Applied through the camera device layer before grabbing; 0 leaves the current exposure unchanged. Cameras without exposure support fail deterministically."),
+                new("gainDb", "Gain (dB, -1=leave)", "number", -1, -1, 48, 0.5, Description: "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."),
             ],
             "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
             "builtin",
@@ -390,9 +392,10 @@ public static class BuiltInNodeCatalog
             [
                 new("lowThreshold", "Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge"),
                 new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge"),
-                new("blurSize", "Blur Kernel (0=off)", "number", 0, 0, 7, 2, Unit: "px", Group: "Edge", Description: "Optional Gaussian pre-blur; must be 0, 3, 5, or 7.")
+                new("blurSize", "Blur Kernel (0=off)", "number", 0, 0, 7, 2, Unit: "px", Group: "Edge", Description: "Optional Gaussian pre-blur; must be 0, 3, 5, or 7."),
+                new("subpixel", "Subpixel Chain Points", "boolean", false, Group: "Edge", Description: "Refine chain points along the local gradient (parabolic peak interpolation) and include them in the chains JSON, stride-sampled to at most 200 points per chain.")
             ],
-            "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first). Thresholds must satisfy 0 <= low <= high <= 255.",
+            "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first), optionally with subpixel-refined chain points. Thresholds must satisfy 0 <= low <= high <= 255.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -407,6 +410,7 @@ public static class BuiltInNodeCatalog
                 new("length", VisionDataType.Double, Required: false),
                 new("angle", VisionDataType.Double, Required: false),
                 new("rmsError", VisionDataType.Double, Required: false),
+                new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
                 new("lines", VisionDataType.String),
                 Next
@@ -436,6 +440,8 @@ public static class BuiltInNodeCatalog
                 new("center", VisionDataType.Point2D, Required: false),
                 new("radius", VisionDataType.Double, Required: false),
                 new("rmsError", VisionDataType.Double, Required: false),
+                new("coverageDeg", VisionDataType.Double, Required: false),
+                new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
                 new("circles", VisionDataType.String),
                 Next

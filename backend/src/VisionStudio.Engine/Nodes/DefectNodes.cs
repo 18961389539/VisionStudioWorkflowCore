@@ -204,6 +204,10 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         var closeSize = node.GetInt("morphologyClose", 0);
         if (openSize is not (0 or 3 or 5 or 7 or 9 or 11 or 15)) throw new InvalidOperationException("morphologyOpen must be 0, 3, 5, 7, 9, 11, or 15.");
         if (closeSize is not (0 or 3 or 5 or 7 or 9 or 11 or 15)) throw new InvalidOperationException("morphologyClose must be 0, 3, 5, 7, 9, 11, or 15.");
+        var variationK = node.GetDouble("variationK", 0);
+        if (!double.IsFinite(variationK) || variationK < 0 || variationK > 20) throw new InvalidOperationException("variationK must be between 0 (off) and 20.");
+        var variationWindow = node.GetInt("variationWindow", 15);
+        if (variationWindow is < 3 or > 101 || variationWindow % 2 == 0) throw new InvalidOperationException("variationWindow must be odd and between 3 and 101.");
         var majorArea = node.GetDouble("majorArea", 500);
         var criticalArea = node.GetDouble("criticalArea", 5000);
         if (!double.IsFinite(majorArea) || !double.IsFinite(criticalArea) || majorArea < 0 || criticalArea < majorArea)
@@ -214,10 +218,11 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         // compensation of the reference toward the inspected image. Both are opt-in
         // (defaults keep the historical pixel-exact behaviour).
         VisionImage? preparedReference = null;
+        byte[]? effectiveRefBytes = null; byte[]? sourceBytesCache = null;
         var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d;
         try
         {
-            if (registrationTolerance > 0 || compensation != "none")
+            if (registrationTolerance > 0 || compensation != "none" || variationK > 0)
             {
                 using var sourceGray = RecognitionImageHelpers.ToGray8(source.Mat);
                 using var referenceGray = RecognitionImageHelpers.ToGray8(reference.Mat);
@@ -247,6 +252,7 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 using var alignedMat = new Mat(height, width, MatType.CV_8UC1);
                 alignedMat.SetArray(aligned);
                 preparedReference = VisionImage.Own(alignedMat.Clone());
+                effectiveRefBytes = aligned; sourceBytesCache = imageBytes;
             }
             var effectiveReference = preparedReference ?? reference;
             using var image = DefectNodeHelpers.Gray(source, true); using var baseline = DefectNodeHelpers.Gray(effectiveReference, true);
@@ -257,7 +263,10 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 _ => throw new InvalidOperationException("Invalid defect polarity.")
             };
             if (domain.AreaCenter(out double _, out double _) > 0) _ = DefectNodeHelpers.Statistics(difference, domain);
-            using var limited = difference.ReduceDomain(domain); using var detected = limited.Threshold(threshold, (double)float.MaxValue);
+            using var limited = difference.ReduceDomain(domain);
+            using var detected = variationK > 0
+                ? VariationThreshold(source, effectiveRefBytes!, sourceBytesCache!, domain, threshold, variationK, variationWindow, node.GetString("polarity", "both"), cancellationToken)
+                : limited.Threshold(threshold, (double)float.MaxValue);
             using var cleaned = Clean(detected, openSize, closeSize);
             using var connected = cleaned.Connection();
             var upperArea = maxArea > 0 ? maxArea : Math.Max(minArea, (double)source.Width * source.Height);
@@ -297,11 +306,44 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                     ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
                     ["compensation"] = compensation, ["gain"] = Math.Round(gain, 6), ["offset"] = Math.Round(offset, 4),
                     ["morphologyOpen"] = openSize, ["morphologyClose"] = closeSize,
+                    ["variationK"] = variationK, ["variationWindow"] = variationWindow,
                     ["grade"] = grade, ["maxDefectArea"] = maxDefectArea
                 }
             });
         }
         finally { preparedReference?.Dispose(); }
+    }
+
+    /// <summary>
+    /// Variation-model thresholding: a pixel is a defect when its absolute difference
+    /// reaches threshold + variationK * local reference standard deviation. Textured
+    /// reference areas therefore tolerate more change than flat ones (HALCON
+    /// compare_variation_model with a locally estimated variation image; a true
+    /// multi-sample model would need multiple reference inputs, which this node's
+    /// single reference port cannot supply - that remains a documented limit).
+    /// </summary>
+    private static JlRegion VariationThreshold(VisionImage source, byte[] referenceBytes, byte[] sourceBytes, JlRegion domain, double threshold, double variationK, int variationWindow, string polarity, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var width = source.Width; var height = source.Height;
+        var localStd = ReferenceAlignment.LocalStdDev(referenceBytes, width, height, variationWindow);
+        var mask = new byte[width * height];
+        for (var i = 0; i < mask.Length; i++)
+        {
+            var diff = polarity switch
+            {
+                "bright" => (double)sourceBytes[i] - referenceBytes[i],
+                "dark" => (double)referenceBytes[i] - sourceBytes[i],
+                "both" => Math.Abs((double)sourceBytes[i] - referenceBytes[i]),
+                _ => throw new InvalidOperationException("Invalid defect polarity.")
+            };
+            mask[i] = diff >= threshold + variationK * localStd[i] ? (byte)255 : (byte)0;
+        }
+        using var maskMat = new Mat(height, width, MatType.CV_8UC1);
+        maskMat.SetArray(mask);
+        using var maskImage = JLVisionImages.FromMat(maskMat);
+        using var maskRegion = maskImage.Threshold(1d, 255d);
+        return maskRegion.Intersection(domain);
     }
 
     private static JlRegion Clean(JlRegion detected, int openSize, int closeSize)

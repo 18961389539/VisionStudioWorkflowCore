@@ -68,13 +68,31 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
         var worstViewRms = viewStats.Where(v => v.reprojectionRms is not null).Select(v => v.reprojectionRms!.Value).DefaultIfEmpty(0).Max();
+        // Fuller per-view reprojection through the fitted camera matrix itself:
+        // recover each planar view's pose from K^-1 H and reproject (homography alone
+        // absorbs pose error, so this is the stricter, model-based number).
+        var fx = model.CameraMatrix[0][0]; var fy = model.CameraMatrix[1][1];
+        var cx = model.CameraMatrix[0][2]; var cy = model.CameraMatrix[1][2];
+        var fullViewStats = request.Views.Select((view, index) =>
+        {
+            var pose = CalibrationViewAnalysis.AnalyzeWithCamera(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight, fx, fy, cx, cy);
+            var homography = viewStats[index];
+            return new
+            {
+                homography.index, homography.pointCount, homography.coverageX, homography.coverageY,
+                homographyRms = homography.reprojectionRms, homographyMax = homography.reprojectionMax,
+                poseReprojectionRms = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionRms,
+                poseReprojectionMax = pose.ReprojectionRms == homography.reprojectionRms ? null : pose.ReprojectionMax
+            };
+        }).ToArray();
+        var worstPoseViewRms = fullViewStats.Where(v => v.poseReprojectionRms is not null).Select(v => v.poseReprojectionRms!.Value).DefaultIfEmpty(0).Max();
         var outputs = new Dictionary<string, VisionValue>
         {
             ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms),
-            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(viewStats))
+            ["viewStats"] = VisionValue.String(JsonSerializer.Serialize(fullViewStats))
         };
         if (viewStats.Any(v => v.reprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
-        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["worstViewRms"] = worstViewRms, ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.NativeCameraType, ["algorithmBackend"] = "JLVision" }));
     }
 }
 

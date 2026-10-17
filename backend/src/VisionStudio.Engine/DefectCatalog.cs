@@ -30,6 +30,8 @@ public static class DefectCatalog
                 new("compensation", "Illumination Compensation", "select", "none", Options: [new("None", "none"), new("Offset Only", "offset"), new("Gain + Offset", "gainoffset")], Description: "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."),
                 new("morphologyOpen", "Morphology Open Kernel", "number", 0, 0, 15, 2, Unit: "px", Description: "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd."),
                 new("morphologyClose", "Morphology Close Kernel", "number", 0, 0, 15, 2, Unit: "px", Description: "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."),
+                new("variationK", "Variation Model K (0=off)", "number", 0, 0, 20, 0.5, Description: "When > 0, a pixel must differ by at least threshold + K * local reference standard deviation (variation-model style; local variation is estimated from the single reference)."),
+                new("variationWindow", "Variation Window", "number", 15, 3, 101, 2, Unit: "px", Description: "Odd window for the local variation estimate."),
                 new("majorArea", "Major Defect Area", "number", 500, 0, 99999999, 1, Unit: "px²"),
                 new("criticalArea", "Critical Defect Area", "number", 5000, 0, 99999999, 1, Unit: "px²")
             ],
