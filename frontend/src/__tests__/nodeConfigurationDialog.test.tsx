@@ -12,7 +12,7 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
     default: ({ previewUrl, showRoiTools, roiEnabled, roiTargetLabel, onRoiChange, overlays = [], measurementGeometry, measurementGeometryEditable, onMeasurementGeometryChange }: {
       previewUrl?: string; showRoiTools?: boolean; roiEnabled: boolean; onRoiChange: (roi?: VisionRoi) => void; overlays?: VisionOverlay[];
       roiTargetLabel?: string;
-      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number } }
+      measurementGeometry?: { type: 'line'; start: { x: number; y: number }; end: { x: number; y: number }; profileSpan?: number; profileCount?: number }
         | { type: 'circle'; center: { x: number; y: number }; radius: number; band?: number; angleStartDeg?: number; angleEndDeg?: number; centerEditable?: boolean; radiusEditable?: boolean };
       measurementGeometryEditable?: boolean;
       onMeasurementGeometryChange?: (geometry: NonNullable<typeof measurementGeometry>) => void;
@@ -25,8 +25,11 @@ vi.mock('../components/ImageViewer', async (importOriginal) => {
           data-center-editable={measurementGeometry.centerEditable !== false} data-radius-editable={measurementGeometry.radiusEditable !== false} />}
         {measurementGeometry?.type === 'line' && <span data-testid="line-geometry" data-start-x={measurementGeometry.start.x}
           data-start-y={measurementGeometry.start.y} data-end-x={measurementGeometry.end.x} data-end-y={measurementGeometry.end.y}
+          data-profile-span={measurementGeometry.profileSpan}
           data-editable={Boolean(measurementGeometryEditable)} />}
         {measurementGeometryEditable && measurementGeometry?.type === 'line' && <button onClick={() => onMeasurementGeometryChange?.({ type: 'line', start: { x: 23, y: 31 }, end: { x: 91, y: 47 } })}>模拟拖动搜索线</button>}
+        {measurementGeometryEditable && measurementGeometry?.type === 'line' && measurementGeometry.profileSpan !== undefined
+          && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry, profileSpan: 45 })}>模拟调整采样跨度</button>}
         {measurementGeometryEditable && measurementGeometry?.type === 'circle' && measurementGeometry.centerEditable !== false && measurementGeometry.radiusEditable !== false
           && <button onClick={() => onMeasurementGeometryChange?.({ ...measurementGeometry,
             center: { x: 42, y: 51 }, radius: 17, band: 14, angleStartDeg: 350, angleEndDeg: 450 })}>模拟调整标称圆</button>}
@@ -640,6 +643,20 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => {
       expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'startX')!.label }) as HTMLInputElement).value).toBe('23');
       expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'endY')!.label }) as HTMLInputElement).value).toBe('47');
+    });
+  });
+
+  it('writes an interactively adjusted caliper profile span back into the staged edge length', async () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,
+      parameters: { startX: 10, startY: 20, endX: 80, endY: 20, edgeLength: 0 } } };
+    const imageNode: Node = { id: 'other', position: { x: 0, y: 0 }, data: { label: '场景图像' } };
+    const edges = [{ id: 'line-image-input', source: imageNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, imageNode], edges, result: report });
+
+    fireEvent.click(await dialog.findByRole('button', { name: '模拟调整采样跨度' }));
+    await waitFor(() => {
+      expect((dialog.getByRole('spinbutton', { name: lineCatalog.parameters.find(parameter => parameter.name === 'edgeLength')!.label }) as HTMLInputElement).value).toBe('45');
     });
   });
 

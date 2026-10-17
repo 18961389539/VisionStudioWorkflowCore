@@ -10,7 +10,7 @@ type ViewState = { scale: number; x: number; y: number };
 type Point = { x: number; y: number };
 type RoiMoveBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type RoiDragMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'e' | 'w' | 'n' | 's' | `vertex:${number}`;
-type MeasurementDragMode = 'start' | 'end' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
+type MeasurementDragMode = 'start' | 'end' | 'profileStart' | 'profileEnd' | 'moveLine' | 'center' | 'moveCircle' | 'radius' | 'angleStart' | 'angleEnd' | 'innerBand' | 'outerBand';
 
 export type MeasurementGeometry =
   | { type: 'line'; start: Point; end: Point; profileSpan?: number; profileCount?: number }
@@ -28,6 +28,19 @@ const persistPixelated = (value: boolean) => {
 };
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+function caliperLineProfileSpanHandles(geometry: Extract<MeasurementGeometry, { type: 'line' }>): { start: Point; end: Point } | undefined {
+  if (geometry.profileCount === undefined) return undefined;
+  const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0) return undefined;
+  const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
+  const tangent = { x: -dy / length, y: dx / length };
+  const midpoint = { x: (geometry.start.x + geometry.end.x) / 2, y: (geometry.start.y + geometry.end.y) / 2 };
+  return {
+    start: { x: midpoint.x - tangent.x * span / 2, y: midpoint.y - tangent.y * span / 2 },
+    end: { x: midpoint.x + tangent.x * span / 2, y: midpoint.y + tangent.y * span / 2 }
+  };
+}
 const flatten = (points?: readonly OverlayPoint[] | null) => (points ?? []).flatMap((p) => [p.x, p.y]);
 const brushPathCache = new WeakMap<readonly OverlayPoint[], number[]>();
 function brushPath(points: readonly OverlayPoint[]): number[] {
@@ -454,6 +467,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const count = geometry.profileCount === undefined ? 0 : Math.round(clamp(geometry.profileCount, 3, 101));
     const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
     const tangent = length > 0 ? { x: -dy / length, y: dx / length } : { x: 0, y: 0 };
+    const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry) : undefined;
     return <Group listening={false}>
       {count > 0 && Array.from({ length: count }, (_, index) => {
         const offset = count === 1 ? 0 : (index / (count - 1) - 0.5) * span;
@@ -470,6 +484,12 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
       {editable && <>
         <Circle x={geometry.start.x} y={geometry.start.y} radius={handleRadius} fill="#1677ff" stroke="#fff" strokeWidth={1.5 / scale} />
         <Circle x={geometry.end.x} y={geometry.end.y} radius={handleRadius} fill="#722ed1" stroke="#fff" strokeWidth={1.5 / scale} />
+        {profileHandles && <>
+          <Circle name="measurement-profile-span-start" x={profileHandles.start.x} y={profileHandles.start.y} radius={handleRadius}
+            fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
+          <Circle name="measurement-profile-span-end" x={profileHandles.end.x} y={profileHandles.end.y} radius={handleRadius}
+            fill="#13c2c2" stroke="#fff" strokeWidth={1.5 / scale} />
+        </>}
       </>}
     </Group>;
   }
@@ -763,7 +783,10 @@ export default function ImageViewer({
   const hitMeasurementHandle = (target: MeasurementGeometry, screen: Point): MeasurementDragMode | undefined => {
     const near = (point: Point) => Math.hypot(screen.x - (view.x + point.x * view.scale), screen.y - (view.y + point.y * view.scale)) <= HANDLE_HIT;
     if (target.type === 'line') {
-      const endpoint = closestHandle([['start', target.start], ['end', target.end]], screen, view);
+      const profileHandles = target.profileCount !== undefined ? caliperLineProfileSpanHandles(target) : undefined;
+      const candidates: [MeasurementDragMode, Point][] = [['start', target.start], ['end', target.end]];
+      if (profileHandles) candidates.push(['profileStart', profileHandles.start], ['profileEnd', profileHandles.end]);
+      const endpoint = closestHandle(candidates, screen, view);
       if (endpoint) return endpoint;
       const dx = target.end.x - target.start.x, dy = target.end.y - target.start.y;
       const lengthSquared = dx * dx + dy * dy;
@@ -905,6 +928,15 @@ export default function ImageViewer({
       if (origin.type === 'line') {
         if (mode === 'start' || mode === 'end') {
           setMeasurementDraft({ ...origin, [mode]: current });
+        } else if (mode === 'profileStart' || mode === 'profileEnd') {
+          const dx = origin.end.x - origin.start.x, dy = origin.end.y - origin.start.y;
+          const length = Math.hypot(dx, dy);
+          if (length > 0) {
+            const tangent = { x: -dy / length, y: dx / length };
+            const midpoint = { x: (origin.start.x + origin.end.x) / 2, y: (origin.start.y + origin.end.y) / 2 };
+            const halfSpan = Math.abs((current.x - midpoint.x) * tangent.x + (current.y - midpoint.y) * tangent.y);
+            setMeasurementDraft({ ...origin, profileSpan: clamp(halfSpan * 2, 1, 10_000) });
+          }
         } else {
           // Keep clipped search lines draggable: constrain their bounds to keep some
           // overlap with the image, while allowing endpoints to remain outside.
@@ -912,7 +944,7 @@ export default function ImageViewer({
           const minY = Math.min(origin.start.y, origin.end.y), maxY = Math.max(origin.start.y, origin.end.y);
           const dx = clamp(current.x - start.x, -maxX, actualWidth - minX);
           const dy = clamp(current.y - start.y, -maxY, actualHeight - minY);
-          setMeasurementDraft({ type: 'line', start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
+          setMeasurementDraft({ ...origin, start: { x: origin.start.x + dx, y: origin.start.y + dy }, end: { x: origin.end.x + dx, y: origin.end.y + dy } });
         }
       } else if (mode === 'center' || mode === 'moveCircle') {
         const center = mode === 'center' ? current : {
@@ -1115,6 +1147,13 @@ export default function ImageViewer({
         const handle = hitMeasurementHandle(measurementGeometry, cursorScreen);
         if (handle === 'radius') return 'nwse-resize';
         if (handle === 'innerBand' || handle === 'outerBand') return 'ns-resize';
+        if ((handle === 'profileStart' || handle === 'profileEnd') && measurementGeometry.type === 'line') {
+          const dx = measurementGeometry.end.x - measurementGeometry.start.x;
+          const dy = measurementGeometry.end.y - measurementGeometry.start.y;
+          if (Math.abs(dy) > Math.abs(dx) * 1.5) return 'ew-resize';
+          if (Math.abs(dx) > Math.abs(dy) * 1.5) return 'ns-resize';
+          return (-dy) * dx >= 0 ? 'nwse-resize' : 'nesw-resize';
+        }
         if (handle) return 'move';
       }
       if (roi && roiEnabled && tool !== 'brush' && tool !== 'eraser') {
@@ -1182,7 +1221,9 @@ export default function ImageViewer({
               onClick={() => { setMeasurementDraft(undefined); geometryGestureStart.current = undefined; setGeometryDrawMode(value => !value); setTool('pan'); }}
               title={geometryDrawMode ? '退出绘制模式' : measurementGeometry.type === 'circle'
                 ? '径向卡尺由内侧起点指向外侧终点；拖动重绘圆，橙色调整圆心/半径，蓝色/紫色调整圆弧起止角，青色/绿色调整搜索带'
-                : '箭头由起点指向终点；蓝色起点、紫色终点。拖动端点或线段可微调搜索线'}>
+                : measurementGeometry.profileCount !== undefined
+                  ? '箭头由起点指向终点；蓝色起点、紫色终点，青色控制点对称调整沿边缘的采样跨度。拖动端点或线段可微调搜索线'
+                  : '箭头由起点指向终点；蓝色起点、紫色终点。拖动端点或线段可微调搜索线'}>
               {geometryDrawMode ? '取消绘制' : measurementGeometry.type === 'line' ? '重绘搜索线' : '重绘标称圆'}
             </Button>
           </>}

@@ -28,7 +28,8 @@ vi.mock('react-konva', async () => {
         data-render-id={++brushStrokeRenderId} data-point-count={points?.length ? points.length / 2 : 0} />
       : stroke === '#ff4d4f'
         ? <span data-testid="roi-polygon-preview" data-point-count={points?.length ? points.length / 2 : 0} /> : null,
-    Circle: () => null,
+    Circle: ({ name }: { name?: string }) => name?.startsWith('measurement-profile-span-')
+      ? <span data-testid={name} /> : null,
     Rect: ({ name }: { name?: string }) => name === 'roi-handle' ? <span data-testid={name} /> : null,
     Text: ({ text }: { text?: string }) => <span data-testid="konva-text">{text}</span>
   };
@@ -97,6 +98,31 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(screen.getByText('起点')).toBeTruthy();
     expect(screen.getByText('终点')).toBeTruthy();
     expect(screen.getByTestId('search-arrow')).toBeTruthy();
+  });
+
+  it('resizes the caliper profile span from its visible image handles', () => {
+    const onChange = vi.fn();
+    const geometry: MeasurementGeometry = { type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 }, profileSpan: 40, profileCount: 5 };
+    imageView(geometry, onChange);
+
+    expect(screen.getByTestId('measurement-profile-span-start')).toBeTruthy();
+    expect(screen.getByTestId('measurement-profile-span-end')).toBeTruthy();
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 177.2 });
+    expect(stage.parentElement?.style.cursor).toBe('ns-resize');
+    fireEvent.mouseDown(stage, { clientX: 200, clientY: 177.2 }); // lower profile-span handle at image (50, 70)
+    fireEvent.mouseMove(stage, { clientX: 200, clientY: 189 }); // expand symmetrically to a 50 px profile span
+    fireEvent.mouseUp(document.body, { clientX: 200, clientY: 189 });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const result = onChange.mock.calls[0][0] as MeasurementGeometry;
+    expect(result.type).toBe('line');
+    if (result.type === 'line') {
+      expect(result.profileSpan).toBeCloseTo(50, 4);
+      expect(result.start).toEqual(geometry.start);
+      expect(result.end).toEqual(geometry.end);
+      expect(result.profileCount).toBe(5);
+    }
   });
 
   it('shows radial search direction from the inner to outer end of a circle caliper', () => {

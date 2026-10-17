@@ -447,7 +447,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   const updateMeasurementGeometry = (geometry: MeasurementGeometry) => {
     if (locked || searchLineInputEdge) return;
     if (geometry.type === 'line') {
-      setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y }));
+      setDraft(current => ({ ...current, startX: geometry.start.x, startY: geometry.start.y, endX: geometry.end.x, endY: geometry.end.y,
+        ...(catalogItem.type === 'measure.caliperLine' && geometry.profileSpan !== undefined ? { edgeLength: geometry.profileSpan } : {}) }));
     } else {
       const startAngle = geometry.angleStartDeg ?? -180;
       const endAngle = geometry.angleEndDeg ?? 180;
