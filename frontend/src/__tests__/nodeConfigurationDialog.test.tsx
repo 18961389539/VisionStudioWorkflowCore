@@ -613,6 +613,32 @@ describe('caliper geometry input guidance', () => {
     return mount({ node: measurementNode, catalogItem: targetCatalog,
       nodes: [measurementNode, geometryNode, measurementCrop, ...(separateGeometryFrame ? [geometryCrop] : []), sourceImage], edges });
   };
+  const mountCropTransformSourceMeasurement = (sourceType: string, targetType: string, outputPort: string, inputPort: string, separateGeometrySource: boolean) => {
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const geometryCatalog = fallbackCatalog.find(item => item.type === sourceType)!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === targetType)!;
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetType, label: '卡尺测量', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const geometryNode: Node = { id: 'geometry', position: { x: 0, y: 0 }, data: {
+      typeKey: sourceType, label: '上游几何', inputs: geometryCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '图像裁剪', inputs: cropCatalog.inputs, parameters: {}
+    } };
+    const sourceImage: Node = { id: 'source-image', position: { x: 0, y: 0 }, data: { label: '裁剪输入图像' } };
+    const otherImage: Node = { id: 'other-image', position: { x: 0, y: 0 }, data: { label: '另一张图像' } };
+    const geometryImage = separateGeometrySource ? otherImage : sourceImage;
+    const edges = [
+      { id: 'crop-image', source: sourceImage.id, sourceHandle: 'image', target: cropNode.id, targetHandle: 'image' },
+      { id: 'geometry-image', source: geometryImage.id, sourceHandle: 'image', target: geometryNode.id, targetHandle: 'image' },
+      { id: 'measurement-image', source: cropNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'geometry-input', source: geometryNode.id, sourceHandle: outputPort, target: measurementNode.id, targetHandle: inputPort },
+      { id: 'crop-transform', source: cropNode.id, sourceHandle: 'transform', target: measurementNode.id, targetHandle: 'transform' }
+    ];
+    return mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, geometryNode, cropNode, sourceImage, ...(separateGeometrySource ? [otherImage] : [])], edges });
+  };
 
   it.each([
     ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine'],
@@ -719,6 +745,27 @@ describe('caliper geometry input guidance', () => {
     const { dialog } = mountCropFrameMeasurement(sourceType, targetType, outputPort, inputPort, false);
 
     expect(dialog.queryByText(mismatchTitle)).toBeNull();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each([
+    ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine'],
+    ['circle', 'feature.circle', 'measure.caliperCircle', 'circle', 'circle']
+  ])('blocks a connected %s from the wrong source frame of a crop transform', (geometryLabel, sourceType, targetType, outputPort, inputPort) => {
+    const { dialog } = mountCropTransformSourceMeasurement(sourceType, targetType, outputPort, inputPort, true);
+
+    expect(dialog.getByText(`上游${geometryLabel === 'circle' ? '圆' : '搜索线'}与 transform 源坐标系不匹配`)).toBeTruthy();
+    expect(dialog.getByText(/来自 transform 源图像/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each([
+    ['search line', 'feature.line', 'measure.caliperLine', 'line', 'searchLine'],
+    ['circle', 'feature.circle', 'measure.caliperCircle', 'circle', 'circle']
+  ])('allows a connected %s from the crop transform source frame', (_geometryLabel, sourceType, targetType, outputPort, inputPort) => {
+    const { dialog } = mountCropTransformSourceMeasurement(sourceType, targetType, outputPort, inputPort, false);
+
+    expect(dialog.queryByText(/与 transform 源坐标系不匹配/)).toBeNull();
     expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(false);
   });
 

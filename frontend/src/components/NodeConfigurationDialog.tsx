@@ -194,6 +194,41 @@ function transformMappedImageFrameNodeIds(transformNodes: Node[], edges: Edge[])
   }))];
 }
 
+function transformEndpointImageFrameNodeIds(transformNodeId: string | undefined, endpoint: 'source' | 'target', nodes: Node[], edges: Edge[], visited = new Set<string>()): string[] {
+  if (!transformNodeId || visited.has(transformNodeId)) return [];
+  visited.add(transformNodeId);
+  const node = nodes.find((item) => item.id === transformNodeId);
+  const type = String(node?.data.typeKey ?? '').toLowerCase();
+  const inputSource = (handle: string) => edges.find((edge) => edge.target === transformNodeId
+    && edge.targetHandle?.toLowerCase() === handle.toLowerCase())?.source;
+  if (type === 'image.crop') {
+    const frameId = endpoint === 'source' ? inputSource('image') : transformNodeId;
+    return frameId ? [frameId] : [];
+  }
+  if (type === 'image.register') {
+    const frameId = inputSource(endpoint === 'source' ? 'image' : 'reference');
+    return frameId ? [frameId] : [];
+  }
+  if (type === 'roi.transform') {
+    // The saved reference is intentionally not graph-traceable; its target is the live debug image.
+    const frameId = endpoint === 'target' ? inputSource('debugImage') : undefined;
+    return frameId ? [frameId] : [];
+  }
+  if (type === 'match.shape') {
+    const frameId = inputSource(endpoint === 'source' ? 'template' : 'image');
+    return frameId ? [frameId] : [];
+  }
+  if (type === 'coordinate.transformcompose') {
+    const handle = endpoint === 'source' ? 'transformA' : 'transformB';
+    return transformEndpointImageFrameNodeIds(inputSource(handle), endpoint, nodes, edges, visited);
+  }
+  if (type === 'coordinate.transforminverse') {
+    const inputTransform = inputSource('transform');
+    return transformEndpointImageFrameNodeIds(inputTransform, endpoint === 'source' ? 'target' : 'source', nodes, edges, visited);
+  }
+  return [];
+}
+
 function connectedCircleGeometry(value: unknown): { x: number; y: number; radius: number } | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const circle = value as Record<string, unknown>;
@@ -451,10 +486,15 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
   const connectedGeometryEdge = circleInputEdge ?? searchLineInputEdge;
   const connectedGeometryImageFrameNodeIds = geometrySourceImageFrameNodeIds(connectedGeometryEdge, nodes, edges, catalogItems);
+  const transformSourceImageFrames = transformInputEdge
+    ? transformEndpointImageFrameNodeIds(transformInputEdge.source, 'source', nodes, edges) : [];
   const transformMappedImageFrames = transformMappedImageFrameNodeIds(transformLineageNodes, edges);
   const connectedGeometryAlreadyInMappedFrame = Boolean(connectedGeometryImageFrameNodeIds.length && transformInputEdge
     && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformMappedImageFrames.some((mappedFrameNodeId) =>
       imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, mappedFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
+  const connectedGeometryTransformSourceFrameMismatch = Boolean(connectedGeometryImageFrameNodeIds.length && transformSourceImageFrames.length
+    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformSourceImageFrames.every((sourceFrameNodeId) =>
+      !imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, sourceFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
   const connectedGeometryImageFrameMismatch = Boolean(connectedGeometryImageFrameNodeIds.length && !transformInputEdge && measurementImageInputEdge
     && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) =>
       !imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, measurementImageInputEdge.source, nodes, edges, cropMaskFramePreservingNodeTypes)));
@@ -466,8 +506,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const correctedSearchLineTransformConflict = Boolean(searchLineInputEdge && transformInputEdge && connectedGeometryAlreadyInMappedFrame);
   const connectedCircleImageFrameMismatch = Boolean(circleInputEdge && connectedGeometryImageFrameMismatch);
   const connectedSearchLineImageFrameMismatch = Boolean(searchLineInputEdge && connectedGeometryImageFrameMismatch);
+  const connectedCircleTransformSourceMismatch = Boolean(circleInputEdge && connectedGeometryTransformSourceFrameMismatch);
+  const connectedSearchLineTransformSourceMismatch = Boolean(searchLineInputEdge && connectedGeometryTransformSourceFrameMismatch);
   const measurementGeometryTransformConflict = correctedCircleTransformConflict || correctedSearchLineTransformConflict;
-  const measurementGeometryFrameMismatchConflict = connectedCircleImageFrameMismatch || connectedSearchLineImageFrameMismatch;
+  const measurementGeometryFrameMismatchConflict = connectedCircleImageFrameMismatch || connectedSearchLineImageFrameMismatch
+    || connectedCircleTransformSourceMismatch || connectedSearchLineTransformSourceMismatch;
   const measurementGeometryConflict = measurementGeometryTransformConflict || measurementGeometryFrameMismatchConflict;
   const correctedCircleTransformMessage = correctedCircleTransformConflict
     ? directCorrectedCircleTransformConflict
@@ -483,7 +526,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const searchLineImageFrameMismatchMessage = connectedSearchLineImageFrameMismatch
     ? '上游搜索线与当前测量图像不在同一像素坐标系。请将线和图像接到同一裁剪/变换分支，或为基准图像线连接匹配的 transform；当前已阻止测试运行。'
     : undefined;
+  const circleTransformSourceMismatchMessage = connectedCircleTransformSourceMismatch
+    ? '上游圆与 transform 的源图像坐标系不匹配。请连接来自 transform 源图像（或同坐标处理分支）的圆；当前已阻止测试运行。'
+    : undefined;
+  const searchLineTransformSourceMismatchMessage = connectedSearchLineTransformSourceMismatch
+    ? '上游搜索线与 transform 的源图像坐标系不匹配。请连接来自 transform 源图像（或同坐标处理分支）的线；当前已阻止测试运行。'
+    : undefined;
   const measurementGeometryConflictMessage = correctedCircleTransformMessage ?? correctedSearchLineTransformMessage
+    ?? circleTransformSourceMismatchMessage ?? searchLineTransformSourceMismatchMessage
     ?? circleImageFrameMismatchMessage ?? searchLineImageFrameMismatchMessage;
   const referenceTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'roi.transform'
     && typeof (source.data.parameters as NodeParameters | undefined)?.referenceImage === 'string'
@@ -1341,23 +1391,25 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           description={caliperLineBoundsNotice.description} />}
         {caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
           description={caliperSearchLineBoundsNotice.description} />}
-        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict || connectedSearchLineImageFrameMismatch ? 'error' : 'info'}
+        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict || connectedSearchLineImageFrameMismatch || connectedSearchLineTransformSourceMismatch ? 'error' : 'info'}
           title={correctedSearchLineTransformConflict ? '上游几何已处于变换目标坐标系'
-            : connectedSearchLineImageFrameMismatch ? '上游搜索线与测量图像坐标不匹配'
-              : `搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
-          description={correctedSearchLineTransformMessage ?? searchLineImageFrameMismatchMessage ?? (transformInputEdge
+            : connectedSearchLineTransformSourceMismatch ? '上游搜索线与 transform 源坐标系不匹配'
+              : connectedSearchLineImageFrameMismatch ? '上游搜索线与测量图像坐标不匹配'
+                : `搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
+          description={correctedSearchLineTransformMessage ?? searchLineTransformSourceMismatchMessage ?? searchLineImageFrameMismatchMessage ?? (transformInputEdge
             ? connectedSearchLine && measurementGeometryFrameKind
               ? `蓝色线显示运行报告中的上游基准搜索线；它会在执行时经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”变换到当前图像。几何仅在匹配的基准图像上只读显示。`
               : `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
             : connectedSearchLine
               ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
               : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。')} />}
-        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict || connectedCircleImageFrameMismatch ? 'error' : transformInputEdge ? 'warning' : 'info'}
+        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict || connectedCircleImageFrameMismatch || connectedCircleTransformSourceMismatch ? 'error' : transformInputEdge ? 'warning' : 'info'}
           title={correctedCircleTransformConflict ? directCorrectedCircleTransformConflict
             ? '定位修正圆不能再次应用 transform' : '上游几何已处于变换目标坐标系'
-            : connectedCircleImageFrameMismatch ? '上游圆与测量图像坐标不匹配'
-              : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
-          description={correctedCircleTransformMessage ?? circleImageFrameMismatchMessage ?? (transformInputEdge
+            : connectedCircleTransformSourceMismatch ? '上游圆与 transform 源坐标系不匹配'
+              : connectedCircleImageFrameMismatch ? '上游圆与测量图像坐标不匹配'
+                : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
+          description={correctedCircleTransformMessage ?? circleTransformSourceMismatchMessage ?? circleImageFrameMismatchMessage ?? (transformInputEdge
             ? connectedCircle && measurementGeometryFrameKind
               ? `圆心和标称半径锁定为运行报告中的上游基准圆；图像预览显示对应基准图像，可拖动圆弧和搜索带手柄，变换会在执行时映射到当前图像。`
               : `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`

@@ -229,6 +229,40 @@ public sealed class ParameterValidationTests
     }
 
     [Theory]
+    [InlineData("feature.line", "line", "measure.caliperLine", "searchLine")]
+    [InlineData("feature.circle", "circle", "measure.caliperCircle", "circle")]
+    public void MeasurementRejectsGeometryFromDifferentImageFrameThanTransformSource(
+        string geometryType,
+        string geometryOutput,
+        string measurementType,
+        string measurementInput)
+    {
+        var workflow = new WorkflowDefinition("geometry-transform-source-mismatch", "Geometry transform source mismatch",
+        [
+            new NodeDefinition("source-image", "image.synthetic", null, null, null),
+            new NodeDefinition("other-image", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("geometry", geometryType, null, null, null),
+            new NodeDefinition("measure", measurementType, null, null, null)
+        ],
+        [
+            new EdgeDefinition("crop-control", "source-image", "next", "crop", "exec", "control"),
+            new EdgeDefinition("geometry-control", "crop", "next", "geometry", "exec", "control"),
+            new EdgeDefinition("measure-control", "geometry", "next", "measure", "exec", "control"),
+            new EdgeDefinition("source-crop", "source-image", "image", "crop", "image", "data"),
+            new EdgeDefinition("geometry-image", "other-image", "image", "geometry", "image", "data"),
+            new EdgeDefinition("crop-measure", "crop", "image", "measure", "image", "data"),
+            new EdgeDefinition("geometry-input", "geometry", geometryOutput, "measure", measurementInput, "data"),
+            new EdgeDefinition("crop-transform", "crop", "transform", "measure", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("geometry is in frame 'other-image.image'", error.Message);
+        Assert.Contains("transform expects source frame 'source-image.image'", error.Message);
+    }
+
+    [Theory]
     [InlineData("feature.line", "line", "measure.caliper", "searchLine")]
     [InlineData("feature.line", "line", "feature.edgeSubpixel", "searchLine")]
     [InlineData("feature.line", "line", "measure.caliperLine", "searchLine")]
