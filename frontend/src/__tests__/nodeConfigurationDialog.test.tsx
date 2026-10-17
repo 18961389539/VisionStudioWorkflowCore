@@ -1287,6 +1287,82 @@ describe('caliper geometry input guidance', () => {
     await waitFor(() => expect(dialog.queryByText('搜索线完全位于图像外')).toBeNull());
   });
 
+  it('checks a transformed single-caliper line against the current measurement image', async () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'transformed-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '单点卡尺',
+      inputs: caliperCatalog.inputs, parameters: { startX: -200, startY: 64, endX: -100, endY: 64 } } };
+    const transformNode: Node = { id: 'pose-transform', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 256, referenceHeight: 128 } } };
+    const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: caliperNode.id, targetHandle: 'transform' }
+    ];
+    const transformedResult: RunResult = { ...report, runId: 'transformed-caliper-bounds-run', nodeReports: [
+      { nodeId: caliperNode.id, nodeType: caliperCatalog.type, success: true, durationMs: 1, summary: {}, inputs: {
+        transform: { type: 'Transform2D', display: 'translation', value: { sourceUnit: 'px', targetUnit: 'px',
+          h00: 1, h01: 0, h02: 50, h10: 0, h11: 1, h12: 0, h20: 0, h21: 0, h22: 1 } }
+      } }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: caliperNode.id, portName: 'image', width: 128, height: 128 },
+      { nodeId: imageNode.id, portName: 'image', width: 128, height: 128 }
+    ] }) })));
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, transformNode, imageNode], edges, result: transformedResult });
+
+    expect(await dialog.findByText('搜索线完全位于图像外')).toBeTruthy();
+    expect(dialog.getByText(/已按本次有效运行的刚性 transform 映射到测量输入图像后估算/)).toBeTruthy();
+    expect(dialog.getByTestId('line-geometry').getAttribute('data-start-x')).toBe('-200');
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
+  });
+
+  it('does not guess transformed bounds from the reference image when no current transform is available', () => {
+    const caliperCatalog = fallbackCatalog.find(item => item.type === 'measure.caliper')!;
+    const caliperNode: Node = { id: 'pending-transform-caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: '单点卡尺',
+      inputs: caliperCatalog.inputs, parameters: { startX: -200, startY: 64, endX: -100, endY: 64 } } };
+    const transformNode: Node = { id: 'pose-transform', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 256, referenceHeight: 128 } } };
+    const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: caliperNode.id, targetHandle: 'image' },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: caliperNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: caliperNode, catalogItem: caliperCatalog, nodes: [caliperNode, transformNode, imageNode], edges });
+
+    expect(dialog.getByText('暂时无法预估变换后的图像边界')).toBeTruthy();
+    expect(dialog.queryByText('搜索线完全位于图像外')).toBeNull();
+  });
+
+  it('checks transformed circle calipers against the current measurement image', async () => {
+    const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
+    const circleNode: Node = { id: 'transformed-circle', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',
+      inputs: circleCatalog.inputs, parameters: { centerX: 80, centerY: 64, radius: 20, radialBand: 8,
+        angleStartDeg: -180, angleEndDeg: 180, samplingMode: 'count', caliperCount: 72, minValidCalipers: 3 } } };
+    const transformNode: Node = { id: 'pose-transform', position: { x: 0, y: 0 }, data: { typeKey: 'roi.transform', label: '定位修正 ROI',
+      parameters: { referenceImage: 'reference-png', referenceWidth: 256, referenceHeight: 128 } } };
+    const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      { id: 'image-input', source: imageNode.id, sourceHandle: 'image', target: circleNode.id, targetHandle: 'image' },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: circleNode.id, targetHandle: 'transform' }
+    ];
+    const transformedResult: RunResult = { ...report, runId: 'transformed-circle-bounds-run', nodeReports: [
+      { nodeId: circleNode.id, nodeType: circleCatalog.type, success: true, durationMs: 1, summary: {}, inputs: {
+        transform: { type: 'Transform2D', display: 'translation', value: { sourceUnit: 'px', targetUnit: 'px',
+          h00: 1, h01: 0, h02: 50, h10: 0, h11: 1, h12: 0, h20: 0, h21: 0, h22: 1 } }
+      } }
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ images: [
+      { nodeId: circleNode.id, portName: 'image', width: 128, height: 128 },
+      { nodeId: imageNode.id, portName: 'image', width: 128, height: 128 }
+    ] }) })));
+    const { dialog } = mount({ node: circleNode, catalogItem: circleCatalog, nodes: [circleNode, transformNode, imageNode], edges, result: transformedResult });
+
+    expect(await dialog.findByText('部分圆卡尺位于图像边界外')).toBeTruthy();
+    expect(dialog.getByText(/已按本次有效运行的刚性 transform 映射到测量输入图像后估算/)).toBeTruthy();
+    expect(dialog.getByTestId('circle-geometry').getAttribute('data-center-x')).toBe('80');
+    expect(dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,reference-png');
+  });
+
   it('warns when the nominal circle leaves too few radial calipers inside the image', async () => {
     const circleCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperCircle')!;
     const circleNode: Node = { id: 'circle-measure', position: { x: 0, y: 0 }, data: { typeKey: circleCatalog.type, label: '卡尺找圆',

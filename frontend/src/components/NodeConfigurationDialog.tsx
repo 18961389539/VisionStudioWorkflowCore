@@ -171,6 +171,41 @@ function connectedSearchLineGeometry(value: unknown): { start: { x: number; y: n
   return start && end ? { start, end } : undefined;
 }
 
+type RigidPixelTransform = { h00: number; h01: number; h02: number; h10: number; h11: number; h12: number };
+
+function rigidPixelTransform(value: unknown): RigidPixelTransform | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const transform = value as Record<string, unknown>;
+  const read = (lower: string, upper: string) => transform[lower] ?? transform[upper];
+  const numbers = ['h00', 'h01', 'h02', 'h10', 'h11', 'h12', 'h20', 'h21', 'h22']
+    .map((key) => read(key, key.toUpperCase()));
+  if (!numbers.every((item) => typeof item === 'number' && Number.isFinite(item))) return undefined;
+  const [h00, h01, h02, h10, h11, h12, h20, h21, h22] = numbers as number[];
+  const sourceUnit = read('sourceUnit', 'SourceUnit');
+  const targetUnit = read('targetUnit', 'TargetUnit');
+  if ((sourceUnit !== undefined && sourceUnit !== 'px') || (targetUnit !== undefined && targetUnit !== 'px')) return undefined;
+  const tolerance = 1e-6;
+  if (Math.abs(h20) > tolerance || Math.abs(h21) > tolerance || Math.abs(h22 - 1) > tolerance
+    || Math.abs(h00 * h00 + h10 * h10 - 1) > tolerance
+    || Math.abs(h01 * h01 + h11 * h11 - 1) > tolerance
+    || Math.abs(h00 * h01 + h10 * h11) > tolerance
+    || Math.abs(h00 * h11 - h01 * h10 - 1) > tolerance) return undefined;
+  return { h00, h01, h02, h10, h11, h12 };
+}
+
+function mapMeasurementGeometry(geometry: MeasurementGeometry, transform: RigidPixelTransform): MeasurementGeometry {
+  const mapPoint = (point: { x: number; y: number }) => ({
+    x: transform.h00 * point.x + transform.h01 * point.y + transform.h02,
+    y: transform.h10 * point.x + transform.h11 * point.y + transform.h12
+  });
+  if (geometry.type === 'line')
+    return { ...geometry, start: mapPoint(geometry.start), end: mapPoint(geometry.end) };
+  const rotation = Math.atan2(transform.h10, transform.h00) * 180 / Math.PI;
+  return { ...geometry, center: mapPoint(geometry.center),
+    angleStartDeg: (geometry.angleStartDeg ?? -180) + rotation,
+    angleEndDeg: (geometry.angleEndDeg ?? 180) + rotation };
+}
+
 export default function NodeConfigurationDialog({ node, catalogItem, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
@@ -423,7 +458,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
   };
   const nodeLabels = Object.fromEntries(nodes.map((item) => [item.id, String(item.data.label ?? item.id)]));
   const { imageSource, setImageSource, imageViewerSource, viewerOverlays, selectedOutputAvailable, selectedInputAvailable,
-    imageCatalogLoading, imageCatalogError, retryImageCatalog } =
+    runImageCatalog, imageCatalogLoading, imageCatalogError, retryImageCatalog } =
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
@@ -486,6 +521,26 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
         caliperCount: geometryNumber('caliperCount', 72), samplingMode: String(draft.samplingMode ?? 'count'),
         angleStepDeg: geometryNumber('angleStepDeg', 5), centerEditable: !circleInputEdge, radiusEditable: !circleInputEdge }
     : undefined;
+  const measurementInputReport = transformInputEdge
+    ? freshInputResult?.nodeReports.filter((report) => report.nodeId === node.id).slice(-1)[0]
+    : undefined;
+  const measurementTransform = transformInputEdge
+    ? rigidPixelTransform(measurementInputReport?.inputs?.transform?.value)
+    : undefined;
+  const mappedMeasurementGeometry = measurementGeometry && (transformInputEdge
+    ? measurementTransform ? mapMeasurementGeometry(measurementGeometry, measurementTransform) : undefined
+    : measurementGeometry);
+  const measurementInputImageEntry = runImageCatalog && freshInputResult && runImageCatalog.runId === freshInputResult.runId && measurementImageSource
+    && (!measurementImageInputEdge?.sourceHandle || runImageCatalog.images[measurementImageSource.id]?.portName === measurementImageInputEdge.sourceHandle)
+    ? runImageCatalog.images[measurementImageSource.id]
+    : undefined;
+  const measurementBoundsWidth = transformInputEdge ? measurementInputImageEntry?.width : imageViewerSource.width;
+  const measurementBoundsHeight = transformInputEdge ? measurementInputImageEntry?.height : imageViewerSource.height;
+  const transformedBoundsPreflightUnavailable = Boolean(transformInputEdge && measurementGeometry && measurementImageFrameReady
+    && (!mappedMeasurementGeometry || !measurementInputImageEntry || measurementInputImageEntry.width <= 0 || measurementInputImageEntry.height <= 0));
+  const measurementBoundsContext = transformInputEdge
+    ? '已按本次有效运行的刚性 transform 映射到测量输入图像后估算；'
+    : '';
   const circleSamplingMode = String(draft.samplingMode ?? (draft.angleStepDeg !== undefined ? 'step' : 'count')).toLowerCase();
   const circleSamplingGeometry: Extract<MeasurementGeometry, { type: 'circle' }> | undefined = isCaliperCircle ? {
     type: 'circle', center: { x: geometryNumber('centerX', 320), y: geometryNumber('centerY', 240) },
@@ -524,27 +579,28 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     return '当前圆弧的理论测点分布接近直线，可能触发退化圆拟合。请扩大角度覆盖；单纯增加卡尺数量不能替代更宽的圆弧。';
   })();
   const caliperCircleBoundsNotice = (() => {
-    if (catalogItem.type !== 'measure.caliperCircle' || transformInputEdge || measurementGeometry?.type !== 'circle'
-      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
-      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0
-      || !Number.isFinite(measurementGeometry.center.x) || !Number.isFinite(measurementGeometry.center.y)
-      || Math.abs(measurementGeometry.center.x) > 10_000_000 || Math.abs(measurementGeometry.center.y) > 10_000_000
-      || !Number.isFinite(measurementGeometry.radius) || measurementGeometry.radius <= 0 || measurementGeometry.radius > 10_000_000) return undefined;
-    const width = imageViewerSource.width;
-    const height = imageViewerSource.height;
+    const geometry = mappedMeasurementGeometry;
+    if (catalogItem.type !== 'measure.caliperCircle' || geometry?.type !== 'circle'
+      || !measurementImageFrameReady || measurementBoundsWidth === undefined || measurementBoundsHeight === undefined
+      || measurementBoundsWidth <= 0 || measurementBoundsHeight <= 0
+      || !Number.isFinite(geometry.center.x) || !Number.isFinite(geometry.center.y)
+      || Math.abs(geometry.center.x) > 10_000_000 || Math.abs(geometry.center.y) > 10_000_000
+      || !Number.isFinite(geometry.radius) || geometry.radius <= 0 || geometry.radius > 10_000_000) return undefined;
+    const width = measurementBoundsWidth;
+    const height = measurementBoundsHeight;
     const band = Math.max(1, Math.min(500, geometryNumber('radialBand', 8)));
-    const innerRadius = Math.max(0, measurementGeometry.radius - band);
-    const outerRadius = measurementGeometry.radius + band;
-    const angles = buildCaliperCircleAngles(measurementGeometry);
+    const innerRadius = Math.max(0, geometry.radius - band);
+    const outerRadius = geometry.radius + band;
+    const angles = buildCaliperCircleAngles(geometry);
     let outside = 0;
     let tooShortAfterClip = 0;
     for (const angle of angles) {
       const radians = angle * Math.PI / 180;
       const direction = { x: Math.cos(radians), y: Math.sin(radians) };
-      const start = { x: measurementGeometry.center.x + direction.x * innerRadius,
-        y: measurementGeometry.center.y + direction.y * innerRadius };
-      const end = { x: measurementGeometry.center.x + direction.x * outerRadius,
-        y: measurementGeometry.center.y + direction.y * outerRadius };
+      const start = { x: geometry.center.x + direction.x * innerRadius,
+        y: geometry.center.y + direction.y * innerRadius };
+      const end = { x: geometry.center.x + direction.x * outerRadius,
+        y: geometry.center.y + direction.y * outerRadius };
       const clipped = clipLineToImage(start, end, width, height);
       if (!clipped) { outside++; continue; }
       if (Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y) < 2) tooShortAfterClip++;
@@ -559,15 +615,16 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     return {
       type: potentiallyAvailable < minimum ? 'warning' as const : 'info' as const,
       title: potentiallyAvailable < minimum ? '图像边界可能导致圆卡尺不足' : '部分圆卡尺位于图像边界外',
-      description: `${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请调整标称圆位置、半径或搜索带。`
+      description: `${measurementBoundsContext}${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请调整标称圆位置、半径或搜索带。`
     };
   })();
   const caliperLineBoundsNotice = (() => {
-    if (catalogItem.type !== 'measure.caliperLine' || transformInputEdge || measurementGeometry?.type !== 'line'
-      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
-      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0) return undefined;
-    const dx = measurementGeometry.end.x - measurementGeometry.start.x;
-    const dy = measurementGeometry.end.y - measurementGeometry.start.y;
+    const geometry = mappedMeasurementGeometry;
+    if (catalogItem.type !== 'measure.caliperLine' || geometry?.type !== 'line'
+      || !measurementImageFrameReady || measurementBoundsWidth === undefined || measurementBoundsHeight === undefined
+      || measurementBoundsWidth <= 0 || measurementBoundsHeight <= 0) return undefined;
+    const dx = geometry.end.x - geometry.start.x;
+    const dy = geometry.end.y - geometry.start.y;
     const length = Math.hypot(dx, dy);
     if (length < 2) return undefined;
     const count = Math.max(3, Math.min(101, Math.floor(geometryNumber('caliperCount', 9) + 0.5)));
@@ -580,9 +637,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
       const offset = (index / (count - 1) - 0.5) * span;
       const delta = { x: tangent.x * offset, y: tangent.y * offset };
       const clipped = clipLineToImage(
-        { x: measurementGeometry.start.x + delta.x, y: measurementGeometry.start.y + delta.y },
-        { x: measurementGeometry.end.x + delta.x, y: measurementGeometry.end.y + delta.y },
-        imageViewerSource.width, imageViewerSource.height
+        { x: geometry.start.x + delta.x, y: geometry.start.y + delta.y },
+        { x: geometry.end.x + delta.x, y: geometry.end.y + delta.y },
+        measurementBoundsWidth, measurementBoundsHeight
       );
       if (!clipped) { outside++; continue; }
       if (Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y) < 2) tooShortAfterClip++;
@@ -597,34 +654,33 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     return {
       type: potentiallyAvailable < minimum ? 'warning' as const : 'info' as const,
       title: potentiallyAvailable < minimum ? '图像边界可能导致卡尺数量不足' : '部分卡尺位于图像边界外',
-      description: `${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请缩短跨度或调整搜索线位置。`
+      description: `${measurementBoundsContext}${detail}；仅按图像边界估算，最多剩余 ${potentiallyAvailable} 条可采样，当前拟合至少需要 ${minimum} 条有效卡尺。ROI 掩膜、对比度阈值和边缘方向还可能继续减少有效点。请缩短跨度或调整搜索线位置。`
     };
   })();
   const caliperSearchLineBoundsNotice = (() => {
-    if (catalogItem.type !== 'measure.caliper' || transformInputEdge || measurementGeometry?.type !== 'line'
-      || !measurementImageFrameReady || imageViewerSource.width === undefined || imageViewerSource.height === undefined
-      || imageViewerSource.width <= 0 || imageViewerSource.height <= 0) return undefined;
-    const length = Math.hypot(measurementGeometry.end.x - measurementGeometry.start.x,
-      measurementGeometry.end.y - measurementGeometry.start.y);
+    const geometry = mappedMeasurementGeometry;
+    if (catalogItem.type !== 'measure.caliper' || geometry?.type !== 'line'
+      || !measurementImageFrameReady || measurementBoundsWidth === undefined || measurementBoundsHeight === undefined
+      || measurementBoundsWidth <= 0 || measurementBoundsHeight <= 0) return undefined;
+    const length = Math.hypot(geometry.end.x - geometry.start.x, geometry.end.y - geometry.start.y);
     if (length < 2) return undefined;
-    const clipped = clipLineToImage(measurementGeometry.start, measurementGeometry.end,
-      imageViewerSource.width, imageViewerSource.height);
+    const clipped = clipLineToImage(geometry.start, geometry.end, measurementBoundsWidth, measurementBoundsHeight);
     if (!clipped) return {
       type: 'warning' as const,
       title: '搜索线完全位于图像外',
-      description: '当前卡尺不会采到图像像素，运行会返回“未找到”而不是检测边缘。请将搜索线移入图像，或检查上游坐标变换。'
+      description: `${measurementBoundsContext}当前卡尺不会采到图像像素，运行会返回“未找到”而不是检测边缘。请将搜索线移入图像，或检查上游坐标变换。`
     };
     const clippedLength = Math.hypot(clipped.end.x - clipped.start.x, clipped.end.y - clipped.start.y);
     if (clippedLength < 2) return {
       type: 'warning' as const,
       title: '搜索线裁切后过短',
-      description: `搜索线与图像仅相交 ${clippedLength.toFixed(1)} px，短于卡尺要求的 2 px。请调整搜索线位置或方向。`
+      description: `${measurementBoundsContext}搜索线与图像仅相交 ${clippedLength.toFixed(1)} px，短于卡尺要求的 2 px。请调整搜索线位置或方向。`
     };
     if (clippedLength >= length - 1e-6) return undefined;
     return {
       type: 'info' as const,
       title: '搜索线将按图像边界裁切',
-      description: `搜索线约有 ${(length - clippedLength).toFixed(1)} px 位于图像外；运行时只会在图像内的 ${clippedLength.toFixed(1)} px 段上采样。`
+      description: `${measurementBoundsContext}搜索线约有 ${(length - clippedLength).toFixed(1)} px 位于图像外；运行时只会在图像内的 ${clippedLength.toFixed(1)} px 段上采样。`
     };
   })();
   const updateMeasurementGeometry = (geometry: MeasurementGeometry, options?: { preserveValues?: boolean }) => {
@@ -1192,6 +1248,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
             : <span>图像处理链中存在非矩形裁剪，选区外像素会清零，可能形成伪边缘；多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像。请在当前图像坐标系提供完整 ROI 掩膜，或调整流程避免将裁剪边界当作真实边缘。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
+        {transformedBoundsPreflightUnavailable && <Alert showIcon type="info" title="暂时无法预估变换后的图像边界"
+          description="当前节点的有效运行报告或测量图尺寸尚不可用。预检不会用基准图坐标冒充当前图像坐标；先运行一次上游定位与变换，再检查变换后的卡尺范围。" />}
         {caliperCircleBoundsNotice && <Alert showIcon type={caliperCircleBoundsNotice.type} title={caliperCircleBoundsNotice.title}
           description={caliperCircleBoundsNotice.description} />}
         {caliperLineBoundsNotice && <Alert showIcon type={caliperLineBoundsNotice.type} title={caliperLineBoundsNotice.title}
