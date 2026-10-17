@@ -199,8 +199,25 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                 }
                 else
                 {
-                    // 旋转后不再保持轴对齐：转为多边形 ROI（4 角），掩膜语义随工件保持。
-                    transformed = new VisionRoi(VisionRoiType.Polygon, Points: corners.Select(c => new VisionRoiPoint(c.X, c.Y)).ToArray());
+                    // Rectangle masks use [ceil(start), ceil(end)) pixel bounds. Transform the
+                    // selected pixel centers so the polygon mask does not gain an extra row/column
+                    // from OpenCV's inclusive polygon edges. Keep `region` on the exact geometric
+                    // corners above for the analytic rectangle/circle outputs.
+                    var left = Math.Ceiling(x);
+                    var top = Math.Ceiling(y);
+                    var right = Math.Ceiling(x + width) - 1;
+                    var bottom = Math.Ceiling(y + height) - 1;
+                    var maskCorners = right >= left && bottom >= top
+                        ? new[]
+                        {
+                            new VisionPoint2D(left, top),
+                            new VisionPoint2D(right, top),
+                            new VisionPoint2D(right, bottom),
+                            new VisionPoint2D(left, bottom)
+                        }
+                        : corners;
+                    transformed = new VisionRoi(VisionRoiType.Polygon,
+                        Points: maskCorners.Select(c => Apply(c)).Select(c => new VisionRoiPoint(c.X, c.Y)).ToArray());
                 }
                 region = corners.ToList();
                 break;

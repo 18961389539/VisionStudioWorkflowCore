@@ -69,7 +69,7 @@ public static class VisionRoiOpenCvExtensions
                     }
                     cancellationToken.ThrowIfCancellationRequested();
                     if (points.Length >= 3)
-                        Cv2.FillPoly(mask, new[] { points }, Scalar.All(255), LineTypes.AntiAlias);
+                        Cv2.FillPoly(mask, new[] { points }, Scalar.All(255), LineTypes.Link8);
                     break;
                 }
                 case VisionRoiType.Brush:

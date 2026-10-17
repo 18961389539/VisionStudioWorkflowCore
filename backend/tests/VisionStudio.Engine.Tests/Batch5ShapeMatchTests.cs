@@ -855,7 +855,7 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
-    public async Task RoiTransform_Rotation_TurnsRectangleIntoPolygonWithTrueCorners()
+    public async Task RoiTransform_Rotation_TurnsRectangleIntoPolygonWithPixelSupportCorners()
     {
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
             """{"roi":{"type":"Rectangle","x":100,"y":100,"width":50,"height":30},"baseThetaDeg":0,"currentThetaDeg":90}""");
@@ -863,14 +863,27 @@ public sealed class Batch5ShapeMatchTests
         var roi = result.Outputs["roi"].Require<VisionRoi>("roi");
         Assert.Equal(VisionRoiType.Polygon, roi.Type);
         Assert.NotNull(roi.Points);
-        // R(90°) 逆时针（图像坐标）：(x,y) → (y,-x)。
-        var expected = new[] { (100d, -100d), (100d, -150d), (130d, -150d), (130d, -100d) };
+        // The half-open rectangle mask selects x=100..149 and y=100..129; rotate those pixel centers.
+        var expected = new[] { (100d, -100d), (100d, -149d), (129d, -149d), (129d, -100d) };
         foreach (var (x, y) in expected)
             Assert.Contains(roi.Points!, p => Math.Abs(p.X - x) < 0.01 && Math.Abs(p.Y - y) < 0.01);
 
         var summary = result.Summary;
         Assert.Equal(90d, Convert.ToDouble(summary["thetaDeg"]));
         Assert.Equal("Polygon", summary["roiType"]);
+    }
+
+    [Fact]
+    public async Task RoiTransform_RightAngleRotation_PreservesRectangleMaskPixelCount()
+    {
+        var sourceRoi = new VisionRoi(VisionRoiType.Rectangle, X: 10, Y: 10, Width: 10, Height: 10);
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Rectangle","x":10,"y":10,"width":10,"height":10},"baseX":15,"baseY":15,"currentX":15,"currentY":15,"baseThetaDeg":0,"currentThetaDeg":90}""");
+        var transformed = result.Outputs["roi"].Require<VisionRoi>("roi");
+        using var sourceMask = sourceRoi.BuildMask(new Size(40, 40));
+        using var transformedMask = transformed.BuildMask(new Size(40, 40));
+
+        Assert.Equal(Cv2.CountNonZero(sourceMask), Cv2.CountNonZero(transformedMask));
     }
 
     [Fact]
