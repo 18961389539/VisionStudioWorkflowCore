@@ -38,6 +38,37 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLineAndCircleSummariesExposeEffectiveSearchSettings()
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+
+        var line = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperLine", """{"startX":10,"startY":20,"endX":30,"endY":20,"edgeLength":0,"caliperCount":5,"minContrast":17,"sampleWidth":7}"""),
+            CancellationToken.None);
+        Assert.Equal(17d, Convert.ToDouble(line.Summary["minContrast"]));
+        Assert.Equal(0d, Convert.ToDouble(line.Summary["edgeLength"]));
+        Assert.Equal(20d, Convert.ToDouble(line.Summary["effectiveCaliperSpan"]));
+        (line.Outputs["image"].Value as IDisposable)?.Dispose();
+
+        var circle = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>
+        {
+            ["image"] = VisionValue.Image(image),
+            ["transform"] = VisionValue.Transform(new VisionTransform2D(
+                "Reference", "Current", "px", 0, -1, 133, 1, 0, -3, 0, 0, 1))
+        }), Node("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":10,"angleEndDeg":70,"caliperCount":5,"radialBand":6,"minContrast":19,"sampleWidth":7,"maxRadiusDeviation":1.5,"maxFitOutliers":2,"fitOutlierThreshold":0.75}"""),
+            CancellationToken.None);
+        Assert.Equal(69d, Convert.ToDouble(circle.Summary["centerX"]));
+        Assert.Equal(61d, Convert.ToDouble(circle.Summary["centerY"]));
+        Assert.Equal(100d, Convert.ToDouble(circle.Summary["angleStartDeg"]));
+        Assert.Equal(160d, Convert.ToDouble(circle.Summary["angleEndDeg"]));
+        Assert.Equal(19d, Convert.ToDouble(circle.Summary["minContrast"]));
+        Assert.Equal(7, Convert.ToInt32(circle.Summary["sampleWidth"]));
+        Assert.Equal(1.5, Convert.ToDouble(circle.Summary["maxRadiusDeviation"]));
+        Assert.Equal(0.75, Convert.ToDouble(circle.Summary["fitOutlierThreshold"]));
+        (circle.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task CaliperCircleReportsWhenCoordinateCorrectionMovesTheCenterOutOfRange()
     {
         using var image = VisionImage.Own(new Mat(32, 32, MatType.CV_8UC1, Scalar.All(0)));

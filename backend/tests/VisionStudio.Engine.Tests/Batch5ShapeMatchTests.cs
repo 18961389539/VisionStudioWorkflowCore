@@ -876,14 +876,17 @@ public sealed class Batch5ShapeMatchTests
     [Fact]
     public async Task RoiTransform_RightAngleRotation_PreservesRectangleMaskPixelCount()
     {
-        var sourceRoi = new VisionRoi(VisionRoiType.Rectangle, X: 10, Y: 10, Width: 10, Height: 10);
+        var sourceRoi = new VisionRoi(VisionRoiType.Rectangle, X: 10, Y: 10, Width: 10, Height: 6);
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
-            """{"roi":{"type":"Rectangle","x":10,"y":10,"width":10,"height":10},"baseX":15,"baseY":15,"currentX":15,"currentY":15,"baseThetaDeg":0,"currentThetaDeg":90}""");
+            """{"roi":{"type":"Rectangle","x":10,"y":10,"width":10,"height":6},"baseX":15,"baseY":15,"currentX":15,"currentY":15,"baseThetaDeg":0,"currentThetaDeg":90}""");
         var transformed = result.Outputs["roi"].Require<VisionRoi>("roi");
         using var sourceMask = sourceRoi.BuildMask(new Size(40, 40));
         using var transformedMask = transformed.BuildMask(new Size(40, 40));
+        using var expectedMask = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(expectedMask, new Rect(10, 11, 6, 10), Scalar.All(255), -1);
 
         Assert.Equal(Cv2.CountNonZero(sourceMask), Cv2.CountNonZero(transformedMask));
+        Assert.Equal(0d, Cv2.Norm(expectedMask, transformedMask, NormTypes.INF));
     }
 
     [Fact]
