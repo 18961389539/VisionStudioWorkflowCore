@@ -1131,6 +1131,53 @@ public sealed class Batch5CaliperRegressionTests
         }
     }
 
+    [Theory]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    public async Task SingleCaliperHandlesProfilesAroundNativeMeasureFilterBoundary(double lineLength)
+    {
+        using var image = MakeEdgeImage(0);
+        using var input = VisionImage.Own(image.Clone());
+        var center = 64d;
+        var parameters = JsonSerializer.Serialize(new
+        {
+            startX = center - lineLength / 2, startY = 32,
+            endX = center + lineLength / 2, endY = 32,
+            sampleWidth = 1, edgeThreshold = 10, polarity = "rising", refine = "parabolic"
+        });
+        var result = await new CaliperNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliper", parameters), CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Convert.ToString(result.Summary["reason"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Theory]
+    [InlineData(2.5)]
+    [InlineData(3)]
+    [InlineData(3.5)]
+    [InlineData(4)]
+    public async Task CaliperCircleHandlesRadialProfilesAroundNativeMeasureFilterBoundary(double radialBand)
+    {
+        using var image = new Mat(96, 96, MatType.CV_8UC1, Scalar.All(20));
+        Cv2.Circle(image, new Point(48, 48), 24, Scalar.All(220), -1, LineTypes.AntiAlias);
+        Cv2.GaussianBlur(image, image, new Size(0, 0), 0.8);
+        using var input = VisionImage.Own(image.Clone());
+        var parameters = JsonSerializer.Serialize(new
+        {
+            centerX = 48, centerY = 48, radius = 24, radialBand,
+            samplingMode = "count", caliperCount = 36, minContrast = 8, sampleWidth = 1
+        });
+
+        var result = await new CaliperCircleNode().ExecuteAsync(new NodeExecutionContext(Inputs(input)),
+            Node("measure.caliperCircle", parameters), CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Convert.ToString(result.Summary["reason"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
     private static Mat MakeEdgeImage(double slope)
     {
         var image = new Mat(128, 128, MatType.CV_8UC1);
