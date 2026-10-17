@@ -6,20 +6,20 @@ public static class FeatureRegionCatalog
     private static readonly PortDescriptor Next = new("next", VisionDataType.Control);
     private static readonly PortDescriptor Image = new("image", VisionDataType.Image);
     private static readonly PortDescriptor Region = new("region", VisionDataType.Region);
-    private static readonly PortDescriptor[] RegionOutputs = [Region, Image, new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("area", VisionDataType.Double), Next];
+    private static readonly PortDescriptor[] RegionOutputs = [Region, Image, new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("diagnostics", VisionDataType.String, Required: false), Next];
     private static readonly ParameterDescriptor[] Kernel = [new("kernelWidth", "Kernel Width", "number", 15, 1, 255, 2), new("kernelHeight", "Kernel Height", "number", 15, 1, 255, 2)];
     private static readonly ParameterDescriptor Union = new("unionFirst", "Union Objects First", "boolean", false);
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
-        new("image.topHat", "White Top Hat", "Preprocess", [Exec, Image], [Image, Next], Kernel,
+        new("image.topHat", "White Top Hat", "Preprocess", [Exec, Image], [Image, new("diagnostics", VisionDataType.String), Next], Kernel,
             "Extract small bright features with gray minus rectangular grayscale opening. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.", "builtin"),
-        new("image.bottomHat", "Black Bottom Hat", "Preprocess", [Exec, Image], [Image, Next], Kernel,
+        new("image.bottomHat", "Black Bottom Hat", "Preprocess", [Exec, Image], [Image, new("diagnostics", VisionDataType.String), Next], Kernel,
             "Extract small dark features with rectangular grayscale closing minus gray. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.", "builtin"),
-        new("image.morphGradient", "Morphological Gradient", "Preprocess", [Exec, Image], [Image, Next], Kernel,
+        new("image.morphGradient", "Morphological Gradient", "Preprocess", [Exec, Image], [Image, new("diagnostics", VisionDataType.String), Next], Kernel,
             "Local grayscale range: rectangular dilation minus erosion. Returns owned 8-bit gray; color is converted to gray. Kernel dimensions must be odd in 1..255. Gradient bands are kernel-dependent and are not subpixel edge positions.", "builtin"),
         new("measure.grayHistogram", "Gray Histogram and Percentiles", "Measurement",
             [Exec, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false), new("region", VisionDataType.Region, Required: false)],
-            [new("found", VisionDataType.Boolean), new("pixelCount", VisionDataType.Integer), new("binsJson", VisionDataType.String), new("cdfJson", VisionDataType.String),
+            [new("found", VisionDataType.Boolean), new("pixelCount", VisionDataType.Integer), new("binsJson", VisionDataType.String), new("cdfJson", VisionDataType.String), new("diagnostics", VisionDataType.String),
              .. new[] { "mean", "stdDev", "minGray", "maxGray", "median", "entropy", "percentileLow", "percentileHigh" }.Select(key => new PortDescriptor(key, VisionDataType.Double, Required: false)), Next],
             [new("lowPercent", "Lower Percentile", "number", 5, 0, 100, .1), new("highPercent", "Upper Percentile", "number", 95, 0, 100, .1)],
             "Native 256-bin histogram over the union of selected pixels intersected with the image domain. Connect exactly one of image/domainImage; optional region restricts it further. 8-bit color converts to gray. Percentiles use the first occupied level whose cumulative count reaches p% (p=0 gives the minimum); entropy uses log2. Empty selection returns zero arrays and omits statistics.", "builtin"),

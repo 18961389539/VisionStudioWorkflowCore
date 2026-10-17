@@ -184,7 +184,7 @@ public static class BuiltInNodeCatalog
             "Image Filter",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("method", "Filter Method", "select", "gaussian", Options:
                 [
@@ -229,7 +229,7 @@ public static class BuiltInNodeCatalog
             "Morphology",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), Next],
+            [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("operation", "Operation", "select", "open", Options:
                 [

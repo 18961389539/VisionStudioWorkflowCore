@@ -29,13 +29,17 @@ internal static class RegionNodeHelpers
                 Width: component.Runs.Max(r => r.EndColumn) - x + 1, Height: component.Runs[^1].Row - y + 1));
         }
         var area = JLVisionRegions.PixelArea(region);
+        if (!double.IsFinite(area) || area < 0) throw new InvalidOperationException("Region area must be finite and non-negative.");
         var mask = JLVisionRegions.Mask(region);
+        var totalPixels = (double)Math.Max(1, region.Width) * Math.Max(1, region.Height);
+        var largest = region.Components.Count == 0 ? 0 : region.Components.Max(c => c.Runs.Sum(r => (double)(r.EndColumn - r.StartColumn + 1)));
+        var diag = CoordinateValidation.Diagnostics("region", ("componentCount", region.Components.Count), ("area", area), ("areaRatio", area / totalPixels), ("largestComponentArea", largest), ("width", region.Width), ("height", region.Height), ("empty", region.Components.Count == 0));
         return new(new Dictionary<string, VisionValue>
         {
             ["region"] = VisionValue.Region(region), ["image"] = VisionValue.Image(VisionImage.Own(mask)),
             ["count"] = VisionValue.Integer(region.Components.Count), ["area"] = VisionValue.Double(area),
-            ["found"] = VisionValue.Boolean(region.Components.Count > 0)
-        }, new Dictionary<string, object?> { ["count"] = region.Components.Count, ["area"] = area, ["found"] = region.Components.Count > 0 }, overlays);
+            ["found"] = VisionValue.Boolean(region.Components.Count > 0), ["diagnostics"] = VisionValue.String(diag)
+        }, new Dictionary<string, object?> { ["count"] = region.Components.Count, ["area"] = area, ["found"] = region.Components.Count > 0, ["diagnostics"] = diag }, overlays);
     }
 }
 

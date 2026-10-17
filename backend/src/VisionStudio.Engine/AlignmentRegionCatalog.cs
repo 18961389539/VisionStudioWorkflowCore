@@ -8,7 +8,7 @@ public static class AlignmentRegionCatalog
     private static readonly PortDescriptor Region = new("region", VisionDataType.Region);
     private static readonly PortDescriptor Found = new("found", VisionDataType.Boolean);
     private static readonly PortDescriptor Count = new("count", VisionDataType.Integer);
-    private static readonly PortDescriptor[] RegionOutputs = [Region, new("image", VisionDataType.Image), Count, new("area", VisionDataType.Double), Found, Next];
+    private static readonly PortDescriptor[] RegionOutputs = [Region, new("image", VisionDataType.Image), Count, new("area", VisionDataType.Double), Found, new("diagnostics", VisionDataType.String, Required: false), Next];
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         new("image.register", "Register Image", "Matching",

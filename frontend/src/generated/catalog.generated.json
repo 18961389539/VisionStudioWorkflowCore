@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "05872ec191284d9b1cf28c7df1de9947bc57d0f8aa981ac45701f496fd4c7435",
+  "hash": "90831df7032a7e163ea7892b871eab691d5d4b441dfc065b4169eb24f5321245",
   "items": [
     {
       "type": "image.acquire",
@@ -9741,6 +9741,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "mean",
           "dataType": "Double",
           "required": false
@@ -11573,6 +11578,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12002,6 +12012,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12160,6 +12175,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -12211,6 +12231,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -13219,6 +13244,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14102,6 +14132,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14164,6 +14199,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14224,6 +14264,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -14347,6 +14392,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -14579,6 +14629,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14719,6 +14774,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14806,6 +14866,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14891,6 +14956,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -14958,6 +15028,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -15160,6 +15235,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15278,6 +15358,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -15362,6 +15447,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
