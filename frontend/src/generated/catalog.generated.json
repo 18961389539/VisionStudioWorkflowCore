@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b6d7363ff04d0ef2488cb0c42c07afc7498ba73181a6c2e7f8b8694feffa9da7",
+  "hash": "beefd5bc46da315abf9059d73a1ea5c92b63d68f71fbb4cbb317497272587b97",
   "items": [
     {
       "type": "image.acquire",
@@ -6341,9 +6341,98 @@
           "step": 1,
           "unit": "px",
           "group": "Multi-target"
+        },
+        {
+          "name": "engine",
+          "label": "Shape Engine",
+          "type": "select",
+          "defaultValue": "native",
+          "options": [
+            {
+              "label": "Native JLVision shape model",
+              "value": "native"
+            },
+            {
+              "label": "Managed chamfer (cross-platform)",
+              "value": "managedChamfer"
+            },
+            {
+              "label": "Auto (native, chamfer fallback)",
+              "value": "auto"
+            }
+          ],
+          "group": "Managed Chamfer",
+          "description": "managedChamfer builds a contour model from the template image (templateRoi crop, centre origin) and searches a chamfer distance transform; it ignores trained native models. auto falls back to chamfer only when the native library is unavailable."
+        },
+        {
+          "name": "chamferTolerancePx",
+          "label": "Chamfer Tolerance",
+          "type": "number",
+          "defaultValue": 2.5,
+          "min": 0.5,
+          "max": 10,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Managed Chamfer",
+          "description": "Edge distance (px) that still counts as covered model contour. Higher tolerates more occlusion/blur but admits more clutter."
+        },
+        {
+          "name": "chamferAngleStepDeg",
+          "label": "Chamfer Angle Step",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 30,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Managed Chamfer",
+          "description": "Coarse angular sampling for the managed engine; refinement halves the step locally. Angle remains discrete, not continuous."
+        },
+        {
+          "name": "chamferScaleStepPercent",
+          "label": "Chamfer Scale Step",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "unit": "%",
+          "group": "Managed Chamfer",
+          "description": "Scale sampling between Search Minimum/Maximum Scale for the managed engine."
+        },
+        {
+          "name": "chamferCannyLow",
+          "label": "Chamfer Canny Low",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Managed Chamfer"
+        },
+        {
+          "name": "chamferCannyHigh",
+          "label": "Chamfer Canny High",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Managed Chamfer"
+        },
+        {
+          "name": "chamferMaxModelPoints",
+          "label": "Chamfer Max Model Points",
+          "type": "number",
+          "defaultValue": 240,
+          "min": 16,
+          "max": 2000,
+          "step": 1,
+          "group": "Managed Chamfer",
+          "description": "Contour points kept after subsampling the template edges; more points are slower but describe finer shape detail."
         }
       ],
-      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height.",
+      "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height. The managedChamfer engine is a cross-platform edge-distance alternative (coverage + distance score, partial-occlusion tolerant, multi-target); it is conceptually in the HALCON shape-model / PatMax direction but not parity: discrete angle/scale, no polarity, XLD refinement, deformation or clutter model.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
