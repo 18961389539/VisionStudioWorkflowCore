@@ -455,13 +455,20 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const connectedGeometryAlreadyInMappedFrame = Boolean(connectedGeometryImageFrameNodeIds.length && transformInputEdge
     && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) => transformMappedImageFrames.some((mappedFrameNodeId) =>
       imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, mappedFrameNodeId, nodes, edges, cropMaskFramePreservingNodeTypes))));
+  const connectedGeometryImageFrameMismatch = Boolean(connectedGeometryImageFrameNodeIds.length && !transformInputEdge && measurementImageInputEdge
+    && connectedGeometryImageFrameNodeIds.some((geometryFrameNodeId) =>
+      !imageFramesSharePixelPreservingAncestor(geometryFrameNodeId, measurementImageInputEdge.source, nodes, edges, cropMaskFramePreservingNodeTypes)));
   const directCorrectedCircleTransformConflict = isCaliperCircle && Boolean(circleInputEdge && transformInputEdge
     && circleSourceNode?.data.typeKey === 'roi.transform'
     && transformLineageNodes.some((source) => source.id === circleInputEdge.source));
   const correctedCircleTransformConflict = directCorrectedCircleTransformConflict
     || isCaliperCircle && connectedGeometryAlreadyInMappedFrame;
   const correctedSearchLineTransformConflict = Boolean(searchLineInputEdge && transformInputEdge && connectedGeometryAlreadyInMappedFrame);
+  const connectedCircleImageFrameMismatch = Boolean(circleInputEdge && connectedGeometryImageFrameMismatch);
+  const connectedSearchLineImageFrameMismatch = Boolean(searchLineInputEdge && connectedGeometryImageFrameMismatch);
   const measurementGeometryTransformConflict = correctedCircleTransformConflict || correctedSearchLineTransformConflict;
+  const measurementGeometryFrameMismatchConflict = connectedCircleImageFrameMismatch || connectedSearchLineImageFrameMismatch;
+  const measurementGeometryConflict = measurementGeometryTransformConflict || measurementGeometryFrameMismatchConflict;
   const correctedCircleTransformMessage = correctedCircleTransformConflict
     ? directCorrectedCircleTransformConflict
       ? '标称圆和 transform 都来自同一个定位修正 ROI。圆已经是当前图像坐标，请断开这个 transform 输入，避免重复位移；当前已阻止测试运行。'
@@ -470,7 +477,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const correctedSearchLineTransformMessage = correctedSearchLineTransformConflict
     ? '上游搜索线已经处于 transform 的目标图像坐标系，再传入 transform 会重复映射。请断开 transform，或改接基准图像坐标的搜索线；当前已阻止测试运行。'
     : undefined;
-  const measurementGeometryTransformConflictMessage = correctedCircleTransformMessage ?? correctedSearchLineTransformMessage;
+  const circleImageFrameMismatchMessage = connectedCircleImageFrameMismatch
+    ? '上游圆与当前测量图像不在同一像素坐标系。请将圆和图像接到同一裁剪/变换分支，或为基准图像圆连接匹配的 transform；当前已阻止测试运行。'
+    : undefined;
+  const searchLineImageFrameMismatchMessage = connectedSearchLineImageFrameMismatch
+    ? '上游搜索线与当前测量图像不在同一像素坐标系。请将线和图像接到同一裁剪/变换分支，或为基准图像线连接匹配的 transform；当前已阻止测试运行。'
+    : undefined;
+  const measurementGeometryConflictMessage = correctedCircleTransformMessage ?? correctedSearchLineTransformMessage
+    ?? circleImageFrameMismatchMessage ?? searchLineImageFrameMismatchMessage;
   const referenceTransformNode = transformLineageNodes.find((source) => source.data.typeKey === 'roi.transform'
     && typeof (source.data.parameters as NodeParameters | undefined)?.referenceImage === 'string'
     && Boolean((source.data.parameters as NodeParameters).referenceImage));
@@ -876,7 +890,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     setImageSource('input');
   };
   const runPreview = async () => {
-    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || measurementGeometryTransformConflict) return;
+    if (locked || issues.length || externalChange || previewBlockedReason || shapeSearchBlocked || referenceMismatch || measurementGeometryConflict) return;
     if (isShapeMatch) { setShapeWorkspaceTab('search'); setShapeImageKind(undefined); setRegionEditMode('search'); }
     setTrainingView(false);
     setShowSavedTrainingImage(false);
@@ -1327,21 +1341,23 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           description={caliperLineBoundsNotice.description} />}
         {caliperSearchLineBoundsNotice && <Alert showIcon type={caliperSearchLineBoundsNotice.type} title={caliperSearchLineBoundsNotice.title}
           description={caliperSearchLineBoundsNotice.description} />}
-        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict ? 'error' : 'info'}
+        {searchLineInputEdge && <Alert showIcon type={correctedSearchLineTransformConflict || connectedSearchLineImageFrameMismatch ? 'error' : 'info'}
           title={correctedSearchLineTransformConflict ? '上游几何已处于变换目标坐标系'
-            : `搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
-          description={correctedSearchLineTransformMessage ?? (transformInputEdge
+            : connectedSearchLineImageFrameMismatch ? '上游搜索线与测量图像坐标不匹配'
+              : `搜索线来自上游：${nodeLabels[searchLineInputEdge.source] ?? searchLineInputEdge.source}`}
+          description={correctedSearchLineTransformMessage ?? searchLineImageFrameMismatchMessage ?? (transformInputEdge
             ? connectedSearchLine && measurementGeometryFrameKind
               ? `蓝色线显示运行报告中的上游基准搜索线；它会在执行时经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”变换到当前图像。几何仅在匹配的基准图像上只读显示。`
               : `上游搜索线会再通过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换映射到当前图像；请确认上游线处于基准坐标，已是当前坐标的线不要重复变换。`
             : connectedSearchLine
               ? '蓝色线显示本次运行实际使用的上游搜索线（只读）；要移动搜索线，请在上游节点中调整几何。'
               : '上游 searchLine 会覆盖本节点的起点和终点参数；运行节点以读取实际搜索线，然后可在图像上查看其位置。要移动搜索线，请在上游节点中调整几何。')} />}
-        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict ? 'error' : transformInputEdge ? 'warning' : 'info'}
+        {circleInputEdge && <Alert showIcon type={correctedCircleTransformConflict || connectedCircleImageFrameMismatch ? 'error' : transformInputEdge ? 'warning' : 'info'}
           title={correctedCircleTransformConflict ? directCorrectedCircleTransformConflict
             ? '定位修正圆不能再次应用 transform' : '上游几何已处于变换目标坐标系'
-            : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
-          description={correctedCircleTransformMessage ?? (transformInputEdge
+            : connectedCircleImageFrameMismatch ? '上游圆与测量图像坐标不匹配'
+              : `标称圆来自上游：${nodeLabels[circleInputEdge.source] ?? circleInputEdge.source}`}
+          description={correctedCircleTransformMessage ?? circleImageFrameMismatchMessage ?? (transformInputEdge
             ? connectedCircle && measurementGeometryFrameKind
               ? `圆心和标称半径锁定为运行报告中的上游基准圆；图像预览显示对应基准图像，可拖动圆弧和搜索带手柄，变换会在执行时映射到当前图像。`
               : `该圆还会经过“${nodeLabels[transformInputEdge.source] ?? transformInputEdge.source}”的变换；请确认上游圆处于基准坐标，已是当前坐标的圆不能重复变换。`
@@ -1457,10 +1473,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       footer={<div className="node-configuration-footer">
         <span>{dirty ? '修改已暂存；取消或关闭将丢弃本次修改' : '参数与当前流程一致'}{previewBusy ? ' · 测试中' : ''}</span>
         <div>
-          <Tooltip title={measurementGeometryTransformConflictMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
+          <Tooltip title={measurementGeometryConflictMessage || previewBlockedReason || (isShapeMatch && shapeWorkspaceTab === 'training' ? '使用当前显示的训练图像建立模型（Ctrl+Enter）' : shapeSearchBlocked ? '请先训练或重新训练模型' : '使用暂存参数测试此节点，并预热上游输入；不写回流程参数。（Ctrl+Enter）')}>
             <Button aria-label={isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
               onClick={() => void (isShapeMatch && shapeWorkspaceTab === 'training' ? trainShapeModel() : runPreview())} loading={isShapeMatch && shapeWorkspaceTab === 'training' ? trainingBusy : previewBusy}
-              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryTransformConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
+              disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason) || measurementGeometryConflict || (shapeWorkspaceTab !== 'training' && shapeSearchBlocked) || (isShapeMatch && shapeWorkspaceTab === 'training' && !hasLosslessTrainingImage) || referenceMismatch}>
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>
