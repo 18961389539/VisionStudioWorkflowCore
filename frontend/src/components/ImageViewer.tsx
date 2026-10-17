@@ -1284,7 +1284,13 @@ export default function ImageViewer({
 
   const commitPolygon = () => {
     if (tool !== 'polygon' || polygonPoints.current.length < 3) return;
-    commitRoiEdit({ type: 'Polygon', points: polygonPoints.current });
+    const points = polygonPoints.current.filter((point, index, all) => index === 0
+      || point.x !== all[index - 1].x || point.y !== all[index - 1].y);
+    // Browsers emit two click events before dblclick. Trim the terminal click (and
+    // an optional repeated first point used to close the polygon) from the ROI.
+    if (points.length > 1 && points.at(-1)!.x === points[0].x && points.at(-1)!.y === points[0].y)
+      points.pop();
+    if (points.length >= 3) commitRoiEdit({ type: 'Polygon', points });
     polygonPoints.current = [];
     setDraft(undefined);
   };

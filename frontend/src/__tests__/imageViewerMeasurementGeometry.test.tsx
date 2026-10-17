@@ -22,7 +22,8 @@ vi.mock('react-konva', async () => {
       };
       return <div data-testid="stage" onMouseDown={dispatch(props.onMouseDown)} onMouseMove={dispatch(props.onMouseMove)}
         onMouseUp={dispatch(props.onMouseUp)} onTouchStart={dispatch(props.onTouchStart)} onTouchMove={dispatch(props.onTouchMove)}
-        onTouchEnd={dispatch(props.onTouchEnd)} onClick={dispatch(props.onClick)} onMouseLeave={props.onMouseLeave}>{props.children}</div>;
+        onTouchEnd={dispatch(props.onTouchEnd)} onClick={dispatch(props.onClick)} onDoubleClick={dispatch(props.onDblClick)}
+        onMouseLeave={props.onMouseLeave}>{props.children}</div>;
     }),
     Layer: ({ children }: React.PropsWithChildren) => <>{children}</>,
     Group: ({ children }: React.PropsWithChildren) => <>{children}</>,
@@ -67,6 +68,36 @@ describe('ImageViewer measurement geometry editing', () => {
       overlays={overlays} roi={invalidRoi} roiEnabled={false} onRoiChange={emptyRoi} />);
 
     expect(screen.getByTestId('stage')).toBeTruthy();
+  });
+
+  it.each([
+    ['double-clicking the final vertex', [[10, 10], [60, 10], [60, 60], [10, 60], [10, 60]]],
+    ['double-clicking the first vertex to close', [[10, 10], [60, 10], [60, 60], [10, 60], [10, 10], [10, 10]]]
+  ])('removes the duplicate terminal vertex when %s', (_description, clicks) => {
+    const RoiHarness = () => {
+      const [roi, setRoi] = useState<VisionRoi | undefined>();
+      return <>
+        <ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+          overlays={overlays} roi={roi} roiEnabled onRoiChange={setRoi} />
+        <output data-testid="roi-state">{JSON.stringify(roi)}</output>
+      </>;
+    };
+    render(<RoiHarness />);
+    fireEvent.click(screen.getByRole('button', { name: '原始比例' }));
+    fireEvent.click(screen.getByRole('radio', { name: '多边形' }));
+    const stage = screen.getByTestId('stage');
+    for (const [clientX, clientY] of clicks)
+      fireEvent.click(stage, { clientX: clientX + 150, clientY: clientY + 80 });
+    const [clientX, clientY] = clicks.at(-1)!;
+    fireEvent.doubleClick(stage, { clientX: clientX + 150, clientY: clientY + 80 });
+
+    const roi = JSON.parse(screen.getByTestId('roi-state').textContent!) as VisionRoi;
+    expect(roi.type).toBe('Polygon');
+    if (roi.type === 'Polygon') {
+      expect(roi.points).toHaveLength(4);
+      expect(roi.points[0]).not.toEqual(roi.points.at(-1));
+      expect(new Set(roi.points.map(point => `${point.x},${point.y}`)).size).toBe(4);
+    }
   });
 
   it('undoes the last canvas ROI edit and hides stale undo after an external edit', () => {
