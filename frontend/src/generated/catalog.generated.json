@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "90831df7032a7e163ea7892b871eab691d5d4b441dfc065b4169eb24f5321245",
+  "hash": "5daef2a2cc80ab0c719bf174c6b736e2dc004c9cb7219df216b9647980b8b5f9",
   "items": [
     {
       "type": "image.acquire",
@@ -5805,6 +5805,26 @@
           "required": true
         },
         {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "entropy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "classCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -5922,7 +5942,7 @@
           "label": "Class Labels",
           "type": "text",
           "defaultValue": "",
-          "description": "Optional comma-separated labels in model class order."
+          "description": "Optional comma-separated labels in model class order; the count must match the model class count or the field must stay empty."
         },
         {
           "name": "applySoftmax",
@@ -5938,10 +5958,11 @@
           "defaultValue": 5,
           "min": 1,
           "max": 100,
-          "step": 1
+          "step": 1,
+          "description": "Number of ranked classes in the result JSON (clamped to the class count); values below 1 fail."
         }
       ],
-      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Output [1,C] or [1,C,1,1]. layout=scores applies optional softmax; layout=yolo26 matches Ultralytics YOLO26-cls ONNX (already softmaxed). Tip: set swapRB=true for RGB-trained YOLO models.",
+      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Output [1,C] or [1,C,1,1]. layout=scores applies optional numerically stable softmax; layout=yolo26 matches Ultralytics YOLO26-cls ONNX (already softmaxed, probabilities are validated and never re-softmaxed). Label lists must match the class count or be empty; unknown layouts and invalid topK fail deterministically. Emits top-K JSON plus best label/index/confidence, winner margin, distribution entropy, class count and JSON diagnostics. No training/evaluation is performed. Tip: set swapRB=true for RGB-trained YOLO models.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

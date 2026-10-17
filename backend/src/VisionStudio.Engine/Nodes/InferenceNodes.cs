@@ -30,38 +30,30 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
         if (!valid)
             throw new InvalidOperationException($"Classification output must have shape [1,C] or [1,C,1,1]; received [{string.Join(',', shape)}].");
         var scores = OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
+        if (scores.Length == 0) throw new InvalidOperationException("Classification output contained no class scores.");
         var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
-        if (layout is not ("scores" or "yolo26"))
-            throw new InvalidOperationException($"Unsupported classification layout '{layout}'. Supported values are 'scores' and 'yolo26'.");
         // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
         var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
-        if (applySoftmax)
-        {
-            var max = scores.Max();
-            var exp = scores.Select(x => Math.Exp(x - max)).ToArray();
-            var sum = exp.Sum();
-            scores = exp.Select(x => (float)(x / sum)).ToArray();
-        }
-        var labels = node.GetString("labels", string.Empty).Split(',', StringSplitOptions.TrimEntries);
-        var topK = Math.Clamp(node.GetInt("topK", 5), 1, scores.Length);
-        var top = scores.Select((score, index) => (score, index))
-            .OrderByDescending(x => x.score).ThenBy(x => x.index).Take(topK)
-            .Select(x => new { index = x.index, label = LabelAt(labels, x.index), score = x.score }).ToArray();
-        var best = top[0];
-        var json = JsonSerializer.Serialize(new { classes = top, outputShape = shape, layout });
+        var labelsText = node.GetString("labels", string.Empty);
+        var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
+        var rank = InferenceStats.RankClassification(scores, layout, applySoftmax, node.GetInt("topK", 5), labels);
+        var best = rank.Top[0];
+        var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)));
+        var json = JsonSerializer.Serialize(new { classes = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }), outputShape = shape, layout, margin = rank.Margin, entropy = rank.Entropy });
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["result"] = VisionValue.String(json),
-                ["label"] = VisionValue.String(best.label),
-                ["classIndex"] = VisionValue.Integer(best.index),
-                ["confidence"] = VisionValue.Double(best.score)
+                ["label"] = VisionValue.String(best.Label),
+                ["classIndex"] = VisionValue.Integer(best.Index),
+                ["confidence"] = VisionValue.Double(best.Score),
+                ["margin"] = VisionValue.Double(rank.Margin),
+                ["entropy"] = VisionValue.Double(rank.Entropy),
+                ["classCount"] = VisionValue.Integer(rank.ClassCount),
+                ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout }));
+            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["diagnostics"] = diag }));
     }
-
-    private static string LabelAt(string[] labels, int index)
-        => index < labels.Length && !string.IsNullOrWhiteSpace(labels[index]) ? labels[index] : index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>Runs an ONNX detector. Layouts: xyxy rows, YOLO (YOLOv8/YOLO26 raw), yolov5 (with objectness).

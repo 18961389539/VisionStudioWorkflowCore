@@ -51,6 +51,54 @@ public static class InferenceStats
         if (classId <= 0) return palette[0];
         return palette[1 + (classId - 1) % (palette.Length - 1)];
     }
+    public sealed record RankedClass(int Index, string Label, double Score);
+    public sealed record ClassificationRank(RankedClass[] Top, double Margin, double Entropy, double ProbabilitySum, int ClassCount);
+
+    /// <summary>Rank a [C] classification head deterministically. layout=yolo26 means the
+    /// tensor is already a probability distribution (validated, never re-softmaxed);
+    /// layout=scores optionally applies a numerically stable softmax. Unknown layouts,
+    /// non-finite scores, label-count mismatches and invalid topK fail loudly instead of
+    /// silently producing a plausible-looking label.</summary>
+    public static ClassificationRank RankClassification(float[] scores, string layout, bool applySoftmax, int topK, string[] labels)
+    {
+        if (scores is null || scores.Length == 0) throw new InvalidOperationException("Classification scores must be a non-empty [C] tensor.");
+        if (scores.Any(s => !float.IsFinite(s))) throw new InvalidOperationException("Classification scores must all be finite.");
+        var normalizedLayout = (layout ?? "scores").Trim().ToLowerInvariant();
+        if (normalizedLayout is not ("scores" or "yolo26")) throw new InvalidOperationException($"Unsupported classification layout '{layout}'. Supported values are 'scores' and 'yolo26'.");
+        if (topK < 1) throw new InvalidOperationException("Classification topK must be at least 1.");
+        var hasLabels = labels is not null && labels.Any(l => !string.IsNullOrWhiteSpace(l));
+        if (hasLabels && labels!.Length != scores.Length) throw new InvalidOperationException($"Classification labels count ({labels.Length}) must match the model class count ({scores.Length}), or be left empty.");
+        double[] probabilities;
+        if (normalizedLayout == "yolo26")
+        {
+            if (scores.Any(s => s < -0.001f || s > 1.001f)) throw new InvalidOperationException("YOLO26 classification output must already be softmax probabilities in [0, 1]; a value outside that range means layout=yolo26 does not match the exported model (use layout=scores for logits).");
+            var sum = scores.Sum(s => (double)s);
+            if (Math.Abs(sum - 1) > 0.02) throw new InvalidOperationException($"YOLO26 classification probabilities must sum to ~1, got {sum:0.####}; use layout=scores if the model emits logits.");
+            probabilities = scores.Select(s => Math.Clamp((double)s, 0, 1)).ToArray();
+        }
+        else if (applySoftmax)
+        {
+            var max = scores.Max();
+            var exp = scores.Select(s => Math.Exp(s - max)).ToArray();
+            var sum = exp.Sum();
+            if (!double.IsFinite(sum) || sum <= 0) throw new InvalidOperationException("Softmax produced a non-finite normalizer.");
+            probabilities = exp.Select(e => e / sum).ToArray();
+        }
+        else
+        {
+            probabilities = scores.Select(s => (double)s).ToArray();
+        }
+        var effectiveTopK = Math.Min(topK, scores.Length);
+        var top = probabilities.Select((score, index) => new RankedClass(index, hasLabels && !string.IsNullOrWhiteSpace(labels![index]) ? labels[index].Trim() : index.ToString(System.Globalization.CultureInfo.InvariantCulture), score))
+            .OrderByDescending(x => x.Score).ThenBy(x => x.Index).Take(effectiveTopK).ToArray();
+        var margin = top.Length > 1 ? top[0].Score - top[1].Score : top[0].Score;
+        var entropyBase = probabilities.Where(p => p > 0).ToArray();
+        var entropySum = entropyBase.Sum();
+        var entropy = entropySum > 0 ? -entropyBase.Sum(p => { var q = p / entropySum; return q * Math.Log2(q); }) : 0;
+        if (!double.IsFinite(margin) || !double.IsFinite(entropy)) throw new InvalidOperationException("Classification ranking produced non-finite margin/entropy.");
+        return new ClassificationRank(top, margin, entropy, probabilities.Sum(), scores.Length);
+    }
+
     public sealed record AnomalyMapStat(double Min, double Max, double Mean, double Peak, int PeakX, int PeakY, double AreaFraction);
     public sealed record YoloCandidate(double CenterX, double CenterY, double Width, double Height, double Score, int ClassId);
 
