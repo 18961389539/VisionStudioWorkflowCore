@@ -199,6 +199,37 @@ describe('ImageViewer measurement geometry editing', () => {
     }
   });
 
+  it('can move a complex polygon from a real ROI area omitted by the display sample', () => {
+    const points = [
+      ...Array.from({ length: 2048 }, () => ({ x: 20, y: 20 })),
+      ...Array.from({ length: 2048 }, () => ({ x: 60, y: 20 })),
+      { x: 60, y: 20 }, // even index: retained by the display sample
+      { x: 90, y: 45 }, // odd index: omitted by the display sample
+      ...Array.from({ length: 2048 }, () => ({ x: 60, y: 70 })),
+      ...Array.from({ length: 2048 }, () => ({ x: 20, y: 70 }))
+    ];
+    expect(points).toHaveLength(8194);
+    const roi: VisionRoi = { type: 'Polygon', points };
+    const onRoiChange = vi.fn();
+    render(<ImageViewer previewUrl="https://example.test/image.png" imageWidth={100} imageHeight={100}
+      overlays={overlays} roi={roi} roiEnabled onRoiChange={onRoiChange} />);
+
+    const stage = screen.getByTestId('stage');
+    // (75,45) lies inside the full triangular extension, but outside the sampled square preview.
+    fireEvent.mouseDown(stage, { clientX: 259, clientY: 118.2 });
+    fireEvent.mouseMove(stage, { clientX: 270.8, clientY: 118.2 });
+    fireEvent.mouseUp(document.body, { clientX: 270.8, clientY: 118.2 });
+
+    expect(onRoiChange).toHaveBeenCalledOnce();
+    const moved = onRoiChange.mock.calls[0][0] as VisionRoi;
+    expect(moved.type).toBe('Polygon');
+    if (moved.type === 'Polygon') {
+      expect(moved.points).toHaveLength(8194);
+      expect(moved.points[0].x).toBeCloseTo(25);
+      expect(moved.points[4097].x).toBeCloseTo(95);
+    }
+  });
+
   it('shows the search-line start, end, and direction in the geometry preview', () => {
     imageView({ type: 'line', start: { x: 10, y: 10 }, end: { x: 50, y: 10 } }, vi.fn());
 

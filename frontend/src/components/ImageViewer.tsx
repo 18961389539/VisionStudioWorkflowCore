@@ -310,7 +310,10 @@ function pointInsideRoi(roi: VisionRoi, point: Point): boolean {
     return inside;
   }
   let inside = false;
-  const pts = polygonPreviewPoints(roi.points);
+  // Drawing may downsample a very large contour for responsiveness, but selection
+  // hit-testing must use the actual ROI. Otherwise thin features omitted from the
+  // preview sample cannot be grabbed to move the region used by execution.
+  const pts = roi.points;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const xi = pts[i].x; const yi = pts[i].y; const xj = pts[j].x; const yj = pts[j].y;
     if ((yi > point.y) !== (yj > point.y) && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) inside = !inside;
