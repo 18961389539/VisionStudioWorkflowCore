@@ -383,6 +383,48 @@ public sealed class Batch5PrecisionNodeTests
         Assert.InRange(arc.Outputs["radius"].Require<double>("radius"), truth.r - 1.5, truth.r + 1.5);
     }
 
+    [Theory]
+    [InlineData("count")]
+    [InlineData("step")]
+    public async Task CaliperCircle_NormalizesLargeAnglesBeforeDistributingSpokes(string samplingMode)
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(128));
+        const double start = 1e18;
+        var parameters = new Dictionary<string, object?>
+        {
+            ["centerX"] = 32, ["centerY"] = 32, ["radius"] = 16, ["radialBand"] = 8,
+            ["angleStartDeg"] = start, ["angleEndDeg"] = start + 256, ["samplingMode"] = samplingMode
+        };
+        if (samplingMode == "count") parameters["caliperCount"] = 72;
+        else parameters["angleStepDeg"] = 256d / 71;
+        var result = await Run(new CaliperCircleNode(), Image(image), JsonSerializer.Serialize(parameters));
+
+        var spokes = (result.Overlays ?? []).Where(overlay => overlay.Id.StartsWith("caliper-circle-search-", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(72, spokes.Length);
+        var directions = spokes.Select(overlay => Math.Round(
+            Math.Atan2(overlay.Y2!.Value - overlay.Y!.Value, overlay.X2!.Value - overlay.X!.Value) * 180 / Math.PI, 4));
+        Assert.Equal(72, directions.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task CaliperCircle_HandlesFiniteEndpointsWhoseDifferenceOverflows()
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(128));
+        var result = await Run(new CaliperCircleNode(), Image(image),
+            """{"centerX":32,"centerY":32,"radius":16,"radialBand":8,"angleStartDeg":-1e308,"angleEndDeg":1e308,"caliperCount":72}""");
+
+        Assert.Equal(72, Convert.ToInt32(result.Summary["spokes"]));
+        var spokes = (result.Overlays ?? []).Where(overlay => overlay.Id.StartsWith("caliper-circle-search-", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(72, spokes.Length);
+        Assert.All(spokes, overlay =>
+        {
+            Assert.True(double.IsFinite(overlay.X!.Value));
+            Assert.True(double.IsFinite(overlay.Y!.Value));
+            Assert.True(double.IsFinite(overlay.X2!.Value));
+            Assert.True(double.IsFinite(overlay.Y2!.Value));
+        });
+    }
+
     [Fact]
     public async Task CaliperCircle_MaxFitErrorRejectsAnEllipseAsAnUnreliableCircle()
     {

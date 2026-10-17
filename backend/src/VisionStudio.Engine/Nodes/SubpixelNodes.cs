@@ -922,12 +922,27 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
 
     private static (double Span, bool FullCircle) ArcSpan(double start, double end)
     {
+        if (start == end) return (0, false);
         var raw = end - start;
-        if (Math.Abs(raw) < 1e-9) return (0, false);
-        var span = raw % 360;
+        if (double.IsFinite(raw) && Math.Abs(raw) < 1e-9) return (0, false);
+        // Reduce each endpoint before subtracting if the difference overflows. The
+        // modulo of the endpoints preserves the clockwise arc while keeping it finite.
+        var span = double.IsFinite(raw)
+            ? raw % 360
+            : ((end % 360) - (start % 360)) % 360;
         if (Math.Abs(span) < 1e-9) return (360, true);
         if (span < 0) span += 360;
         return (span, false);
+    }
+
+    private static double NormalizeAngle(double angle, double samplingStep)
+    {
+        // Preserve the existing trigonometric path for ordinary angles. Normalize only
+        // when floating-point spacing would noticeably distort adjacent caliper directions.
+        var ulp = Math.Abs(Math.BitIncrement(angle) - angle);
+        if (double.IsFinite(ulp) && ulp <= Math.Abs(samplingStep) * 0.01) return angle;
+        var normalized = angle % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
     }
 
     private static double[] BuildAnglesByCount(double start, double end, int count, out double effectiveStep)
@@ -941,7 +956,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
         count = Math.Clamp(count, 3, 361);
         effectiveStep = fullCircle ? span / count : span / (count - 1);
         var angles = new double[count];
-        for (var i = 0; i < count; i++) angles[i] = start + i * effectiveStep;
+        var normalizedStart = NormalizeAngle(start, effectiveStep);
+        for (var i = 0; i < count; i++) angles[i] = normalizedStart + i * effectiveStep;
         return angles;
     }
 
@@ -965,7 +981,8 @@ public sealed class CaliperCircleNode : IVisionNodeExecutor
             count = maximumCount;
         }
         var angles = new double[count];
-        for (var i = 0; i < count; i++) angles[i] = start + i * effectiveStep;
+        var normalizedStart = NormalizeAngle(start, effectiveStep);
+        for (var i = 0; i < count; i++) angles[i] = normalizedStart + i * effectiveStep;
         return angles;
     }
 }
