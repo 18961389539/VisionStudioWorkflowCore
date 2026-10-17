@@ -12,8 +12,8 @@ public sealed record RunArtifact(
 
 /// <summary>
 /// Small in-memory artifact cache for the MVP viewer. Bounded retention prevents repeated debug runs
-/// from keeping JPEG/overlay payloads forever. Production can replace this with a run/image repository.
-/// Retention is bounded both by run count and by a total JPEG byte budget: high-resolution runs
+/// from keeping encoded image/overlay payloads forever. Production can replace this with a run/image repository.
+/// Retention is bounded both by run count and by a total encoded image byte budget: high-resolution runs
 /// can no longer grow memory without bound just because each run stays under the count cap.
 /// </summary>
 public sealed class RunStore
@@ -88,7 +88,7 @@ public sealed class RunStore
         return false;
     }
 
-    /// <summary>预算只计 JPEG 字节；overlay 为小型矢量数据，忽略不计。</summary>
+    /// <summary>预算计入预览和节点图像的编码字节；overlay 为小型矢量数据，忽略不计。</summary>
     private static long EstimateBytes(RunArtifact artifact)
-        => (artifact.PreviewJpeg?.Length ?? 0) + artifact.NodeImages.Sum(x => (long)x.Jpeg.Length);
+        => (artifact.PreviewJpeg?.Length ?? 0) + artifact.NodeImages.Sum(x => (long)x.Bytes.Length);
 }

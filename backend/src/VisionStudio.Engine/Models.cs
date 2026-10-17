@@ -57,14 +57,15 @@ public sealed record ReplayInputArtifact(
 
 /// <summary>
 /// One image output port captured while a run executes (interactive debugging support).
-/// Encoded as JPEG at capture time because live Mats are disposed with the run data.
+/// Encoded at capture time because live Mats are disposed with the run data; masks are kept lossless.
 /// </summary>
 public sealed record RunNodeImage(
     string NodeId,
     string PortName,
-    byte[] Jpeg,
+    byte[] Bytes,
     int Width,
-    int Height);
+    int Height,
+    string ContentType = "image/jpeg");
 
 public sealed record WorkflowRunResult(
     string RunId,

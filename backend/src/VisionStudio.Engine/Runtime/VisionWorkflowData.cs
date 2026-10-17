@@ -33,7 +33,7 @@ public sealed class VisionWorkflowData : IDisposable
     private readonly ConcurrentDictionary<string, bool> _executedNodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<NodeImageKey, RunNodeImage> _nodeImages = new(NodeImageKeyComparer.Instance);
     private const int MaxNodeImages = 32;
-    /// <summary>单次运行全部节点图像的 JPEG 字节总预算：高分辨率/多图像节点不能只靠张数上限约束内存。</summary>
+    /// <summary>单次运行全部节点图像的编码字节总预算：高分辨率/多图像节点不能只靠张数上限约束内存。</summary>
     private const long MaxNodeImagesTotalBytes = 16L * 1024 * 1024;
     private long _nodeImageBytes;
     private bool _resumeSkipCompleted;
@@ -362,13 +362,13 @@ public sealed class VisionWorkflowData : IDisposable
     /// <summary>Clears a captured execution error without touching reports/outputs (used by interactive node runs).</summary>
     public void ClearError() => Error = null;
 
-    /// <summary>When true, each node's image output is captured as JPEG for interactive inspection.</summary>
+    /// <summary>When true, each node's image output is captured for interactive inspection.</summary>
     public bool CaptureNodeImages { get; private set; }
 
     /// <summary>
-    /// Captures every image-typed output of a node as JPEG. Live Mats are disposed with the run data,
-    /// so re-executions replace the previous captures for that node.
-    /// Bounded by <see cref="MaxNodeImages"/> and a total JPEG byte budget
+    /// Captures every image-typed output of a node. Mask ports use lossless PNG; other images use JPEG.
+    /// Live Mats are disposed with the run data, so re-executions replace the previous captures for that node.
+    /// Bounded by <see cref="MaxNodeImages"/> and a total encoded-byte budget
     /// (<see cref="MaxNodeImagesTotalBytes"/>) and never allowed to fail the run.
     /// </summary>
     public void CaptureNodeImage(string nodeId, IReadOnlyDictionary<string, VisionValue> outputs)
@@ -380,8 +380,11 @@ public sealed class VisionWorkflowData : IDisposable
             if (value.Type is not (VisionDataType.Image or VisionDataType.DomainImage) || value.Value is not IVisionImage image || image.NativeImage is not Mat mat) continue;
             try
             {
-                Cv2.ImEncode(".jpg", mat, out var jpeg);
-                captures.Add(new RunNodeImage(nodeId, portName, jpeg, image.Width, image.Height));
+                var maskPort = portName.Contains("mask", StringComparison.OrdinalIgnoreCase);
+                var extension = maskPort ? ".png" : ".jpg";
+                if (!Cv2.ImEncode(extension, mat, out var bytes)) continue;
+                captures.Add(new RunNodeImage(nodeId, portName, bytes, image.Width, image.Height,
+                    maskPort ? "image/png" : "image/jpeg"));
             }
             catch { /* 图像捕获失败不应影响运行 */ }
         }
@@ -392,13 +395,13 @@ public sealed class VisionWorkflowData : IDisposable
         {
             foreach (var key in _nodeImages.Keys.Where(key => StringComparer.OrdinalIgnoreCase.Equals(key.NodeId, nodeId)).ToArray())
             {
-                if (_nodeImages.TryRemove(key, out var previous)) _nodeImageBytes -= previous.Jpeg.Length;
+                if (_nodeImages.TryRemove(key, out var previous)) _nodeImageBytes -= previous.Bytes.Length;
             }
 
             foreach (var capture in captures)
             {
                 if (_nodeImages.Count >= MaxNodeImages) continue;
-                var nextBytes = _nodeImageBytes + capture.Jpeg.LongLength;
+                var nextBytes = _nodeImageBytes + capture.Bytes.LongLength;
                 if (nextBytes > MaxNodeImagesTotalBytes) continue;
                 _nodeImages[new NodeImageKey(nodeId, capture.PortName)] = capture;
                 _nodeImageBytes = nextBytes;

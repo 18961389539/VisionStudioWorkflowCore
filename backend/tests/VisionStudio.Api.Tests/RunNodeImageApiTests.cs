@@ -93,20 +93,21 @@ public sealed class RunNodeImageApiTests : IClassFixture<VisionStudioApiFactory>
         Assert.False(string.IsNullOrWhiteSpace(runId));
 
         var catalog = await _client.GetFromJsonAsync<JsonElement>($"/api/runs/{runId}/images");
-        var cropPorts = catalog.GetProperty("images").EnumerateArray()
-            .Where(item => item.GetProperty("nodeId").GetString() == "crop")
-            .Select(item => item.GetProperty("portName").GetString())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("image", cropPorts);
-        Assert.Contains("roiMask", cropPorts);
+        var cropEntries = catalog.GetProperty("images").EnumerateArray()
+            .Where(item => item.GetProperty("nodeId").GetString() == "crop").ToArray();
+        var imageEntry = Assert.Single(cropEntries, item => item.GetProperty("portName").GetString() == "image");
+        var maskEntry = Assert.Single(cropEntries, item => item.GetProperty("portName").GetString() == "roiMask");
+        Assert.Equal("image/jpeg", imageEntry.GetProperty("contentType").GetString());
+        Assert.Equal("image/png", maskEntry.GetProperty("contentType").GetString());
 
-        // The legacy URL remains the primary cropped image; an explicit port retrieves the mask.
+        // The legacy URL remains the primary cropped image; the mask endpoint is lossless.
         var image = await _client.GetByteArrayAsync($"/api/runs/{runId}/nodes/crop/image");
-        var mask = await _client.GetByteArrayAsync($"/api/runs/{runId}/nodes/crop/image?portName=roiMask");
+        using var maskResponse = await _client.GetAsync($"/api/runs/{runId}/nodes/crop/image?portName=roiMask");
+        var mask = await maskResponse.Content.ReadAsByteArrayAsync();
+        Assert.Equal("image/png", maskResponse.Content.Headers.ContentType?.MediaType);
         Assert.Equal(0xFF, image[0]);
         Assert.Equal(0xD8, image[1]);
-        Assert.Equal(0xFF, mask[0]);
-        Assert.Equal(0xD8, mask[1]);
+        Assert.Equal(new byte[] { 137, 80, 78, 71 }, mask.Take(4).ToArray());
         Assert.NotEqual(Convert.ToBase64String(image), Convert.ToBase64String(mask));
         Assert.Equal(HttpStatusCode.NotFound,
             (await _client.GetAsync($"/api/runs/{runId}/nodes/crop/image?portName=missing")).StatusCode);

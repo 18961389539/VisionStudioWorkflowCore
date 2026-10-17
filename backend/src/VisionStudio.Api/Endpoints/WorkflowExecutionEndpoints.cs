@@ -164,7 +164,7 @@ public static class WorkflowExecutionEndpoints
                 {
                     runId,
                     images = artifact.NodeImages
-                        .Select(x => new { x.NodeId, x.PortName, x.Width, x.Height, bytes = x.Jpeg.Length })
+                        .Select(x => new { x.NodeId, x.PortName, x.Width, x.Height, x.ContentType, bytes = x.Bytes.Length })
                         .ToArray()
                 })
                 : Results.NotFound());
@@ -177,7 +177,7 @@ public static class WorkflowExecutionEndpoints
             var image = portName is null
                 ? nodeImages.FirstOrDefault(x => x.PortName.Equals("image", StringComparison.OrdinalIgnoreCase)) ?? nodeImages.FirstOrDefault()
                 : nodeImages.FirstOrDefault(x => x.PortName.Equals(portName, StringComparison.OrdinalIgnoreCase));
-            return image is null ? Results.NotFound() : Results.File(image.Jpeg, "image/jpeg");
+            return image is null ? Results.NotFound() : Results.File(image.Bytes, image.ContentType);
         });
 
         return app;

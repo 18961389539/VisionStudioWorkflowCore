@@ -14,7 +14,7 @@ namespace VisionStudio.Engine.Tests;
 public sealed class RunNodeImageCaptureTests
 {
     [Fact]
-    public async Task CaptureNodeImages_StoresJpegsForEveryImageNode()
+    public async Task CaptureNodeImages_StoresImageOutputsForEveryImageNode()
     {
         await using var provider = BuildProvider();
         var runner = provider.GetRequiredService<WorkflowCoreVisionRunner>();
@@ -32,10 +32,11 @@ public sealed class RunNodeImageCaptureTests
         Assert.Equal("image", source.PortName);
         Assert.Equal(320, source.Width);
         Assert.Equal(240, source.Height);
-        Assert.True(source.Jpeg.Length > 0);
-        Assert.True(threshold.Jpeg.Length > 0);
-        Assert.Equal(0xFF, source.Jpeg[0]);
-        Assert.Equal(0xD8, source.Jpeg[1]);
+        Assert.True(source.Bytes.Length > 0);
+        Assert.True(threshold.Bytes.Length > 0);
+        Assert.Equal("image/jpeg", source.ContentType);
+        Assert.Equal(0xFF, source.Bytes[0]);
+        Assert.Equal(0xD8, source.Bytes[1]);
     }
 
     [Fact]
@@ -66,8 +67,14 @@ public sealed class RunNodeImageCaptureTests
         });
 
         Assert.Collection(data.SnapshotNodeImages(),
-            output => { Assert.Equal("image", output.PortName); Assert.Equal("crop", output.NodeId); },
-            output => { Assert.Equal("roiMask", output.PortName); Assert.Equal("crop", output.NodeId); });
+            output => { Assert.Equal("image", output.PortName); Assert.Equal("crop", output.NodeId); Assert.Equal("image/jpeg", output.ContentType); },
+            output =>
+            {
+                Assert.Equal("roiMask", output.PortName);
+                Assert.Equal("crop", output.NodeId);
+                Assert.Equal("image/png", output.ContentType);
+                Assert.Equal(new byte[] { 137, 80, 78, 71 }, output.Bytes.Take(4).ToArray());
+            });
     }
 
     [Fact]
