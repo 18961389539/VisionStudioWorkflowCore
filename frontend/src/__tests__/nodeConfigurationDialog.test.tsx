@@ -506,8 +506,8 @@ describe('caliper geometry input guidance', () => {
       ];
       const { dialog, unmount } = mount({ node: measurementNode, catalogItem: measurementCatalog, nodes: [measurementNode, cropNode], edges });
 
-      expect(dialog.getByText('测量图像来自裁剪节点')).toBeTruthy();
-      expect(dialog.getByText(/可能形成伪边缘/)).toBeTruthy();
+      expect(dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+      expect(dialog.getByText(/选区外像素会清零/)).toBeTruthy();
       unmount();
       cleanup();
 
@@ -515,9 +515,67 @@ describe('caliper geometry input guidance', () => {
         id: 'crop-roi', source: cropNode.id, sourceHandle: 'croppedRoi', target: measurementNode.id, targetHandle: 'roi'
       }];
       const masked = mount({ node: measurementNode, catalogItem: measurementCatalog, nodes: [measurementNode, cropNode], edges: maskedEdges });
-      expect(masked.dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+      expect(masked.dialog.queryByText('上游裁剪可能形成伪边缘')).toBeNull();
     }
   );
+
+  it('traces crop-mask guidance through pixel-coordinate-preserving image processing', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const grayscaleCatalog = fallbackCatalog.find(item => item.type === 'image.grayscale')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+      typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '非矩形裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Polygon', points: [{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 30, y: 50 }] } }
+    } };
+    const grayscaleNode: Node = { id: 'grayscale', position: { x: 0, y: 0 }, data: {
+      typeKey: grayscaleCatalog.type, label: '灰度转换', inputs: grayscaleCatalog.inputs, parameters: {}
+    } };
+    const nodes = [lineNode, cropNode, grayscaleNode];
+    const edges = [
+      { id: 'crop-gray', source: cropNode.id, sourceHandle: 'image', target: grayscaleNode.id, targetHandle: 'image' },
+      { id: 'gray-line', source: grayscaleNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+    ];
+    const view = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges });
+
+    expect(view.dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+    expect(view.dialog.getByText(/“非矩形裁剪”的 croppedRoi 输出/)).toBeTruthy();
+    expect(view.dialog.getByText(/灰度转换等不改变坐标的处理可以放在两者之间/)).toBeTruthy();
+    expect(view.dialog.getByText(/模糊等邻域滤波后请避开 ROI 边界测量/)).toBeTruthy();
+    view.unmount();
+    cleanup();
+
+    const masked = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges: [...edges,
+      { id: 'crop-mask', source: cropNode.id, sourceHandle: 'croppedRoi', target: lineNode.id, targetHandle: 'roi' }] });
+    expect(masked.dialog.queryByText('上游裁剪可能形成伪边缘')).toBeNull();
+  });
+
+  it('keeps crop-mask guidance when a geometric image transform changes the pixel frame', () => {
+    const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
+    const resizeCatalog = fallbackCatalog.find(item => item.type === 'image.resize')!;
+    const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
+      typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
+    } };
+    const cropNode: Node = { id: 'crop', position: { x: 0, y: 0 }, data: {
+      typeKey: cropCatalog.type, label: '非矩形裁剪', inputs: cropCatalog.inputs,
+      parameters: { roi: { type: 'Circle', x: 30, y: 30, radius: 20 } }
+    } };
+    const resizeNode: Node = { id: 'resize', position: { x: 0, y: 0 }, data: {
+      typeKey: resizeCatalog.type, label: '缩放图像', inputs: resizeCatalog.inputs, parameters: {}
+    } };
+    const nodes = [lineNode, cropNode, resizeNode];
+    const edges = [
+      { id: 'crop-resize', source: cropNode.id, sourceHandle: 'image', target: resizeNode.id, targetHandle: 'image' },
+      { id: 'resize-line', source: resizeNode.id, sourceHandle: 'image', target: lineNode.id, targetHandle: 'image' }
+    ];
+    const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges });
+
+    expect(dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+    expect(dialog.getByText(/多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像/)).toBeTruthy();
+  });
 
   it('does not warn about synthetic ROI edges for a rectangular crop', () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
@@ -533,7 +591,7 @@ describe('caliper geometry input guidance', () => {
 
     const { dialog } = mount({ node: lineNode, catalogItem: lineCatalog, nodes: [lineNode, cropNode], edges });
 
-    expect(dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+    expect(dialog.queryByText('上游裁剪可能形成伪边缘')).toBeNull();
   });
 
   it('warns when a pose-corrected rectangular ROI can rotate into a masked polygon during cropping', () => {
@@ -560,14 +618,14 @@ describe('caliper geometry input guidance', () => {
     const nodes = [lineNode, cropNode, roiNode, imageNode];
     const { dialog, unmount } = mount({ node: lineNode, catalogItem: lineCatalog, nodes, edges });
 
-    expect(dialog.getByText('测量图像来自裁剪节点')).toBeTruthy();
-    expect(dialog.getByText(/可能形成伪边缘/)).toBeTruthy();
+    expect(dialog.getByText('上游裁剪可能形成伪边缘')).toBeTruthy();
+    expect(dialog.getByText(/选区外像素会清零/)).toBeTruthy();
     unmount();
     cleanup();
 
     const masked = mount({ node: lineNode, catalogItem: lineCatalog, nodes,
       edges: [...edges, { id: 'crop-mask', source: cropNode.id, sourceHandle: 'croppedRoi', target: lineNode.id, targetHandle: 'roi' }] });
-    expect(masked.dialog.queryByText('测量图像来自裁剪节点')).toBeNull();
+    expect(masked.dialog.queryByText('上游裁剪可能形成伪边缘')).toBeNull();
   });
 
   it('writes an interactively adjusted search line back into the staged parameters', async () => {

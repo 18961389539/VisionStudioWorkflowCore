@@ -14,6 +14,16 @@ import { canonicalParameterGroup } from '../i18n/catalog';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
+const cropMaskFramePreservingNodeTypes = new Set([
+  'image.grayscale', 'image.channel', 'image.colorConvert', 'image.blur.gaussian', 'image.blur.median', 'image.filter',
+  'image.sharpen', 'image.contrastNormalize', 'image.illuminationNormalize', 'image.threshold',
+  'image.threshold.adaptive', 'image.threshold.otsu', 'image.morphology', 'image.topHat', 'image.bottomHat',
+  'image.morphGradient', 'image.reduceDomain'
+]);
+const cropMaskFrameChangingNodeTypes = new Set([
+  'image.resize', 'image.rotate', 'image.perspective', 'image.warpAffine', 'image.undistort', 'image.register'
+]);
+
 type Props = {
   node: Node;
   catalogItem: NodeCatalogItem;
@@ -176,10 +186,6 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     ? edges.find((edge) => edge.target === node.id && edge.targetHandle === 'image')
     : undefined;
   const measurementImageSource = nodes.find((item) => item.id === measurementImageInputEdge?.source);
-  const cropRoiInputEdge = measurementImageSource?.data.typeKey === 'image.crop'
-    ? edges.find((edge) => edge.target === measurementImageSource.id && edge.targetHandle === 'roi')
-    : undefined;
-  const configuredCropRoi = (measurementImageSource?.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
   const roiSourceMayMaskCropBounds = (sourceId: string, visited = new Set<string>()): boolean => {
     if (visited.has(sourceId)) return true;
     visited.add(sourceId);
@@ -191,13 +197,38 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     const sourceRoi = (source.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
     return sourceRoi ? sourceRoi.type !== 'Rectangle' : false;
   };
-  const cropMayZeroOutsideSelection = cropRoiInputEdge
-    ? roiSourceMayMaskCropBounds(cropRoiInputEdge.source)
-    : Boolean(configuredCropRoi && configuredCropRoi.type !== 'Rectangle');
-  const croppedRoiConnected = Boolean(measurementImageSource?.data.typeKey === 'image.crop'
-    && roiInputEdge?.source === measurementImageInputEdge?.source && roiInputEdge?.sourceHandle === 'croppedRoi');
+  const cropMaskSources = (() => {
+    const sources: { node: Node; maskIsInCurrentFrame: boolean }[] = [];
+    const visited = new Set<string>();
+    let current = measurementImageSource;
+    let cropsAfterCurrent = 0;
+    let hasCoordinateChange = false;
+    while (current && !visited.has(current.id)) {
+      const currentNode = current;
+      visited.add(currentNode.id);
+      const type = String(currentNode.data.typeKey ?? '');
+      if (type === 'image.crop') {
+        const cropRoiEdge = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === 'roi');
+        const cropRoi = (currentNode.data.parameters as NodeParameters | undefined)?.roi as VisionRoi | undefined;
+        const masksOutsideSelection = cropRoiEdge
+          ? roiSourceMayMaskCropBounds(cropRoiEdge.source)
+          : Boolean(cropRoi && cropRoi.type !== 'Rectangle');
+        if (masksOutsideSelection)
+          sources.push({ node: currentNode, maskIsInCurrentFrame: cropsAfterCurrent === 0 && !hasCoordinateChange });
+        cropsAfterCurrent++;
+      } else if (cropMaskFrameChangingNodeTypes.has(type)) hasCoordinateChange = true;
+      else if (!cropMaskFramePreservingNodeTypes.has(type)) break;
+      const imageInput = edges.find((edge) => edge.target === currentNode.id && edge.targetHandle === 'image');
+      current = imageInput ? nodes.find((item) => item.id === imageInput.source) : undefined;
+    }
+    return sources;
+  })();
+  const directCropMaskSource = cropMaskSources.length === 1 && cropMaskSources[0].maskIsInCurrentFrame
+    ? cropMaskSources[0].node : undefined;
+  const croppedRoiConnected = Boolean(directCropMaskSource
+    && roiInputEdge?.source === directCropMaskSource.id && roiInputEdge?.sourceHandle === 'croppedRoi');
   const croppedImageNeedsRoiWarning = Boolean(measurementNodeTypes.includes(catalogItem.type)
-    && measurementImageSource?.data.typeKey === 'image.crop' && cropMayZeroOutsideSelection && !croppedRoiConnected);
+    && cropMaskSources.length > 0 && !croppedRoiConnected);
   const connectedInputPorts = catalogItem.inputs.filter((input) => edges.some((edge) =>
     edge.target === node.id && edge.targetHandle === input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
@@ -951,8 +982,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
           </Space>} />}
         {roiMaskInputConnected && <Alert showIcon type="info" title={`ROI 掩膜来自上游：${nodeLabels[roiInputEdge!.source] ?? roiInputEdge!.source}`}
           description="此节点的 roi 输入优先于本地选区，且按当前图像坐标解释。请在上游编辑区域；当前节点不会再次移动 ROI。" />}
-        {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="测量图像来自裁剪节点"
-          description={<span>如果裁剪使用圆形、多边形或笔刷 ROI，选区外像素会清零，可能形成伪边缘。请将“{nodeLabels[measurementImageSource!.id] ?? measurementImageSource!.id}”的 croppedRoi 输出接到本节点 roi 输入，以屏蔽选区外区域；矩形裁剪通常无需此处理。</span>} />}
+        {croppedImageNeedsRoiWarning && <Alert showIcon type="warning" title="上游裁剪可能形成伪边缘"
+          description={directCropMaskSource
+            ? <span>如果裁剪使用圆形、多边形或笔刷 ROI，选区外像素会清零，可能形成伪边缘。请将“{nodeLabels[directCropMaskSource.id] ?? directCropMaskSource.id}”的 croppedRoi 输出接到本节点 roi 输入，以屏蔽选区外采样；灰度转换等不改变坐标的处理可以放在两者之间，模糊等邻域滤波后请避开 ROI 边界测量。</span>
+            : <span>图像处理链中存在非矩形裁剪，选区外像素会清零，可能形成伪边缘；多次裁剪或坐标变换后，单个 croppedRoi 可能无法直接覆盖当前图像。请在当前图像坐标系提供完整 ROI 掩膜，或调整流程避免将裁剪边界当作真实边缘。</span>} />}
         {circleSamplingNotice && <Alert showIcon type="info" title="圆卡尺实际步长已自动调整" description={circleSamplingNotice} />}
         {circleFitConditionNotice && <Alert showIcon type="warning" title="圆弧覆盖可能不足以稳定拟合" description={circleFitConditionNotice} />}
         {searchLineInputEdge && <Alert showIcon type="info"
