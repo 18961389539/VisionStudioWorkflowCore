@@ -478,7 +478,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, nodes, edge
     && imageViewerSource.nodeId === imageInputSourceId
     ? (displayedResult?.overlays ?? []).filter((overlay) => overlay.nodeId === node.id)
     : [];
-  const resultOverlaysForViewer = stale && measurementGeometryType
+  const resultOverlaysForViewer = stale
     ? viewerOverlays.filter((overlay) => overlay.nodeId !== node.id)
     : viewerOverlays;
   useEffect(() => {

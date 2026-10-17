@@ -109,6 +109,23 @@ describe('ROI reference workspace', () => {
     expect(reopened.dialog.getByRole('button', { name: '清除测试 ROI' })).toBeTruthy();
   });
 
+  it('hides the previous corrected ROI overlay after the base ROI changes', async () => {
+    const captureWithOverlay: RunResult = { ...capture, overlays: [
+      { id: 'roi-transform-corrected-shape', nodeId: 'test', type: 'Circle', x: 132, y: 63, radius: 9 }
+    ] };
+    const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges,
+      onPreview: vi.fn(async () => captureWithOverlay) });
+
+    fireEvent.click(view.dialog.getByRole('button', { name: '获取图像并设为基准' }));
+    await waitFor(() => expect(view.dialog.getByTestId('image-url').textContent).toBe('data:image/png;base64,saved-png'));
+    fireEvent.click(view.dialog.getByRole('button', { name: '清除测试 ROI' }));
+    fireEvent.click(view.dialog.getByRole('radio', { name: '修正结果' }));
+    await waitFor(() => expect(view.dialog.getByTestId('image-url').textContent).toContain('/nodes/test/image'));
+
+    expect(view.dialog.getByText(/上次运行图像/)).toBeTruthy();
+    expect(view.dialog.getByTestId('overlay-ids').textContent).not.toContain('roi-transform-corrected-shape');
+  });
+
   it('keeps the last reference intact after a failed capture and blocks editing when the pose origin changes', async () => {
     const onPreview = vi.fn().mockResolvedValueOnce(capture).mockResolvedValueOnce({ ...report, success: false, error: '定位未找到目标', nodeReports: [] });
     const view = mount({ node: roiNode, catalogItem: roiCatalog, nodes: [roiNode, imageNode, locateNode], edges, onPreview });
