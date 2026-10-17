@@ -672,6 +672,44 @@ describe('caliper geometry input guidance', () => {
     expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it.each([
+    ['fitted line', 'measure.fitLine', 'measure.caliperLine', 'line', 'searchLine'],
+    ['fitted circle', 'measure.fitCircle', 'measure.caliperCircle', 'circle', 'circle']
+  ])('traces %s through connected Point2D measurements before allowing a transform', (geometryLabel, fitType, targetType, outputPort, inputPort) => {
+    const pointCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
+    const fitCatalog = fallbackCatalog.find(item => item.type === fitType)!;
+    const targetCatalog = fallbackCatalog.find(item => item.type === targetType)!;
+    const measurementNode: Node = { id: 'measurement', position: { x: 0, y: 0 }, data: {
+      typeKey: targetType, label: '最终卡尺测量', inputs: targetCatalog.inputs, parameters: {}
+    } };
+    const pointNodes: Node[] = [1, 2, 3].map(index => ({ id: `point-source-${index}`, position: { x: 0, y: 0 }, data: {
+      typeKey: pointCatalog.type, label: `上游卡尺测点 ${index}`, inputs: pointCatalog.inputs, parameters: {}
+    } }));
+    const fitNode: Node = { id: 'fit-geometry', position: { x: 0, y: 0 }, data: {
+      typeKey: fitType, label: `多点拟合${geometryLabel}`, inputs: fitCatalog.inputs, parameters: {}
+    } };
+    const transformNode: Node = { id: 'transform', position: { x: 0, y: 0 }, data: {
+      typeKey: 'roi.transform', label: '定位修正 ROI', parameters: { referenceImage: 'reference-png', referenceWidth: 100, referenceHeight: 100 }
+    } };
+    const imageNode: Node = { id: 'current-image', position: { x: 0, y: 0 }, data: { label: '当前图像' } };
+    const edges = [
+      ...pointNodes.flatMap((pointNode, index) => [
+        { id: `point-image-${index}`, source: imageNode.id, sourceHandle: 'image', target: pointNode.id, targetHandle: 'image' },
+        { id: `fit-point-${index}`, source: pointNode.id, sourceHandle: 'point', target: fitNode.id, targetHandle: `point${index + 1}` }
+      ]),
+      { id: 'measurement-image', source: imageNode.id, sourceHandle: 'image', target: measurementNode.id, targetHandle: 'image' },
+      { id: 'transform-image', source: imageNode.id, sourceHandle: 'image', target: transformNode.id, targetHandle: 'debugImage' },
+      { id: 'fit-geometry', source: fitNode.id, sourceHandle: outputPort, target: measurementNode.id, targetHandle: inputPort },
+      { id: 'transform-input', source: transformNode.id, sourceHandle: 'transform', target: measurementNode.id, targetHandle: 'transform' }
+    ];
+    const { dialog } = mount({ node: measurementNode, catalogItem: targetCatalog,
+      nodes: [measurementNode, ...pointNodes, fitNode, transformNode, imageNode], edges });
+
+    expect(dialog.getByText('上游几何已处于变换目标坐标系')).toBeTruthy();
+    expect(dialog.getByText(/断开 transform，或改接基准图像坐标/)).toBeTruthy();
+    expect((dialog.getByRole('button', { name: '运行此节点' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('edits transformed search geometry over the saved ROI reference image', async () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const lineNode: Node = { id: 'line-measure', position: { x: 0, y: 0 }, data: { typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs,

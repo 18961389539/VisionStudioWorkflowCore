@@ -158,6 +158,50 @@ public sealed class ParameterValidationTests
         Assert.Contains("Remove the transform input", error.Message);
     }
 
+    [Theory]
+    [InlineData("measure.fitLine", "line", "measure.caliperLine", "searchLine")]
+    [InlineData("measure.fitCircle", "circle", "measure.caliperCircle", "circle")]
+    public void MeasurementRejectsFittedGeometryAlreadyInTheTransformTargetFrame(
+        string fitType,
+        string fitOutput,
+        string measurementType,
+        string measurementInput)
+    {
+        var workflow = new WorkflowDefinition("fitted-geometry-frame-conflict", "Fitted geometry frame conflict",
+        [
+            new NodeDefinition("image", "image.synthetic", null, null, null),
+            new NodeDefinition("pose", "roi.transform", null, null, null),
+            new NodeDefinition("point1", "measure.caliperLine", null, null, null),
+            new NodeDefinition("point2", "measure.caliperLine", null, null, null),
+            new NodeDefinition("point3", "measure.caliperLine", null, null, null),
+            new NodeDefinition("fit", fitType, null, null, null),
+            new NodeDefinition("measure", measurementType, null, null, null)
+        ],
+        [
+            new EdgeDefinition("image-pose-control", "image", "next", "pose", "exec", "control"),
+            new EdgeDefinition("pose-point1-control", "pose", "next", "point1", "exec", "control"),
+            new EdgeDefinition("point1-point2-control", "point1", "next", "point2", "exec", "control"),
+            new EdgeDefinition("point2-point3-control", "point2", "next", "point3", "exec", "control"),
+            new EdgeDefinition("point3-fit-control", "point3", "next", "fit", "exec", "control"),
+            new EdgeDefinition("fit-measure-control", "fit", "next", "measure", "exec", "control"),
+            new EdgeDefinition("pose-image", "image", "image", "pose", "debugImage", "data"),
+            new EdgeDefinition("point1-image", "image", "image", "point1", "image", "data"),
+            new EdgeDefinition("point2-image", "image", "image", "point2", "image", "data"),
+            new EdgeDefinition("point3-image", "image", "image", "point3", "image", "data"),
+            new EdgeDefinition("fit-point1", "point1", "point", "fit", "point1", "data"),
+            new EdgeDefinition("fit-point2", "point2", "point", "fit", "point2", "data"),
+            new EdgeDefinition("fit-point3", "point3", "point", "fit", "point3", "data"),
+            new EdgeDefinition("measure-image", "image", "image", "measure", "image", "data"),
+            new EdgeDefinition("fitted-geometry", "fit", fitOutput, "measure", measurementInput, "data"),
+            new EdgeDefinition("pose-transform", "pose", "transform", "measure", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("already in transform frame 'image.image'", error.Message);
+        Assert.Contains("Remove the transform input", error.Message);
+    }
+
     [Fact]
     public void MeasurementAcceptsSourceFrameGeometryWithCropTransform()
     {

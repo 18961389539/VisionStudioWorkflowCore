@@ -165,7 +165,17 @@ function geometrySourceImageFrameNodeIds(geometryEdge: Edge | undefined, nodes: 
       .flatMap((edge) => geometrySourceImageFrameNodeIds(edge, nodes, edges, catalogItems, new Set(visited)));
   }
   const output = sourceCatalog?.outputs.find((port) => port.name.toLowerCase() === String(geometryEdge.sourceHandle ?? '').toLowerCase());
-  if (output?.dataType.toLowerCase() !== 'circle' && output?.dataType.toLowerCase() !== 'line2d') return [];
+  const outputType = output?.dataType.toLowerCase();
+  if (type === 'image.crop' && output?.name.toLowerCase() === 'croporigin') {
+    const frameSource = edges.find((edge) => edge.target === geometryEdge.source && edge.targetHandle?.toLowerCase() === 'image')?.source;
+    return frameSource ? [frameSource] : [];
+  }
+  if (!['circle', 'line2d', 'point2d', 'rectangle2d', 'pose2d'].includes(outputType ?? '')) return [];
+  const hasFrameAwareGeometry = ['roi.transform', 'match.shape', 'feature.line', 'feature.circle', 'feature.edgesubpixel',
+    'measure.caliper', 'measure.caliperline', 'measure.calipercircle'].includes(type);
+  const hasImageOutput = sourceCatalog?.outputs.some((port) => port.name.toLowerCase() === 'image'
+    && ['image', 'domainimage'].includes(port.dataType.toLowerCase()));
+  if (!hasFrameAwareGeometry && !hasImageOutput) return [];
   const inputPort = type === 'roi.transform' ? 'debugImage' : 'image';
   const frameSource = edges.find((edge) => edge.target === geometryEdge.source && edge.targetHandle?.toLowerCase() === inputPort.toLowerCase())?.source;
   return frameSource ? [frameSource] : [];
