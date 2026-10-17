@@ -99,6 +99,14 @@ internal static class JLVisionEdgeMeasurement
             if ((i & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
             var gradient = gradients[i];
             var amplitude = Math.Abs(gradient);
+            var leftAmplitude = i > 0 ? Math.Abs(gradients[i - 1]) : 0;
+            var rightAmplitude = i + 1 < gradients.Length ? Math.Abs(gradients[i + 1]) : 0;
+            // Treat each edge as a gradient peak before applying first/last-edge selection.
+            // Otherwise a low threshold can select the blurred edge's rising tail.
+            var tiesPreviousPeak = i > 0 && Math.Abs(amplitude - leftAmplitude) <= 1e-12;
+            var tiesRightBoundary = i == 0 && Math.Abs(amplitude - rightAmplitude) <= 1e-12;
+            if (amplitude < leftAmplitude || amplitude < rightAmplitude || tiesPreviousPeak || tiesRightBoundary)
+                continue;
             if (amplitude < Math.Max(threshold, .0001)
                 || requestedPolarity == "rising" && gradient <= 0
                 || requestedPolarity == "falling" && gradient >= 0)

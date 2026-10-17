@@ -965,6 +965,24 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperLine_ShortProfileFirstFromStartSelectsEdgePeakNotBlurTail()
+    {
+        using var imageMat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(20));
+        using (var bright = new Mat(imageMat, new Rect(32, 0, 32, 64))) bright.SetTo(Scalar.All(220));
+        Cv2.GaussianBlur(imageMat, imageMat, new Size(0, 0), 1.0);
+        using var image = VisionImage.Own(imageMat.Clone());
+
+        var result = await new CaliperLineNode().ExecuteAsync(new NodeExecutionContext(Inputs(image)),
+            Node("measure.caliperLine", """{"startX":29,"startY":32,"endX":35,"endY":32,"caliperCount":3,"sampleWidth":1,"minContrast":1,"polarity":"rising","direction":"firstFromStart"}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Convert.ToString(result.Summary["reason"]));
+        var point = result.Outputs["point"].Require<VisionPoint2D>("point");
+        Assert.InRange(point.X, 31.1, 31.9);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
     public async Task EdgeNodes_ImageOutputsAreDispatcherValidAndInputSurvives()
     {
         using var mat = MakeEdgeImage(1);
