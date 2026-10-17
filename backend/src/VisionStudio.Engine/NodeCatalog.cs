@@ -207,7 +207,7 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("image", VisionDataType.Image)],
             [new("image", VisionDataType.Image), new("diagnostics", VisionDataType.String), Next],
             [
-                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2),
+                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."),
                 new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5, Description: "0 derives sigma from the kernel size."),
                 new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5, Description: "0 mirrors sigmaX.")
             ],
@@ -267,12 +267,12 @@ public static class BuiltInNodeCatalog
             [new("image", VisionDataType.Image), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("blockSize", "Block Size", "number", 31, 3, 99, 2, Description: "Local window size (coerced to odd)."),
-                new("c", "C Constant", "number", 5, 0, 50, 1),
+                new("c", "C Constant", "number", 5, 0, 50, 1, Description: "Finite constant subtracted from the local threshold; larger values reduce foreground."),
                 new("method", "Method", "select", "mean", Options:
                 [
                     new("Mean", "mean"),
                     new("Gaussian", "gaussian")
-                ]),
+                ], Description: "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."),
                 new("invert", "Invert", "boolean", false)
             ],
             "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
@@ -650,9 +650,9 @@ public static class BuiltInNodeCatalog
                 [
                     new("Pixels (px)", "px"), new("mm", "mm"), new("cm", "cm"), new("m", "m")
                 ], Group: "Frames", Description: "Use px for image-space transforms used by image.warpAffine or caliper measurement; use mm/cm/m for engineering coordinates."),
-                new("x", "X Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
-                new("y", "Y Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform"),
-                new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform")
+                new("x", "X Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform", Description: "Finite translation along the target frame X axis."),
+                new("y", "Y Translation", "number", 0, -1000000, 1000000, 0.001, Unit: "unit", Group: "Rigid Transform", Description: "Finite translation along the target frame Y axis."),
+                new("angleDeg", "Rotation", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Rigid Transform", Description: "Finite counter-clockwise rotation in degrees.")
             ],
             "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
             "builtin"),
@@ -695,8 +695,8 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("tree", VisionDataType.FrameTree2D)],
             [new("transform", VisionDataType.Transform2D), new("path", VisionDataType.String), new("hopCount", VisionDataType.Integer), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Resolve"),
-                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Resolve")
+                new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Resolve", Description: "Frame to resolve from; must exist in the frame tree."),
+                new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Resolve", Description: "Frame to resolve to; an unreachable target fails deterministically.")
             ],
             "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
             "builtin"),
@@ -707,11 +707,11 @@ public static class BuiltInNodeCatalog
             [ExecIn],
             [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
-                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose"),
-                new("frame", "Frame", "text", "RobotBase", Group: "Pose"),
-                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Pose")
+                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Finite X position in the selected frame and unit."),
+                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Finite Y position in the selected frame and unit."),
+                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose", Description: "Finite heading in degrees; the normalized -180..180 value is reported in diagnostics."),
+                new("frame", "Frame", "text", "RobotBase", Group: "Pose", Description: "Named frame the pose is expressed in; must be non-empty."),
+                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m"), new("px", "px")], Group: "Pose", Description: "Engineering unit of X/Y.")
             ],
             "Create a constant frame-aware 2D pose with strict finite-value, frame and unit validation. Emits the pose plus scalar x/y/theta, frame, unit, normalized angle (in diagnostics) and a JSON diagnostics payload.",
             "builtin"),
@@ -721,7 +721,7 @@ public static class BuiltInNodeCatalog
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
             [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
-            [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames")],
+            [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames", Description: "Child/tool frame named by the new transform; must differ from the pose frame.")],
             "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
             "builtin"),
         new(

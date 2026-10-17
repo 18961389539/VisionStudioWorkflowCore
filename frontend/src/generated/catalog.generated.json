@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "5daef2a2cc80ab0c719bf174c6b736e2dc004c9cb7219df216b9647980b8b5f9",
+  "hash": "09e54e72a062895ed02eede73e94c06c3fa8a96012ab5f244b41e3cf8e0a32c2",
   "items": [
     {
       "type": "image.acquire",
@@ -1765,7 +1765,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "unit",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite translation along the target frame X axis."
         },
         {
           "name": "y",
@@ -1776,7 +1777,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "unit",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite translation along the target frame Y axis."
         },
         {
           "name": "angleDeg",
@@ -1787,7 +1789,8 @@
           "max": 3600,
           "step": 0.001,
           "unit": "deg",
-          "group": "Rigid Transform"
+          "group": "Rigid Transform",
+          "description": "Finite counter-clockwise rotation in degrees."
         }
       ],
       "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
@@ -2029,7 +2032,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite X position in the selected frame and unit."
         },
         {
           "name": "y",
@@ -2039,7 +2043,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite Y position in the selected frame and unit."
         },
         {
           "name": "thetaDeg",
@@ -2050,14 +2055,16 @@
           "max": 3600,
           "step": 0.001,
           "unit": "deg",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Finite heading in degrees; the normalized -180..180 value is reported in diagnostics."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Named frame the pose is expressed in; must be non-empty."
         },
         {
           "name": "unit",
@@ -2076,9 +2083,14 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Engineering unit of X/Y."
         }
       ],
       "description": "Create a constant frame-aware 2D pose with strict finite-value, frame and unit validation. Emits the pose plus scalar x/y/theta, frame, unit, normalized angle (in diagnostics) and a JSON diagnostics payload.",
@@ -2262,7 +2274,8 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Tool",
-          "group": "Frames"
+          "group": "Frames",
+          "description": "Child/tool frame named by the new transform; must differ from the pose frame."
         }
       ],
       "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
@@ -2329,14 +2342,16 @@
           "label": "Source Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Resolve"
+          "group": "Resolve",
+          "description": "Frame to resolve from; must exist in the frame tree."
         },
         {
           "name": "targetFrame",
           "label": "Target Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Resolve"
+          "group": "Resolve",
+          "description": "Frame to resolve to; an unreachable target fails deterministically."
         }
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
@@ -11538,7 +11553,8 @@
           "defaultValue": 5,
           "min": 0,
           "max": 50,
-          "step": 1
+          "step": 1,
+          "description": "Finite constant subtracted from the local threshold; larger values reduce foreground."
         },
         {
           "name": "method",
@@ -11554,7 +11570,8 @@
               "label": "Gaussian",
               "value": "gaussian"
             }
-          ]
+          ],
+          "description": "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."
         },
         {
           "name": "invert",
@@ -11905,7 +11922,8 @@
           "defaultValue": 5,
           "min": 3,
           "max": 31,
-          "step": 2
+          "step": 2,
+          "description": "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."
         },
         {
           "name": "sigmaX",
