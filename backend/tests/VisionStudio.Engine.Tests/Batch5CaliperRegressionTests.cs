@@ -736,6 +736,37 @@ public sealed class Batch5CaliperRegressionTests
     }
 
     [Fact]
+    public async Task CaliperRejectsCropTransformTargetingDifferentRuntimeImageFrame()
+    {
+        using var sceneMat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(20));
+        using (var brightSide = new Mat(sceneMat, new Rect(32, 0, 32, 64))) brightSide.SetTo(Scalar.All(220));
+        using var source = VisionImage.Own(sceneMat.Clone());
+        using var registry = new VisionNodeRegistry();
+        registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("measure.caliperLine"), new CaliperLineNode(), "test");
+        var dispatcher = new VisionNodeDispatcher(registry);
+        NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json));
+
+        var crop = await dispatcher.ExecuteAsync(ConfiguredNode("crop", "image.crop",
+            """{"x":10,"y":10,"width":40,"height":40}"""), Inputs(source), null, CancellationToken.None);
+        using var croppedImage = (VisionImage)crop.Outputs["image"].Require<IVisionImage>("image");
+        (crop.Outputs["roiMask"].Value as IDisposable)?.Dispose();
+        var transform = crop.Outputs["transform"].Require<VisionTransform2D>("transform");
+        Assert.Equal("image:crop:crop", transform.TargetFrame);
+
+        var mismatchedInputs = Inputs(source);
+        mismatchedInputs["transform"] = crop.Outputs["transform"];
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.ExecuteAsync(
+            ConfiguredNode("measure", "measure.caliperLine",
+                """{"startX":20,"startY":32,"endX":44,"endY":32,"caliperCount":5,"sampleWidth":1}"""),
+            mismatchedInputs, null, CancellationToken.None).AsTask());
+
+        Assert.Contains("targets image frame 'image:crop:crop'", error.Message);
+        Assert.Contains("connected image is in frame 'CurrentImage'", error.Message);
+    }
+
+    [Fact]
     public async Task CropTransformsComposeAcrossAnImagePreservingNode()
     {
         using var source = VisionImage.Own(new Mat(100, 100, MatType.CV_8UC1, Scalar.All(80)));
