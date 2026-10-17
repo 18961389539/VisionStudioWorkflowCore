@@ -360,6 +360,34 @@ describe('ImageViewer measurement geometry editing', () => {
     expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'line', profileWidth: 15 });
   });
 
+  it('keeps the line-caliper width handle on a visible clipped profile and editable', () => {
+    const onChange = vi.fn();
+    const geometry: MeasurementGeometry = { type: 'line', start: { x: -20, y: 10 }, end: { x: 20, y: 90 },
+      profileSpan: 40, profileCount: 5, profileWidth: 5 };
+    imageView(geometry, onChange);
+
+    const handle = screen.getByTestId('measurement-profile-width');
+    const handleX = Number(handle.getAttribute('data-x'));
+    const handleY = Number(handle.getAttribute('data-y'));
+    expect(handleX).toBeGreaterThan(0); // the un-clipped center-profile handle would be outside the image
+    expect(handleX).toBeLessThan(99);
+    expect(handleY).toBeGreaterThan(0);
+    expect(handleY).toBeLessThan(99);
+
+    // This fixture fits a 100x100 image into a 400x260 viewer at scale 2.36, centered at (82, 12).
+    const normal = { x: -2 / Math.sqrt(5), y: 1 / Math.sqrt(5) };
+    const toScreen = (point: { x: number; y: number }) => ({ x: 82 + point.x * 2.36, y: 12 + point.y * 2.36 });
+    const start = toScreen({ x: handleX, y: handleY });
+    const end = toScreen({ x: handleX + normal.x * 5, y: handleY + normal.y * 5 });
+    const stage = screen.getByTestId('stage');
+    fireEvent.mouseDown(stage, { clientX: start.x, clientY: start.y });
+    fireEvent.mouseMove(stage, { clientX: end.x, clientY: end.y });
+    fireEvent.mouseUp(document.body, { clientX: end.x, clientY: end.y });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange.mock.calls[0][0]).toMatchObject({ type: 'line', profileWidth: 15 });
+  });
+
   it('resizes the caliper profile span from its visible image handles', () => {
     const onChange = vi.fn();
     const geometry: MeasurementGeometry = { type: 'line', start: { x: 20, y: 50 }, end: { x: 80, y: 50 }, profileSpan: 40, profileCount: 5 };

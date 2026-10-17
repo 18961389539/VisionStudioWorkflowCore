@@ -45,14 +45,31 @@ function caliperLineProfileSpanHandles(geometry: Extract<MeasurementGeometry, { 
     end: { x: midpoint.x + tangent.x * span / 2, y: midpoint.y + tangent.y * span / 2 }
   };
 }
-function caliperLineProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'line' }>): Point | undefined {
-  if (geometry.profileWidth === undefined) return undefined;
+function caliperLineProfileWidthHandle(geometry: Extract<MeasurementGeometry, { type: 'line' }>,
+  width: number, height: number): Point | undefined {
+  if (geometry.profileWidth === undefined || width <= 0 || height <= 0) return undefined;
   const dx = geometry.end.x - geometry.start.x, dy = geometry.end.y - geometry.start.y;
   const length = Math.hypot(dx, dy);
   if (length <= 0) return undefined;
+  const count = geometry.profileCount === undefined ? 1 : Math.round(clamp(geometry.profileCount, 3, 101));
+  const span = geometry.profileSpan && geometry.profileSpan > 0 ? geometry.profileSpan : length;
+  const tangent = { x: -dy / length, y: dx / length };
   const halfWidth = Math.max(0, geometry.profileWidth) / 2;
-  return { x: (geometry.start.x + geometry.end.x) / 2 - dy / length * halfWidth,
-    y: (geometry.start.y + geometry.end.y) / 2 + dx / length * halfWidth };
+  let selected: { point: Point; margin: number } | undefined;
+  for (let index = 0; index < count; index++) {
+    const offset = count === 1 ? 0 : (index / (count - 1) - 0.5) * span;
+    const offsetX = tangent.x * offset, offsetY = tangent.y * offset;
+    const clipped = clipSegmentToImage(
+      { x: geometry.start.x + offsetX, y: geometry.start.y + offsetY },
+      { x: geometry.end.x + offsetX, y: geometry.end.y + offsetY }, width, height);
+    if (!clipped) continue;
+    const midpoint = { x: (clipped.start.x + clipped.end.x) / 2, y: (clipped.start.y + clipped.end.y) / 2 };
+    const point = { x: clamp(midpoint.x + tangent.x * halfWidth, 0, width - 1),
+      y: clamp(midpoint.y + tangent.y * halfWidth, 0, height - 1) };
+    const margin = Math.min(point.x, width - 1 - point.x, point.y, height - 1 - point.y);
+    if (!selected || margin > selected.margin) selected = { point, margin };
+  }
+  return selected?.point;
 }
 
 function clipSegmentToImage(start: Point, end: Point, width: number, height: number): { start: Point; end: Point } | undefined {
@@ -539,7 +556,7 @@ function MeasurementGeometryShape({ geometry, scale, editable, imageWidth, image
     const apertureCount = geometry.profileWidth === undefined ? 0 : Math.max(1, count);
     const halfProfileWidth = Math.max(0, geometry.profileWidth ?? 0) / 2;
     const profileHandles = editable && count >= 3 ? caliperLineProfileSpanHandles(geometry) : undefined;
-    const profileWidthHandle = editable ? caliperLineProfileWidthHandle(geometry) : undefined;
+    const profileWidthHandle = editable ? caliperLineProfileWidthHandle(geometry, imageWidth, imageHeight) : undefined;
     return <Group listening={false}>
       {apertureCount > 0 && Array.from({ length: apertureCount }, (_, index) => {
         const offset = apertureCount === 1 ? 0 : (index / (apertureCount - 1) - 0.5) * span;
@@ -935,7 +952,7 @@ export default function ImageViewer({
       const profileHandles = target.profileCount !== undefined ? caliperLineProfileSpanHandles(target) : undefined;
       const candidates: [MeasurementDragMode, Point][] = [['start', target.start], ['end', target.end]];
       if (profileHandles) candidates.push(['profileStart', profileHandles.start], ['profileEnd', profileHandles.end]);
-      const widthHandle = caliperLineProfileWidthHandle(target);
+      const widthHandle = caliperLineProfileWidthHandle(target, actualWidth, actualHeight);
       if (widthHandle) candidates.push(['profileWidth', widthHandle]);
       const endpoint = closestHandle(candidates, screen, view);
       if (endpoint) return endpoint;
