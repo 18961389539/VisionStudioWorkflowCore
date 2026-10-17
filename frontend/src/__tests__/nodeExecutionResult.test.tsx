@@ -66,6 +66,19 @@ describe('NodeExecutionResult measurement status', () => {
     expect(screen.getByLabelText('关键测量结果').textContent).toContain('最少有效卡尺数 6');
   });
 
+  it('explains when a fit exceeds its configured quality limit and shows both values', () => {
+    const strictResult = result(false, 'fit-error-exceeds-tolerance');
+    strictResult.nodeReports[0].summary = {
+      found: false, reason: 'fit-error-exceeds-tolerance', fitError: 1.24, maxFitError: 0.8, sampleCount: 9
+    };
+    mount('measure.caliperLine', strictResult);
+
+    expect(screen.getByText(/最终拟合误差超过“最大拟合误差”门槛/)).toBeTruthy();
+    const summary = screen.getByLabelText('关键测量结果');
+    expect(summary.textContent).toContain('拟合误差 1.24');
+    expect(summary.textContent).toContain('最大拟合误差 0.8');
+  });
+
   it('keeps the successful status when the measurement found an edge', () => {
     mount(catalog.type, result(true, 'ok'));
 

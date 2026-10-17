@@ -307,6 +307,42 @@ public sealed class Batch5PrecisionNodeTests
     }
 
     [Fact]
+    public async Task CaliperLine_MaxFitErrorCanRejectAValidButPoorlyRepresentedEdge()
+    {
+        using var image = new Mat(160, 160, MatType.CV_8UC1, Scalar.All(20));
+        var rows = image.Rows;
+        var columns = image.Cols;
+        for (var y = 0; y < rows; y++)
+        {
+            var delta = y - 80d;
+            var boundary = 80 + delta * delta / 600;
+            for (var x = (int)Math.Ceiling(boundary); x < columns; x++) image.Set(y, x, (byte)220);
+        }
+        Cv2.GaussianBlur(image, image, new Size(0, 0), 1.0);
+        const string geometry = "\"startX\":40,\"startY\":80,\"endX\":120,\"endY\":80,\"edgeLength\":100,\"caliperCount\":9,\"sampleWidth\":1,\"minContrast\":20,\"maxFitOutliers\":0";
+
+        var ungated = await Run(new CaliperLineNode(), Image(image), $"{{{geometry}}}");
+        Assert.True(Convert.ToBoolean(ungated.Summary["found"]), Convert.ToString(ungated.Summary["reason"]));
+        var error = Convert.ToDouble(ungated.Summary["fitError"]);
+        Assert.True(error > 0.5, $"Expected curved edge fit error above tolerance; fitError={error}");
+
+        var gated = await Run(new CaliperLineNode(), Image(image), $"{{{geometry},\"maxFitError\":0.5}}");
+        Assert.False(Convert.ToBoolean(gated.Summary["found"]));
+        Assert.Equal("fit-error-exceeds-tolerance", Convert.ToString(gated.Summary["reason"]));
+        Assert.False(gated.Outputs.ContainsKey("line"));
+        Assert.Equal(0.5, Convert.ToDouble(gated.Summary["maxFitError"]));
+    }
+
+    [Fact]
+    public async Task CaliperLine_RejectsNonFiniteMaximumFitError()
+    {
+        using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new CaliperLineNode(), Image(image), """{"maxFitError":"NaN"}"""));
+        Assert.Contains("maxFitError", error.Message);
+    }
+
+    [Fact]
     public async Task CaliperCircle_ConcentricCircle_RecoversRadiusAndRoundness()
     {
         using var image = BuildCircleImage(axes: null, out var truth);
@@ -342,6 +378,25 @@ public sealed class Batch5PrecisionNodeTests
         Assert.InRange(arc.Outputs["radius"].Require<double>("radius"), truth.r - 1.5, truth.r + 1.5);
     }
 
+    [Fact]
+    public async Task CaliperCircle_MaxFitErrorRejectsAnEllipseAsAnUnreliableCircle()
+    {
+        using var image = BuildCircleImage(new Size(36, 28), out _);
+        const string geometry = "\"centerX\":200,\"centerY\":200,\"radius\":32,\"radialBand\":12,\"samplingMode\":\"count\",\"caliperCount\":72,\"sampleWidth\":1,\"minContrast\":20";
+
+        var ungated = await Run(new CaliperCircleNode(), Image(image), $"{{{geometry}}}");
+        Assert.True(Convert.ToBoolean(ungated.Summary["found"]), Convert.ToString(ungated.Summary["reason"]));
+        var error = Convert.ToDouble(ungated.Summary["fitError"]);
+        Assert.True(error > 0.5, $"Expected ellipse-to-circle fit error above tolerance; fitError={error}");
+
+        var gated = await Run(new CaliperCircleNode(), Image(image), $"{{{geometry},\"maxFitError\":0.5}}");
+        Assert.False(Convert.ToBoolean(gated.Summary["found"]));
+        Assert.Equal("fit-error-exceeds-tolerance", Convert.ToString(gated.Summary["reason"]));
+        Assert.False(gated.Outputs.ContainsKey("circle"));
+        Assert.False(gated.Outputs.ContainsKey("radius"));
+        Assert.Equal(0.5, Convert.ToDouble(gated.Summary["maxFitError"]));
+    }
+
     [Theory]
     [InlineData("angleStartDeg")]
     [InlineData("angleEndDeg")]
@@ -354,6 +409,7 @@ public sealed class Batch5PrecisionNodeTests
     [InlineData("maxFitOutliers")]
     [InlineData("fitOutlierThreshold")]
     [InlineData("fitRadiusTolerance")]
+    [InlineData("maxFitError")]
     public async Task CaliperCircle_RejectsNonFiniteNumericParameters(string parameterName)
     {
         using var image = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));

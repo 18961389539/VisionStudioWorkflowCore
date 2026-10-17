@@ -37,6 +37,17 @@ describe('precision workflow catalog', () => {
     }
   });
 
+  it('exposes an optional fit-error acceptance gate for line and circle measurements', () => {
+    const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
+    for (const type of ['measure.caliperLine', 'measure.caliperCircle']) {
+      const item = translated.find(entry => entry.type === type)!;
+      const parameter = item.parameters.find(entry => entry.name === 'maxFitError');
+      expect(parameter).toMatchObject({ label: '最大拟合误差（0 为关闭）', defaultValue: 0, min: 0, unit: 'px' });
+      expect(parameter?.description).toContain('found=false');
+      expect(parameter?.description).toContain('设为 0');
+    }
+  });
+
   it('explains the UInt16 to byte-gray scaling used by caliper thresholds', () => {
     const translated = localizeCatalog(fallbackCatalogRaw, 'zh');
     for (const type of ['measure.caliper', 'feature.edgeSubpixel', 'measure.caliperLine', 'measure.caliperCircle']) {
