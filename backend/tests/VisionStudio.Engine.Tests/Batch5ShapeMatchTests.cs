@@ -890,6 +890,29 @@ public sealed class Batch5ShapeMatchTests
     }
 
     [Fact]
+    public async Task RoiTransform_ArbitraryRotationKeepsRectangleMaskAreaWithinRasterTolerance()
+    {
+        var sourceRoi = new VisionRoi(VisionRoiType.Rectangle, X: 30, Y: 34, Width: 20, Height: 12);
+        var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Rectangle","x":30,"y":34,"width":20,"height":12},"baseX":40,"baseY":40,"currentX":40,"currentY":40,"baseThetaDeg":0,"currentThetaDeg":45}""");
+        var transformed = result.Outputs["roi"].Require<VisionRoi>("roi");
+        using var sourceMask = sourceRoi.BuildMask(new Size(100, 100));
+        using var transformedMask = transformed.BuildMask(new Size(100, 100));
+
+        Assert.InRange(Cv2.CountNonZero(transformedMask), Cv2.CountNonZero(sourceMask) - 5, Cv2.CountNonZero(sourceMask) + 5);
+    }
+
+    [Fact]
+    public async Task RoiTransform_RotationRejectsRectangleThatSelectsNoPixels()
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),
+            """{"roi":{"type":"Rectangle","x":10.1,"y":10,"width":0.2,"height":5},"baseX":10,"baseY":10,"currentX":10,"currentY":10,"baseThetaDeg":0,"currentThetaDeg":90}"""));
+
+        Assert.Contains("selects no image pixels", error.Message);
+        Assert.Contains("Increase its width and height", error.Message);
+    }
+
+    [Fact]
     public async Task RoiTransform_HalfTurnSymmetry_UsesEquivalentOrientation()
     {
         var result = await Run(new RoiTransformNode(), new Dictionary<string, VisionValue>(),

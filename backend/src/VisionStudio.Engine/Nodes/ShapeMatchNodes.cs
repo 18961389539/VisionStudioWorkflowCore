@@ -207,15 +207,15 @@ public sealed class RoiTransformNode : IVisionNodeExecutor
                     var top = Math.Ceiling(y);
                     var right = Math.Ceiling(x + width) - 1;
                     var bottom = Math.Ceiling(y + height) - 1;
-                    var maskCorners = right >= left && bottom >= top
-                        ? new[]
-                        {
-                            new VisionPoint2D(left, top),
-                            new VisionPoint2D(right, top),
-                            new VisionPoint2D(right, bottom),
-                            new VisionPoint2D(left, bottom)
-                        }
-                        : corners;
+                    if (right < left || bottom < top)
+                        throw new InvalidOperationException("The rectangle ROI selects no image pixels and cannot be rotated. Increase its width and height before applying ROI correction.");
+                    var maskCorners = new[]
+                    {
+                        new VisionPoint2D(left, top),
+                        new VisionPoint2D(right, top),
+                        new VisionPoint2D(right, bottom),
+                        new VisionPoint2D(left, bottom)
+                    };
                     transformed = new VisionRoi(VisionRoiType.Polygon,
                         Points: maskCorners.Select(c => Apply(c)).Select(c => new VisionRoiPoint(c.X, c.Y)).ToArray());
                 }
