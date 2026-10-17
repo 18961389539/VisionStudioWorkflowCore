@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "517d98d77526c1c6f3b9775387e1ee18d9539c4970e07f8b1c317d9aa5ec07f0",
+  "hash": "77511cc35911a638884bd47d19447ead52a87b4657458a20300612a8519e48b1",
   "items": [
     {
       "type": "image.acquire",
@@ -1636,6 +1636,21 @@
           "name": "exec",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "tree",
+          "dataType": "FrameTree2D",
+          "required": false
         }
       ],
       "outputs": [
@@ -1660,7 +1675,8 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Used when the X input is not connected."
         },
         {
           "name": "y",
@@ -1671,14 +1687,16 @@
           "max": 1000000,
           "step": 0.001,
           "unit": "target",
-          "group": "Point"
+          "group": "Point",
+          "description": "Used when the Y input is not connected."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "Workpiece",
-          "group": "Point"
+          "group": "Point",
+          "description": "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."
         },
         {
           "name": "unit",
@@ -1702,7 +1720,7 @@
           "group": "Point"
         }
       ],
-      "description": "Create a constant coordinate-aware reference point.",
+      "description": "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -1716,6 +1734,26 @@
           "name": "exec",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "thetaDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "tree",
+          "dataType": "FrameTree2D",
+          "required": false
         }
       ],
       "outputs": [
@@ -1739,7 +1777,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Used when the X input is not connected."
         },
         {
           "name": "y",
@@ -1749,7 +1788,8 @@
           "min": -1000000,
           "max": 1000000,
           "step": 0.001,
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Used when the Y input is not connected."
         },
         {
           "name": "thetaDeg",
@@ -1760,14 +1800,16 @@
           "max": 3600,
           "step": 0.001,
           "unit": "deg",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Used when the theta input is not connected. The output angle is normalized to (-180, 180]."
         },
         {
           "name": "frame",
           "label": "Frame",
           "type": "text",
           "defaultValue": "RobotBase",
-          "group": "Pose"
+          "group": "Pose",
+          "description": "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."
         },
         {
           "name": "unit",
@@ -1791,7 +1833,7 @@
           "group": "Pose"
         }
       ],
-      "description": "Create a constant frame-aware 2D pose.",
+      "description": "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2889,9 +2931,83 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Device"
+        },
+        {
+          "name": "triggerMode",
+          "label": "Trigger",
+          "type": "select",
+          "defaultValue": "Level",
+          "options": [
+            {
+              "label": "Level",
+              "value": "Level"
+            },
+            {
+              "label": "Rising",
+              "value": "Rising"
+            },
+            {
+              "label": "Falling",
+              "value": "Falling"
+            }
+          ],
+          "group": "Condition",
+          "description": "Level waits while the condition is true. Rising waits for false-to-true and Falling for true-to-false. The first sample cannot be an edge."
+        },
+        {
+          "name": "stableMs",
+          "label": "Stable Hold",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 120000,
+          "step": 1,
+          "unit": "ms",
+          "group": "Wait",
+          "description": "The armed condition must stay true for this long. 0 accepts the first qualifying sample. Cannot exceed Timeout."
+        },
+        {
+          "name": "qualityMode",
+          "label": "Accepted Quality",
+          "type": "select",
+          "defaultValue": "Any",
+          "options": [
+            {
+              "label": "Any",
+              "value": "Any"
+            },
+            {
+              "label": "Good",
+              "value": "Good"
+            },
+            {
+              "label": "Good or Uncertain",
+              "value": "GoodOrUncertain"
+            }
+          ],
+          "group": "Condition",
+          "description": "Samples outside the accepted quality do not match, do not move the edge memory, and do not count toward the stable hold."
+        },
+        {
+          "name": "onTimeout",
+          "label": "On Timeout",
+          "type": "select",
+          "defaultValue": "Fail",
+          "options": [
+            {
+              "label": "Fail the node",
+              "value": "Fail"
+            },
+            {
+              "label": "Continue unmatched",
+              "value": "Continue"
+            }
+          ],
+          "group": "Wait",
+          "description": "Fail throws the existing timeout error. Continue succeeds with matched=false so a downstream branch can handle the miss."
         }
       ],
-      "description": "Block the workflow until a tag condition becomes true or the timeout expires. Useful for PLC trigger/ready handshakes.",
+      "description": "Poll a device tag until the condition is true, an edge is seen, or the timeout expires. Level is the default and still fails on timeout. Rising, falling, stable-hold, quality, and a matched=false timeout result are optional.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -3579,7 +3695,7 @@
           "step": 2,
           "unit": "px",
           "group": "Sampling",
-          "description": "Length averaged along the expected edge; larger values smooth local noise but may merge nearby features."
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the expected edge; larger values smooth local noise but may merge nearby features."
         },
         {
           "name": "minContrast",
@@ -3992,6 +4108,11 @@
           "name": "value",
           "dataType": "Double",
           "required": true
+        },
+        {
+          "name": "previous",
+          "dataType": "Boolean",
+          "required": false
         }
       ],
       "outputs": [
@@ -4042,7 +4163,8 @@
               "label": "!=",
               "value": "!="
             }
-          ]
+          ],
+          "description": "Used in threshold mode."
         },
         {
           "name": "threshold",
@@ -4051,10 +4173,68 @@
           "defaultValue": 15000,
           "min": -99999999,
           "max": 99999999,
-          "step": 1
+          "step": 1,
+          "description": "Used in threshold mode."
+        },
+        {
+          "name": "mode",
+          "label": "Compare Mode",
+          "type": "select",
+          "defaultValue": "threshold",
+          "options": [
+            {
+              "label": "Threshold",
+              "value": "threshold"
+            },
+            {
+              "label": "Inside range",
+              "value": "range"
+            }
+          ],
+          "description": "Threshold compares one value. Inside range checks a closed window and ignores the operator."
+        },
+        {
+          "name": "tolerance",
+          "label": "Tolerance",
+          "type": "number",
+          "defaultValue": 1E-09,
+          "min": 0,
+          "max": 1000000,
+          "step": 1E-09,
+          "description": "Absolute band for == and !=. The default 1e-9 preserves the previous equality behavior."
+        },
+        {
+          "name": "rangeMin",
+          "label": "Range Minimum",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -99999999,
+          "max": 99999999,
+          "step": 1,
+          "description": "Inclusive lower bound for inside-range mode. Must not exceed Range Maximum."
+        },
+        {
+          "name": "rangeMax",
+          "label": "Range Maximum",
+          "type": "number",
+          "defaultValue": 100,
+          "min": -99999999,
+          "max": 99999999,
+          "step": 1,
+          "description": "Inclusive upper bound for inside-range mode."
+        },
+        {
+          "name": "hysteresis",
+          "label": "Hysteresis",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "description": "Applied only when the previous condition input is connected. There is no memory across runs. 0 disables it."
         }
       ],
-      "description": "Workflow Core conditional marker.",
+      "description": "Compare a number and branch true or false. Threshold mode keeps the original operators, with a configurable equality tolerance. Inside-range mode checks a closed window. Hysteresis uses the optional previous condition and does not remember state across runs.",
       "pluginId": "builtin",
       "declaresActions": false
     },
@@ -5200,7 +5380,7 @@
           ]
         }
       ],
-      "description": "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+      "description": "Combine boolean results (NOT uses 'a' only). An unknown operation fails instead of falling back to AND. Feeds flow.result / flow.if for the final OK/NG disposition.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -5877,6 +6057,16 @@
           "name": "template",
           "dataType": "Image",
           "required": false
+        },
+        {
+          "name": "searchRoi",
+          "dataType": "Roi",
+          "required": false
+        },
+        {
+          "name": "templateRoi",
+          "dataType": "Roi",
+          "required": false
         }
       ],
       "outputs": [
@@ -5914,6 +6104,21 @@
           "name": "rectangle",
           "dataType": "Rectangle2D",
           "required": false
+        },
+        {
+          "name": "scale",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
         },
         {
           "name": "next",
@@ -5982,9 +6187,68 @@
               "value": "sqdiff-normed"
             }
           ]
+        },
+        {
+          "name": "maxTargets",
+          "label": "Max Targets",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "group": "Search",
+          "description": "Accepted matches. found/score/x/y/angle stay the best match. Default 1 keeps older single-result workflows."
+        },
+        {
+          "name": "minCenterDistance",
+          "label": "Min Center Distance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "unit": "px",
+          "group": "Search",
+          "description": "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."
+        },
+        {
+          "name": "scaleMinPercent",
+          "label": "Scale Min",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 50,
+          "max": 200,
+          "step": 1,
+          "unit": "%",
+          "group": "Scale",
+          "description": "Uniform scale is a discrete resampled NCC search, not a continuous scaled model. 100 with Scale Max 100 keeps the original single-scale search. Use match.shape for trained scale."
+        },
+        {
+          "name": "scaleMaxPercent",
+          "label": "Scale Max",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 50,
+          "max": 200,
+          "step": 1,
+          "unit": "%",
+          "group": "Scale",
+          "description": "Largest uniform scale to resample. Must be greater than or equal to Scale Min."
+        },
+        {
+          "name": "scaleStepPercent",
+          "label": "Scale Step (%)",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "unit": "%",
+          "group": "Scale",
+          "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected."
         }
       ],
-      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
+      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches, a search ROI, a template mask, and a discrete uniform scale range are optional; defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6272,7 +6536,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."
         },
         {
           "name": "maxRadiusDeviation",
@@ -6485,7 +6750,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "edgeThreshold",
@@ -6708,7 +6974,8 @@
           "max": 99,
           "step": 2,
           "unit": "px",
-          "group": "Sampling"
+          "group": "Sampling",
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."
         },
         {
           "name": "minContrast",
@@ -9011,6 +9278,22 @@
             {
               "label": "Perimeter",
               "value": "perimeter"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
+            },
+            {
+              "label": "Class ID",
+              "value": "classId"
+            },
+            {
+              "label": "Width",
+              "value": "width"
+            },
+            {
+              "label": "Height",
+              "value": "height"
             }
           ]
         },
@@ -9019,9 +9302,127 @@
           "label": "Descending",
           "type": "boolean",
           "defaultValue": true
+        },
+        {
+          "name": "sortBy2",
+          "label": "Then Sort By",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "X",
+              "value": "x"
+            },
+            {
+              "label": "Y",
+              "value": "y"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
+            },
+            {
+              "label": "Perimeter",
+              "value": "perimeter"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
+            },
+            {
+              "label": "Class ID",
+              "value": "classId"
+            },
+            {
+              "label": "Width",
+              "value": "width"
+            },
+            {
+              "label": "Height",
+              "value": "height"
+            }
+          ]
+        },
+        {
+          "name": "descending2",
+          "label": "Then Descending",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "sortBy3",
+          "label": "Third Sort By",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "X",
+              "value": "x"
+            },
+            {
+              "label": "Y",
+              "value": "y"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
+            },
+            {
+              "label": "Perimeter",
+              "value": "perimeter"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
+            },
+            {
+              "label": "Class ID",
+              "value": "classId"
+            },
+            {
+              "label": "Width",
+              "value": "width"
+            },
+            {
+              "label": "Height",
+              "value": "height"
+            }
+          ]
+        },
+        {
+          "name": "descending3",
+          "label": "Third Descending",
+          "type": "boolean",
+          "defaultValue": true
+        },
+        {
+          "name": "topN",
+          "label": "Keep First",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "description": "0 keeps every item. Otherwise only the first N sorted items are returned and reindexed."
         }
       ],
-      "description": "Sort a DetectionList by a selected numeric field and refresh result indices.",
+      "description": "Sort a DetectionList by up to three fields and refresh result indices. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13507,7 +13908,7 @@
         {
           "name": "b",
           "dataType": "Double",
-          "required": true
+          "required": false
         }
       ],
       "outputs": [
@@ -13544,11 +13945,57 @@
             {
               "label": "Divide (a / b)",
               "value": "divide"
+            },
+            {
+              "label": "Power (a ^ b)",
+              "value": "pow"
+            },
+            {
+              "label": "Square root (a)",
+              "value": "sqrt"
+            },
+            {
+              "label": "Absolute value (a)",
+              "value": "abs"
+            },
+            {
+              "label": "Minimum (min a, b)",
+              "value": "min"
+            },
+            {
+              "label": "Maximum (max a, b)",
+              "value": "max"
+            },
+            {
+              "label": "Clamp (a)",
+              "value": "clamp"
             }
           ]
+        },
+        {
+          "name": "clampMin",
+          "label": "Clamp Minimum",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Clamp",
+          "description": "Lower bound used only by Clamp."
+        },
+        {
+          "name": "clampMax",
+          "label": "Clamp Maximum",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Clamp",
+          "description": "Upper bound used only by Clamp. Must be greater than or equal to Clamp Minimum."
         }
       ],
-      "description": "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+      "description": "Combine measurements. Add, subtract, multiply, divide, power, min, and max read a and b. Square root, absolute value, and clamp read a only. An unknown operation, division by zero, a negative square root, reversed clamp bounds, or a non-finite result fails instead of guessing.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13620,6 +14067,16 @@
           "required": true
         },
         {
+          "name": "deviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "clamped",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -13651,7 +14108,7 @@
           "defaultValue": false
         }
       ],
-      "description": "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+      "description": "Inclusive range check. min greater than max fails instead of swapping. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window. invert flips pass only.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

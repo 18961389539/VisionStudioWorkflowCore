@@ -113,7 +113,7 @@ internal static class JLVisionMatching
                 if (fileImage.Empty()) throw new InvalidOperationException($"Template image '{Path.GetFullPath(path)}' could not be loaded.");
             }
             if (templateBuffer.Empty()) throw new InvalidOperationException("Matching requires a non-empty template image.");
-            if (!(shape && savedModel.Length > 0) && (templateBuffer.Width > source.Width || templateBuffer.Height > source.Height)) throw new InvalidOperationException("Template is larger than the scene image.");
+            if (shape && savedModel.Length == 0 && (templateBuffer.Width > source.Width || templateBuffer.Height > source.Height)) throw new InvalidOperationException("Template is larger than the scene image.");
             using var templateColor = JLVisionImages.FromMat(templateBuffer);
             using var templateChannels = templateColor.CountChannels();
             using var template = templateChannels.I == 1 ? templateColor.CopyImage() : templateColor.Rgb1ToGray();
@@ -174,8 +174,31 @@ internal static class JLVisionMatching
             var method = node.GetString("method", "ccoeff-normed").Trim().ToLowerInvariant();
             if (!shape && method is not ("ccoeff-normed" or "sqdiff-normed")) throw new InvalidOperationException($"Unsupported template matching method '{method}'.");
             var squaredDifference = !shape && method == "sqdiff-normed";
-            var maximum = shape ? Math.Clamp(node.GetInt("maxTargets", 5), 1, 100) : squaredDifference ? 100 : 1;
-            var searchRoi = shape ? node.GetRoi("searchRoi") : null;
+            var acceptLimit = Math.Clamp(node.GetInt("maxTargets", shape ? 5 : 1), 1, shape ? 100 : 50);
+            var maximum = !shape && squaredDifference ? 100 : acceptLimit;
+            VisionRoi? searchRoi;
+            if (shape) searchRoi = node.GetRoi("searchRoi");
+            else if (context.TryGetValue("searchRoi", out var searchRoiInput)) searchRoi = searchRoiInput.Require<VisionRoi>("searchRoi");
+            else searchRoi = node.GetRoi("searchRoi");
+            var nccScaleMin = 1d;
+            var nccScaleMax = 1d;
+            var nccScaleStep = .1d;
+            if (!shape)
+            {
+                var scaleMinPercent = node.GetDouble("scaleMinPercent", 100);
+                var scaleMaxPercent = node.GetDouble("scaleMaxPercent", 100);
+                var scaleStepPercent = node.GetDouble("scaleStepPercent", 10);
+                if (!double.IsFinite(scaleMinPercent) || !double.IsFinite(scaleMaxPercent) || !double.IsFinite(scaleStepPercent))
+                    throw new InvalidOperationException("match.template scale percent values must be finite.");
+                scaleMinPercent = Math.Clamp(scaleMinPercent, 50, 200);
+                scaleMaxPercent = Math.Clamp(scaleMaxPercent, 50, 200);
+                scaleStepPercent = Math.Clamp(scaleStepPercent, 1, 50);
+                if (scaleMinPercent > scaleMaxPercent)
+                    throw new InvalidOperationException($"match.template scaleMinPercent {scaleMinPercent:0.###} is greater than scaleMaxPercent {scaleMaxPercent:0.###}.");
+                nccScaleMin = scaleMinPercent / 100d;
+                nccScaleMax = scaleMaxPercent / 100d;
+                nccScaleStep = scaleStepPercent / 100d;
+            }
             var maxClutterScore = Math.Clamp(node.GetDouble("maxClutterScore", .2), 0, 1);
             var maxDeformationPx = shape ? Math.Clamp(node.GetInt("maxDeformationPx", 0), 0, 32) : 0;
             var scoreUsingClutter = shape && node.GetBool("scoreUsingClutter", false);
@@ -200,6 +223,14 @@ internal static class JLVisionMatching
                 if (contrastFractionThreshold > 0) outputs["contrastFraction"] = VisionValue.Double(0);
             }
             var summary = new Dictionary<string, object?> { ["found"] = false, ["bestScore"] = 0d, ["score"] = 0d, ["templateSource"] = templateSource, ["algorithmBackend"] = "JLVision", ["angleRangeDeg"] = range * 180 / Math.PI, ["angleStepDeg"] = step * 180 / Math.PI };
+            if (!shape)
+            {
+                summary["scaleMinPercent"] = nccScaleMin * 100;
+                summary["scaleMaxPercent"] = nccScaleMax * 100;
+                summary["scaleStepPercent"] = nccScaleStep * 100;
+                summary["scaleSearch"] = Math.Abs(nccScaleMin - 1) < 1e-9 && Math.Abs(nccScaleMax - 1) < 1e-9 ? "fixed" : "discrete-resampled-ncc";
+                summary["maxTargets"] = acceptLimit;
+            }
             if (shape)
             {
                 summary["scaleTolerancePercent"] = scaleTolerance * 100;
@@ -266,7 +297,7 @@ internal static class JLVisionMatching
                 if (clippedSearch.Width <= 0 || clippedSearch.Height <= 0)
                 {
                     summary["searchRegionEmpty"] = true;
-                    outputs["image"] = VisionValue.Image(source.CloneOwned());
+                    if (shape) outputs["image"] = VisionValue.Image(source.CloneOwned());
                     outputs["count"] = VisionValue.Integer(0);
                     outputs["detections"] = VisionValue.Detections([]);
                     summary["accepted"] = 0;
@@ -275,7 +306,8 @@ internal static class JLVisionMatching
                 // Search regions constrain candidate origins; a margin keeps the full trained contour
                 // available when a target lies near the region boundary.
             var radius = Math.Sqrt((double)templateBox.Width * templateBox.Width + (double)templateBox.Height * templateBox.Height);
-                var margin = (int)Math.Ceiling(radius * searchScaleMax) + 2;
+                var marginScale = shape ? searchScaleMax : Math.Max(searchScaleMax, nccScaleMax);
+                var margin = (int)Math.Ceiling(radius * marginScale) + 2;
                 var expanded = new Rect(clippedSearch.X - margin, clippedSearch.Y - margin,
                     clippedSearch.Width + margin * 2, clippedSearch.Height + margin * 2) & imageBounds;
                 using var sceneGray = JLVisionImages.ToMat(gray);
@@ -476,29 +508,19 @@ internal static class JLVisionMatching
             }
             else
             {
-                var pyramidLevels = node.GetInt("pyramidLevels", 0);
-                if (pyramidLevels is < 0 or > 8) throw new InvalidOperationException("pyramidLevels must be between 0 and 8.");
-                if (pyramidLevels == 0) pyramidLevels = Math.Clamp((int)Math.Floor(Math.Log2(Math.Max(1d, Math.Min(templateBuffer.Width, templateBuffer.Height) / 6d))) + 1, 1, 8);
+                VisionRoi? templateRoi = context.TryGetValue("templateRoi", out var templateRoiInput)
+                    ? templateRoiInput.Require<VisionRoi>("templateRoi")
+                    : node.GetRoi("templateRoi");
+                var requestedPyramidLevels = node.GetInt("pyramidLevels", 0);
+                if (requestedPyramidLevels is < 0 or > 8) throw new InvalidOperationException("pyramidLevels must be between 0 and 8.");
+                var pyramidLevels = requestedPyramidLevels == 0
+                    ? Math.Clamp((int)Math.Floor(Math.Log2(Math.Max(1d, Math.Min(templateBuffer.Width, templateBuffer.Height) / 6d))) + 1, 1, 8)
+                    : requestedPyramidLevels;
                 summary["pyramidLevels"] = pyramidLevels;
-                using var lease = JLVisionModelCache.Acquire(Key(templateBuffer, false, range, step, originX, originY, pyramidLevels), () =>
-                {
-                    var created = new JlNCCModel();
-                    try { created.CreateNccModel(template, pyramidLevels, -range, 2 * range, step, "use_polarity"); return created; }
-                    catch { created.Dispose(); throw; }
-                });
-                var model = (JlNCCModel)lease.Model; summary["modelCacheHit"] = lease.Hit; summary["method"] = method;
-                JlTuple rows, cols, angles, scores, scales;
-                gray.FindNccModel(model, -range, 2 * range, squaredDifference ? .001 : minScore, maximum, .5, "true", 0, out rows, out cols, out angles, out scores);
-                scales = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
-                using (rows) using (cols) using (angles) using (scores) using (scales)
-                {
-                    for (var index = 0; index < scores.Length; index++)
-                    {
-                        var score = squaredDifference ? Ssd(gray, template, cols[index].D, rows[index].D, angles[index].D, originX, originY) : scores[index].D;
-                        matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scales[index].D, scales[index].D, score,
-                            templateBox.Width, templateBox.Height, originX, originY, index));
-                    }
-                }
+                summary["method"] = method;
+                summary["templateMask"] = templateRoi is not null;
+                AppendNccCandidates(matchingScene, template, templateBuffer, templateRoi, range, step, requestedPyramidLevels, pyramidLevels,
+                    squaredDifference, minScore, acceptLimit, nccScaleMin, nccScaleMax, nccScaleStep, searchRoi is not null, token, summary, matchedCandidates);
             }
             foreach (var candidate in matchedCandidates.OrderByDescending(candidate => CandidateScore(candidate, scoreUsingClutter)))
             {
@@ -520,8 +542,7 @@ internal static class JLVisionMatching
                 if (shape && savedModel.Length > 0 && (radians < searchStart - 1e-9 || radians > searchEnd + 1e-9)) continue;
                 if (shape && savedModel.Length > 0 && (candidate.ScaleX < searchScaleXMin - 1e-9 || candidate.ScaleX > searchScaleXMax + 1e-9
                     || candidate.ScaleY < searchScaleYMin - 1e-9 || candidate.ScaleY > searchScaleYMax + 1e-9)) continue;
-                if (!shape && (score < minScore || detections.Count > 0)) continue;
-                if (shape && searchRoi is not null && !Contains(searchRoi, x, y)) continue;
+                if (searchRoi is not null && !Contains(searchRoi, x, y)) continue;
                 double? contrast = null;
                 double? contrastFraction = null;
                 if (contrastEnabled)
@@ -544,11 +565,11 @@ internal static class JLVisionMatching
                         y - sin * candidate.ScaleX * (p.Item1 - candidate.OriginX) + cos * candidate.ScaleY * (p.Item2 - candidate.OriginY))).ToArray();
                 var left = corners.Min(p => p.X); var top = corners.Min(p => p.Y); var width = corners.Max(p => p.X) - left + 1; var height = corners.Max(p => p.Y) - top + 1;
                 if (shape && candidateBox.Width * candidateBox.Height * candidate.ScaleX * candidate.ScaleY < minArea) continue;
-                var distance = Math.Max(0, node.GetDouble("minCenterDistance", 20));
-                if (shape && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
+                var distance = Math.Max(0, node.GetDouble("minCenterDistance", shape ? 20 : 0));
+                if (distance > 0 && detections.Any(d => Math.Sqrt(Math.Pow(d.Circle.X - x, 2) + Math.Pow(d.Circle.Y - y, 2)) < distance)) continue;
                 if (shape && detections.Any(d => Overlap(d.BoundingBox, new(left, top, width, height)) > .3)) continue;
                 var degrees = VisionTransform2D.NormalizeAngleDeg(radians * 180 / Math.PI);
-                if (shape && detections.Count >= maximum) continue;
+                if (detections.Count >= acceptLimit) continue;
                 if (!outputs["found"].Require<bool>("found"))
                 {
                     outputs["found"] = VisionValue.Boolean(true); outputs["score"] = VisionValue.Double(score);
@@ -561,6 +582,11 @@ internal static class JLVisionMatching
                         if (scoreUsingClutter) outputs["nativeScore"] = VisionValue.Double(nativeScore);
                         if (contrast is { } measuredContrast) outputs["contrast"] = VisionValue.Double(measuredContrast);
                         if (contrastFraction is { } measuredFraction) outputs["contrastFraction"] = VisionValue.Double(measuredFraction);
+                    }
+                    if (!shape)
+                    {
+                        outputs["scale"] = VisionValue.Double(scale);
+                        summary["matchedScale"] = scale;
                     }
                     outputs["x"] = VisionValue.Double(shape ? x : left); outputs["y"] = VisionValue.Double(shape ? y : top);
                     outputs["angle"] = VisionValue.Double(degrees); outputs["center"] = VisionValue.Point(shape ? new(x, y) : new(left + width / 2, top + height / 2));
@@ -582,10 +608,13 @@ internal static class JLVisionMatching
                 detections.Add(new(detections.Count, left, top, width, height, candidateBox.Width * candidateBox.Height * candidate.ScaleX * candidate.ScaleY, 2 * (width + height), 0, new(x, y, Math.Sqrt(width * width + height * height) / 2), box, score));
                 var scaleLabel = anisotropicScale ? $" ×{candidate.ScaleX:0.###}/{candidate.ScaleY:0.###}" : $" ×{scale:0.###}";
                 var clutterLabel = clutterEnabled ? $" c={candidate.ClutterScore ?? 0:0.###}" : string.Empty;
-                overlays.Add(new($"match-{candidate.Index}", VisionOverlayType.Polygon, Points: corners.Select(p => new VisionOverlayPoint(p.X, p.Y)).ToArray(), Label: shape ? $"s={score:0.###} a={degrees:0.#}{scaleLabel}{clutterLabel}" : $"s={score:0.###} a={degrees:0.#}", Stroke: "#52c41a", StrokeWidth: 2));
+                var templateLabel = Math.Abs(scale - 1d) < 1e-6 ? $"s={score:0.###} a={degrees:0.#}" : $"s={score:0.###} a={degrees:0.#} ×{scale:0.###}";
+                overlays.Add(new($"match-{candidate.Index}", VisionOverlayType.Polygon, Points: corners.Select(p => new VisionOverlayPoint(p.X, p.Y)).ToArray(), Label: shape ? $"s={score:0.###} a={degrees:0.#}{scaleLabel}{clutterLabel}" : templateLabel, Stroke: "#52c41a", StrokeWidth: 2));
             }
             token.ThrowIfCancellationRequested();
-            if (shape) { outputs["image"] = VisionValue.Image(source.CloneOwned()); outputs["count"] = VisionValue.Integer(detections.Count); outputs["detections"] = VisionValue.Detections(detections); }
+            if (shape) outputs["image"] = VisionValue.Image(source.CloneOwned());
+            outputs["count"] = VisionValue.Integer(detections.Count);
+            outputs["detections"] = VisionValue.Detections(detections);
             summary["accepted"] = detections.Count;
             return new(outputs, summary, overlays);
         }
@@ -1820,6 +1849,169 @@ internal static class JLVisionMatching
         static string FormatBrushStroke(VisionRoiBrushStroke stroke) =>
             FormattableString.Invariant($"{stroke.Mode}:{stroke.Width:R}:")
             + string.Join(',', stroke.Points.Select(point => FormattableString.Invariant($"{point.X:R},{point.Y:R}")));
+    }
+
+    /// <summary>
+    /// NCC has no continuous scaled model. Uniform scale is a discrete set of resampled templates.
+    /// A template ROI, when present, is applied with ReduceDomain so only masked pixels train the model.
+    /// Polarity ignore, clutter, and deformation belong to match.shape.
+    /// </summary>
+    private static void AppendNccCandidates(
+        JlImage matchingScene,
+        JlImage grayTemplate,
+        Mat templateBuffer,
+        VisionRoi? templateRoi,
+        double range,
+        double step,
+        int requestedPyramidLevels,
+        int resolvedPyramidLevels,
+        bool squaredDifference,
+        double minScore,
+        int acceptLimit,
+        double scaleMin,
+        double scaleMax,
+        double scaleStep,
+        bool widenedSearch,
+        CancellationToken token,
+        Dictionary<string, object?> summary,
+        List<ShapeMatchCandidate> matchedCandidates)
+    {
+        matchingScene.GetImageSize(out int sceneWidth, out int sceneHeight);
+        var scales = TemplateScales(scaleMin, scaleMax, scaleStep);
+        summary["scaleSamples"] = scales.Count;
+        var searched = 0;
+        var cacheHit = true;
+        var candidateIndex = 0;
+        foreach (var scale in scales)
+        {
+            token.ThrowIfCancellationRequested();
+            var scaledWidth = Math.Max(1, (int)Math.Round(templateBuffer.Width * scale));
+            var scaledHeight = Math.Max(1, (int)Math.Round(templateBuffer.Height * scale));
+            if (scaledWidth > sceneWidth || scaledHeight > sceneHeight) continue;
+            searched++;
+            var unscaled = Math.Abs(scale - 1d) < 1e-9;
+            var masked = templateRoi is not null;
+            Mat? ownedGray = null;
+            JlImage? ownedTemplate = null;
+            JlImage? ownedMask = null;
+            JlRegion? ownedRegion = null;
+            JlImage? ownedReduced = null;
+            try
+            {
+                JlImage modelImage;
+                Mat keyImage;
+                int modelWidth;
+                int modelHeight;
+                if (unscaled && !masked)
+                {
+                    modelImage = grayTemplate;
+                    keyImage = templateBuffer;
+                    modelWidth = templateBuffer.Width;
+                    modelHeight = templateBuffer.Height;
+                }
+                else
+                {
+                    using var grayMat = JLVisionImages.ToMat(grayTemplate);
+                    ownedGray = new Mat();
+                    if (unscaled) grayMat.CopyTo(ownedGray);
+                    else Cv2.Resize(grayMat, ownedGray, new Size(scaledWidth, scaledHeight), 0, 0,
+                        scale < 1d ? InterpolationFlags.Area : InterpolationFlags.Linear);
+                    ownedTemplate = JLVisionImages.FromMat(ownedGray);
+                    modelImage = ownedTemplate;
+                    keyImage = ownedGray;
+                    modelWidth = ownedGray.Width;
+                    modelHeight = ownedGray.Height;
+                    if (masked)
+                    {
+                        using var mask = new Mat(templateBuffer.Height, templateBuffer.Width, MatType.CV_8UC1, Scalar.All(0));
+                        FillRoiMask(mask, templateRoi, new Rect(0, 0, templateBuffer.Width, templateBuffer.Height), token);
+                        using var scaledMask = new Mat();
+                        if (unscaled) mask.CopyTo(scaledMask);
+                        else Cv2.Resize(mask, scaledMask, new Size(modelWidth, modelHeight), 0, 0, InterpolationFlags.Nearest);
+                        if (Cv2.CountNonZero(scaledMask) < 16)
+                            throw new InvalidOperationException("Template mask must cover at least 16 pixels.");
+                        ownedMask = JLVisionImages.FromMat(scaledMask);
+                        ownedRegion = ownedMask.Threshold(1d, 255d);
+                        ownedReduced = ownedTemplate.ReduceDomain(ownedRegion);
+                        modelImage = ownedReduced;
+                    }
+                }
+
+                var modelOriginX = (modelWidth - 1) / 2d;
+                var modelOriginY = (modelHeight - 1) / 2d;
+                var levels = requestedPyramidLevels == 0 && !unscaled
+                    ? Math.Clamp((int)Math.Floor(Math.Log2(Math.Max(1d, Math.Min(modelWidth, modelHeight) / 6d))) + 1, 1, 8)
+                    : resolvedPyramidLevels;
+                var fingerprint = unscaled && !masked ? "" : RoiFingerprint(templateRoi) + ":" + scale.ToString("R");
+                using var lease = JLVisionModelCache.Acquire(
+                    Key(keyImage, false, range, step, modelOriginX, modelOriginY, levels, clutterConfig: fingerprint),
+                    () =>
+                    {
+                        var created = new JlNCCModel();
+                        try
+                        {
+                            created.CreateNccModel(modelImage, levels, -range, 2 * range, step, "use_polarity");
+                            return created;
+                        }
+                        catch
+                        {
+                            created.Dispose();
+                            throw;
+                        }
+                    });
+                cacheHit &= lease.Hit;
+                var numMatches = squaredDifference || acceptLimit > 1 || scales.Count > 1 || widenedSearch
+                    ? Math.Min(100, Math.Max(acceptLimit, acceptLimit * 4))
+                    : 1;
+                var model = (JlNCCModel)lease.Model;
+                matchingScene.FindNccModel(model, -range, 2 * range, squaredDifference ? .001 : minScore, numMatches, .5, "true", 0,
+                    out var rows, out var cols, out var angles, out var scores);
+                using (rows)
+                using (cols)
+                using (angles)
+                using (scores)
+                {
+                    for (var index = 0; index < scores.Length; index++)
+                    {
+                        var candidateScore = squaredDifference
+                            ? Ssd(matchingScene, modelImage, cols[index].D, rows[index].D, angles[index].D, modelOriginX, modelOriginY)
+                            : scores[index].D;
+                        matchedCandidates.Add(new(cols[index].D, rows[index].D, angles[index].D, scale, scale, candidateScore,
+                            modelWidth, modelHeight, modelOriginX, modelOriginY, candidateIndex++));
+                    }
+                }
+            }
+            finally
+            {
+                ownedReduced?.Dispose();
+                ownedRegion?.Dispose();
+                ownedMask?.Dispose();
+                ownedTemplate?.Dispose();
+                ownedGray?.Dispose();
+            }
+        }
+
+        if (searched == 0) throw new InvalidOperationException("Template is larger than the scene image.");
+        summary["modelCacheHit"] = cacheHit;
+    }
+
+    private static List<double> TemplateScales(double scaleMin, double scaleMax, double scaleStep)
+    {
+        if (Math.Abs(scaleMin - 1d) < 1e-9 && Math.Abs(scaleMax - 1d) < 1e-9) return [1d];
+        var samples = new List<double>();
+        for (var percent = scaleMin * 100d; percent <= scaleMax * 100d + 1e-6; percent += scaleStep * 100d)
+        {
+            samples.Add(percent / 100d);
+            if (samples.Count > 41)
+                throw new InvalidOperationException("match.template scale search exceeds 41 samples. Increase scaleStepPercent or narrow the scale range.");
+        }
+        if (samples.Count == 0 || Math.Abs(samples[^1] - scaleMax) > 1e-6)
+        {
+            samples.Add(scaleMax);
+            if (samples.Count > 41)
+                throw new InvalidOperationException("match.template scale search exceeds 41 samples. Increase scaleStepPercent or narrow the scale range.");
+        }
+        return samples;
     }
 
     private static string Key(Mat template, bool shape, double range, double step, double x, double y, int levels = 0,

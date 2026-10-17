@@ -99,7 +99,7 @@ public sealed class CoordinatePointNode : IVisionNodeExecutor
     public string Type => "coordinate.point";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var p=new VisionCoordinatePoint2D(node.GetDouble("x",0),node.GetDouble("y",0),node.GetString("frame","Workpiece"),node.GetString("unit","mm"));
+        var p = CoordinateLiteral.Point(context, node, 0, 0, "Workpiece");
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"point",VisionValue.CoordinatePoint(p)}},new Dictionary<string,object?>{{"point",$"({p.X:0.###},{p.Y:0.###}) {p.Unit}"},{"frame",p.Frame}}));
     }
 }
@@ -113,5 +113,54 @@ public sealed class CoordinateDistanceNode : IVisionNodeExecutor
         if(!string.Equals(a.Frame,b.Frame,StringComparison.OrdinalIgnoreCase)||!string.Equals(a.Unit,b.Unit,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"Coordinate frame/unit mismatch: {a.Frame}/{a.Unit} vs {b.Frame}/{b.Unit}.");
         var d=Math.Sqrt(Math.Pow(b.X-a.X,2)+Math.Pow(b.Y-a.Y,2)); var m=new VisionMeasurement(d,a.Unit,"Distance");
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string,VisionValue>{{"measurement",VisionValue.Measurement(m)},{"distance",VisionValue.Double(d)}},new Dictionary<string,object?>{{"distance",Math.Round(d,4)},{"unit",a.Unit},{"frame",a.Frame}}));
+    }
+}
+
+internal static class CoordinateLiteral
+{
+    public static VisionCoordinatePoint2D Point(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, string defaultFrame)
+    {
+        var (x, y, frame, unit) = Read(context, node, defaultX, defaultY, defaultFrame, "coordinate.point");
+        return new VisionCoordinatePoint2D(x, y, frame, unit);
+    }
+
+    public static VisionCoordinatePose2D Pose(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, double defaultTheta, string defaultFrame)
+    {
+        var (x, y, frame, unit) = Read(context, node, defaultX, defaultY, defaultFrame, "coordinate.pose");
+        var theta = Number(context, node, "thetaDeg", defaultTheta, "coordinate.pose");
+        return new VisionCoordinatePose2D(x, y, VisionTransform2D.NormalizeAngleDeg(theta), frame, unit);
+    }
+
+    private static (double X, double Y, string Frame, string Unit) Read(NodeExecutionContext context, NodeDefinition node, double defaultX, double defaultY, string defaultFrame, string nodeType)
+    {
+        var x = Number(context, node, "x", defaultX, nodeType);
+        var y = Number(context, node, "y", defaultY, nodeType);
+        var frame = node.GetString("frame", defaultFrame).Trim();
+        if (frame.Length == 0)
+            throw new InvalidOperationException($"{nodeType} frame must be non-empty. Connect a frame tree to check the name against known frames.");
+        var unitText = node.GetString("unit", "mm");
+        var unit = unitText.Trim().ToLowerInvariant();
+        if (unit is not ("mm" or "cm" or "m"))
+            throw new InvalidOperationException($"{nodeType} unit '{unitText}' is not supported. Allowed units: mm, cm, m.");
+        if (context.TryGetValue("tree", out var treeValue))
+        {
+            var tree = treeValue.Require<VisionFrameTree2D>("tree");
+            var known = tree.Transforms
+                .SelectMany(transform => new[] { transform.SourceFrame, transform.TargetFrame })
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (!known.Any(name => name.Equals(frame, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"{nodeType} frame '{frame}' is not in the connected frame tree. Known frames: {string.Join(", ", known)}.");
+        }
+        return (x, y, frame, unit);
+    }
+
+    private static double Number(NodeExecutionContext context, NodeDefinition node, string name, double fallback, string nodeType)
+    {
+        var value = context.TryGetValue(name, out _) ? context.RequireNumber(name) : node.GetDouble(name, fallback);
+        if (!double.IsFinite(value))
+            throw new InvalidOperationException($"{nodeType} {name} must be a finite number.");
+        return value;
     }
 }

@@ -458,13 +458,24 @@ public sealed class Batch1NodeTests
     }
 
     [Fact]
-    public async Task ValueRange_ChecksInclusiveWindow_AndSwapsReversedBounds()
+    public async Task ValueRange_ChecksInclusiveWindow_AndRejectsReversedBounds()
     {
-        Assert.True((bool)(await Run(new ValueRangeNode(), Number(50), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
+        var inside = await Run(new ValueRangeNode(), Number(50), """{"min":0,"max":100}""");
+        Assert.True((bool)inside.Outputs["pass"].Value!);
+        Assert.Equal(0d, (double)inside.Outputs["deviation"].Value!, 6);
+        Assert.Equal(50d, (double)inside.Outputs["clamped"].Value!, 6);
         Assert.False((bool)(await Run(new ValueRangeNode(), Number(101), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
-        Assert.True((bool)(await Run(new ValueRangeNode(), Number(100), """{"min":0,"max":100}""")).Outputs["pass"].Value!);      // 闭区间
-        Assert.True((bool)(await Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}""")).Outputs["pass"].Value!);       // 反向配置自动交换
-        Assert.True((bool)(await Run(new ValueRangeNode(), Number(150), """{"min":0,"max":100,"invert":true}""")).Outputs["pass"].Value!);
+        Assert.True((bool)(await Run(new ValueRangeNode(), Number(100), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
+        var reversed = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}"""));
+        Assert.Contains("greater than maximum", reversed.Message);
+        var high = await Run(new ValueRangeNode(), Number(150), """{"min":0,"max":100,"invert":true}""");
+        Assert.True((bool)high.Outputs["pass"].Value!);
+        Assert.Equal(50d, (double)high.Outputs["deviation"].Value!, 6);
+        Assert.Equal(100d, (double)high.Outputs["clamped"].Value!, 6);
+        var low = await Run(new ValueRangeNode(), Number(-4), """{"min":0,"max":100}""");
+        Assert.Equal(-4d, (double)low.Outputs["deviation"].Value!, 6);
+        Assert.Equal(0d, (double)low.Outputs["clamped"].Value!, 6);
     }
 
     [Fact]

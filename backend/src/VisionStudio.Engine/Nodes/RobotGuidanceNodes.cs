@@ -89,9 +89,7 @@ public sealed class CoordinatePoseNode : IVisionNodeExecutor
     public string Type => "coordinate.pose";
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
-        var pose = new VisionCoordinatePose2D(
-            node.GetDouble("x", 0), node.GetDouble("y", 0), node.GetDouble("thetaDeg", 0),
-            node.GetString("frame", "RobotBase"), node.GetString("unit", "mm"));
+        var pose = CoordinateLiteral.Pose(context, node, 0, 0, 0, "RobotBase");
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["pose"] = VisionValue.CoordinatePose(pose) },
             new Dictionary<string, object?> { ["pose"] = $"X={pose.X:0.###}, Y={pose.Y:0.###}, R={pose.ThetaDeg:0.###}°", ["frame"] = pose.Frame, ["unit"] = pose.Unit }));

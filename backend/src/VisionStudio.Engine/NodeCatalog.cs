@@ -323,7 +323,7 @@ public static class BuiltInNodeCatalog
             "match.template",
             "Template Match",
             "Matching",
-            [ExecIn, new("image", VisionDataType.Image), new("template", VisionDataType.Image, Required: false)],
+            [ExecIn, new("image", VisionDataType.Image), new("template", VisionDataType.Image, Required: false), new("searchRoi", VisionDataType.Roi, Required: false), new("templateRoi", VisionDataType.Roi, Required: false)],
             [
                 new("found", VisionDataType.Boolean),
                 new("score", VisionDataType.Double),
@@ -332,6 +332,9 @@ public static class BuiltInNodeCatalog
                 new("y", VisionDataType.Double, Required: false),
                 new("center", VisionDataType.Point2D, Required: false),
                 new("rectangle", VisionDataType.Rectangle2D, Required: false),
+                new("scale", VisionDataType.Double, Required: false),
+                new("count", VisionDataType.Integer),
+                new("detections", VisionDataType.DetectionList),
                 Next
             ],
             [
@@ -344,9 +347,14 @@ public static class BuiltInNodeCatalog
                 [
                     new("Normalized cross-correlation", "ccoeff-normed"),
                     new("Normalized squared difference", "sqdiff-normed")
-                ])
+                ]),
+                new("maxTargets", "Max Targets", "number", 1, 1, 50, 1, Group: "Search", Description: "Accepted matches. found/score/x/y/angle stay the best match. Default 1 keeps older single-result workflows."),
+                new("minCenterDistance", "Min Center Distance", "number", 0, 0, 10000, 1, Unit: "px", Group: "Search", Description: "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."),
+                new("scaleMinPercent", "Scale Min", "number", 100, 50, 200, 1, Unit: "%", Group: "Scale", Description: "Uniform scale is a discrete resampled NCC search, not a continuous scaled model. 100 with Scale Max 100 keeps the original single-scale search. Use match.shape for trained scale."),
+                new("scaleMaxPercent", "Scale Max", "number", 100, 50, 200, 1, Unit: "%", Group: "Scale", Description: "Largest uniform scale to resample. Must be greater than or equal to Scale Min."),
+                new("scaleStepPercent", "Scale Step (%)", "number", 10, 1, 50, 1, Unit: "%", Group: "Scale", Description: "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected.")
             ],
-            "JLVision cached NCC pyramid matching with subpixel translation and rotation. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
+            "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches, a search ROI, a template mask, and a discrete uniform scale range are optional; defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
         new(
@@ -574,15 +582,15 @@ public static class BuiltInNodeCatalog
             "coordinate.point",
             "Coordinate Point",
             "Coordinate",
-            [ExecIn],
+            [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
             [new("point", VisionDataType.CoordinatePoint2D), Next],
             [
-                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
-                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
-                new("frame", "Frame", "text", "Workpiece", Group: "Point"),
+                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the X input is not connected."),
+                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the Y input is not connected."),
+                new("frame", "Frame", "text", "Workpiece", Group: "Point", Description: "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."),
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
             ],
-            "Create a constant coordinate-aware reference point.",
+            "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
             "builtin"),
         new(
             "coordinate.distance",
@@ -660,16 +668,16 @@ public static class BuiltInNodeCatalog
             "coordinate.pose",
             "Coordinate Pose",
             "Coordinate",
-            [ExecIn],
+            [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("thetaDeg", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
             [new("pose", VisionDataType.CoordinatePose2D), Next],
             [
-                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose"),
-                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose"),
-                new("frame", "Frame", "text", "RobotBase", Group: "Pose"),
+                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the X input is not connected."),
+                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the Y input is not connected."),
+                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose", Description: "Used when the theta input is not connected. The output angle is normalized to (-180, 180]."),
+                new("frame", "Frame", "text", "RobotBase", Group: "Pose", Description: "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."),
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Pose")
             ],
-            "Create a constant frame-aware 2D pose.",
+            "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. The frame must be non-empty; a connected frame tree checks it against known frames.",
             "builtin"),
         new(
             "coordinate.poseToTransform",
@@ -771,9 +779,27 @@ public static class BuiltInNodeCatalog
                 new("compareValue", "Compare Value", "text", "1", Group: "Condition"),
                 new("timeoutMs", "Timeout", "number", 5000, 50, 120000, 50, Unit: "ms", Group: "Wait"),
                 new("pollMs", "Poll Interval", "number", 25, 10, 5000, 5, Unit: "ms", Group: "Wait"),
-                new("autoConnect", "Auto Connect", "boolean", true, Group: "Device")
+                new("autoConnect", "Auto Connect", "boolean", true, Group: "Device"),
+                new("triggerMode", "Trigger", "select", "Level", Options:
+                [
+                    new("Level", "Level"),
+                    new("Rising", "Rising"),
+                    new("Falling", "Falling")
+                ], Group: "Condition", Description: "Level waits while the condition is true. Rising waits for false-to-true and Falling for true-to-false. The first sample cannot be an edge."),
+                new("stableMs", "Stable Hold", "number", 0, 0, 120000, 1, Unit: "ms", Group: "Wait", Description: "The armed condition must stay true for this long. 0 accepts the first qualifying sample. Cannot exceed Timeout."),
+                new("qualityMode", "Accepted Quality", "select", "Any", Options:
+                [
+                    new("Any", "Any"),
+                    new("Good", "Good"),
+                    new("Good or Uncertain", "GoodOrUncertain")
+                ], Group: "Condition", Description: "Samples outside the accepted quality do not match, do not move the edge memory, and do not count toward the stable hold."),
+                new("onTimeout", "On Timeout", "select", "Fail", Options:
+                [
+                    new("Fail the node", "Fail"),
+                    new("Continue unmatched", "Continue")
+                ], Group: "Wait", Description: "Fail throws the existing timeout error. Continue succeeds with matched=false so a downstream branch can handle the miss.")
             ],
-            "Block the workflow until a tag condition becomes true or the timeout expires. Useful for PLC trigger/ready handshakes.",
+            "Poll a device tag until the condition is true, an edge is seen, or the timeout expires. Level is the default and still fails on timeout. Rising, falling, stable-hold, quality, and a matched=false timeout result are optional.",
             "builtin",
             new VisionToolCapabilities(Deterministic: false, SupportsParallel: false),
             Resources: [new("device", "deviceId")]),
@@ -899,7 +925,7 @@ public static class BuiltInNodeCatalog
             "value.arithmetic",
             "Arithmetic",
             "Value",
-            [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double)],
+            [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double, Required: false)],
             [new("result", VisionDataType.Double), Next],
             [
                 new("op", "Operation", "select", "add", Options:
@@ -907,23 +933,31 @@ public static class BuiltInNodeCatalog
                     new("Add (a + b)", "add"),
                     new("Subtract (a - b)", "subtract"),
                     new("Multiply (a * b)", "multiply"),
-                    new("Divide (a / b)", "divide")
-                ])
+                    new("Divide (a / b)", "divide"),
+                    new("Power (a ^ b)", "pow"),
+                    new("Square root (a)", "sqrt"),
+                    new("Absolute value (a)", "abs"),
+                    new("Minimum (min a, b)", "min"),
+                    new("Maximum (max a, b)", "max"),
+                    new("Clamp (a)", "clamp")
+                ]),
+                new("clampMin", "Clamp Minimum", "number", 0, -1000000000, 1000000000, 0.001, Group: "Clamp", Description: "Lower bound used only by Clamp."),
+                new("clampMax", "Clamp Maximum", "number", 1, -1000000000, 1000000000, 0.001, Group: "Clamp", Description: "Upper bound used only by Clamp. Must be greater than or equal to Clamp Minimum.")
             ],
-            "Combine two measurements with one of the four basic operations; division by zero fails explicitly instead of producing NaN/Infinity.",
+            "Combine measurements. Add, subtract, multiply, divide, power, min, and max read a and b. Square root, absolute value, and clamp read a only. An unknown operation, division by zero, a negative square root, reversed clamp bounds, or a non-finite result fails instead of guessing.",
             "builtin"),
         new(
             "value.range",
             "Range Check",
             "Value",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("pass", VisionDataType.Boolean), Next],
+            [new("pass", VisionDataType.Boolean), new("deviation", VisionDataType.Double), new("clamped", VisionDataType.Double), Next],
             [
                 new("min", "Min", "number", 0, -1000000000, 1000000000, 1),
                 new("max", "Max", "number", 100, -1000000000, 1000000000, 1),
                 new("invert", "Invert", "boolean", false)
             ],
-            "Inclusive range check (min/max are swapped when configured in reverse); invert for exclusive windows.",
+            "Inclusive range check. min greater than max fails instead of swapping. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window. invert flips pass only.",
             "builtin"),
         new(
             "logic.boolean",
@@ -940,13 +974,13 @@ public static class BuiltInNodeCatalog
                     new("NOT (a)", "not")
                 ])
             ],
-            "Combine boolean results (NOT uses 'a' only); feeds flow.result / flow.if for the final OK/NG disposition.",
+            "Combine boolean results (NOT uses 'a' only). An unknown operation fails instead of falling back to AND. Feeds flow.result / flow.if for the final OK/NG disposition.",
             "builtin"),
         new(
             "flow.if",
             "If",
             "Flow",
-            [ExecIn, new("value", VisionDataType.Double)],
+            [ExecIn, new("value", VisionDataType.Double), new("previous", VisionDataType.Boolean, Required: false)],
             [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean)],
             [
                 new(
@@ -962,10 +996,19 @@ public static class BuiltInNodeCatalog
                         new("<=", "<="),
                         new("==", "=="),
                         new("!=", "!=")
-                    ]),
-                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1)
+                    ], Description: "Used in threshold mode."),
+                new("threshold", "Compare Value", "number", 15000, -99999999, 99999999, 1, Description: "Used in threshold mode."),
+                new("mode", "Compare Mode", "select", "threshold", Options:
+                [
+                    new("Threshold", "threshold"),
+                    new("Inside range", "range")
+                ], Description: "Threshold compares one value. Inside range checks a closed window and ignores the operator."),
+                new("tolerance", "Tolerance", "number", 1e-9, 0, 1000000, 1e-9, Description: "Absolute band for == and !=. The default 1e-9 preserves the previous equality behavior."),
+                new("rangeMin", "Range Minimum", "number", 0, -99999999, 99999999, 1, Description: "Inclusive lower bound for inside-range mode. Must not exceed Range Maximum."),
+                new("rangeMax", "Range Maximum", "number", 100, -99999999, 99999999, 1, Description: "Inclusive upper bound for inside-range mode."),
+                new("hysteresis", "Hysteresis", "number", 0, 0, 1000000, 0.001, Description: "Applied only when the previous condition input is connected. There is no memory across runs. 0 disables it.")
             ],
-            "Workflow Core conditional marker.",
+            "Compare a number and branch true or false. Threshold mode keeps the original operators, with a configurable equality tolerance. Inside-range mode checks a closed window. Hysteresis uses the optional previous condition and does not remember state across runs.",
             "builtin"),
         new(
             "flow.result",

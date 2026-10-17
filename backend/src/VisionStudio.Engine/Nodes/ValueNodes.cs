@@ -6,7 +6,7 @@ namespace VisionStudio.Engine.Nodes;
 /// 批次一（2026-10-13 节点补齐）· 通用数值/布尔判定族。
 /// 用途：把多个测量节点的结果（距离/面积/分数/坐标）组合成完整的 OK/NG 判定——
 /// 常量入参、四则运算、范围比较、布尔逻辑，配合 flow.if / flow.result 形成判定链。
-/// 设计约定：除零等非法运算**显式报错**（不产生 NaN/Infinity 静默污染下游判定）。
+/// 设计约定：除零、未知运算符、上下限颠倒等非法配置**显式报错**（不产生 NaN/Infinity，也不静默改成加法或对调区间）。
 /// </summary>
 public sealed class ValueNumberNode : IVisionNodeExecutor
 {
@@ -37,27 +37,57 @@ public sealed class ValueArithmeticNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         var a = context.RequireNumber("a");
-        var b = context.RequireNumber("b");
-        if (!double.IsFinite(a) || !double.IsFinite(b))
+        if (!double.IsFinite(a))
             throw new InvalidOperationException("value.arithmetic requires finite numeric inputs.");
         var operation = node.GetString("op", "add").Trim().ToLowerInvariant();
+        var needsB = operation is "add" or "subtract" or "multiply" or "divide" or "pow" or "min" or "max";
+        double? b = null;
+        if (needsB)
+        {
+            if (!context.TryGetValue("b", out _))
+                throw new InvalidOperationException($"value.arithmetic operation '{operation}' requires input 'b'.");
+            b = context.RequireNumber("b");
+            if (!double.IsFinite(b.Value))
+                throw new InvalidOperationException("value.arithmetic requires finite numeric inputs.");
+        }
+        else if (operation is not ("sqrt" or "abs" or "clamp"))
+            throw new InvalidOperationException($"value.arithmetic operation '{operation}' is not supported.");
 
         var result = operation switch
         {
-            "subtract" => a - b,
-            "multiply" => a * b,
-            "divide" => b == 0
+            "add" => a + b!.Value,
+            "subtract" => a - b!.Value,
+            "multiply" => a * b!.Value,
+            "divide" => b!.Value == 0
                 ? throw new InvalidOperationException("value.arithmetic divide by zero: input 'b' is 0.")
-                : a / b,
-            _ => a + b
+                : a / b.Value,
+            "pow" => Math.Pow(a, b!.Value),
+            "sqrt" => a < 0
+                ? throw new InvalidOperationException("value.arithmetic sqrt requires input 'a' to be greater than or equal to 0.")
+                : Math.Sqrt(a),
+            "abs" => Math.Abs(a),
+            "min" => Math.Min(a, b!.Value),
+            "max" => Math.Max(a, b!.Value),
+            "clamp" => Clamp(node, a),
+            _ => throw new InvalidOperationException($"value.arithmetic operation '{operation}' is not supported.")
         };
         if (!double.IsFinite(result))
             throw new InvalidOperationException("value.arithmetic result is not finite.");
-        operation = operation switch { "subtract" or "multiply" or "divide" => operation, _ => "add" };
 
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["result"] = VisionValue.Double(result) },
             new Dictionary<string, object?> { ["op"] = operation, ["a"] = a, ["b"] = b, ["result"] = result }));
+    }
+
+    private static double Clamp(NodeDefinition node, double value)
+    {
+        var minimum = node.GetDouble("clampMin", 0);
+        var maximum = node.GetDouble("clampMax", 1);
+        if (!double.IsFinite(minimum) || !double.IsFinite(maximum))
+            throw new InvalidOperationException("value.arithmetic clamp bounds must be finite.");
+        if (minimum > maximum)
+            throw new InvalidOperationException($"value.arithmetic clamp minimum {minimum} is greater than maximum {maximum}.");
+        return Math.Clamp(value, minimum, maximum);
     }
 }
 
@@ -74,21 +104,29 @@ public sealed class ValueRangeNode : IVisionNodeExecutor
         if (!double.IsFinite(value) || !double.IsFinite(min) || !double.IsFinite(max))
             throw new InvalidOperationException("value.range requires a finite value and finite bounds.");
 
-        // 闭区间 [min, max]；min > max 时交换（容错现场配置顺序），invert 输出取反。
-        var lower = Math.Min(min, max);
-        var upper = Math.Max(min, max);
-        var inside = value >= lower && value <= upper;
+        if (min > max)
+            throw new InvalidOperationException($"value.range minimum {min} is greater than maximum {max}. Swap the bounds or correct the configuration.");
+        var inside = value >= min && value <= max;
         var pass = invert ? !inside : inside;
+        var deviation = value > max ? value - max : value < min ? value - min : 0d;
+        var clamped = Math.Clamp(value, min, max);
 
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass) },
+            new Dictionary<string, VisionValue>
+            {
+                ["pass"] = VisionValue.Boolean(pass),
+                ["deviation"] = VisionValue.Double(deviation),
+                ["clamped"] = VisionValue.Double(clamped)
+            },
             new Dictionary<string, object?>
             {
                 ["value"] = value,
-                ["min"] = lower,
-                ["max"] = upper,
+                ["min"] = min,
+                ["max"] = max,
                 ["invert"] = invert,
-                ["pass"] = pass
+                ["pass"] = pass,
+                ["deviation"] = deviation,
+                ["clamped"] = clamped
             }));
     }
 }
@@ -112,14 +150,15 @@ public sealed class LogicBooleanNode : IVisionNodeExecutor
             case "xor":
                 result = a ^ context.Require<bool>("b");
                 break;
+            case "and":
+                result = a && context.Require<bool>("b");
+                break;
             case "not":
                 usedB = false;
                 result = !a;
                 break;
             default:
-                operation = "and";
-                result = a && context.Require<bool>("b");
-                break;
+                throw new InvalidOperationException($"logic.boolean operation '{operation}' is not supported.");
         }
 
         return ValueTask.FromResult(new NodeExecutorResult(
