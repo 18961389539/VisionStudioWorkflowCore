@@ -95,10 +95,12 @@ describe('caliper diagnostic configuration workspace', () => {
     else manifest.executionSequence = 6;
     mount(manifest); openDiagnostics();
     if (mismatch === 'execution') await waitFor(() => expect(screen.getByText(/诊断与当前运行报告不一致/)).toBeTruthy());
-    else await waitFor(() => expect(screen.getByRole('img', { name: /所选卡尺灰度剖面/ })).toBeTruthy());
+    // Manifest then profile are two sequential fetches inside the full configuration dialog.
+    // The default 1s waitFor budget is enough locally and too short on a loaded Windows runner.
+    else await waitFor(() => expect(screen.getByRole('img', { name: /所选卡尺灰度剖面/ })).toBeTruthy(), { timeout: 8_000 });
     expect(screen.queryByTestId('diagnostic-geometry')).toBeNull();
     expect(screen.getByTestId('image-url').textContent).toBe('');
-  });
+  }, 20_000);
 
   it('removes old geometry and image after a failed newer execution even if its image catalog still has an old output', async () => {
     const view = mount(); openDiagnostics();
