@@ -315,7 +315,7 @@ Usage and limitations are documented in [Planar Calibration](planar-calibration.
 
 `inference.classification` adds an optional minimum-probability gate and an `accepted` output for workflow routing. The gate is available only when scores represent probabilities (Softmax logits or YOLO26-cls probabilities); disabled by default, it preserves existing classifier behavior. `topK` is explicitly limited to 1–100 at execution. The baseline **66** score has not been rerated.
 
-Usage and limits are documented in [ONNX Image Classification](onnx-classification.md). Multi-image batching, multi-crop aggregation, and calibration of classifier confidence remain open product gaps.
+Usage and limits are documented in [ONNX Image Classification](onnx-classification.md). Multi-crop aggregation is now available; multi-image batching and calibration of classifier confidence remain open product gaps.
 
 ## Follow-up implementation: template matching
 

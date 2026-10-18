@@ -18,22 +18,18 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
+        if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
-        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
-        cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        var shape = OnnxInferenceHelpers.Shape(output);
-        var valid = shape.Length == 2 && shape[0] == 1 && shape[1] > 0
-            || shape.Length == 4 && shape[0] == 1 && shape[1] > 0 && shape[2] == 1 && shape[3] == 1;
-        if (!valid)
-            throw new InvalidOperationException($"Classification output must have shape [1,C] or [1,C,1,1]; received [{string.Join(',', shape)}].");
-        var scores = OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
-        if (scores.Length == 0) throw new InvalidOperationException("Classification output contained no class scores.");
         var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
         // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
         var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
+        var multiCrop = node.GetString("multiCrop", "none").Trim().ToLowerInvariant();
+        if (multiCrop is not ("none" or "five" or "ten"))
+            throw new InvalidOperationException("Classification multiCrop must be none, five, or ten.");
+        var viewCropFraction = node.GetDouble("viewCropFraction", 0.9);
+        if (multiCrop != "none" && (!double.IsFinite(viewCropFraction) || viewCropFraction is < 0.5 or > 1))
+            throw new InvalidOperationException("Classification viewCropFraction must be between 0.5 and 1.");
         var minimumConfidence = node.GetDouble("minimumConfidence", 0);
         if (!double.IsFinite(minimumConfidence) || minimumConfidence is < 0 or > 1)
             throw new InvalidOperationException("Classification minimumConfidence must be finite and between 0 and 1.");
@@ -43,25 +39,150 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
         if (topK is < 1 or > 100) throw new InvalidOperationException("Classification topK must be between 1 and 100.");
         var labelsText = node.GetString("labels", string.Empty);
         var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
-        var rank = InferenceStats.RankClassification(scores, layout, applySoftmax, topK, labels);
-        var best = rank.Top[0];
-        var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
-        var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)));
-        var json = JsonSerializer.Serialize(new { classes = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }), outputShape = shape, layout, margin = rank.Margin, entropy = rank.Entropy, minimumConfidence, accepted });
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
+        var inputWidth = node.GetInt("inputWidth", 224); var inputHeight = node.GetInt("inputHeight", 224);
+        if (inputWidth is < 1 or > 4096 || inputHeight is < 1 or > 4096)
+            throw new InvalidOperationException("Classification inputWidth and inputHeight must be between 1 and 4096.");
+        var views = multiCrop == "none"
+            ? new List<Mat> { source }
+            : CreateClassificationViews(source, inputWidth, inputHeight, viewCropFraction, multiCrop == "ten", cancellationToken);
+        var ownsViews = multiCrop != "none";
+        try
+        {
+            double[]? aggregate = null;
+            int[]? outputShape = null;
+            var viewPredictions = new List<object>(views.Count);
+            var classCount = 0;
+            for (var viewIndex = 0; viewIndex < views.Count; viewIndex++)
             {
-                ["result"] = VisionValue.String(json),
-                ["label"] = VisionValue.String(best.Label),
-                ["classIndex"] = VisionValue.Integer(best.Index),
-                ["confidence"] = VisionValue.Double(best.Score),
-                ["accepted"] = VisionValue.Boolean(accepted),
-                ["margin"] = VisionValue.Double(rank.Margin),
-                ["entropy"] = VisionValue.Double(rank.Entropy),
-                ["classCount"] = VisionValue.Integer(rank.ClassCount),
-                ["diagnostics"] = VisionValue.String(diag)
-            },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["diagnostics"] = diag }));
+                cancellationToken.ThrowIfCancellationRequested();
+                using var input = OnnxInferenceHelpers.PrepareInput(net, views[viewIndex], node).Blob;
+                using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+                var shape = OnnxInferenceHelpers.Shape(output);
+                var scores = ReadClassificationScores(output, shape);
+                if (aggregate is not null && scores.Length != classCount)
+                    throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {scores.Length} classes; expected {classCount}.");
+                classCount = scores.Length;
+                outputShape ??= shape;
+                var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
+                viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
+                if (multiCrop == "none")
+                {
+                    aggregate = scores.Select(value => (double)value).ToArray();
+                    break;
+                }
+
+                var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                aggregate ??= new double[distribution.Length];
+                for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
+            }
+
+            var aggregateIsProbability = layout == "yolo26" || applySoftmax;
+            var averaged = aggregate!.Select(value => (float)(value / views.Count)).ToArray();
+            var rank = multiCrop == "none"
+                ? InferenceStats.RankClassification(averaged, layout, applySoftmax, topK, labels)
+                : InferenceStats.RankClassification(averaged, aggregateIsProbability ? "yolo26" : "scores", false, topK, labels);
+            var best = rank.Top[0];
+            var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
+            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count));
+            var jsonFields = new Dictionary<string, object?>
+            {
+                ["classes"] = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }),
+                ["outputShape"] = outputShape, ["layout"] = layout, ["margin"] = rank.Margin, ["entropy"] = rank.Entropy,
+                ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted
+            };
+            if (multiCrop != "none")
+            {
+                jsonFields["multiCrop"] = multiCrop;
+                jsonFields["viewCropFraction"] = viewCropFraction;
+                jsonFields["views"] = viewPredictions;
+            }
+            var json = JsonSerializer.Serialize(jsonFields);
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["result"] = VisionValue.String(json),
+                    ["label"] = VisionValue.String(best.Label),
+                    ["classIndex"] = VisionValue.Integer(best.Index),
+                    ["confidence"] = VisionValue.Double(best.Score),
+                    ["accepted"] = VisionValue.Boolean(accepted),
+                    ["margin"] = VisionValue.Double(rank.Margin),
+                    ["entropy"] = VisionValue.Double(rank.Entropy),
+                    ["classCount"] = VisionValue.Integer(rank.ClassCount),
+                    ["diagnostics"] = VisionValue.String(diag)
+                },
+                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["diagnostics"] = diag }));
+        }
+        finally
+        {
+            if (ownsViews) foreach (var view in views) view.Dispose();
+        }
+    }
+
+    private static float[] ReadClassificationScores(OnnxOutputTensor output, int[] shape)
+    {
+        var valid = shape.Length == 2 && shape[0] == 1 && shape[1] > 0
+            || shape.Length == 4 && shape[0] == 1 && shape[1] > 0 && shape[2] == 1 && shape[3] == 1;
+        if (!valid)
+            throw new InvalidOperationException($"Classification output must have shape [1,C] or [1,C,1,1]; received [{string.Join(',', shape)}].");
+        return OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
+    }
+
+    private static double[] ClassificationDistribution(float[] scores, string layout, bool applySoftmax)
+    {
+        if (layout == "yolo26" || !applySoftmax) return scores.Select(value => (double)value).ToArray();
+        var maximum = scores.Max();
+        var exponentials = scores.Select(value => Math.Exp(value - maximum)).ToArray();
+        var total = exponentials.Sum();
+        if (!double.IsFinite(total) || total <= 0) throw new InvalidOperationException("Classification crop softmax produced an invalid normalizer.");
+        return exponentials.Select(value => value / total).ToArray();
+    }
+
+    private static List<Mat> CreateClassificationViews(Mat source, int inputWidth, int inputHeight, double cropFraction,
+        bool includeHorizontalFlips, CancellationToken cancellationToken)
+    {
+        var targetAspect = (double)inputWidth / inputHeight;
+        var fitWidth = (double)source.Width; var fitHeight = fitWidth / targetAspect;
+        if (fitHeight > source.Height) { fitHeight = source.Height; fitWidth = fitHeight * targetAspect; }
+        var cropWidth = Math.Clamp((int)Math.Round(fitWidth * cropFraction), 1, source.Width);
+        var cropHeight = Math.Clamp((int)Math.Round(fitHeight * cropFraction), 1, source.Height);
+        var maxX = source.Width - cropWidth; var maxY = source.Height - cropHeight;
+        if (maxX == 0 && maxY == 0)
+            throw new InvalidOperationException("Multi-crop aggregation needs a smaller viewCropFraction or a source aspect ratio that yields distinct views.");
+
+        var centerX = maxX / 2; var centerY = maxY / 2;
+        var rectangles = new[]
+        {
+            new Rect(0, 0, cropWidth, cropHeight),
+            new Rect(maxX, 0, cropWidth, cropHeight),
+            new Rect(0, maxY, cropWidth, cropHeight),
+            new Rect(maxX, maxY, cropWidth, cropHeight),
+            new Rect(centerX, centerY, cropWidth, cropHeight)
+        };
+        var views = new List<Mat>(includeHorizontalFlips ? 10 : 5);
+        try
+        {
+            foreach (var rectangle in rectangles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var roi = new Mat(source, rectangle);
+                var view = new Mat();
+                try { JLVisionOperators.Resize(roi, view, new Size(inputWidth, inputHeight)); }
+                catch { view.Dispose(); throw; }
+                views.Add(view);
+                if (includeHorizontalFlips)
+                {
+                    var mirrored = new Mat();
+                    try { Cv2.Flip(view, mirrored, FlipMode.Y); views.Add(mirrored); }
+                    catch { mirrored.Dispose(); throw; }
+                }
+            }
+            return views;
+        }
+        catch
+        {
+            foreach (var view in views) view.Dispose();
+            throw;
+        }
     }
 }
 

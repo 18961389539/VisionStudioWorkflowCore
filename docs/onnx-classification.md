@@ -1,6 +1,6 @@
 # ONNX Image Classification
 
-`inference.classification` runs a single image through an ONNX model and returns the top classes, their scores, and the winning label/index. Configure the input dimensions and normalization to match the model export. Use `swapRB=true` for RGB-trained models loaded through OpenCV's BGR image path.
+`inference.classification` runs an image through an ONNX model and returns the top classes, their scores, and the winning label/index. Configure the input dimensions and normalization to match the model export. Use `swapRB=true` for RGB-trained models loaded through OpenCV's BGR image path.
 
 ## Output layout and labels
 
@@ -15,4 +15,8 @@ Set `minimumConfidence` between 0 and 1 to get an `accepted` boolean. The node r
 
 Connect `accepted` to a branch node when low-confidence images should take a review, retry, or reject path. The JSON `result` also includes `minimumConfidence` and `accepted` for run records.
 
-The node expects one image at a time and does not train or evaluate models. It does not aggregate crops or multiple views; combine those with explicit workflow branches and collection nodes.
+## Multi-crop views
+
+`multiCrop=five` evaluates center and four corner crops whose aspect ratio matches the model input. Each crop uses `viewCropFraction` of the largest matching crop, defaulting to 0.9. If `viewCropFraction=1` and the source already matches the model aspect ratio, there are no distinct crops and the node reports a configuration error. The node averages per-view probabilities when softmax is enabled; with raw scores, it averages those scores. `multiCrop=ten` also evaluates a horizontal flip of each crop and is appropriate only when horizontal orientation does not change the class. Result JSON records each view's winning class and score. Every view runs as a separate ONNX call, so ten-view inference takes roughly ten times the single-view work. The default `none` keeps one-call behavior.
+
+The node expects one source image at a time and does not train or evaluate models. Use a representative validation set to choose aggregation and confidence settings.
