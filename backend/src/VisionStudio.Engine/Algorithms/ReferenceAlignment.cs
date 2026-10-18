@@ -1,17 +1,17 @@
 namespace VisionStudio.Engine.Algorithms;
 
-/// <summary>Pure golden-template helpers: sampled/coarse-to-fine integer-shift registration and
+/// <summary>Pure golden-template helpers: sampled/coarse-to-fine translation registration and
 /// least-squares illumination (gain/offset) compensation, HALCON variation-model style.
 /// Inputs are row-major grayscale buffers in source intensity units; optional masks
 /// restrict fitting and alignment scoring to the inspection domain.</summary>
 public static class ReferenceAlignment
 {
-    public sealed record ShiftResult(int ShiftX, int ShiftY, double MeanAbsoluteDifference);
+    public sealed record ShiftResult(double ShiftX, double ShiftY, double MeanAbsoluteDifference);
 
-    public static ShiftResult SearchShift(byte[] image, byte[] reference, int width, int height, int maxShift, byte[]? domainMask = null, CancellationToken cancellationToken = default)
-        => SearchShift(ToFloat(image), ToFloat(reference), width, height, maxShift, domainMask, cancellationToken);
+    public static ShiftResult SearchShift(byte[] image, byte[] reference, int width, int height, int maxShift, byte[]? domainMask = null, CancellationToken cancellationToken = default, bool subpixel = false)
+        => SearchShift(ToFloat(image), ToFloat(reference), width, height, maxShift, domainMask, cancellationToken, subpixel);
 
-    public static ShiftResult SearchShift(float[] image, float[] reference, int width, int height, int maxShift, byte[]? domainMask = null, CancellationToken cancellationToken = default)
+    public static ShiftResult SearchShift(float[] image, float[] reference, int width, int height, int maxShift, byte[]? domainMask = null, CancellationToken cancellationToken = default, bool subpixel = false)
     {
         if (width < 1 || height < 1) throw new InvalidOperationException("Registration dimensions must be positive.");
         var length = checked(width * height);
@@ -40,10 +40,10 @@ public static class ReferenceAlignment
         foreach (var candidate in coarseCandidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var exact = ScoreShift(image, reference, width, height, candidate.ShiftX, candidate.ShiftY, domainMask, null, cancellationToken);
+            var exact = ScoreShift(image, reference, width, height, (int)candidate.ShiftX, (int)candidate.ShiftY, domainMask, null, cancellationToken);
             if (IsBetter(exact, best)) best = exact;
         }
-        var centerX = best.ShiftX; var centerY = best.ShiftY;
+        var centerX = (int)best.ShiftX; var centerY = (int)best.ShiftY;
         for (var dy = Math.Max(-maxShift, centerY - 1); dy <= Math.Min(maxShift, centerY + 1); dy++)
         for (var dx = Math.Max(-maxShift, centerX - 1); dx <= Math.Min(maxShift, centerX + 1); dx++)
         {
@@ -51,7 +51,38 @@ public static class ReferenceAlignment
             var refined = ScoreShift(image, reference, width, height, dx, dy, domainMask, null, cancellationToken);
             if (IsBetter(refined, best)) best = refined;
         }
-        return best.MeanAbsoluteDifference == double.MaxValue ? new(0, 0, 0) : best;
+        if (best.MeanAbsoluteDifference == double.MaxValue) return new(0, 0, 0);
+        if (!subpixel) return best;
+
+        // Estimate the fractional peak from normalized cross-correlation around the
+        // integer solution. The final reported registration error remains the same
+        // domain-restricted mean absolute difference used by the integer search.
+        var refinedX = RefineSubpixelAxis(best.ShiftX, best.ShiftY, axisX: true);
+        var refinedY = RefineSubpixelAxis(best.ShiftX, best.ShiftY, axisX: false);
+        if (!TryScoreShift(image, reference, width, height, refinedX, refinedY, domainMask, null, cancellationToken, out var error))
+            return best;
+        if (error > best.MeanAbsoluteDifference + 1e-9) return best;
+        return new(refinedX, refinedY, error);
+
+        double RefineSubpixelAxis(double centerX, double centerY, bool axisX)
+        {
+            var center = axisX ? centerX : centerY;
+            if (center - 0.5 < -maxShift || center + 0.5 > maxShift) return center;
+            const double probe = 0.5;
+            var left = axisX
+                ? ScoreCorrelation(image, reference, width, height, centerX - probe, centerY, sampleIndices, cancellationToken)
+                : ScoreCorrelation(image, reference, width, height, centerX, centerY - probe, sampleIndices, cancellationToken);
+            var middle = ScoreCorrelation(image, reference, width, height, centerX, centerY, sampleIndices, cancellationToken);
+            var right = axisX
+                ? ScoreCorrelation(image, reference, width, height, centerX + probe, centerY, sampleIndices, cancellationToken)
+                : ScoreCorrelation(image, reference, width, height, centerX, centerY + probe, sampleIndices, cancellationToken);
+            if (!double.IsFinite(left) || !double.IsFinite(middle) || !double.IsFinite(right)) return center;
+            var curvature = left - 2 * middle + right;
+            if (curvature >= -1e-12) return center;
+            var offset = 0.5 * probe * (left - right) / curvature;
+            offset = Math.Clamp(offset, -probe, probe);
+            return Math.Clamp(center + offset, -maxShift, maxShift);
+        }
     }
 
     private static int[] RegistrationSampleIndices(int length, byte[]? domainMask, CancellationToken token)
@@ -80,32 +111,121 @@ public static class ReferenceAlignment
     private static ShiftResult ScoreShift(float[] image, float[] reference, int width, int height, int dx, int dy,
         byte[]? domainMask, int[]? sampleIndices, CancellationToken token)
     {
+        TryScoreShift(image, reference, width, height, dx, dy, domainMask, sampleIndices, token, out var error);
+        return new(dx, dy, error);
+    }
+
+    private static bool TryScoreShift(float[] image, float[] reference, int width, int height, double dx, double dy,
+        byte[]? domainMask, int[]? sampleIndices, CancellationToken token, out double meanAbsoluteDifference)
+    {
         double sum = 0; long count = 0;
+        if (dx == Math.Truncate(dx) && dy == Math.Truncate(dy))
+        {
+            var shiftX = (int)dx; var shiftY = (int)dy;
+            if (sampleIndices is not null)
+            {
+                for (var i = 0; i < sampleIndices.Length; i++)
+                {
+                    if ((i & 0x3FFF) == 0) token.ThrowIfCancellationRequested();
+                    var index = sampleIndices[i]; var x = index % width; var y = index / width;
+                    var referenceX = x - shiftX; var referenceY = y - shiftY;
+                    if (referenceX < 0 || referenceX >= width || referenceY < 0 || referenceY >= height) continue;
+                    sum += Math.Abs((double)image[index] - reference[referenceY * width + referenceX]); count++;
+                }
+            }
+            else
+            {
+                for (var y = Math.Max(0, shiftY); y < Math.Min(height, height + shiftY); y++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    for (var x = Math.Max(0, shiftX); x < Math.Min(width, width + shiftX); x++)
+                    {
+                        var index = y * width + x;
+                        if (domainMask is not null && domainMask[index] == 0) continue;
+                        sum += Math.Abs((double)image[index] - reference[(y - shiftY) * width + (x - shiftX)]); count++;
+                    }
+                }
+            }
+            meanAbsoluteDifference = count == 0 ? double.MaxValue : sum / count;
+            return count != 0;
+        }
         if (sampleIndices is not null)
         {
             for (var i = 0; i < sampleIndices.Length; i++)
             {
                 if ((i & 0x3FFF) == 0) token.ThrowIfCancellationRequested();
                 var index = sampleIndices[i]; var x = index % width; var y = index / width;
-                var referenceX = x - dx; var referenceY = y - dy;
-                if (referenceX < 0 || referenceX >= width || referenceY < 0 || referenceY >= height) continue;
-                sum += Math.Abs((double)image[index] - reference[referenceY * width + referenceX]); count++;
+                if (!TrySampleBilinear(reference, width, height, x - dx, y - dy, out var referenceValue)) continue;
+                sum += Math.Abs((double)image[index] - referenceValue); count++;
             }
         }
         else
         {
-            for (var y = Math.Max(0, dy); y < Math.Min(height, height + dy); y++)
+            for (var y = 0; y < height; y++)
             {
                 token.ThrowIfCancellationRequested();
-                for (var x = Math.Max(0, dx); x < Math.Min(width, width + dx); x++)
+                for (var x = 0; x < width; x++)
                 {
                     var index = y * width + x;
                     if (domainMask is not null && domainMask[index] == 0) continue;
-                    sum += Math.Abs((double)image[index] - reference[(y - dy) * width + (x - dx)]); count++;
+                    if (!TrySampleBilinear(reference, width, height, x - dx, y - dy, out var referenceValue)) continue;
+                    sum += Math.Abs((double)image[index] - referenceValue); count++;
                 }
             }
         }
-        return count == 0 ? new(dx, dy, double.MaxValue) : new(dx, dy, sum / count);
+        meanAbsoluteDifference = count == 0 ? double.MaxValue : sum / count;
+        return count != 0;
+    }
+
+    private static double ScoreCorrelation(float[] image, float[] reference, int width, int height, double dx, double dy,
+        int[] sampleIndices, CancellationToken token)
+    {
+        double imageSum = 0, referenceSum = 0; long count = 0;
+        for (var i = 0; i < sampleIndices.Length; i++)
+        {
+            if ((i & 0x3FFF) == 0) token.ThrowIfCancellationRequested();
+            var index = sampleIndices[i]; var x = index % width; var y = index / width;
+            if (!TrySampleBilinear(reference, width, height, x - dx, y - dy, out var referenceValue)) continue;
+            imageSum += image[index]; referenceSum += referenceValue; count++;
+        }
+        if (count < 2) return double.NaN;
+        var imageMean = imageSum / count; var referenceMean = referenceSum / count;
+        double covariance = 0, imageVariance = 0, referenceVariance = 0;
+        for (var i = 0; i < sampleIndices.Length; i++)
+        {
+            if ((i & 0x3FFF) == 0) token.ThrowIfCancellationRequested();
+            var index = sampleIndices[i]; var x = index % width; var y = index / width;
+            if (!TrySampleBilinear(reference, width, height, x - dx, y - dy, out var referenceValue)) continue;
+            var imageDelta = image[index] - imageMean; var referenceDelta = referenceValue - referenceMean;
+            covariance += imageDelta * referenceDelta;
+            imageVariance += imageDelta * imageDelta;
+            referenceVariance += referenceDelta * referenceDelta;
+        }
+        var denominator = Math.Sqrt(imageVariance * referenceVariance);
+        return denominator > 1e-12 ? covariance / denominator : double.NaN;
+    }
+
+    public static bool TrySampleBilinear(float[] values, int width, int height, double x, double y, out float value)
+    {
+        if (width < 1 || height < 1 || values.Length != checked(width * height))
+            throw new InvalidOperationException("Bilinear sampling buffer must match positive image dimensions.");
+        if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || x > width - 1 || y < 0 || y > height - 1)
+        {
+            value = 0;
+            return false;
+        }
+        if (x == Math.Truncate(x) && y == Math.Truncate(y))
+        {
+            value = values[(int)y * width + (int)x];
+            return true;
+        }
+        var x0 = (int)Math.Floor(x); var y0 = (int)Math.Floor(y);
+        var x1 = Math.Min(width - 1, x0 + 1); var y1 = Math.Min(height - 1, y0 + 1);
+        var fx = x - x0; var fy = y - y0;
+        var top = values[y0 * width + x0] * (1d - fx) + values[y0 * width + x1] * fx;
+        var bottom = values[y1 * width + x0] * (1d - fx) + values[y1 * width + x1] * fx;
+        value = (float)(top * (1d - fy) + bottom * fy);
+        return true;
     }
 
     private static bool IsBetter(ShiftResult candidate, ShiftResult current)
@@ -122,21 +242,28 @@ public static class ReferenceAlignment
     /// Border pixels without a corresponding sample are excluded from their model.
     /// </summary>
     public static void AccumulateAlignedSample(float[] mean, float[] m2, int[] sampleCounts, float[] sample,
-        int width, int height, int shiftX, int shiftY, CancellationToken cancellationToken = default)
+        int width, int height, double shiftX, double shiftY, CancellationToken cancellationToken = default)
     {
         if (width < 1 || height < 1) throw new InvalidOperationException("Variation model dimensions must be positive.");
         var length = checked(width * height);
         if (mean.Length != length || m2.Length != length || sampleCounts.Length != length || sample.Length != length)
             throw new InvalidOperationException("Variation model buffers must match image dimensions.");
+        var integerShift = shiftX == Math.Truncate(shiftX) && shiftY == Math.Truncate(shiftY);
+        var integralShiftX = integerShift ? (int)shiftX : 0; var integralShiftY = integerShift ? (int)shiftY : 0;
         for (var y = 0; y < height; y++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             for (var x = 0; x < width; x++)
             {
-                var sampleX = x - shiftX; var sampleY = y - shiftY;
-                if (sampleX < 0 || sampleX >= width || sampleY < 0 || sampleY >= height) continue;
+                float value;
+                if (integerShift)
+                {
+                    var sampleX = x - integralShiftX; var sampleY = y - integralShiftY;
+                    if (sampleX < 0 || sampleX >= width || sampleY < 0 || sampleY >= height) continue;
+                    value = sample[sampleY * width + sampleX];
+                }
+                else if (!TrySampleBilinear(sample, width, height, x - shiftX, y - shiftY, out value)) continue;
                 var index = y * width + x; var count = ++sampleCounts[index];
-                var value = sample[sampleY * width + sampleX];
                 var delta = value - mean[index];
                 mean[index] += delta / count;
                 m2[index] += delta * (value - mean[index]);

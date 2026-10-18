@@ -237,6 +237,9 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         if (!double.IsFinite(maxArea) || maxArea < 0 || maxArea > 0 && maxArea < minArea) throw new InvalidOperationException("maxArea must be 0 (unbounded) or at least minArea.");
         var registrationTolerance = node.GetInt("registrationTolerance", 0);
         if (registrationTolerance is < 0 or > 25) throw new InvalidOperationException("registrationTolerance must be between 0 and 25 pixels.");
+        var subpixelRegistration = node.GetBool("subpixelRegistration", false);
+        if (subpixelRegistration && registrationTolerance == 0)
+            throw new InvalidOperationException("subpixelRegistration requires registrationTolerance greater than zero.");
         var maxRegistrationError = node.GetDouble("maxRegistrationError", 0);
         if (!double.IsFinite(maxRegistrationError) || maxRegistrationError < 0 || maxRegistrationError > 65535)
             throw new InvalidOperationException("maxRegistrationError must be finite and between 0 and 65535.");
@@ -262,7 +265,7 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
         // registration; ordinary image inputs keep the model portable with the graph.
         VisionImage? preparedReference = null;
         float[]? effectiveReferenceValues = null; float[]? sourceValuesCache = null; float[]? modelStdDev = null;
-        var shiftX = 0; var shiftY = 0; var gain = 1d; var offset = 0d; double? registrationError = null;
+        var shiftX = 0d; var shiftY = 0d; var gain = 1d; var offset = 0d; double? registrationError = null;
         var referenceAlignmentErrors = new List<double>();
         try
         {
@@ -296,11 +299,11 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                             sampleValues[i] = (float)(sampleGain * sampleValues[i] + sampleOffset);
                         }
                     }
-                    var sampleShiftX = 0; var sampleShiftY = 0;
+                    var sampleShiftX = 0d; var sampleShiftY = 0d;
                     if (registrationTolerance > 0)
                     {
                         var sampleShift = ReferenceAlignment.SearchShift(referenceAnchor, sampleValues, width, height,
-                            registrationTolerance, domainMask, cancellationToken);
+                            registrationTolerance, domainMask, cancellationToken, subpixelRegistration);
                         sampleShiftX = sampleShift.ShiftX; sampleShiftY = sampleShift.ShiftY;
                         referenceAlignmentErrors.Add(sampleShift.MeanAbsoluteDifference);
                         if (maxRegistrationError > 0 && sampleShift.MeanAbsoluteDifference > maxRegistrationError)
@@ -324,7 +327,8 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                             registrationValues[i] = (float)((sourceValues[i] - fittedOffset) / registrationScale);
                         }
                     }
-                    var shift = ReferenceAlignment.SearchShift(registrationValues, mean, width, height, registrationTolerance, domainMask, cancellationToken);
+                    var shift = ReferenceAlignment.SearchShift(registrationValues, mean, width, height,
+                        registrationTolerance, domainMask, cancellationToken, subpixelRegistration);
                     shiftX = shift.ShiftX; shiftY = shift.ShiftY;
                     registrationError = shift.MeanAbsoluteDifference * registrationScale;
                     if (maxRegistrationError > 0 && registrationError > maxRegistrationError)
@@ -336,16 +340,18 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                         cancellationToken.ThrowIfCancellationRequested();
                         for (var x = 0; x < width; x++)
                         {
-                            var index = y * width + x; var referenceX = x - shiftX; var referenceY = y - shiftY;
-                            if (referenceX < 0 || referenceX >= width || referenceY < 0 || referenceY >= height)
+                            var index = y * width + x;
+                            if (!ReferenceAlignment.TrySampleBilinear(mean, width, height, x - shiftX, y - shiftY, out var referenceValue))
                             {
                                 alignedMean[index] = sourceValues[index];
                                 if (alignedStdDev is not null) alignedStdDev[index] = 0;
                                 continue;
                             }
-                            var referenceIndex = referenceY * width + referenceX;
-                            alignedMean[index] = mean[referenceIndex];
-                            if (alignedStdDev is not null) alignedStdDev[index] = modelStdDev![referenceIndex];
+                            alignedMean[index] = referenceValue;
+                            if (alignedStdDev is not null &&
+                                ReferenceAlignment.TrySampleBilinear(modelStdDev!, width, height, x - shiftX, y - shiftY, out var stdDevValue))
+                                alignedStdDev[index] = stdDevValue;
+                            else if (alignedStdDev is not null) alignedStdDev[index] = 0;
                         }
                     }
                     mean = alignedMean;
@@ -418,7 +424,8 @@ public sealed class ReferenceCompareNode : IVisionNodeExecutor
                 {
                     ["threshold"] = threshold, ["minArea"] = minArea, ["maxArea"] = maxArea,
                     ["polarity"] = node.GetString("polarity", "both"),
-                    ["registrationTolerance"] = registrationTolerance, ["shiftX"] = shiftX, ["shiftY"] = shiftY,
+                    ["registrationTolerance"] = registrationTolerance, ["subpixelRegistration"] = subpixelRegistration,
+                    ["shiftX"] = Math.Round(shiftX, 4), ["shiftY"] = Math.Round(shiftY, 4),
                     ["registrationMeanAbsoluteDifference"] = registrationError,
                     ["referenceSampleCount"] = referenceSamples.Count,
                     ["referenceSampleAlignmentErrors"] = referenceAlignmentErrors,

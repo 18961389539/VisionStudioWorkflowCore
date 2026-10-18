@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "52a96836fcd36f6c96ced45219af476c52a8f3d6b75d4b08d5c6bd759a3e5c84",
+  "hash": "9b7e1fd605527df90b313e352b01fc0492c0952e8ecf0525ba881fb9cf337213",
   "items": [
     {
       "type": "image.acquire",
@@ -3744,7 +3744,14 @@
           "max": 25,
           "step": 1,
           "unit": "px",
-          "description": "Search and refine integer reference shifts within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
+          "description": "Search reference translation within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
+        },
+        {
+          "name": "subpixelRegistration",
+          "label": "Subpixel Registration",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "After integer translation search, optionally refine X/Y offsets to fractional pixels using normalized correlation and bilinear sampling. Requires Registration Tolerance > 0."
         },
         {
           "name": "maxRegistrationError",
@@ -3841,7 +3848,7 @@
           "unit": "px²"
         }
       ],
-      "description": "Golden-template defect comparison: connect one to five known-good images with matching dimensions and pixel depth; optional small-shift registration aligns extra samples and the current image inside the inspection domain. Multiple references build a per-pixel mean and sample-standard-deviation model; a single reference uses the legacy local-texture estimate. Optional registration error gating and illumination compensation precede thresholding, morphology, defect splitting, area filtering and minor/major/critical grading. defects JSON lists area and bounding box per defect; referenceSampleCount reports used samples. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "description": "Golden-template defect comparison: connect one to five known-good images with matching dimensions and pixel depth; optional translation registration aligns extra samples and the current image inside the inspection domain, with optional subpixel refinement. Multiple references build a per-pixel mean and sample-standard-deviation model; a single reference uses the legacy local-texture estimate. Optional registration error gating and illumination compensation precede thresholding, morphology, defect splitting, area filtering and minor/major/critical grading. defects JSON lists area and bounding box per defect; referenceSampleCount reports used samples. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

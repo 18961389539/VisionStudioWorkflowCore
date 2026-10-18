@@ -296,10 +296,14 @@ Only anchors actually cited in earlier batches are compared above; a full previo
 
 ## Follow-up implementation: reference defect model
 
-After the baseline audit, `defect.referenceCompare` was extended to accept one to five known-good image inputs. With multiple samples it aligns extra references by integer translation inside the effective inspection domain, then builds a per-pixel mean and sample-standard-deviation model using online Welford accumulation. `variationK` now uses that measured sample deviation; single-reference workflows retain the prior local-texture estimate. The model keeps the full source grayscale intensity range, including 16-bit images, and reports reference count and sample alignment errors. An optional registration-error gate rejects poorly aligned references or inspected images.
+After the baseline audit, `defect.referenceCompare` was extended to accept one to five known-good image inputs. With multiple samples it aligns extra references by translation inside the effective inspection domain, then builds a per-pixel mean and sample-standard-deviation model using online Welford accumulation. `variationK` now uses that measured sample deviation; single-reference workflows retain the prior local-texture estimate. The model keeps the full source grayscale intensity range, including 16-bit images, and reports reference count and sample alignment errors. An optional registration-error gate rejects poorly aligned references or inspected images.
 
-The earlier **74** score and `<=74` cap describe only the baseline snapshot; this implementation has not yet been rescored against the full audit rubric. Remaining product gaps include persistent/cached model assets, subpixel/rotation/scale registration, and a larger managed sample set.
+The earlier **74** score and `<=74` cap describe only the baseline snapshot; this implementation has not yet been rescored against the full audit rubric. Persistent/cached model assets, rotation/scale registration, and a larger managed sample set remain product gaps.
 Usage and limits are documented in [Reference Defect Compare](reference-defect-comparison.md).
+
+## Follow-up implementation: subpixel reference registration
+
+`defect.referenceCompare` can optionally refine integer translation with normalized-correlation peak interpolation, then bilinearly resample extra good samples and the reference mean/deviation model. The setting is opt-in and requires nonzero `registrationTolerance`, preserving prior graph behavior by default. Registration summaries now retain fractional-pixel offsets. The historical score has not been rerated; rotation/scale/deformation and persistent reusable models remain open product gaps.
 
 ## Follow-up implementation: planar calibration
 

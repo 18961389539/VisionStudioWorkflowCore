@@ -20,12 +20,12 @@ threshold + variationK × sampleStandardDeviation
 
 With one reference, the node retains the local-texture standard-deviation estimate controlled by `variationWindow`. With `variationK = 0`, the node still compares a multi-reference image against the learned mean, but does not add a variation allowance.
 
-`registrationTolerance` searches integer translations within the requested pixel range. It applies to extra references and to the inspected image. Registration scoring is sampled to shortlist shifts and then re-evaluated at full resolution inside the inspection domain. Optional illumination compensation normalizes extra references to the first sample and fits the model to the inspected image. `maxRegistrationError` can reject alignment whose mean absolute grayscale difference exceeds the configured limit; it requires `registrationTolerance > 0`.
+`registrationTolerance` searches translations within the requested pixel range. It applies to extra references and to the inspected image. Registration scoring is sampled to shortlist integer shifts and then re-evaluated at full resolution inside the inspection domain. Enable `subpixelRegistration` to refine the best integer shift to fractional X/Y offsets using normalized correlation; the reference model is bilinearly resampled for alignment. It requires `registrationTolerance > 0` and is off by default. Optional illumination compensation normalizes extra references to the first sample and fits the model to the inspected image. `maxRegistrationError` can reject alignment whose mean absolute grayscale difference exceeds the configured limit; it requires `registrationTolerance > 0`.
 
 Threshold and registration error use the source grayscale intensity units. UInt16 images retain their full intensity range. `referenceSampleCount` reports the number of connected references used; the summary includes the inspected-image registration error and extra-reference alignment errors.
 
 ## Current limits
 
 - Up to five image inputs; the per-pixel model is rebuilt for each node execution and is not stored as a trained workflow asset.
-- Registration handles integer X/Y translation only. It does not handle subpixel shift, rotation, scale, or local deformation.
+- Registration handles X/Y translation, with optional subpixel refinement. It does not handle rotation, scale, or local deformation.
 - A nonzero registration-error gate raises a node execution error when the limit is exceeded, which should be treated as an inspection-system fault rather than an ordinary NG result.
