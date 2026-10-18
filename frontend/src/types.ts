@@ -1036,7 +1036,9 @@ export type CalibrationWizardSession = {
   imageHeight?: number | null;
   views: CalibrationWizardView[];
   enabledCount: number;
-  cameraModel: 'pinhole' | 'fisheye';
+  cameraModel: 'pinhole' | 'fisheye' | 'telecentric';
+  telecentricMagnification: number;
+  telecentricPixelSizeUm: number;
   model?: unknown;
   lastSolveSummary?: Record<string, unknown> | null;
 };

@@ -343,3 +343,7 @@ The Intrinsics Wizard can save solved models as immutable, hashed SQLite version
 
 `calibration.cameraIntrinsics` and the wizard now support selecting OpenCV's four-coefficient Kannala-Brandt fisheye model alongside the existing JLVision native polynomial pinhole model. The fisheye solve reports fitted-model per-view RMS/max residuals, supports the view and overall RMS gates, serializes its lens model into immutable camera-intrinsic assets, and is consumed by `image.undistort` with resolution-scaled intrinsics and a field-of-view balance control. Telecentric and non-central fisheye models remain unsupported. This extension has not been rescored against the full audit rubric.
 
+## Follow-up implementation: object-side telecentric intrinsics
+
+`calibration.cameraIntrinsics` and the Intrinsics Wizard now also support JLVision's `area_scan_telecentric_polynomial` model for standard object-side telecentric lenses. The session document and immutable camera-intrinsic assets preserve magnification, fixed sensor pixel pitch, and the native camera tuple; `image.undistort` builds its radial map with the correct native camera type. The wizard asks for datasheet-based magnification and pixel-pitch values. Telecentric solves report planar homography quality and overall RMS; pinhole pose RMS is disabled because it does not model telecentric projection. Tilted/bilateral models and full audit rescoring remain open work.
+

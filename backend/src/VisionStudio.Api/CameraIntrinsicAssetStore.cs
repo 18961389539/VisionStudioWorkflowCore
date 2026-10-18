@@ -295,12 +295,13 @@ public sealed class CameraIntrinsicAssetStore(SqliteMetadataDatabase db)
 
     private static bool HasValidLensModel(CameraCalibrationModel model)
     {
-        if (model.NativeCameraType is not null && (model.NativeCameraType != "area_scan_polynomial" || model.NativeCameraParameters is not { Length: 12 })) return false;
+        if (model.NativeCameraType is not null && (model.NativeCameraType is not ("area_scan_polynomial" or "area_scan_telecentric_polynomial") || model.NativeCameraParameters is not { Length: 12 })) return false;
         if (model.NativeCameraType is null && model.NativeCameraParameters is not null) return false;
         return model.LensModel switch
         {
             "opencv_fisheye" => model.DistCoeffs.Length == 4 && model.NativeCameraType is null && model.NativeCameraParameters is null,
             "area_scan_polynomial" => model.NativeCameraType == "area_scan_polynomial" && model.NativeCameraParameters is { Length: 12 },
+            "area_scan_telecentric_polynomial" => model.NativeCameraType == "area_scan_telecentric_polynomial" && model.NativeCameraParameters is { Length: 12 },
             "brown_conrady" => model.NativeCameraType is null,
             null => true,
             _ => false

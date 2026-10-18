@@ -40,7 +40,9 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [maxViewRms, setMaxViewRms] = useState(0);
   const [maxRms, setMaxRms] = useState(0);
   const [maxPoseViewRms, setMaxPoseViewRms] = useState(0);
-  const [cameraModel, setCameraModel] = useState<'pinhole' | 'fisheye'>('pinhole');
+  const [cameraModel, setCameraModel] = useState<'pinhole' | 'fisheye' | 'telecentric'>('pinhole');
+  const [telecentricMagnification, setTelecentricMagnification] = useState(0.2);
+  const [telecentricPixelSizeUm, setTelecentricPixelSizeUm] = useState(3.45);
   const [fisheyeBalance, setFisheyeBalance] = useState(0);
   const [hints, setHints] = useState<CalibrationWizardHint[]>([]);
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
@@ -91,14 +93,39 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  const applySessionState = (next: CalibrationWizardSession) => {
+    setSession(next);
+    setCameraModel(next.cameraModel === 'fisheye' || next.cameraModel === 'telecentric' ? next.cameraModel : 'pinhole');
+    setTelecentricMagnification(next.telecentricMagnification ?? 0.2);
+    setTelecentricPixelSizeUm(next.telecentricPixelSizeUm ?? 3.45);
+  };
+
   const refresh = async (next: CalibrationWizardSession) => {
     setSession(next);
   };
 
-  const changeCameraModel = (next: 'pinhole' | 'fisheye') => {
+  const changeCameraModel = (next: 'pinhole' | 'fisheye' | 'telecentric') => {
     if (next === cameraModel) return;
     setCameraModel(next);
     setSession((current) => current ? { ...current, cameraModel: next, model: undefined, lastSolveSummary: null } : current);
+    if (next === 'telecentric') setMaxPoseViewRms(0);
+    setSolveSummary(undefined);
+    setViewStatsRows([]);
+    setPinnedAssetId(undefined);
+    setPinnedVersion(0);
+    setPinnedModel(undefined);
+  };
+
+  const changeTelecentricParameters = (magnification: number, pixelSizeUm: number) => {
+    setTelecentricMagnification(magnification);
+    setTelecentricPixelSizeUm(pixelSizeUm);
+    setSession((current) => current ? {
+      ...current,
+      telecentricMagnification: magnification,
+      telecentricPixelSizeUm: pixelSizeUm,
+      model: undefined,
+      lastSolveSummary: null
+    } : current);
     setSolveSummary(undefined);
     setViewStatsRows([]);
     setPinnedAssetId(undefined);
@@ -116,8 +143,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '创建向导会话失败');
-      setSession(data);
-      setCameraModel(data.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
+      applySessionState(data);
       setSolveSummary(undefined);
       setViewStatsRows([]);
       setHints([]);
@@ -178,8 +204,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '会话文档导入失败');
-      setSession(data);
-      setCameraModel(data.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
+      applySessionState(data);
       setSolveSummary((data.lastSolveSummary as Record<string, unknown> | null) ?? undefined);
       setStep(data.views?.length ? 2 : 1);
       await loadHints(data.sessionId);
@@ -272,12 +297,11 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms, cameraModel })
+        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, cameraModel, telecentricMagnification, telecentricPixelSizeUm })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
-      setSession(data.session);
-      setCameraModel(data.session?.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
+      applySessionState(data.session);
       setSolveSummary(data.result);
       setPinnedAssetId(undefined);
       setPinnedVersion(0);
@@ -300,7 +324,16 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
-      const text = typeof data.documentJson === 'string' ? data.documentJson : JSON.stringify(data.document, null, 2);
+      const sourceDocument = data.document && typeof data.document === 'object' ? data.document as Record<string, unknown> : {};
+      const exportedDocument = {
+        ...sourceDocument,
+        cameraModel,
+        telecentricMagnification,
+        telecentricPixelSizeUm,
+        model: session.model ?? null,
+        lastSolveSummary: session.model ? sourceDocument.lastSolveSummary ?? null : null
+      };
+      const text = JSON.stringify(exportedDocument, null, 2);
       setDocumentJson(text);
       if (Array.isArray(data.hints)) setHints(data.hints);
       await navigator.clipboard?.writeText(text).catch(() => undefined);
@@ -346,8 +379,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       if (!importResponse.ok) throw new Error(restored.error ?? '恢复标定源视图失败');
       let summary: Record<string, unknown> = {};
       try { summary = JSON.parse(snapshot.summaryJson) as Record<string, unknown>; } catch { /* checksum validation already rejects invalid saved JSON */ }
-      setSession(restored);
-      setCameraModel(restored.cameraModel === 'fisheye' ? 'fisheye' : 'pinhole');
+      applySessionState(restored);
       setSolveSummary(summary);
       const stats = summary.viewStats;
       if (typeof stats === 'string') { try { setViewStatsRows(JSON.parse(stats) as Record<string, unknown>[]); } catch { setViewStatsRows([]); } }
@@ -386,9 +418,10 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       if (selectedNodeType === 'calibration.cameraIntrinsics') {
-        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', cameraModel: data.cameraModel ?? cameraModel, maxViewRms, maxRms, maxPoseViewRms });
+        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', cameraModel, maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, telecentricMagnification, telecentricPixelSizeUm });
         messageApi.success('已将视图 JSON 应用到相机内参节点');
       } else if (selectedNodeType === 'image.undistort') {
+        if (!session.model) throw new Error('相机模型已失效或尚未求解，请先重新运行标定。');
         const bound = pinMatchesSession && pinnedAssetId
           ? { intrinsicsAssetId: pinnedAssetId, intrinsicsAssetVersion: pinnedVersion }
           : { intrinsicsAssetId: '', intrinsicsAssetVersion: 0 };
@@ -397,8 +430,10 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       } else {
         onApplyToSelectedNode({
           calibrationDataJson: data.calibrationDataJson ?? '',
-          cameraModel: data.cameraModel ?? cameraModel,
-          calibrationJson: data.calibrationJson ?? ''
+          cameraModel,
+          telecentricMagnification,
+          telecentricPixelSizeUm,
+          calibrationJson: session.model ? data.calibrationJson ?? '' : ''
         });
         messageApi.success('已导出标定结果（请选择内参或去畸变节点以精确写入）');
       }
@@ -415,7 +450,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message="相机内参向导（Batch F）"
-        description="会话落盘 · 质量审核与离群处理 · JLVision 多项式针孔 / OpenCV 鱼眼模型 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。远心标定尚未支持。" />
+        description="会话落盘 · 质量审核与离群处理 · JLVision 多项式针孔 / 物方远心模型、OpenCV 鱼眼模型 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。远心倍率和像元尺寸请按镜头与相机数据表填写。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
       {hints.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
@@ -510,14 +545,19 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
           <Space>
             <Select value={cameraModel} onChange={changeCameraModel} style={{ width: 220 }} options={[
               { value: 'pinhole', label: '针孔（JLVision 多项式）' },
-              { value: 'fisheye', label: '鱼眼（OpenCV 四系数）' }
+              { value: 'fisheye', label: '鱼眼（OpenCV 四系数）' },
+              { value: 'telecentric', label: '物方远心（JLVision 多项式）' }
             ]} />
+            {cameraModel === 'telecentric' && <>
+              <InputNumber addonBefore="镜头倍率" min={0.001} max={10} step={0.01} value={telecentricMagnification} onChange={(value) => changeTelecentricParameters(Number(value ?? 0.2), telecentricPixelSizeUm)} />
+              <InputNumber addonBefore="像元尺寸 μm" min={0.1} max={100} step={0.01} value={telecentricPixelSizeUm} onChange={(value) => changeTelecentricParameters(telecentricMagnification, Number(value ?? 3.45))} />
+            </>}
             <InputNumber addonBefore="单视图 RMS 上限" min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="拟合模型单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="拟合模型单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} disabled={cameraModel === 'telecentric'} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
             <InputNumber addonBefore="模型 RMS 上限" min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
             <Button type="primary" loading={busy} disabled={enabledCount < 3} onClick={calibrate}>运行内参标定</Button>
           </Space>
-          <Typography.Text type="secondary">0 = 关闭门控。针孔的单视图门限采用平面预检；鱼眼采用拟合鱼眼模型的逐视图重投影误差。拟合模型门限会拒绝无法准确度量的 JLVision 多项式畸变模型。</Typography.Text>
+          <Typography.Text type="secondary">0 = 关闭门控。针孔与远心单视图门限采用平面预检；鱼眼采用拟合模型逐视图重投影。远心倍率和像元尺寸初值应来自数据表；远心投影不提供针孔位姿 RMS。</Typography.Text>
         </Space>
       )}
 

@@ -11,7 +11,7 @@ public sealed record CameraCalibrationView(List<List<double>> ObjectPoints, List
 public sealed record CameraCalibrationRequest(int ImageWidth, int ImageHeight, List<CameraCalibrationView> Views);
 public sealed record CameraCalibrationModel(int ImageWidth, int ImageHeight, double[][] CameraMatrix, double[] DistCoeffs, double Rms, string? NativeCameraType = null, double[]? NativeCameraParameters = null, string? LensModel = null);
 
-/// <summary>Intrinsic pinhole or fisheye calibration from corresponding object/image points.</summary>
+/// <summary>Intrinsic pinhole, fisheye, or object-side telecentric calibration from corresponding object/image points.</summary>
 public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
 {
     public string Type => "calibration.cameraIntrinsics";
@@ -25,7 +25,13 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         try { request = JsonSerializer.Deserialize<CameraCalibrationRequest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new JsonException("empty payload"); }
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid calibrationDataJson: {ex.Message}", ex); }
         var cameraModel = node.GetString("cameraModel", "pinhole").Trim().ToLowerInvariant();
-        if (cameraModel is not ("pinhole" or "fisheye")) throw new InvalidOperationException("cameraModel must be pinhole or fisheye.");
+        if (cameraModel is not ("pinhole" or "fisheye" or "telecentric")) throw new InvalidOperationException("cameraModel must be pinhole, fisheye, or telecentric.");
+        var telecentricMagnification = node.GetDouble("telecentricMagnification", 0.2);
+        var telecentricPixelSizeUm = node.GetDouble("telecentricPixelSizeUm", 3.45);
+        if (cameraModel == "telecentric" && (!double.IsFinite(telecentricMagnification) || telecentricMagnification is < 0.001 or > 10))
+            throw new InvalidOperationException("telecentricMagnification must be finite and between 0.001 and 10.");
+        if (cameraModel == "telecentric" && (!double.IsFinite(telecentricPixelSizeUm) || telecentricPixelSizeUm is < 0.1 or > 100))
+            throw new InvalidOperationException("telecentricPixelSizeUm must be finite and between 0.1 and 100.");
         if (request.ImageWidth is < 16 or > 32768 || request.ImageHeight is < 16 or > 32768) throw new InvalidOperationException("ImageWidth and ImageHeight must each be between 16 and 32768 pixels.");
         if (request.Views is null || request.Views.Count < 3) throw new InvalidOperationException("Intrinsic calibration requires at least three views; use varied board orientations and positions.");
         if (request.Views.Count > 500) throw new InvalidOperationException("Intrinsic calibration accepts at most 500 views.");
@@ -60,7 +66,7 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         }).ToArray();
         var maxViewRms = node.GetDouble("maxViewRms", 0);
         if (!double.IsFinite(maxViewRms) || maxViewRms is < 0 or > 100) throw new InvalidOperationException("maxViewRms must be finite and between 0 and 100 (0 disables the per-view gate).");
-        if (maxViewRms > 0 && cameraModel == "pinhole")
+        if (maxViewRms > 0 && (cameraModel is "pinhole" or "telecentric"))
         {
             var bad = viewStats.FirstOrDefault(v => v.reprojectionRms is not null && v.reprojectionRms > maxViewRms);
             if (bad is not null) throw new InvalidOperationException($"Calibration view {bad.index} has planar reprojection RMS {bad.reprojectionRms:0.###} px above maxViewRms {maxViewRms:0.###}; check that view's detected points.");
@@ -74,7 +80,9 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
                 fisheyeResult = JLVisionCalibration.CalibrateFisheye(request, cancellationToken);
                 model = fisheyeResult.Model;
             }
-            else model = JLVisionCalibration.Calibrate(request, cancellationToken);
+            else model = JLVisionCalibration.Calibrate(request, cancellationToken,
+                cameraModel == "telecentric" ? "area_scan_telecentric_polynomial" : "area_scan_polynomial",
+                telecentricMagnification, telecentricPixelSizeUm);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) { throw new InvalidOperationException($"{(cameraModel == "fisheye" ? "OpenCV fisheye" : "JLVision")} intrinsic calibration failed: {ex.Message}", ex); }
@@ -83,9 +91,10 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         if (!double.IsFinite(maxRms) || maxRms is < 0 or > 1000) throw new InvalidOperationException("maxRms must be finite and between 0 and 1000 (0 disables the model gate).");
         if (maxRms > 0 && rms > maxRms) throw new InvalidOperationException($"Intrinsic calibration RMS {rms:0.###} exceeds maxRms {maxRms:0.###}; collect better-distributed views or remove the worst view (see viewStats).");
         var resultJson = JsonSerializer.Serialize(model);
-        var nativePolynomialDistortionActive = model.NativeCameraType == "area_scan_polynomial"
+        var nativePolynomialDistortionActive = (model.NativeCameraType is "area_scan_polynomial" or "area_scan_telecentric_polynomial")
             && model.NativeCameraParameters is { Length: 12 }
             && model.NativeCameraParameters.Skip(1).Take(5).Any(value => Math.Abs(value) > 1e-12);
+        var telecentricModelActive = model.NativeCameraType == "area_scan_telecentric_polynomial";
         // Fuller per-view reprojection through the fitted camera matrix itself:
         // recover each planar view's pose from K^-1 H and reproject (homography alone
         // absorbs pose error, so this is the stricter, model-based number).
@@ -93,7 +102,7 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         var cx = model.CameraMatrix[0][2]; var cy = model.CameraMatrix[1][2];
         var fullViewStats = request.Views.Select((view, index) =>
         {
-            var pose = fisheyeResult is null && !nativePolynomialDistortionActive
+            var pose = fisheyeResult is null && !nativePolynomialDistortionActive && !telecentricModelActive
                 ? CalibrationViewAnalysis.AnalyzeWithCamera(view.ObjectPoints, view.ImagePoints, request.ImageWidth, request.ImageHeight, fx, fy, cx, cy, model.DistCoeffs)
                 : null;
             var homography = viewStats[index];
@@ -119,8 +128,8 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         var fisheyeModelActive = model.LensModel == "opencv_fisheye";
         var maxPoseViewRms = node.GetDouble("maxPoseViewRms", 0);
         if (!double.IsFinite(maxPoseViewRms) || maxPoseViewRms is < 0 or > 100) throw new InvalidOperationException("maxPoseViewRms must be finite and between 0 and 100 (0 disables the fitted-model per-view gate).");
-        if (maxPoseViewRms > 0 && nativePolynomialDistortionActive)
-            throw new InvalidOperationException("maxPoseViewRms cannot accurately score the native polynomial model. Use maxViewRms and maxRms or disable this gate.");
+        if (maxPoseViewRms > 0 && (nativePolynomialDistortionActive || telecentricModelActive))
+            throw new InvalidOperationException("maxPoseViewRms cannot accurately score the selected native camera model. Use maxViewRms and maxRms or disable this gate.");
         if (maxPoseViewRms > 0)
         {
             var bad = fullViewStats.FirstOrDefault(v => v.poseReprojectionRms is not null && v.poseReprojectionRms > maxPoseViewRms);
@@ -133,7 +142,7 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
         }
         // Outlier view: pose RMS more than 3x the median (and above 0.5 px) - the view
         // to inspect/remove first, as mature calibrators flag suspect views.
-        var outlierViewIndex = !nativePolynomialDistortionActive && medianPoseRms > 0 && worstPoseViewRms > Math.Max(0.5, 3 * medianPoseRms) ? worstPoseViewIndex : null;
+        var outlierViewIndex = !nativePolynomialDistortionActive && !telecentricModelActive && medianPoseRms > 0 && worstPoseViewRms > Math.Max(0.5, 3 * medianPoseRms) ? worstPoseViewIndex : null;
         var outputs = new Dictionary<string, VisionValue>
         {
             ["calibrationJson"] = VisionValue.String(resultJson), ["rms"] = VisionValue.Double(rms),
@@ -141,14 +150,15 @@ public sealed class CameraIntrinsicCalibrationNode : IVisionNodeExecutor
             ["meanCoverageX"] = VisionValue.Double(viewStats.Average(v => v.coverageX)),
             ["meanCoverageY"] = VisionValue.Double(viewStats.Average(v => v.coverageY)),
             ["nativePolynomialDistortionActive"] = VisionValue.Boolean(nativePolynomialDistortionActive),
-            ["fisheyeModelActive"] = VisionValue.Boolean(fisheyeModelActive)
+            ["fisheyeModelActive"] = VisionValue.Boolean(fisheyeModelActive),
+            ["telecentricModelActive"] = VisionValue.Boolean(telecentricModelActive)
         };
         if (fullViewStats.Any(v => v.homographyRms is not null || v.poseReprojectionRms is not null)) outputs["worstViewRms"] = VisionValue.Double(worstViewRms);
         if (worstViewIndex is not null) outputs["worstViewIndex"] = VisionValue.Integer(worstViewIndex.Value);
         if (worstPoseViewRms > 0) outputs["worstPoseViewRms"] = VisionValue.Double(worstPoseViewRms);
         if (worstPoseViewIndex is not null) outputs["worstPoseViewIndex"] = VisionValue.Integer(worstPoseViewIndex.Value);
         if (outlierViewIndex is not null) outputs["outlierViewIndex"] = VisionValue.Integer(outlierViewIndex.Value);
-        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["cameraModel"] = cameraModel, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["fisheyeModelActive"] = fisheyeModelActive, ["poseRmsModel"] = nativePolynomialDistortionActive ? "not available for native polynomial distortion" : fisheyeModelActive ? "OpenCV fisheye fitted model" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["algorithmBackend"] = fisheyeModelActive ? "OpenCV fisheye" : "JLVision" }));
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?> { ["views"] = request.Views.Count, ["imageSize"] = $"{request.ImageWidth}x{request.ImageHeight}", ["rms"] = rms, ["cameraModel"] = cameraModel, ["telecentricMagnification"] = cameraModel == "telecentric" ? telecentricMagnification : null, ["telecentricPixelSizeUm"] = cameraModel == "telecentric" ? telecentricPixelSizeUm : null, ["maxViewRms"] = maxViewRms, ["maxPoseViewRms"] = maxPoseViewRms, ["maxRms"] = maxRms, ["worstViewRms"] = worstViewRms, ["worstPoseViewRms"] = worstPoseViewRms, ["worstPoseViewIndex"] = worstPoseViewIndex, ["medianPoseRms"] = medianPoseRms, ["outlierViewIndex"] = outlierViewIndex, ["nativePolynomialDistortionActive"] = nativePolynomialDistortionActive, ["fisheyeModelActive"] = fisheyeModelActive, ["telecentricModelActive"] = telecentricModelActive, ["poseRmsModel"] = telecentricModelActive ? "not available for telecentric projection model" : nativePolynomialDistortionActive ? "not available for native polynomial distortion" : fisheyeModelActive ? "OpenCV fisheye fitted model" : "pinhole", ["meanCoverageX"] = viewStats.Average(v => v.coverageX), ["meanCoverageY"] = viewStats.Average(v => v.coverageY), ["model"] = model.LensModel ?? model.NativeCameraType ?? "brown_conrady", ["algorithmBackend"] = fisheyeModelActive ? "OpenCV fisheye" : "JLVision" }));
     }
 }
 
@@ -185,12 +195,13 @@ public sealed class ImageUndistortNode : IVisionNodeExecutor
 
     private static bool HasValidLensModel(CameraCalibrationModel model)
     {
-        if (model.NativeCameraType is not null && (model.NativeCameraType != "area_scan_polynomial" || model.NativeCameraParameters is not { Length: 12 })) return false;
+        if (model.NativeCameraType is not null && (model.NativeCameraType is not ("area_scan_polynomial" or "area_scan_telecentric_polynomial") || model.NativeCameraParameters is not { Length: 12 })) return false;
         if (model.NativeCameraType is null && model.NativeCameraParameters is not null) return false;
         return model.LensModel switch
         {
             "opencv_fisheye" => model.DistCoeffs.Length == 4 && model.NativeCameraType is null && model.NativeCameraParameters is null,
             "area_scan_polynomial" => model.NativeCameraType == "area_scan_polynomial" && model.NativeCameraParameters is { Length: 12 },
+            "area_scan_telecentric_polynomial" => model.NativeCameraType == "area_scan_telecentric_polynomial" && model.NativeCameraParameters is { Length: 12 },
             "brown_conrady" => model.NativeCameraType is null,
             null => true,
             _ => false

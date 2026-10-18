@@ -31,7 +31,7 @@ public sealed record CalibrationWizardAddViewRequest(
 
 public sealed record CalibrationWizardSetEnabledRequest(bool Enabled);
 
-public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0, string CameraModel = "pinhole");
+public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0, string CameraModel = "pinhole", double TelecentricMagnification = 0.2, double TelecentricPixelSizeUm = 3.45);
 
 public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
 
@@ -345,6 +345,7 @@ public sealed class CalibrationWizardService
     {
         var session = ResolveSession(sessionId);
         session.SetCameraModel(request.CameraModel);
+        session.SetTelecentricParameters(request.TelecentricMagnification, request.TelecentricPixelSizeUm);
         Persist(session);
         var calibRequest = session.BuildRequest();
         var parameters = new Dictionary<string, JsonElement>
@@ -353,7 +354,9 @@ public sealed class CalibrationWizardService
             ["cameraModel"] = JsonSerializer.SerializeToElement(request.CameraModel.Trim().ToLowerInvariant()),
             ["maxViewRms"] = JsonSerializer.SerializeToElement(request.MaxViewRms),
             ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms),
-            ["maxPoseViewRms"] = JsonSerializer.SerializeToElement(request.MaxPoseViewRms)
+            ["maxPoseViewRms"] = JsonSerializer.SerializeToElement(request.MaxPoseViewRms),
+            ["telecentricMagnification"] = JsonSerializer.SerializeToElement(request.TelecentricMagnification),
+            ["telecentricPixelSizeUm"] = JsonSerializer.SerializeToElement(request.TelecentricPixelSizeUm)
         };
         var node = new NodeDefinition("wizard-intrinsics", "calibration.cameraIntrinsics", "Wizard", null, parameters);
         try
@@ -374,7 +377,9 @@ public sealed class CalibrationWizardService
                 ["nodeSummary"] = result.Summary,
                 ["calibrationJson"] = json,
                 ["enabledViews"] = calibRequest.Views.Count,
-                ["cameraModel"] = session.Snapshot().CameraModel
+                ["cameraModel"] = session.Snapshot().CameraModel,
+                ["telecentricMagnification"] = session.Snapshot().TelecentricMagnification,
+                ["telecentricPixelSizeUm"] = session.Snapshot().TelecentricPixelSizeUm
             };
             var state = session.StoreSolveResult(model, summary);
             Persist(session);
@@ -405,7 +410,9 @@ public sealed class CalibrationWizardService
             cameraModel = state.CameraModel,
             hints = PoseHints(session),
             fisheyeSupported = true,
-            fisheyeNote = "Fisheye uses OpenCV's four-coefficient angular model. Telecentric calibration is not supported."
+            fisheyeNote = "Fisheye uses OpenCV's four-coefficient angular model.",
+            telecentricSupported = true,
+            telecentricNote = "Object-side area-scan telecentric calibration uses the JLVision native polynomial model. Seed magnification and fixed sensor pixel pitch from the lens/camera datasheets."
         };
     }
 

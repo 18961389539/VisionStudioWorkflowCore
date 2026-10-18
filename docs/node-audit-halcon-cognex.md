@@ -1,6 +1,8 @@
 ﻿# Calibration Wizard (Batch E) — node audit notes
 # Asia/Shanghai
 
+> Historical Batch E snapshot. Current wizard capabilities also include persisted sessions, fisheye calibration, and object-side telecentric calibration; see [camera-intrinsics.md](camera-intrinsics.md) and the follow-up notes in `node-completion-audit.md`.
+
 ## Shipped
 - Guided **camera intrinsics wizard** (HALCON Calibration Assistant–style slice, not a full product):
   - Engine: `CalibrationViewQuality` (Laplacian blur, coverage, corner completeness → Pass/Warn/Fail + guidance)

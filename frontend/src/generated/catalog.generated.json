@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "9184f40f45011209e933529a8ed031ea22afdc356e2fc781021ce60e0f834e14",
+  "hash": "7a12cf3c1d40c4f42e836f2344f1b1867dcd15281737f671611e5e013dd5b577",
   "items": [
     {
       "type": "image.acquire",
@@ -956,6 +956,11 @@
           "required": true
         },
         {
+          "name": "telecentricModelActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -975,9 +980,33 @@
             {
               "label": "Fisheye (OpenCV Kannala-Brandt)",
               "value": "fisheye"
+            },
+            {
+              "label": "Object-Side Telecentric (JLVision polynomial)",
+              "value": "telecentric"
             }
           ],
-          "description": "Select the lens model that matches the camera. Fisheye models use four Kannala-Brandt angular distortion coefficients and OpenCV's fisheye calibrator."
+          "description": "Select the lens model that matches the camera. Fisheye uses OpenCV's four Kannala-Brandt coefficients. Object-side telecentric uses JLVision area_scan_telecentric_polynomial; calibrate with magnification and sensor pixel pitch seeded from datasheets."
+        },
+        {
+          "name": "telecentricMagnification",
+          "label": "Telecentric Magnification",
+          "type": "number",
+          "defaultValue": 0.2,
+          "min": 0.001,
+          "max": 10,
+          "step": 0.001,
+          "description": "Object-side telecentric lens magnification. Seed from the lens datasheet; the calibration refines this value."
+        },
+        {
+          "name": "telecentricPixelSizeUm",
+          "label": "Sensor Pixel Size (µm)",
+          "type": "number",
+          "defaultValue": 3.45,
+          "min": 0.1,
+          "max": 100,
+          "step": 0.01,
+          "description": "Physical sensor pixel pitch in micrometers. Set from the camera datasheet and keep fixed during calibration."
         },
         {
           "name": "calibrationDataJson",
@@ -994,7 +1023,7 @@
           "min": 0,
           "max": 100,
           "step": 0.1,
-          "description": "For pinhole, gates the planar homography pre-fit. For fisheye, gates the fitted fisheye per-view reprojection."
+          "description": "For pinhole and object-side telecentric, gates the planar homography pre-fit. For fisheye, gates fitted fisheye per-view reprojection."
         },
         {
           "name": "maxPoseViewRms",
@@ -1004,7 +1033,7 @@
           "min": 0,
           "max": 100,
           "step": 0.1,
-          "description": "Gate the fitted-camera per-view reprojection; available for fisheye and pinhole solves without active native polynomial distortion."
+          "description": "Gate fitted-camera per-view reprojection. Unavailable for telecentric projection and when native polynomial distortion is active."
         },
         {
           "name": "maxRms",
@@ -1016,7 +1045,7 @@
           "step": 0.1
         }
       ],
-      "description": "Calibrate pinhole lenses with the JLVision native area_scan_polynomial model, or fisheye lenses with OpenCV's four-coefficient Kannala-Brandt model. Accepts supplied correspondences, calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports coverage and fitted-model reprojection RMS/max where available; configurable per-view and overall RMS gates reject weak solves. Telecentric models are not supported.",
+      "description": "Calibrate pinhole lenses with the JLVision native area_scan_polynomial model, or fisheye lenses with OpenCV's four-coefficient Kannala-Brandt model. Accepts supplied correspondences, calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports coverage and fitted-model reprojection RMS/max where available; configurable per-view and overall RMS gates reject weak solves. Object-side telecentric models use JLVision area_scan_telecentric_polynomial and preserve the native parameter tuple; the pixel pitch should be fixed from camera data and magnification seeded from the lens data. Telecentric pose RMS is not reported.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -14158,7 +14187,7 @@
           "description": "OpenCV fisheye output-field balance: 0 favors a tighter rectified field; 1 preserves more field of view with additional border."
         }
       ],
-      "description": "Correct lens distortion with JLVision native polynomial/Brown-Conrady models or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
+      "description": "Correct lens distortion with JLVision native pinhole or object-side telecentric polynomial models, Brown-Conrady models, or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
