@@ -206,6 +206,143 @@ public static class InferenceStats
         return result;
     }
 
+    public sealed record YoloObbCandidate(double CenterX, double CenterY, double Width, double Height, double Score, int ClassId, double AngleRad);
+
+    /// <summary>
+    /// Decode Ultralytics raw oriented-box heads. Channels are cx,cy,w,h, class scores, angle;
+    /// angles are radians in both YOLOv8 (already transformed by its head) and YOLO26 (direct regression).
+    /// Accepts [1,C,N], [1,N,C], and [N,C].
+    /// </summary>
+    public static YoloObbCandidate[] DecodeYoloObb(float[] values, IReadOnlyList<int> shape, string tensorOrder = "auto")
+    {
+        var normalizedOrder = (tensorOrder ?? "auto").Trim().ToLowerInvariant();
+        if (normalizedOrder is not ("auto" or "channelsfirst" or "channelslast"))
+            throw new InvalidOperationException("YOLO-OBB tensorOrder must be auto, channelsFirst, or channelsLast.");
+        int channels, count; bool channelsFirst;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] > 0 && shape[1] >= 6 && shape[2] >= 6)
+        {
+            channelsFirst = normalizedOrder switch
+            {
+                "channelsfirst" => true,
+                "channelslast" => false,
+                _ when shape[1] < shape[2] => true,
+                _ when shape[2] < shape[1] => false,
+                _ => throw new InvalidOperationException("YOLO-OBB raw tensor order is ambiguous because both dimensions are equal; set tensorOrder explicitly.")
+            };
+            channels = channelsFirst ? shape[1] : shape[2];
+            count = channelsFirst ? shape[2] : shape[1];
+        }
+        else if (shape.Count == 3 && shape[0] == 1 && shape[1] >= 6 && shape[2] > 0 && normalizedOrder != "channelslast") { channels = shape[1]; count = shape[2]; channelsFirst = true; }
+        else if (shape.Count == 3 && shape[0] == 1 && shape[2] >= 6 && shape[1] > 0 && normalizedOrder != "channelsfirst") { channels = shape[2]; count = shape[1]; channelsFirst = false; }
+        else if (shape.Count == 2 && shape[1] >= 6 && shape[0] > 0) { channels = shape[1]; count = shape[0]; channelsFirst = false; }
+        else throw new InvalidOperationException($"YOLO-OBB raw output must have shape [1,C,N], [1,N,C] or [N,C] with C>=6; received [{string.Join(',', shape)}].");
+        if (values.Length != channels * count) throw new InvalidOperationException("YOLO-OBB tensor element count does not match its shape.");
+        var classCount = channels - 5;
+        float At(int n, int c) => channelsFirst ? values[c * count + n] : values[n * channels + c];
+        var result = new YoloObbCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var bestClass = 0; var bestScore = double.NegativeInfinity;
+            for (var c = 0; c < classCount; c++)
+            {
+                var score = At(n, 4 + c);
+                if (score > bestScore) { bestScore = score; bestClass = c; }
+            }
+            result[n] = new(At(n, 0), At(n, 1), At(n, 2), At(n, 3), bestScore, bestClass, At(n, channels - 1));
+        }
+        return result;
+    }
+
+    /// <summary>Decode YOLO26 end-to-end OBB rows [cx,cy,w,h,score,classId,angleRad].</summary>
+    public static YoloObbCandidate[] DecodeYoloObbXywhr(float[] values, IReadOnlyList<int> shape)
+    {
+        const int expected = 7;
+        int count, channels;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] >= expected) { count = shape[1]; channels = shape[2]; }
+        else if (shape.Count == 2 && shape[0] > 0 && shape[1] >= expected) { count = shape[0]; channels = shape[1]; }
+        else throw new InvalidOperationException($"YOLO26-OBB end-to-end output must have shape [1,N,{expected}+] or [N,{expected}+]; received [{string.Join(',', shape)}].");
+        if (values.Length != count * channels) throw new InvalidOperationException("YOLO26-OBB tensor element count does not match its shape.");
+        var result = new YoloObbCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var offset = n * channels;
+            var classValue = values[offset + 5];
+            if (!float.IsFinite(classValue) || classValue < 0 || classValue > int.MaxValue || Math.Abs(classValue - MathF.Round(classValue)) > 1e-3f)
+                throw new InvalidOperationException($"YOLO26-OBB row {n} has a non-integer or negative class id.");
+            result[n] = new(values[offset], values[offset + 1], values[offset + 2], values[offset + 3], values[offset + 4], (int)MathF.Round(classValue), values[offset + 6]);
+        }
+        return result;
+    }
+
+    /// <summary>Exact convex-polygon IoU for two oriented boxes, used by class-aware rotated NMS.</summary>
+    public static double RotatedBoxIoU(double centerAX, double centerAY, double widthA, double heightA, double angleARad,
+        double centerBX, double centerBY, double widthB, double heightB, double angleBRad)
+    {
+        if (widthA <= 0 || heightA <= 0 || widthB <= 0 || heightB <= 0) return 0;
+        var polygonA = OrientedBoxCorners(centerAX, centerAY, widthA, heightA, angleARad);
+        var polygonB = OrientedBoxCorners(centerBX, centerBY, widthB, heightB, angleBRad);
+        var intersection = ClipConvexPolygon(polygonA, polygonB);
+        if (intersection.Count < 3) return 0;
+        var intersectionArea = PolygonArea(intersection);
+        var union = widthA * heightA + widthB * heightB - intersectionArea;
+        return union > 0 ? Math.Clamp(intersectionArea / union, 0, 1) : 0;
+    }
+
+    /// <summary>Return rectangle corners in Ultralytics xywhr angle convention (radians).</summary>
+    public static (double X, double Y)[] OrientedBoxCorners(double centerX, double centerY, double width, double height, double angleRad)
+    {
+        var cos = Math.Cos(angleRad); var sin = Math.Sin(angleRad);
+        var halfW = width / 2; var halfH = height / 2;
+        return [
+            Transform(-halfW, -halfH), Transform(halfW, -halfH),
+            Transform(halfW, halfH), Transform(-halfW, halfH)
+        ];
+
+        (double X, double Y) Transform(double x, double y) => (centerX + x * cos - y * sin, centerY + x * sin + y * cos);
+    }
+
+    private static List<(double X, double Y)> ClipConvexPolygon((double X, double Y)[] subject, (double X, double Y)[] clip)
+    {
+        var output = subject.ToList();
+        for (var edge = 0; edge < clip.Length && output.Count > 0; edge++)
+        {
+            var a = clip[edge]; var b = clip[(edge + 1) % clip.Length];
+            var input = output; output = [];
+            var previous = input[^1]; var previousSide = Cross(a, b, previous);
+            foreach (var current in input)
+            {
+                var currentSide = Cross(a, b, current);
+                var previousInside = previousSide >= -1e-9; var currentInside = currentSide >= -1e-9;
+                if (currentInside != previousInside)
+                {
+                    var denominator = previousSide - currentSide;
+                    if (Math.Abs(denominator) > 1e-12)
+                    {
+                        var t = previousSide / denominator;
+                        output.Add((previous.X + t * (current.X - previous.X), previous.Y + t * (current.Y - previous.Y)));
+                    }
+                }
+                if (currentInside) output.Add(current);
+                previous = current; previousSide = currentSide;
+            }
+        }
+        return output;
+
+        static double Cross((double X, double Y) a, (double X, double Y) b, (double X, double Y) p) =>
+            (b.X - a.X) * (p.Y - a.Y) - (b.Y - a.Y) * (p.X - a.X);
+    }
+
+    private static double PolygonArea(IReadOnlyList<(double X, double Y)> polygon)
+    {
+        var twiceArea = 0d;
+        for (var i = 0; i < polygon.Count; i++)
+        {
+            var next = polygon[(i + 1) % polygon.Count];
+            twiceArea += polygon[i].X * next.Y - next.X * polygon[i].Y;
+        }
+        return Math.Abs(twiceArea) / 2;
+    }
+
     public sealed record YoloSegCandidate(double CenterX, double CenterY, double Width, double Height, double Score, int ClassId, float[] MaskCoeffs);
 
     /// <summary>

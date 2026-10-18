@@ -379,6 +379,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<OcrNode>();
         services.AddSingleton<OnnxClassificationNode>();
         services.AddSingleton<OnnxDetectionNode>();
+        services.AddSingleton<OnnxOrientedDetectionNode>();
         services.AddSingleton<OnnxSegmentationNode>();
         services.AddSingleton<OnnxAnomalyNode>();
         services.AddSingleton<OnnxInstanceSegmentationNode>();

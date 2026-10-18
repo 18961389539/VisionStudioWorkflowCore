@@ -351,3 +351,9 @@ The Intrinsics Wizard can save solved models as immutable, hashed SQLite version
 
 `inference.instanceSegmentation` now decodes YOLO26 end-to-end rows (`[x1,y1,x2,y2,score,class,mask coefficients]`) alongside raw YOLO-Seg heads. Automatic NMS applies class-aware suppression to raw candidates and skips it for end-to-end rows. Each detected mask can also be included in the `instances` JSON as an independent row-major alternating run-length array, so overlapping objects are preserved even though the image output is a highest-score-wins class-id composite. The historic score table above predates this change; a full audit re-score and runtime comparison against exported YOLO26-seg ONNX models remain outstanding.
 
+## Follow-up implementation: oriented box detection
+
+`inference.obb` fills the prior OBB gap with YOLOv8/YOLO26 raw-head decoding and YOLO26 end-to-end `[1,N,7]` `xywhr` rows. It maps angle-aware boxes through Ultralytics letterboxing, applies exact polygon-IoU class-aware suppression to raw candidates, skips NMS by default for end-to-end output, and emits oriented `DetectionList` rectangles, four-corner JSON, labels, and an overlay. The historic audit scores predate this node; runtime comparison against exported OBB models and a full audit re-score remain outstanding.
+
+Usage and limits are documented in [ONNX Oriented Box Detection](onnx-obb.md). Embedded-NMS exports, tracking, rotated crops, and automatic class-name extraction remain open product gaps.
+

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "92b80080483530f478ea02bd86b8bf1574d8d25a03e27229bf2031cd15632c94",
+  "hash": "1adf0fad7b69cc2691e7a113d9dcdb723281f1eeef95aac435755e39c2758899",
   "items": [
     {
       "type": "image.acquire",
@@ -7202,7 +7202,267 @@
           "step": 1
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. Not semantic segmentation or OBB. For keypoints use inference.pose.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.obb",
+      "displayName": "ONNX Oriented Box Detection (YOLO-OBB)",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "yolo",
+          "options": [
+            {
+              "label": "Raw YOLOv8/YOLO26 OBB head",
+              "value": "yolo"
+            },
+            {
+              "label": "YOLO26 end-to-end xywhr rows",
+              "value": "xywhr"
+            }
+          ],
+          "description": "Raw head: [1,5+nc,N] (cx,cy,w,h,class scores,angle rad). End-to-end: [1,N,7] rows (cx,cy,w,h,score,classId,angle rad)."
+        },
+        {
+          "name": "tensorOrder",
+          "label": "Raw Tensor Order",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (smaller dimension is channels)",
+              "value": "auto"
+            },
+            {
+              "label": "Channels First [1,C,N]",
+              "value": "channelsFirst"
+            },
+            {
+              "label": "Channels Last [1,N,C]",
+              "value": "channelsLast"
+            }
+          ],
+          "description": "Only used for raw 3D tensors. Auto detects the smaller channel dimension; select an explicit order for unusual class counts or small input sizes."
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "pixels",
+          "options": [
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            },
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            }
+          ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on: Ultralytics gray (114) letterbox with exact padding removal. Disable only when source/model aspect ratios match."
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "Rotated IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsMode",
+          "label": "NMS Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (raw=on, end-to-end=off)",
+              "value": "auto"
+            },
+            {
+              "label": "On",
+              "value": "on"
+            },
+            {
+              "label": "Off",
+              "value": "off"
+            }
+          ],
+          "description": "Uses exact oriented polygon IoU and class-aware suppression. Automatic mode skips NMS on YOLO26 end-to-end predictions."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Detections",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        },
+        {
+          "name": "labels",
+          "label": "Class Labels",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional comma-separated labels in model class order; leave empty to emit class_N labels."
+        }
+      ],
+      "description": "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

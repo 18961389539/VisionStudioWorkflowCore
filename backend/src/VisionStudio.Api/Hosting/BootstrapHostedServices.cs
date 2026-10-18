@@ -156,6 +156,7 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<OcrNode>(),
             services.GetRequiredService<OnnxClassificationNode>(),
             services.GetRequiredService<OnnxDetectionNode>(),
+            services.GetRequiredService<OnnxOrientedDetectionNode>(),
             services.GetRequiredService<OnnxSegmentationNode>(),
             services.GetRequiredService<OnnxAnomalyNode>(),
             services.GetRequiredService<OnnxInstanceSegmentationNode>(),

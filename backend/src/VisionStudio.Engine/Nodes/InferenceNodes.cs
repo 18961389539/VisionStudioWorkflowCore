@@ -205,6 +205,199 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
     private sealed record DetectionCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId);
 }
 
+/// <summary>YOLOv8/YOLO26 ONNX oriented-box inference with exact rotated IoU suppression.</summary>
+public sealed class OnnxOrientedDetectionNode : IVisionNodeExecutor
+{
+    public string Type => "inference.obb";
+
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = context.RequireImage("image").Mat;
+        if (node.GetBool("crop", false))
+            throw new InvalidOperationException("OBB inference with crop=true is unsupported because crop mapping does not preserve box geometry. Set crop=false.");
+        using var net = OnnxInferenceHelpers.LoadNet(node);
+        var modelPath = OnnxInferenceHelpers.ResolvePath(node);
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        cancellationToken.ThrowIfCancellationRequested();
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var shape = OnnxInferenceHelpers.Shape(output);
+        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "oriented detection");
+        var layout = node.GetString("layout", "yolo").Trim().ToLowerInvariant();
+        if (layout is "yolo26" or "raw") layout = "yolo";
+        if (layout is "end2end" or "xywhr") layout = "xywhr";
+        if (layout is not ("yolo" or "xywhr"))
+            throw new InvalidOperationException($"Unsupported OBB layout '{layout}'. Supported values are 'yolo' (raw) and 'xywhr' (YOLO26 end-to-end).");
+        var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
+        if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
+            throw new InvalidOperationException("OBB tensorOrder must be auto, channelsFirst, or channelsLast.");
+
+        var threshold = node.GetDouble("confidenceThreshold", 0.25);
+        var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
+        if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1)
+            throw new InvalidOperationException("OBB confidenceThreshold and nmsThreshold must be finite values from 0 to 1.");
+        var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
+        var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
+        if (coordinates is not ("pixels" or "normalized"))
+            throw new InvalidOperationException($"Unsupported OBB coordinates '{coordinates}'. Supported values are 'pixels' and 'normalized'.");
+        var letterbox = node.GetBool("letterbox", true);
+        var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
+        if (nmsMode is not ("auto" or "on" or "off"))
+            throw new InvalidOperationException("OBB nmsMode must be auto, on, or off.");
+        var applyNms = nmsMode == "on" || nmsMode == "auto" && layout == "yolo";
+        var inputWidth = node.GetInt("inputWidth", 640);
+        var inputHeight = node.GetInt("inputHeight", 640);
+        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("OBB inputWidth/inputHeight must be positive.");
+
+        // A rotated rectangle remains a rotated rectangle through letterbox (uniform scale).
+        // A stretch with different X/Y scales turns it into a parallelogram, which Rectangle2D cannot represent.
+        var stretchScaleX = (double)inputWidth / source.Width;
+        var stretchScaleY = (double)inputHeight / source.Height;
+        if (!letterbox && Math.Abs(stretchScaleX - stretchScaleY) > 1e-6 * Math.Max(stretchScaleX, stretchScaleY))
+            throw new InvalidOperationException("OBB letterbox=false requires source and model input to have the same aspect ratio; enable letterbox to preserve rotated-box geometry.");
+        var letterboxScale = Math.Min(stretchScaleX, stretchScaleY);
+        var padX = letterbox ? (inputWidth - source.Width * letterboxScale) / 2 : 0;
+        var padY = letterbox ? (inputHeight - source.Height * letterboxScale) / 2 : 0;
+        var scaleX = letterbox ? letterboxScale : stretchScaleX;
+        var scaleY = letterbox ? letterboxScale : stretchScaleY;
+        double MapX(double x) => (x - padX) / scaleX;
+        double MapY(double y) => (y - padY) / scaleY;
+
+        var decoded = layout == "yolo"
+            ? InferenceStats.DecodeYoloObb(values, shape, tensorOrder)
+            : InferenceStats.DecodeYoloObbXywhr(values, shape);
+        var candidates = new List<ObbCandidate>();
+        for (var i = 0; i < decoded.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var item = decoded[i];
+            if (!double.IsFinite(item.Score) || item.Score is < 0 or > 1)
+                throw new InvalidOperationException($"OBB row {i} has a non-finite score or a score outside [0,1].");
+            if (item.ClassId < 0) throw new InvalidOperationException($"OBB row {i} has a negative classId.");
+            if (item.Score == 0 || item.Score < threshold) continue; // zero-score padding rows are normal in end-to-end exports
+            if (!double.IsFinite(item.CenterX) || !double.IsFinite(item.CenterY) || !double.IsFinite(item.Width) || !double.IsFinite(item.Height) ||
+                !double.IsFinite(item.AngleRad) || item.Width <= 0 || item.Height <= 0)
+                throw new InvalidOperationException($"OBB row {i} has non-finite geometry, angle, or a non-positive width/height.");
+
+            var cx = item.CenterX; var cy = item.CenterY; var width = item.Width; var height = item.Height;
+            if (coordinates == "normalized")
+            {
+                cx *= inputWidth; cy *= inputHeight; width *= inputWidth; height *= inputHeight;
+            }
+            cx = MapX(cx); cy = MapY(cy);
+            width /= scaleX; height /= scaleY;
+            var corners = InferenceStats.OrientedBoxCorners(cx, cy, width, height, item.AngleRad);
+            candidates.Add(new ObbCandidate(cx, cy, width, height, item.AngleRad, item.Score, item.ClassId, corners));
+        }
+
+        var kept = new List<ObbCandidate>();
+        foreach (var candidate in candidates.OrderByDescending(x => x.Score))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (applyNms && kept.Any(x => x.ClassId == candidate.ClassId && BoundsOverlap(x, candidate) &&
+                InferenceStats.RotatedBoxIoU(x.CenterX, x.CenterY, x.Width, x.Height, x.AngleRad,
+                    candidate.CenterX, candidate.CenterY, candidate.Width, candidate.Height, candidate.AngleRad) > nmsThreshold))
+                continue;
+            kept.Add(candidate);
+            if (kept.Count == maxCount) break;
+        }
+
+        var labelsText = node.GetString("labels", string.Empty).Trim();
+        var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
+        var detections = new List<VisionDetection>(kept.Count);
+        var payload = new List<object>(kept.Count);
+        for (var i = 0; i < kept.Count; i++)
+        {
+            var item = kept[i];
+            if (labels.Length > 0 && item.ClassId >= labels.Length)
+                throw new InvalidOperationException($"OBB classId {item.ClassId} is outside the configured labels list ({labels.Length} labels).");
+            var minX = item.Corners.Min(p => p.X); var maxX = item.Corners.Max(p => p.X);
+            var minY = item.Corners.Min(p => p.Y); var maxY = item.Corners.Max(p => p.Y);
+            var perimeter = 2 * (item.Width + item.Height);
+            detections.Add(new VisionDetection(i, minX, minY, maxX - minX, maxY - minY,
+                item.Width * item.Height, perimeter, perimeter > 0 ? 4 * Math.PI * item.Width * item.Height / (perimeter * perimeter) : 0,
+                new VisionCircle(item.CenterX, item.CenterY, Math.Sqrt(item.Width * item.Width + item.Height * item.Height) / 2),
+                new VisionRectangle2D(item.CenterX, item.CenterY, item.Width, item.Height, item.AngleRad * 180 / Math.PI), item.Score, item.ClassId));
+            payload.Add(new
+            {
+                index = i,
+                classId = item.ClassId,
+                label = labels.Length > 0 ? labels[item.ClassId] : $"class_{item.ClassId}",
+                score = item.Score,
+                centerX = item.CenterX,
+                centerY = item.CenterY,
+                width = item.Width,
+                height = item.Height,
+                angleRad = item.AngleRad,
+                angleDeg = item.AngleRad * 180 / Math.PI,
+                bounds = new { x = minX, y = minY, width = maxX - minX, height = maxY - minY },
+                polygon = item.Corners.Select(p => new { x = p.X, y = p.Y }).ToArray()
+            });
+        }
+
+        var overlay = BuildObbOverlay(source, kept, labels);
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("count", detections.Count), ("nmsMode", nmsMode),
+            ("letterbox", letterbox), ("coordinates", coordinates), ("outputShape", shape));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["detections"] = VisionValue.Detections(detections),
+                ["count"] = VisionValue.Integer(detections.Count),
+                ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, outputShape = shape, nmsApplied = applyNms, detections = payload })),
+                ["diagnostics"] = VisionValue.String(diagnostics)
+            },
+            new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["nmsApplied"] = applyNms,
+                ["nmsMode"] = nmsMode, ["letterbox"] = letterbox, ["coordinates"] = coordinates, ["outputShape"] = shape, ["diagnostics"] = diagnostics }));
+    }
+
+    private static bool BoundsOverlap(ObbCandidate a, ObbCandidate b) =>
+        a.Right > b.Left && b.Right > a.Left && a.Bottom > b.Top && b.Bottom > a.Top;
+
+    private static Mat BuildObbOverlay(Mat source, IReadOnlyList<ObbCandidate> boxes, string[] labels)
+    {
+        var overlay = new Mat();
+        try
+        {
+            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
+            else if (source.Channels() == 3) source.CopyTo(overlay);
+            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
+            else throw new InvalidOperationException($"OBB overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
+
+            for (var i = 0; i < boxes.Count; i++)
+            {
+                var box = boxes[i];
+                var color = InferenceStats.SegmentationColorBgr(box.ClassId + 1);
+                var scalar = new Scalar(color.B, color.G, color.R);
+                var points = box.Corners.Select(p => new Point(
+                    (int)Math.Round(Math.Clamp(p.X, -2d * source.Width, 3d * source.Width)),
+                    (int)Math.Round(Math.Clamp(p.Y, -2d * source.Height, 3d * source.Height)))).ToArray();
+                for (var edge = 0; edge < points.Length; edge++)
+                    Cv2.Line(overlay, points[edge], points[(edge + 1) % points.Length], scalar, 2, LineTypes.AntiAlias);
+                var label = labels.Length > box.ClassId ? labels[box.ClassId] : $"class_{box.ClassId}";
+                if (label.Any(character => character > 127)) label = $"class_{box.ClassId}"; // OpenCV Hershey fonts are ASCII-only.
+                var text = $"{label} {box.Score:0.00} {box.AngleRad * 180 / Math.PI:0.0}deg";
+                var textX = (int)Math.Round(Math.Clamp(box.Left, 0, source.Width - 1));
+                var textY = (int)Math.Round(Math.Clamp(box.Top - 5, 16, Math.Max(16, source.Height - 1)));
+                Cv2.PutText(overlay, text, new Point(textX, textY),
+                    HersheyFonts.HersheySimplex, 0.45, scalar, 1, LineTypes.AntiAlias);
+            }
+            return overlay;
+        }
+        catch { overlay.Dispose(); throw; }
+    }
+
+    private sealed record ObbCandidate(double CenterX, double CenterY, double Width, double Height, double AngleRad, double Score, int ClassId, (double X, double Y)[] Corners)
+    {
+        public double Left => Corners.Min(p => p.X);
+        public double Right => Corners.Max(p => p.X);
+        public double Top => Corners.Min(p => p.Y);
+        public double Bottom => Corners.Max(p => p.Y);
+    }
+}
+
 /// <summary>ONNX semantic segmentation. layout=logits expects [1,C,H,W]; layout=yolo26-semantic expects YOLO26 class map [1,H,W]/[H,W]/[1,1,H,W].</summary>
 public sealed class OnnxSegmentationNode : IVisionNodeExecutor
 {
