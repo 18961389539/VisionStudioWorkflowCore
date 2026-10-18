@@ -91,7 +91,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'measure.caliperWidth': 'caliper', 'measure.caliperLine': 'caliper', 'measure.caliperCircle': 'caliper', 'measure.pointLineDistance': 'ruler',
   'measure.circleSpacing': 'rings', 'measure.lineSpacing': 'ruler', 'measure.fitLine': 'line', 'measure.fitCircle': 'circle',
   'measure.fitEllipse': 'ellipse', 'measure.rotatedRect': 'region', 'measure.wallThickness': 'rings',
-  'measure.concentricity': 'target', 'measure.roundness': 'circle', 'measure.straightness': 'line',
+  'measure.contourThickness': 'rings', 'measure.concentricity': 'target', 'measure.roundness': 'circle', 'measure.straightness': 'line',
   'measure.contourDeviation': 'compare', 'measure.parallelism': 'parallel', 'measure.perpendicularity': 'corner',
   'measure.colorDifference': 'palette', 'measure.regionIntensity': 'histogram', 'measure.grayHistogram': 'histogram',
   'geometry.angle': 'corner', 'geometry.intersection': 'crosshair', 'geometry.distance': 'ruler',

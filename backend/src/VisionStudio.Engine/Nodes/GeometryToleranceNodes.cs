@@ -88,7 +88,7 @@ public sealed class ContourFromPointsNode : IVisionNodeExecutor
         curve.SmallestCircleXld(out double row, out double col, out double radius);
         var perimeter = length.D;
         var contour = new VisionContour(0, points, -1, false, area, perimeter, perimeter > 0 ? Math.Min(1, 4 * Math.PI * area / (perimeter * perimeter)) : 0,
-            new(left, top, right - left, bottom - top), new(col, row, radius));
+            new(left, top, right - left, bottom - top), new(col, row, radius)) { Closed = closed };
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["contours"] = VisionValue.Contours([contour]), ["found"] = VisionValue.Boolean(true), ["count"] = VisionValue.Integer(1), ["sampleCount"] = VisionValue.Integer(points.Length) },
             new Dictionary<string, object?> { ["found"] = true, ["sampleCount"] = points.Length, ["area"] = area, ["perimeter"] = perimeter, ["closed"] = closed, ["algorithmBackend"] = "JLVision" },

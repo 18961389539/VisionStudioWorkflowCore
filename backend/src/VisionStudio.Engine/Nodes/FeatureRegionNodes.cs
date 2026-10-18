@@ -121,6 +121,10 @@ public sealed class RegionFromRoiNode : IVisionNodeExecutor
             throw new InvalidOperationException("ROI canvas must be 1..16384 per axis and at most 64000000 pixels.");
         var roi = context.TryGetValue("roi", out var input) ? input.Require<VisionRoi>("roi") : node.GetRoi();
         if (roi is null) throw new InvalidOperationException("Connect a ROI or configure a valid roi parameter.");
+        // Native region generation clips to the most recently initialized image
+        // extent. Establish this canvas before rasterizing so the first run does
+        // not inherit a smaller image from another node on this worker thread.
+        using var nativeCanvas = new JlImage("byte", width, height);
         using var native = Rasterize(roi, width, height);
         using var bounds = new JlRegion(0d, 0d, (double)height - 1, (double)width - 1);
         using var clipped = native.Intersection(bounds);

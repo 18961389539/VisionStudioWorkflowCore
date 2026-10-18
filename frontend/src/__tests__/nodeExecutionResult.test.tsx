@@ -33,6 +33,23 @@ afterEach(cleanup);
 
 describe('NodeExecutionResult measurement status', () => {
   it.each([
+    ['contours-intersect-or-touch', '内外轮廓相交或接触'],
+    ['normal-pairing-failed', '部分法向测量线再次穿过孔洞'],
+    ['sample-budget-exceeded', '采样数量超出上限']
+  ])('explains invalid contour thickness result %s', (reason, message) => {
+    mount('measure.contourThickness', result(false, reason));
+    expect(screen.getByText('未找到有效结果')).toBeTruthy();
+    expect(screen.getByText(new RegExp(message))).toBeTruthy();
+  });
+  it('separates a valid thickness measurement from a failed tolerance verdict', () => {
+    const run = result(true, 'ok');
+    run.nodeReports[0].summary = { found: true, withinTolerance: false, minThickness: 14, maxThickness: 40 };
+    mount('measure.contourThickness', run);
+    expect(screen.getByText('壁厚超出公差')).toBeTruthy();
+    expect(screen.queryByText('未找到有效结果')).toBeNull();
+    expect(screen.getByLabelText('关键测量结果').textContent).toContain('最小壁厚 14');
+  });
+  it.each([
     ['no-edge-pair-above-threshold', '没有找到完整的两侧边缘'],
     ['no-pair-within-width-range', '已找到边缘对，但宽度均超出范围']
   ])('explains paired-edge failure %s', (reason, message) => {

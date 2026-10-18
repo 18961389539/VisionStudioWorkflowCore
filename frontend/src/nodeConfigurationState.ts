@@ -320,6 +320,14 @@ export function configurationIssues(
     if (parameters.direction === 'closestwidth' && nominal !== undefined && nominal <= 0)
       issues.push('按标称宽度选择时，标称宽度必须大于 0。');
   }
+  if (catalog.type === 'measure.contourThickness') {
+    const minimum = validNumericParameter('minThickness');
+    const maximum = validNumericParameter('maxThickness');
+    if (minimum !== undefined && maximum !== undefined && maximum > 0 && maximum < minimum)
+      issues.push('最大合格壁厚必须为 0（不限）或不小于最小合格壁厚。');
+    const budget = validNumericParameter('maxSamplesPerBoundary');
+    if (budget !== undefined && !Number.isInteger(budget)) issues.push('每侧最大采样数必须为整数。');
+  }
   if (catalog.type === 'measure.caliperCircle') {
     const angleStart = validNumericParameter('angleStartDeg');
     const angleEnd = validNumericParameter('angleEndDeg');

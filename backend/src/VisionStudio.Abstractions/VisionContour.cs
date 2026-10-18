@@ -18,7 +18,11 @@ public sealed record VisionContour(
     double Perimeter,
     double Circularity,
     VisionRectangle2D BoundingBox,
-    VisionCircle MinEnclosingCircle);
+    VisionCircle MinEnclosingCircle)
+{
+    /// <summary>Whether the ordered points define a closed boundary. Legacy contour producers default to closed.</summary>
+    public bool Closed { get; init; } = true;
+}
 
 /// <summary>
 /// 第五批 · 轮廓派生属性（contour.properties 输出）：在 VisionContour 基础量之上

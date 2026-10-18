@@ -1117,6 +1117,7 @@ public static class BuiltInNodeCatalog
         .. Batch4IterationCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. Batch5PrecisionCatalog.Items.Select(item => item with { PluginId = "builtin" }),
         .. CaliperWidthCatalog.Items,
+        .. ContourThicknessCatalog.Items,
         .. RegionCatalog.Items,
         .. DefectCatalog.Items,
         .. AlignmentRegionCatalog.Items,

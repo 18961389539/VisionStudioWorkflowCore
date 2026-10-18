@@ -1,0 +1,392 @@
+{
+  "id": "contour-thickness",
+  "name": "Contour thickness with local dent",
+  "nodes": [
+    {
+      "id": "outer",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 80
+      },
+      "parameters": {
+        "canvasWidth": 400,
+        "canvasHeight": 400,
+        "roi": {
+          "type": "Rectangle",
+          "x": 100,
+          "y": 100,
+          "width": 200,
+          "height": 200
+        }
+      }
+    },
+    {
+      "id": "notch",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 290,
+        "y": -160
+      },
+      "parameters": {
+        "canvasWidth": 400,
+        "canvasHeight": 400,
+        "roi": {
+          "type": "Rectangle",
+          "x": 275,
+          "y": 180,
+          "width": 25,
+          "height": 40
+        }
+      }
+    },
+    {
+      "id": "cut",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 560,
+        "y": -160
+      },
+      "parameters": {
+        "operation": "difference"
+      }
+    },
+    {
+      "id": "inner",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 290,
+        "y": 80
+      },
+      "parameters": {
+        "canvasWidth": 400,
+        "canvasHeight": 400,
+        "roi": {
+          "type": "Rectangle",
+          "x": 140,
+          "y": 140,
+          "width": 120,
+          "height": 120
+        }
+      }
+    },
+    {
+      "id": "ring",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 560,
+        "y": 80
+      },
+      "parameters": {
+        "operation": "difference"
+      }
+    },
+    {
+      "id": "extract",
+      "type": "contour.extract",
+      "name": null,
+      "position": {
+        "x": 830,
+        "y": 80
+      },
+      "parameters": {
+        "mode": "all",
+        "binarize": "direct",
+        "maxPoints": 2000
+      }
+    },
+    {
+      "id": "outerContour",
+      "type": "contour.filter",
+      "name": null,
+      "position": {
+        "x": 1100,
+        "y": 80
+      },
+      "parameters": {
+        "hierarchy": "external"
+      }
+    },
+    {
+      "id": "innerContour",
+      "type": "contour.filter",
+      "name": null,
+      "position": {
+        "x": 1370,
+        "y": 80
+      },
+      "parameters": {
+        "hierarchy": "holes"
+      }
+    },
+    {
+      "id": "thickness",
+      "type": "measure.contourThickness",
+      "name": null,
+      "position": {
+        "x": 1640,
+        "y": 80
+      },
+      "parameters": {
+        "measurementMode": "shortest",
+        "sampleStep": 4,
+        "minThickness": 20
+      }
+    },
+    {
+      "id": "found",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 1910,
+        "y": 80
+      },
+      "parameters": {}
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2180,
+        "y": -40
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missing",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2180,
+        "y": 240
+      },
+      "parameters": {}
+    },
+    {
+      "id": "join",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 2450,
+        "y": 80
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "inner",
+      "sourcePort": "next",
+      "targetNodeId": "ring",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "ring",
+      "sourcePort": "next",
+      "targetNodeId": "extract",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "extract",
+      "sourcePort": "next",
+      "targetNodeId": "outerContour",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "outerContour",
+      "sourcePort": "next",
+      "targetNodeId": "innerContour",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "innerContour",
+      "sourcePort": "next",
+      "targetNodeId": "thickness",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "thickness",
+      "sourcePort": "next",
+      "targetNodeId": "found",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "found",
+      "sourcePort": "true",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "found",
+      "sourcePort": "false",
+      "targetNodeId": "missing",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "missing",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "cut",
+      "sourcePort": "region",
+      "targetNodeId": "ring",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "inner",
+      "sourcePort": "region",
+      "targetNodeId": "ring",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "ring",
+      "sourcePort": "image",
+      "targetNodeId": "extract",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "extract",
+      "sourcePort": "contours",
+      "targetNodeId": "outerContour",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "extract",
+      "sourcePort": "contours",
+      "targetNodeId": "innerContour",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "outerContour",
+      "sourcePort": "contours",
+      "targetNodeId": "thickness",
+      "targetPort": "outerContours",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "innerContour",
+      "sourcePort": "contours",
+      "targetNodeId": "thickness",
+      "targetPort": "innerContours",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "ring",
+      "sourcePort": "image",
+      "targetNodeId": "thickness",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "thickness",
+      "sourcePort": "found",
+      "targetNodeId": "found",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "thickness",
+      "sourcePort": "withinTolerance",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "found",
+      "sourcePort": "condition",
+      "targetNodeId": "missing",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c-notch",
+      "sourceNodeId": "outer",
+      "sourcePort": "next",
+      "targetNodeId": "notch",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c-cut",
+      "sourceNodeId": "notch",
+      "sourcePort": "next",
+      "targetNodeId": "cut",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c-inner",
+      "sourceNodeId": "cut",
+      "sourcePort": "next",
+      "targetNodeId": "inner",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d-cut-a",
+      "sourceNodeId": "outer",
+      "sourcePort": "region",
+      "targetNodeId": "cut",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d-cut-b",
+      "sourceNodeId": "notch",
+      "sourcePort": "region",
+      "targetNodeId": "cut",
+      "targetPort": "b",
+      "kind": "data"
+    }
+  ]
+}

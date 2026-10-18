@@ -37,6 +37,7 @@
     <Content Include="../../../samples/text-validation-workflow.json" Link="samples/text-validation-workflow.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../samples/circular-tolerance-workflow.json" Link="samples/circular-tolerance-workflow.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../samples/edge-tolerance-workflow.json" Link="samples/edge-tolerance-workflow.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../samples/contour-thickness-workflow.json" Link="samples/contour-thickness-workflow.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../samples/small-feature-workflow.json" Link="samples/small-feature-workflow.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../samples/region-shape-workflow.json" Link="samples/region-shape-workflow.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

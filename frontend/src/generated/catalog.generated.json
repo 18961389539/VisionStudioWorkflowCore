@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b4f567268e9ae2f48b1adb884229906cae475b2c9001c12f8e2cee3105119141",
+  "hash": "3fbb8ecfaf52a46920cf80c6f478a30417077565695dce6e72e7afaec8551ff9",
   "items": [
     {
       "type": "image.acquire",
@@ -10753,6 +10753,202 @@
       ],
       "description": "Pixelwise CIE76 Euclidean distance in sRGB/D65 Lab. Compare an aligned same-size reference image or a constant sRGB color. deltaE is the mean of pixel distances, not distance between mean colors. domainImage retains the effective inspection region for downstream thresholding; empty regions omit scalar differences.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "measure.contourThickness",
+      "displayName": "Contour Wall Thickness",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "innerContours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "outerContours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "contained",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "samplesJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "minThickness",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxThickness",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "meanThickness",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "stdDev",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "variation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "thinSampleCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "minInnerPoint",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "minOuterPoint",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "minLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "innerIndex",
+          "label": "Inner Contour Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1
+        },
+        {
+          "name": "outerIndex",
+          "label": "Outer Contour Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1
+        },
+        {
+          "name": "measurementMode",
+          "label": "Thickness Measurement Mode",
+          "type": "select",
+          "defaultValue": "shortest",
+          "options": [
+            {
+              "label": "Shortest contour distance",
+              "value": "shortest"
+            },
+            {
+              "label": "Inner contour normal",
+              "value": "innernormal"
+            }
+          ]
+        },
+        {
+          "name": "sampleStep",
+          "label": "Thickness Sample Step",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.1,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px"
+        },
+        {
+          "name": "maxSamplesPerBoundary",
+          "label": "Maximum Samples Per Boundary",
+          "type": "number",
+          "defaultValue": 4096,
+          "min": 8,
+          "max": 4096,
+          "step": 1
+        },
+        {
+          "name": "minThickness",
+          "label": "Minimum Wall Thickness",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000000,
+          "step": 0.1,
+          "unit": "px"
+        },
+        {
+          "name": "maxThickness",
+          "label": "Maximum Wall Thickness (0=unlimited)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000000,
+          "step": 0.1,
+          "unit": "px"
+        }
+      ],
+      "description": "Measure two simple closed subpixel contours in the same image pixel frame, with the inner boundary strictly inside the outer. Shortest mode samples the outer boundary to inner contour segments and provides an exact segment-to-segment global minimum over both complete contours. Normal mode samples outward inner-boundary normals (vertex bisectors at corners) and provides sampled extrema. Connections crossing the hole or leaving the outer shell are rejected. Every original vertex of the sampled boundary is retained; extra samples limit arc spacing. Means/std dev are arc-length weighted; maxima and thin counts are sampled. Missing/open/self-intersecting/touching/noncontained contours, unreliable pairs or sampling/work budget overflow return found=false and omit measurement values. Limits: 20000 points per contour, 4096 samples per measured boundary and 50 million geometry operations. Optional image passes through for overlay inspection. Red lines mark sampled tolerance failures. Units: px.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true
     },

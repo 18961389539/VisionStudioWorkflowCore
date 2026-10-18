@@ -14,6 +14,7 @@ import type { NodeCatalogItem } from '../types';
 import type { Lang } from './lang';
 
 const nodeNames: Record<string, string> = {
+  'measure.contourThickness': '真实轮廓壁厚',
   'image.topHat': '白顶帽（亮特征）', 'image.bottomHat': '黑底帽（暗特征）', 'image.morphGradient': '形态学梯度',
   'measure.grayHistogram': '灰度直方图与百分位', 'region.fromRoi': 'ROI 转像素区域',
   'region.convexHull': '区域凸包', 'region.boundary': '区域边界', 'region.skeleton': '区域骨架',
@@ -79,6 +80,10 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Inner Contour Index': '内轮廓索引', 'Outer Contour Index': '外轮廓索引',
+  'Thickness Measurement Mode': '壁厚测量方式', 'Thickness Sample Step': '壁厚采样步长',
+  'Maximum Samples Per Boundary': '每侧最大采样数', 'Minimum Wall Thickness': '最小合格壁厚',
+  'Maximum Wall Thickness (0=unlimited)': '最大合格壁厚（0 为不限）',
   'Pair Polarity': '边缘对极性', 'Pair Selection': '边缘对选择', 'Minimum Pair Width': '最小宽度',
   'Maximum Pair Width (0=unlimited)': '最大宽度（0 为不限）', 'Nominal Pair Width': '标称宽度',
   'Camera Model': '相机模型',
@@ -241,6 +246,7 @@ export function canonicalParameterGroup(group?: string): string {
 }
 
 const optionNames: Record<string, string> = {
+  'Shortest contour distance': '最短轮廓距离', 'Inner contour normal': '沿内轮廓法向',
   'Bright strip': '亮条（暗→亮→暗）', 'Dark gap': '暗槽（亮→暗→亮）', 'Closest to nominal width': '最接近标称宽度',
   'Pinhole (JLVision polynomial)': '针孔（JLVision 多项式）',
   'Fisheye (OpenCV Kannala-Brandt)': '鱼眼（OpenCV Kannala-Brandt）',
@@ -296,6 +302,8 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  innerContours: '内轮廓', outerContours: '外轮廓', minInnerPoint: '最薄处内侧点',
+  minOuterPoint: '最薄处外侧点', minLine: '最薄处测量线', thinSampleCount: '过薄采样数',
   pairCount: '合格边缘对数',
   overlay: '叠加图', similarity: '相似度 SSIM', changedPixelCount: '变化像素数', meanConfidence: '平均置信度', lowConfidenceFraction: '低置信度像素比例', worstViewIndex: '最差视图索引',
   threshold: '阈值',
@@ -385,6 +393,7 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
+  'measure.contourThickness': '直接测量真实内外轮廓，无需拟合圆。两侧须在同一图像像素坐标系中，且为无自交的闭合轮廓，内轮廓严格包含于外轮廓。最短距离模式从外边界采样到内轮廓线段的距离，并在两侧完整折线上计算全局最短距离；法向模式沿内轮廓外法向测厚，顶点使用法向角平分线。两种模式口径不同；法向模式的极值来自采样。保留被采样侧的所有原始顶点，再按步长补点；均值和标准差按弧长加权，最大值与过薄点数依赖采样密度。测量线穿过孔洞或离开外轮廓时拒绝结果。轮廓缺失、开放、自交、相交、接触、不包含或超出采样/运算预算时 found=false，不输出厚度与合格结论。可接入图像查看测量叠加；红线表示采样超限区段，并突出最薄位置。结果单位为 px。',
   'measure.caliperWidth': '沿搜索线进行原生亚像素双边缘测量，输出宽度、按起点→终点排序的两端点及中心。支持亮条、暗槽、任意极性，先按最小/最大宽度筛选，再按强度、起点/终点顺序或最接近标称宽度选择。强度取两侧边缘中较弱者。搜索线应垂直于被测边界；倾斜时输出的是沿搜索线的距离。固定高斯平滑 σ=1，需要至少 8 个连续有效剖面采样点；ROI 缺口两侧的边缘不会跨区配对。可在图像中重绘搜索线、拖动端点，并接入刚性像素 transform 跟随定位。UInt16 按完整量程转为 8 位灰度。未找到合格边缘对时 found=false，且不输出宽度和端点。结果单位为图像像素。',
   'image.crop': '在输入图像上绘制矩形、圆形、多边形或笔刷 ROI，并裁剪为选区与图像交集的紧包围框。ROI 越出图像边缘的部分会自动裁切；完全没有覆盖图像像素时会明确报错。连接 roi 输入时，上游区域优先并覆盖本地选区；笔刷支持添加和擦除；选区外的图像像素清零；roiMask 输出与裁剪图像同尺寸的二值蒙版，croppedRoi 输出平移到裁剪坐标系的 ROI，可直接接到下游卡尺节点以避免把清零边界误测为真实边缘。裁剪后坐标原点移动到包围框左上角；cropOrigin 给出该点在输入图像中的位置，transform 将 CurrentImage 几何映射到 CropImage。需要同时应用定位修正时，将 roi.transform 变换接到组合节点 A、图像裁剪变换接到 B。保留旧版 x/y/width/height 工作流兼容。',
   'image.topHat': '灰度图减去矩形灰度开运算，提取比结构元素小的亮特征。输入须为 8 位，彩色自动转灰度；宽高为 1–255 奇数。处理整幅图像，边界使用原生规则；结构元素应大于目标特征。',
@@ -523,6 +532,13 @@ const descriptions: Record<string, string> = {
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'measure.contourThickness.innerIndex': '从内轮廓输入列表选择一条闭合边界，索引从 0 开始。',
+  'measure.contourThickness.outerIndex': '从外轮廓输入列表选择包含内边界的一条闭合边界；两侧须处于同一图像坐标系。',
+  'measure.contourThickness.measurementMode': '最短距离给出轮廓之间的最近距离；法向模式沿内轮廓局部法向配对。凹形结构中若测量线穿过孔洞，会拒绝配对。',
+  'measure.contourThickness.sampleStep': '相邻补充采样点的最大弧长间隔，原始顶点始终保留。减小可提高厚度分布分辨率，但会增加采样数量。',
+  'measure.contourThickness.maxSamplesPerBoundary': '每侧采样数上限。超限会明确返回未找到结果，不会静默抽稀丢失局部缺陷；可增大步长或上限。',
+  'measure.contourThickness.minThickness': '低于该壁厚时 withinTolerance=false，采样超限位置以红线显示；0 关闭下限。',
+  'measure.contourThickness.maxThickness': '高于该壁厚时判为不合格，0 关闭上限。最大值来自采样；启用时必须不小于最小合格壁厚。',
   'measure.caliperWidth.sampleWidth': '投影宽度必须为奇数，偶数向上调整。沿搜索线法向平均灰度以抑制噪声；过大会混合相邻结构。',
   'measure.caliperWidth.edgeThreshold': '两侧边缘都必须达到的最小幅值，按 8 位灰度计；UInt16 按 65535→255 换算。',
   'measure.caliperWidth.polarity': '亮条按起点→终点先上升后下降，暗槽先下降后上升；任意同时检索两种结构，也可能选中相邻亮条之间的间隙。',

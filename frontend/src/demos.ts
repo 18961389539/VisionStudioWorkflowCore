@@ -487,6 +487,53 @@ export const forEachDemo = (): DemoGraph => ({
   ]
 });
 
+export const contourThicknessDemo = (): DemoGraph => ({
+  nodes: [
+    node('outer', 'region.fromRoi', 20, 80, {"canvasWidth":400,"canvasHeight":400,"roi":{"type":"Rectangle","x":100,"y":100,"width":200,"height":200}}),
+    node('notch', 'region.fromRoi', 290, -160, {"canvasWidth":400,"canvasHeight":400,"roi":{"type":"Rectangle","x":275,"y":180,"width":25,"height":40}}),
+    node('cut', 'region.boolean', 560, -160, {"operation":"difference"}),
+    node('inner', 'region.fromRoi', 290, 80, {"canvasWidth":400,"canvasHeight":400,"roi":{"type":"Rectangle","x":140,"y":140,"width":120,"height":120}}),
+    node('ring', 'region.boolean', 560, 80, {"operation":"difference"}),
+    node('extract', 'contour.extract', 830, 80, {"mode":"all","binarize":"direct","maxPoints":2000}),
+    node('outerContour', 'contour.filter', 1100, 80, {"hierarchy":"external"}),
+    node('innerContour', 'contour.filter', 1370, 80, {"hierarchy":"holes"}),
+    node('thickness', 'measure.contourThickness', 1640, 80, {"measurementMode":"shortest","sampleStep":4,"minThickness":20}),
+    node('found', 'flow.ifBoolean', 1910, 80, {}),
+    node('result', 'flow.result', 2180, -40, {}),
+    node('missing', 'flow.result', 2180, 240, {}),
+    node('join', 'flow.join', 2450, 80, {})
+  ],
+  edges: [
+    control('c1', 'inner', 'next', 'ring', 'exec'),
+    control('c2', 'ring', 'next', 'extract', 'exec'),
+    control('c3', 'extract', 'next', 'outerContour', 'exec'),
+    control('c4', 'outerContour', 'next', 'innerContour', 'exec'),
+    control('c5', 'innerContour', 'next', 'thickness', 'exec'),
+    control('c6', 'thickness', 'next', 'found', 'exec'),
+    control('c7', 'found', 'true', 'result', 'exec'),
+    control('c8', 'result', 'next', 'join', 'branch1'),
+    control('c9', 'found', 'false', 'missing', 'exec'),
+    control('c10', 'missing', 'next', 'join', 'branch2'),
+    data('d0', 'cut', 'region', 'ring', 'a'),
+    data('d1', 'inner', 'region', 'ring', 'b'),
+    data('d2', 'ring', 'image', 'extract', 'image'),
+    data('d3', 'extract', 'contours', 'outerContour', 'contours'),
+    data('d4', 'extract', 'contours', 'innerContour', 'contours'),
+    data('d5', 'outerContour', 'contours', 'thickness', 'outerContours'),
+    data('d6', 'innerContour', 'contours', 'thickness', 'innerContours'),
+    data('d7', 'ring', 'image', 'thickness', 'image'),
+    data('d8', 'thickness', 'found', 'found', 'condition'),
+    data('d9', 'thickness', 'withinTolerance', 'result', 'pass'),
+    data('d10', 'found', 'condition', 'missing', 'pass'),
+    control('c-notch', 'outer', 'next', 'notch', 'exec'),
+    control('c-cut', 'notch', 'next', 'cut', 'exec'),
+    control('c-inner', 'cut', 'next', 'inner', 'exec'),
+    data('d-cut-a', 'outer', 'region', 'cut', 'a'),
+    data('d-cut-b', 'notch', 'region', 'cut', 'b')
+  ]
+});
+
+
 export const caliperWidthDemo = (): DemoGraph => ({
   nodes: [
     node('source', 'image.synthetic', 20, 180, { width: 640, height: 480, centerX: 320, centerY: 240, radius: 80 }),
@@ -946,6 +993,7 @@ export const regionShapeDemo = (): { nodes: Node[]; edges: Edge[] } => ({
 });
 
 export const demos = {
+  contourThickness: contourThicknessDemo,
   caliperWidth: caliperWidthDemo,
   smallFeatures: smallFeatureDemo,
   regionShapes: regionShapeDemo,
@@ -981,6 +1029,7 @@ export type DemoKey = keyof typeof demos;
 
 /** 每个示例的一句话用途说明：让用户在打开前就知道“这个示例是干什么的、适合谁” */
 export const demoDescriptions: Record<DemoKey, string> = {
+  contourThickness: '生成带局部凹陷的环形图像 → 提取真实内外轮廓 → 壁厚分布与最薄处 → 公差判定；默认检出约 14 px 薄区并判 NG，降低下限可验证 OK。',
   caliperWidth: '合成亮条 → 双边缘卡尺测宽 → 宽度公差判定；演示 115 px 标称宽度筛选、中心与两端点输出，找不到边缘对时走 NG。',
   smallFeatures: '生成带亮细条与暗缝的区域测试图，分别做顶帽、底帽和梯度；统计暗缝底帽响应，空检测域走 NG。',
   regionShapes: 'ROI 多边形生成区域，计算凸包与凹陷差，展示边界和骨架，并按凹陷像素面积判定。',

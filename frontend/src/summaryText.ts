@@ -57,6 +57,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'measure.blob': ['area', 'radius', 'x', 'y'],
   'measure.caliper': ['found', 'x', 'y', 'strength', 'sampleCount'],
   'measure.caliperWidth': ['found', 'width', 'pairCount', 'strength'],
+  'measure.contourThickness': ['found', 'minThickness', 'maxThickness', 'withinTolerance'],
   'measure.rotatedRect': ['width', 'height', 'angleDeg'],
   'feature.edge': ['edgePixels'],
   'feature.line': ['length', 'angleDeg'],

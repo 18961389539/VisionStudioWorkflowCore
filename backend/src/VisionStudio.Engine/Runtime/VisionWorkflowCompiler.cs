@@ -207,6 +207,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             ValidateNodeParameters(node, catalog, connectedInputPorts);
             ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
             ValidateCaliperWidthLimits(node, catalog);
+            ValidateContourThicknessLimits(node, catalog);
             ValidateCaliperCircleArc(node, catalog);
             ValidateCaliperSampleRequirements(node, catalog);
         }
@@ -823,6 +824,18 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         if (node.GetString("direction", "strongest").Equals("closestwidth", StringComparison.OrdinalIgnoreCase)
             && GetNumericParameter(node, catalog, "nominalWidth") <= 0)
             throw new InvalidOperationException($"Node '{node.Id}' nominalWidth must be positive for closest-width selection.");
+    }
+
+    private static void ValidateContourThicknessLimits(NodeDefinition node, NodeCatalogItem catalog)
+    {
+        if (!catalog.Type.Equals("measure.contourThickness", StringComparison.OrdinalIgnoreCase)) return;
+        var minimum = GetNumericParameter(node, catalog, "minThickness");
+        var maximum = GetNumericParameter(node, catalog, "maxThickness");
+        if (maximum > 0 && maximum < minimum)
+            throw new InvalidOperationException($"Node '{node.Id}' maxThickness must be zero (unlimited) or at least minThickness.");
+        var budget = GetNumericParameter(node, catalog, "maxSamplesPerBoundary");
+        if (budget != Math.Truncate(budget))
+            throw new InvalidOperationException($"Node '{node.Id}' maxSamplesPerBoundary must be an integer.");
     }
 
     private static void ValidateCaliperCircleArc(NodeDefinition node, NodeCatalogItem catalog)
