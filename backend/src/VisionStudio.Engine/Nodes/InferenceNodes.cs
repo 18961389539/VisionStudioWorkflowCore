@@ -207,7 +207,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                 if (includeHorizontalFlips)
                 {
                     var mirrored = new Mat();
-                    try { Cv2.Flip(view, mirrored, FlipMode.Y); views.Add(mirrored); }
+                    try { JLVisionOperators.MirrorHorizontal(view, mirrored); views.Add(mirrored); }
                     catch { mirrored.Dispose(); throw; }
                 }
             }

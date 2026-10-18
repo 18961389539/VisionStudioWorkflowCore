@@ -88,7 +88,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'feature.edge': 'edge', 'feature.edgeSubpixel': 'edge', 'feature.circle': 'circle', 'feature.line': 'line',
   'match.template': 'target', 'match.shape': 'target', 'roi.transform': 'transform',
   'measure.blob': 'detections', 'measure.blobs': 'detections', 'measure.caliper': 'caliper',
-  'measure.caliperLine': 'caliper', 'measure.caliperCircle': 'caliper', 'measure.pointLineDistance': 'ruler',
+  'measure.caliperWidth': 'caliper', 'measure.caliperLine': 'caliper', 'measure.caliperCircle': 'caliper', 'measure.pointLineDistance': 'ruler',
   'measure.circleSpacing': 'rings', 'measure.lineSpacing': 'ruler', 'measure.fitLine': 'line', 'measure.fitCircle': 'circle',
   'measure.fitEllipse': 'ellipse', 'measure.rotatedRect': 'region', 'measure.wallThickness': 'rings',
   'measure.concentricity': 'target', 'measure.roundness': 'circle', 'measure.straightness': 'line',

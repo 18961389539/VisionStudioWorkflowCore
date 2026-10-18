@@ -8,7 +8,7 @@ namespace VisionStudio.Engine.Algorithms;
 /// engine loads the .traineddata model, which dominates short inspection cycles; the pool keeps
 /// a few warm engines and hands out a private instance when all are busy. Tesseract instances are
 /// independent, so one engine per lease is safe across parallel branches. Every lease clears the
-/// adaptive classifier and the character whitelist/blacklist/DPI overrides on return, so a result
+/// adaptive classifier and resets the character whitelist/blacklist/DPI before processing, so a result
 /// never depends on the previous image or node configuration.
 /// </summary>
 internal static class OcrEnginePool
@@ -59,15 +59,6 @@ internal static class OcrEnginePool
                 if (engines.Count == 0) Idle.Remove(key);
                 return new Lease(key, pooled, reused: true);
             }
-
-            var victim = Idle.FirstOrDefault(pair => pair.Value.Count > 0);
-            if (victim.Value is not null)
-            {
-                var engine = victim.Value[^1];
-                victim.Value.RemoveAt(victim.Value.Count - 1);
-                if (victim.Value.Count == 0) Idle.Remove(victim.Key);
-                engine.Dispose();
-            }
         }
 
         // Create outside the lock: model loading is the slow part and must not serialize
@@ -92,8 +83,11 @@ internal static class OcrEnginePool
             {
                 if (Idle.Count >= MaxKeys)
                 {
-                    engine.Dispose();
-                    return;
+                    // Admit a new warm configuration only after evicting an idle key at
+                    // capacity. A cache miss alone must not evict another language/model.
+                    var victim = Idle.First();
+                    Idle.Remove(victim.Key);
+                    foreach (var idleEngine in victim.Value) idleEngine.Dispose();
                 }
                 Idle[key] = engines = new List<TesseractOCR.Engine>(MaxIdlePerKey);
             }

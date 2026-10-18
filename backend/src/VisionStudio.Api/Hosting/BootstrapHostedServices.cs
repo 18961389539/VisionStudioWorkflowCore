@@ -199,6 +199,7 @@ public sealed class RuntimeBootstrapHostedService(
             services.GetRequiredService<LineNode>(),
             services.GetRequiredService<CircleNode>(),
             services.GetRequiredService<CaliperNode>(),
+            services.GetRequiredService<CaliperWidthNode>(),
             services.GetRequiredService<RotatedRectangleNode>(),
             services.GetRequiredService<IntersectionNode>(),
             services.GetRequiredService<DistanceNode>(),

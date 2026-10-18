@@ -105,19 +105,30 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
                 }
             }
 
-            // ZXing's DataMatrix multi-detector returns nothing as soon as a frame holds more
-            // than one symbol (verified: one DataMatrix decodes, two identical ones yield zero
-            // results), which silently turned "multiple" into a single-symbol reader for DPM
-            // parts. Retry once on overlapping half-frame tiles with single-symbol decoding:
-            // each tile sees one symbol, and position-based deduplication removes the overlap.
-            if (multiple && resultsFound.Count == 0 && tileSearch == "auto" && formats.Any(TwoDimensionalFormats.Contains))
+            // The DataMatrix multi-detector can return zero or only some symbols. Recover
+            // on overlapping 2D tiles even after partial success, keeping every enabled
+            // preprocessing/polarity pass and mapping tile coordinates back to the source.
+            if (multiple && tileSearch == "auto" && formats.Any(TwoDimensionalFormats.Contains)
+                && (resultsFound.Count == 0 || formats.Contains(BarcodeFormat.DATA_MATRIX)))
             {
+                var recoveryFormats = resultsFound.Count == 0 ? formats : new[] { BarcodeFormat.DATA_MATRIX };
                 foreach (var tile in BuildRecoveryTiles(variants[0].Image.Width, variants[0].Image.Height))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    using var view = new Mat(variants[0].Image, tile);
-                    tileAttempts++;
-                    AddDecoded(Decode(view, formats, tryHarder, false, cancellationToken), variants[0].Name, false, tile.X, tile.Y);
+                    if (resultsFound.Count > maxResults) break;
+                    foreach (var variant in variants)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        using var view = new Mat(variant.Image, tile);
+                        tileAttempts++;
+                        AddDecoded(Decode(view, recoveryFormats, tryHarder, false, cancellationToken), variant.Name, false, tile.X, tile.Y);
+                        if (resultsFound.Count > maxResults) break;
+                        if (!tryInverted) continue;
+                        using var inverted = new Mat();
+                        JLVisionOperators.BitwiseNot(view, inverted);
+                        tileAttempts++;
+                        AddDecoded(Decode(inverted, recoveryFormats, tryHarder, false, cancellationToken), variant.Name, true, tile.X, tile.Y);
+                        if (resultsFound.Count > maxResults) break;
+                    }
                     if (resultsFound.Count > maxResults) break;
                 }
             }
@@ -256,27 +267,54 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
     }
 
     /// <summary>
-    /// Overlapping tiles for multi-symbol recovery. Each tile spans 60% of one axis and the full
-    /// other axis, so any symbol up to 60% of the frame fits inside at least one tile, while the
-    /// overlap lets position-based deduplication discard double reads.
+    /// Strip tiles retain support for large symbols. Two levels of overlapping 2D tiles
+    /// separate code arrays in both axes; centre offsets keep symbols crossing a split
+    /// inside a tile. Exact quadrants avoid distracting partial neighbours in regular
+    /// trays. The search is bounded to at most 4 + 4 + 9 + 81 distinct regions.
     /// </summary>
     private static IEnumerable<OpenCvSharp.Rect> BuildRecoveryTiles(int width, int height)
     {
-        const double span = 0.6;
-        var tileWidth = Math.Max(1, (int)Math.Ceiling(width * span));
-        var tileHeight = Math.Max(1, (int)Math.Ceiling(height * span));
-        var tiles = new List<OpenCvSharp.Rect>(4);
-        if (tileWidth < width)
+        var seen = new HashSet<OpenCvSharp.Rect>();
+        var pending = new Queue<(OpenCvSharp.Rect Region, int Depth)>();
+        pending.Enqueue((new OpenCvSharp.Rect(0, 0, width, height), 0));
+        var stripWidth = Math.Max(1, (int)Math.Ceiling(width * 0.6));
+        var stripHeight = Math.Max(1, (int)Math.Ceiling(height * 0.6));
+        foreach (var strip in new[]
         {
-            tiles.Add(new OpenCvSharp.Rect(0, 0, tileWidth, height));
-            tiles.Add(new OpenCvSharp.Rect(width - tileWidth, 0, tileWidth, height));
-        }
-        if (tileHeight < height)
+            new OpenCvSharp.Rect(0, 0, stripWidth, height),
+            new OpenCvSharp.Rect(width - stripWidth, 0, stripWidth, height),
+            new OpenCvSharp.Rect(0, 0, width, stripHeight),
+            new OpenCvSharp.Rect(0, height - stripHeight, width, stripHeight)
+        })
         {
-            tiles.Add(new OpenCvSharp.Rect(0, 0, width, tileHeight));
-            tiles.Add(new OpenCvSharp.Rect(0, height - tileHeight, width, tileHeight));
+            if (strip.Width >= 16 && strip.Height >= 16 && seen.Add(strip)) yield return strip;
         }
-        return tiles.Where(tile => tile.Width >= 16 && tile.Height >= 16).Distinct();
+
+        var splitX = width / 2;
+        var splitY = height / 2;
+        foreach (var y in new[] { 0, splitY })
+        foreach (var x in new[] { 0, splitX })
+        {
+            var quadrant = new OpenCvSharp.Rect(x, y, x == 0 ? splitX : width - splitX, y == 0 ? splitY : height - splitY);
+            if (quadrant.Width >= 16 && quadrant.Height >= 16 && seen.Add(quadrant)) yield return quadrant;
+        }
+
+        while (pending.TryDequeue(out var current))
+        {
+            var tileWidth = Math.Max(1, (int)Math.Ceiling(current.Region.Width * 0.6));
+            var tileHeight = Math.Max(1, (int)Math.Ceiling(current.Region.Height * 0.6));
+            if (tileWidth < 16 || tileHeight < 16) continue;
+            var maxX = current.Region.Width - tileWidth;
+            var maxY = current.Region.Height - tileHeight;
+            foreach (var y in new[] { 0, maxY / 2, maxY }.Distinct())
+            foreach (var x in new[] { 0, maxX / 2, maxX }.Distinct())
+            {
+                var tile = new OpenCvSharp.Rect(current.Region.X + x, current.Region.Y + y, tileWidth, tileHeight);
+                if (!seen.Add(tile)) continue;
+                yield return tile;
+                if (current.Depth == 0) pending.Enqueue((tile, 1));
+            }
+        }
     }
 
     private static Mat ApplyRoi(Mat source, VisionRoi? roi, CancellationToken token)

@@ -426,6 +426,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<LineNode>();
         services.AddSingleton<CircleNode>();
         services.AddSingleton<CaliperNode>();
+        services.AddSingleton<CaliperWidthNode>();
         services.AddSingleton<RotatedRectangleNode>();
         services.AddSingleton<IntersectionNode>();
         services.AddSingleton<DistanceNode>();

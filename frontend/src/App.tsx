@@ -81,6 +81,7 @@ const WORKFLOW_IO_TIMEOUT_MS = 15_000;
 
 // 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
 const DEMO_LABELS: Record<DemoKey, string> = {
+  caliperWidth: '双边缘卡尺测宽与公差判定',
   circularTolerance: '圆环壁厚与同心偏差',
   smallFeatures: '细小亮暗特征检测',
   regionShapes: '区域形状与凸包差',
@@ -100,7 +101,7 @@ const DEMO_LABELS: Record<DemoKey, string> = {
 };
 const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
   { group: '相机采集', keys: ['camera', 'cameraTrigger', 'frameSet'] },
-  { group: '测量与标定', keys: ['smallFeatures', 'regionShapes', 'circularTolerance', 'edgeTolerance', 'colors', 'textValidation', 'alignment', 'defects', 'regions', 'precision', 'inspection', 'measurement', 'calibration'] },
+  { group: '测量与标定', keys: ['caliperWidth', 'smallFeatures', 'regionShapes', 'circularTolerance', 'edgeTolerance', 'colors', 'textValidation', 'alignment', 'defects', 'regions', 'precision', 'inspection', 'measurement', 'calibration'] },
   { group: '机器人', keys: ['robotEyeToHand', 'robotEyeInHand', 'robotRuntime', 'robotPlc', 'robotTcp'] },
   { group: '设备 / PLC', keys: ['devicePlc'] },
   { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested', 'forEach'] }

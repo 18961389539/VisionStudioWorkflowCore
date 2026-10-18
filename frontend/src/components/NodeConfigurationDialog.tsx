@@ -259,7 +259,7 @@ function geometrySourceImageFrameNodeIds(geometryEdge: Edge | undefined, nodes: 
   }
   if (!['circle', 'line2d', 'point2d', 'rectangle2d', 'pose2d'].includes(outputType ?? '')) return [];
   const hasFrameAwareGeometry = ['roi.transform', 'match.shape', 'feature.line', 'feature.circle', 'feature.edgesubpixel',
-    'measure.caliper', 'measure.caliperline', 'measure.calipercircle'].includes(type);
+    'measure.caliper', 'measure.caliperwidth', 'measure.caliperline', 'measure.calipercircle'].includes(type);
   const hasImageOutput = sourceCatalog?.outputs.some((port) => port.name.toLowerCase() === 'image'
     && ['image', 'domainimage'].includes(port.dataType.toLowerCase()));
   if (!hasFrameAwareGeometry && !hasImageOutput) return [];
@@ -478,7 +478,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const externalChange = parameterFingerprint(configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem)) !== parameterFingerprint(baseline);
   const locked = disabled || previewBusy;
   const roiInputEdge = inputEdge(edges, node.id, 'roi');
-  const measurementNodeTypes = ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'];
+  const measurementNodeTypes = ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle'];
   const measurementImageInputEdge = measurementNodeTypes.includes(catalogItem.type)
     ? inputEdge(edges, node.id, 'image')
     : undefined;
@@ -596,14 +596,14 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const cropClearUndoAvailable = Boolean(isImageCrop && !cropRoiInputConnected && cropClearUndo
     && cropClearUndo.afterFingerprint === draftFingerprint);
   const measurementFitUndoAvailable = Boolean(measurementFitUndo && measurementFitUndo.afterFingerprint === draftFingerprint);
-  const searchLineInputEdge = ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
+  const searchLineInputEdge = ['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? inputEdge(edges, node.id, 'searchLine')
     : undefined;
   const circleInputEdge = isCaliperCircle
     ? inputEdge(edges, node.id, 'circle')
     : undefined;
   const circleSourceNode = circleInputEdge ? nodes.find((item) => item.id === circleInputEdge.source) : undefined;
-  const transformInputEdge = ['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
+  const transformInputEdge = ['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'].includes(catalogItem.type)
     ? inputEdge(edges, node.id, 'transform')
     : undefined;
   const transformLineageNodes = transformSourceLineage(nodes, edges, transformInputEdge?.source);
@@ -756,7 +756,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     if (imageExtentIssue) issues.push(imageExtentIssue);
   }
   const measurementGeometryType = isCaliperCircle ? 'circle'
-    : ['measure.caliper', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type) ? 'line' : undefined;
+    : ['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'feature.edgeSubpixel'].includes(catalogItem.type) ? 'line' : undefined;
   const measurementGeometryFrameKind = !transformInputEdge ? 'current'
     : savedMeasurementReference ? 'saved-reference'
       : cropMeasurementReferenceNodeId ? 'transform-input' : undefined;
@@ -979,7 +979,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   })();
   const caliperSearchLineBoundsNotice = (() => {
     const geometry = mappedMeasurementGeometry;
-    if (catalogItem.type !== 'measure.caliper' || geometry?.type !== 'line'
+    if (!['measure.caliper', 'measure.caliperWidth'].includes(catalogItem.type) || geometry?.type !== 'line'
       || !measurementImageFrameReady || measurementBoundsWidth === undefined || measurementBoundsHeight === undefined
       || measurementBoundsWidth <= 0 || measurementBoundsHeight <= 0) return undefined;
     const length = Math.hypot(geometry.end.x - geometry.start.x, geometry.end.y - geometry.start.y);

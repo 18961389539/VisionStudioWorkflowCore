@@ -206,6 +206,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 
             ValidateNodeParameters(node, catalog, connectedInputPorts);
             ValidateMeasurementGeometry(node, catalog, connectedInputPorts);
+            ValidateCaliperWidthLimits(node, catalog);
             ValidateCaliperCircleArc(node, catalog);
             ValidateCaliperSampleRequirements(node, catalog);
         }
@@ -221,7 +222,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "feature.edgeSubpixel", "measure.caliper", "measure.caliperLine", "measure.caliperCircle"
+            "feature.edgeSubpixel", "measure.caliper", "measure.caliperWidth", "measure.caliperLine", "measure.caliperCircle"
         };
 
         foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
@@ -349,7 +350,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "feature.edgeSubpixel", "measure.caliper", "measure.caliperLine", "measure.caliperCircle"
+            "feature.edgeSubpixel", "measure.caliper", "measure.caliperWidth", "measure.caliperLine", "measure.caliperCircle"
         };
 
         foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
@@ -432,6 +433,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             || nodeType.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase)
             || nodeType.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
             || nodeType.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+            || nodeType.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)
             || nodeType.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase)
             || nodeType.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase))
             return "image";
@@ -779,6 +781,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         if (hasConnectedSearchLine
             && (catalog.Type.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
                 || catalog.Type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
+                || catalog.Type.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)
                 || catalog.Type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase))
             && parameterName is "startX" or "startY" or "endX" or "endY")
             return true;
@@ -800,7 +803,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             && catalog.Inputs.Any(input => input.Name.Equals("searchLine", StringComparison.OrdinalIgnoreCase)
                 && input.DataType == VisionDataType.Line2D))
             return;
-        if (catalog.Type is not ("feature.edgeSubpixel" or "measure.caliper" or "measure.caliperLine"))
+        if (catalog.Type is not ("feature.edgeSubpixel" or "measure.caliper" or "measure.caliperWidth" or "measure.caliperLine"))
             return;
 
         var dx = GetNumericParameter(node, catalog, "endX") - GetNumericParameter(node, catalog, "startX");
@@ -808,6 +811,18 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         if (Math.Sqrt(dx * dx + dy * dy) < 2)
             throw new InvalidOperationException(
                 $"Node '{node.Id}' search line must be at least 2 px long. Adjust its start/end coordinates or connect a valid searchLine input.");
+    }
+
+    private static void ValidateCaliperWidthLimits(NodeDefinition node, NodeCatalogItem catalog)
+    {
+        if (!catalog.Type.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)) return;
+        var minimum = GetNumericParameter(node, catalog, "minWidth");
+        var maximum = GetNumericParameter(node, catalog, "maxWidth");
+        if (maximum > 0 && maximum < minimum)
+            throw new InvalidOperationException($"Node '{node.Id}' maxWidth must be zero (unlimited) or at least minWidth.");
+        if (node.GetString("direction", "strongest").Equals("closestwidth", StringComparison.OrdinalIgnoreCase)
+            && GetNumericParameter(node, catalog, "nominalWidth") <= 0)
+            throw new InvalidOperationException($"Node '{node.Id}' nominalWidth must be positive for closest-width selection.");
     }
 
     private static void ValidateCaliperCircleArc(NodeDefinition node, NodeCatalogItem catalog)

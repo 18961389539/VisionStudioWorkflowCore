@@ -64,7 +64,7 @@ const nodeNames: Record<string, string> = {
   'feature.circle': '圆检测', 'feature.edge': '边缘检测 / Canny', 'feature.line': '直线检测',
   'flow.if': '条件分支', 'flow.join': '分支汇合', 'flow.parallel': '并行执行', 'flow.result': '检测结果 / 判定',
   'geometry.angle': '直线夹角', 'geometry.intersection': '直线交点', 'geometry.distance': '点间距离',
-  'measure.caliper': '卡尺测量', 'measure.blob': '最大连通区域', 'measure.rotatedRect': '旋转矩形',
+  'measure.caliper': '卡尺测量', 'measure.caliperWidth': '双边缘卡尺测宽', 'measure.blob': '最大连通区域', 'measure.rotatedRect': '旋转矩形',
   'image.threshold': '图像阈值分割', 'robot.executeTarget': '执行机器人目标', 'robot.j4TcpCompensation': 'J4 / TCP 补偿',
   'robot.currentPose': '读取机器人当前位姿', 'robot.guidance2d': '二维机器人引导'
 };
@@ -79,6 +79,8 @@ const categories: Record<string, string> = {
 };
 
 const parameterNames: Record<string, string> = {
+  'Pair Polarity': '边缘对极性', 'Pair Selection': '边缘对选择', 'Minimum Pair Width': '最小宽度',
+  'Maximum Pair Width (0=unlimited)': '最大宽度（0 为不限）', 'Nominal Pair Width': '标称宽度',
   'Camera Model': '相机模型',
   'Duplicate Merge Radius (px)': '重复合并半径（像素）',
   'Tiled Multi-Code Recovery': '分块多码回补',
@@ -239,6 +241,7 @@ export function canonicalParameterGroup(group?: string): string {
 }
 
 const optionNames: Record<string, string> = {
+  'Bright strip': '亮条（暗→亮→暗）', 'Dark gap': '暗槽（亮→暗→亮）', 'Closest to nominal width': '最接近标称宽度',
   'Pinhole (JLVision polynomial)': '针孔（JLVision 多项式）',
   'Fisheye (OpenCV Kannala-Brandt)': '鱼眼（OpenCV Kannala-Brandt）',
   'Pixels (px)': '像素 (px)',
@@ -293,6 +296,7 @@ const optionNames: Record<string, string> = {
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
+  pairCount: '合格边缘对数',
   overlay: '叠加图', similarity: '相似度 SSIM', changedPixelCount: '变化像素数', meanConfidence: '平均置信度', lowConfidenceFraction: '低置信度像素比例', worstViewIndex: '最差视图索引',
   threshold: '阈值',
   pixelCount: '像素数', binsJson: '256 级频数 JSON', cdfJson: '累计分布 JSON', median: '中位灰度',
@@ -381,6 +385,7 @@ export const portNames: Record<string, string> = {
 };
 
 const descriptions: Record<string, string> = {
+  'measure.caliperWidth': '沿搜索线进行原生亚像素双边缘测量，输出宽度、按起点→终点排序的两端点及中心。支持亮条、暗槽、任意极性，先按最小/最大宽度筛选，再按强度、起点/终点顺序或最接近标称宽度选择。强度取两侧边缘中较弱者。搜索线应垂直于被测边界；倾斜时输出的是沿搜索线的距离。固定高斯平滑 σ=1，需要至少 8 个连续有效剖面采样点；ROI 缺口两侧的边缘不会跨区配对。可在图像中重绘搜索线、拖动端点，并接入刚性像素 transform 跟随定位。UInt16 按完整量程转为 8 位灰度。未找到合格边缘对时 found=false，且不输出宽度和端点。结果单位为图像像素。',
   'image.crop': '在输入图像上绘制矩形、圆形、多边形或笔刷 ROI，并裁剪为选区与图像交集的紧包围框。ROI 越出图像边缘的部分会自动裁切；完全没有覆盖图像像素时会明确报错。连接 roi 输入时，上游区域优先并覆盖本地选区；笔刷支持添加和擦除；选区外的图像像素清零；roiMask 输出与裁剪图像同尺寸的二值蒙版，croppedRoi 输出平移到裁剪坐标系的 ROI，可直接接到下游卡尺节点以避免把清零边界误测为真实边缘。裁剪后坐标原点移动到包围框左上角；cropOrigin 给出该点在输入图像中的位置，transform 将 CurrentImage 几何映射到 CropImage。需要同时应用定位修正时，将 roi.transform 变换接到组合节点 A、图像裁剪变换接到 B。保留旧版 x/y/width/height 工作流兼容。',
   'image.topHat': '灰度图减去矩形灰度开运算，提取比结构元素小的亮特征。输入须为 8 位，彩色自动转灰度；宽高为 1–255 奇数。处理整幅图像，边界使用原生规则；结构元素应大于目标特征。',
   'image.bottomHat': '矩形灰度闭运算减去灰度图，提取比结构元素小的暗特征。输入须为 8 位，彩色自动转灰度；宽高为 1–255 奇数。处理整幅图像，边界使用原生规则；结构元素应大于目标特征。',
@@ -518,10 +523,17 @@ const descriptions: Record<string, string> = {
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'measure.caliperWidth.sampleWidth': '投影宽度必须为奇数，偶数向上调整。沿搜索线法向平均灰度以抑制噪声；过大会混合相邻结构。',
+  'measure.caliperWidth.edgeThreshold': '两侧边缘都必须达到的最小幅值，按 8 位灰度计；UInt16 按 65535→255 换算。',
+  'measure.caliperWidth.polarity': '亮条按起点→终点先上升后下降，暗槽先下降后上升；任意同时检索两种结构，也可能选中相邻亮条之间的间隙。',
+  'measure.caliperWidth.direction': '先过滤宽度再选择。最强取两侧较弱边缘的幅值；从终点只改变选对顺序；标称宽度用于多结构消歧。',
+  'measure.caliperWidth.minWidth': '沿搜索线的最小合格宽度，单位 px；用于排除细小噪声结构。',
+  'measure.caliperWidth.maxWidth': '沿搜索线的最大合格宽度，0 为不限；启用时必须不小于最小宽度。',
+  'measure.caliperWidth.nominalWidth': '选择“最接近标称宽度”时必须大于 0；按绝对宽度偏差优先，再按边缘强度选择。',
   'recognition.barcode.preprocess': '自动模式依次尝试原始灰度、Otsu 阈值和自适应阈值。光照不均或背景渐变时可用自适应模式。',
   'recognition.barcode.tryInverted': '常规极性未读到码时自动尝试反色；多码模式也会检查反色结果，以支持同一画面内混合极性。',
   'recognition.barcode.dedupRadiusPx': '同一码制、同一内容的两条读数只有中心距离不超过该值才合并：位置不同的同内容码按两个零件计数，同一码被不同预处理或反色重复读到只计一次。',
-  'recognition.barcode.tileSearch': '多码模式整幅找不到码时，用重叠半幅分块逐块单码解码再合并。同一画面出现多个 DataMatrix 时必须开启，否则 ZXing 的多码检测会返回空。',
+  'recognition.barcode.tileSearch': 'DataMatrix 多码读取为空或不完整时，使用有限的两级二维分块和四象限区域补读。各分块沿用已启用的预处理与反色设置，坐标映射回原图后按位置去重；关闭后不执行分块补读。',
   'recognition.barcode.adaptiveBlockSize': '局部阈值窗口必须为奇数；小图像会自动缩小窗口。',
   'coordinate.transformConstant.unit': '处理图像坐标或连接卡尺测量时选“像素 (px)”；工程坐标变换使用 mm、cm 或 m。卡尺要求最终变换为 px→px，且只包含平移和旋转。',
   'image.synthetic.placementMode': '固定模式保持图案在基准位置；按序移动按“样本序号 × 位移/角度步长”生成位置；固定种子随机可复现；每次运行随机会重新生成位移和角度，并自动避开画幅边界。按序和固定种子模式越界时会把图案整体平移进画幅。',

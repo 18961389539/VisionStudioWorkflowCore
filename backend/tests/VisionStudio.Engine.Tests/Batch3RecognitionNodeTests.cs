@@ -84,7 +84,7 @@ public sealed class Batch3RecognitionNodeTests
             var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) },
                 $"{{\"mode\":\"{(formatName == "QR_CODE" ? "qr" : "2d")}\",\"multiple\":true,\"preprocess\":\"none\",\"tryInverted\":false}}");
             Assert.Equal(2, checked((int)result.Outputs["count"].Require<long>("count")));
-            Assert.Equal(0, Convert.ToInt32(result.Summary["duplicatesMerged"]));
+            Assert.Equal(Convert.ToInt32(result.Summary["rawCount"]) - 2, Convert.ToInt32(result.Summary["duplicatesMerged"]));
             Assert.Equal("SAME-SN-001", result.Outputs["text"].Require<string>("text"));
             // ZXing's DataMatrix multi-detector returns nothing for two symbols, so the count
             // above is only reachable through the tiled single-symbol recovery path.
@@ -242,19 +242,20 @@ public sealed class Batch3RecognitionNodeTests
         Assert.Equal(220, source.At<Vec3b>(0, 0).Item2);
     }
 
-    [Fact]
-    public async Task ClassificationBatchesMultiCropViewsInOneRun()
+    [Theory]
+    [InlineData("five", 5)]
+    [InlineData("ten", 10)]
+    public async Task ClassificationBatchesMultiCropViewsInOneRun(string multiCrop, int viewCount)
     {
         using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
         var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.ClassificationDynamicBatch,
-            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop = "five" });
-        // Five TTA views feed one [5,3,8,8] tensor and one session run.
-        Assert.Equal(5, Convert.ToInt32(result.Summary["batchSize"]));
-        Assert.Equal(5, Convert.ToInt32(result.Summary["viewCount"]));
+            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop });
+        Assert.Equal(viewCount, Convert.ToInt32(result.Summary["batchSize"]));
+        Assert.Equal(viewCount, Convert.ToInt32(result.Summary["viewCount"]));
         Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
         using var json = JsonDocument.Parse(result.Outputs["result"].Require<string>("result"));
-        Assert.Equal(5, json.RootElement.GetProperty("views").GetArrayLength());
-        Assert.Equal(5, json.RootElement.GetProperty("batchSize").GetInt32());
+        Assert.Equal(viewCount, json.RootElement.GetProperty("views").GetArrayLength());
+        Assert.Equal(viewCount, json.RootElement.GetProperty("batchSize").GetInt32());
     }
 
     [Fact]

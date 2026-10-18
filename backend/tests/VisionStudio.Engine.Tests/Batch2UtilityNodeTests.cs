@@ -11,16 +11,19 @@ namespace VisionStudio.Engine.Tests;
 
 public sealed class Batch2UtilityNodeTests
 {
-    [Fact]
-    public async Task Delay_CompletesAndHonorsCancellation()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(17)]
+    [InlineData(40)]
+    public async Task Delay_CompletesAndHonorsCancellation(int delayMs)
     {
         var node = new DelayNode();
-        var result = await Run(node, new(), "{\"delayMs\":40}");
+        var result = await Run(node, new(), JsonSerializer.Serialize(new { delayMs }));
         // elapsedMs 报告实测耗时：必须覆盖请求值，同时不能被当成请求值原样回显。
         var elapsed = (double)result.Outputs["elapsedMs"].Value!;
-        Assert.True(elapsed >= 40, $"elapsedMs {elapsed} should cover the requested 40ms");
+        Assert.True(elapsed >= delayMs, $"elapsedMs {elapsed} should cover the requested {delayMs}ms");
         Assert.True(elapsed < 5000, $"elapsedMs {elapsed} should stay near the requested delay");
-        Assert.Equal(40, (int)result.Summary["delayMs"]!);
+        Assert.Equal(delayMs, (int)result.Summary["delayMs"]!);
         Assert.Equal(Math.Round(elapsed, 3), (double)result.Summary["elapsedMs"]!);
         using var cts = new CancellationTokenSource(20);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await node.ExecuteAsync(new(new Dictionary<string, VisionValue>()), Definition(node.Type, "{\"delayMs\":600000}"), cts.Token));

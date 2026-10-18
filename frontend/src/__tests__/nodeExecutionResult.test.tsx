@@ -32,6 +32,14 @@ function mount(type = catalog.type, runResult = result(false, 'too-few-edge-poin
 afterEach(cleanup);
 
 describe('NodeExecutionResult measurement status', () => {
+  it.each([
+    ['no-edge-pair-above-threshold', '没有找到完整的两侧边缘'],
+    ['no-pair-within-width-range', '已找到边缘对，但宽度均超出范围']
+  ])('explains paired-edge failure %s', (reason, message) => {
+    mount('measure.caliperWidth', result(false, reason));
+    expect(screen.getByText('未找到有效结果')).toBeTruthy();
+    expect(screen.getByText(new RegExp(message))).toBeTruthy();
+  });
   it('shows a warning and a useful reason when the caliper ran but found too few edges', () => {
     mount();
 

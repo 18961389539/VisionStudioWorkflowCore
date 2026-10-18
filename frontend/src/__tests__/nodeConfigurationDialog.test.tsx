@@ -1993,13 +1993,13 @@ describe('caliper geometry input guidance', () => {
     expect(dialog.getByTestId('image-url').textContent).toContain('/nodes/caliper/image');
   });
 
-  it.each(['measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'] as const)(
+  it.each(['measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle', 'feature.edgeSubpixel'] as const)(
     'shows %s result overlays until its measurement geometry changes', async (type) => {
     const caliperCatalog = fallbackCatalog.find(item => item.type === type)!;
     const parameters = type === 'measure.caliperCircle'
       ? { centerX: 50, centerY: 50, radius: 20 }
       : { startX: 10, startY: 20, endX: 80, endY: 20 };
-    const labels: Record<string, string> = { 'measure.caliper': '卡尺测量', 'measure.caliperLine': '卡尺找线',
+    const labels: Record<string, string> = { 'measure.caliper': '卡尺测量', 'measure.caliperWidth': '双边缘卡尺测宽', 'measure.caliperLine': '卡尺找线',
       'measure.caliperCircle': '卡尺找圆', 'feature.edgeSubpixel': '亚像素找边' };
     const caliperNode: Node = { id: 'caliper', position: { x: 0, y: 0 }, data: { typeKey: caliperCatalog.type, label: labels[type],
       inputs: caliperCatalog.inputs, parameters } };

@@ -605,7 +605,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 249  # 235 routes on main + 14 calibration wizard/hand-eye routes (Batch E/F: wizard session CRUD, views, calibrate, export/import, preview, hints, disable-outliers, handeye/solve); prior baseline 233 was already 2 stale vs main
+expected_routes = 258  # Prior 249 + 8 versioned camera-intrinsics asset routes + 1 guided 3D hand-eye solve route.
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -1408,8 +1408,15 @@ facts=len(re.findall(r'\[Fact\]',text)); theories=len(re.findall(r'\[Theory\]',t
 ok(f'Test source: Fact={facts}, Theory={theories}, SoakTraits={soaks}')
 
 # Traditional image processing must use JLVision; OpenCV is retained only at IO,
-# synthetic-image drawing and legacy camera/plugin buffer boundaries.
+# synthetic-image drawing and legacy camera/plugin buffer boundaries. Two explicit
+# exceptions cover the 3D pose solver and OBB visualization; image algorithms stay native.
 allowed_cv_node_calls = {'ImRead', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line'}
+allowed_cv_node_exceptions = {
+    # The added 3D pose solver deliberately uses OpenCV's hand-eye methods.
+    ('HandEye3DCalibrationNode.cs', 'HandEye3DCalibrationNode', 'CalibrateHandEye'),
+    # Drawing a text label on an inference preview is visualization, not image analysis.
+    ('InferenceNodes.cs', 'OnnxOrientedDetectionNode', 'PutText'),
+}
 for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
     body = source.read_text(encoding='utf-8-sig')
     for match in re.finditer(r'\bCv2\.(\w+)', body):
@@ -1417,7 +1424,8 @@ for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
         enclosing_classes = re.findall(r'\bclass\s+(\w+)', body[:match.start()])
         synthetic_polygon_drawing = (source.name == 'OpenCvNodes.cs' and call == 'FillConvexPoly'
                                      and enclosing_classes and enclosing_classes[-1] == 'SyntheticImageNode')
-        if call not in allowed_cv_node_calls and not synthetic_polygon_drawing:
+        exception = (source.name, enclosing_classes[-1] if enclosing_classes else '', call)
+        if call not in allowed_cv_node_calls and not synthetic_polygon_drawing and exception not in allowed_cv_node_exceptions:
             fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call}')
     if 'OpenCvSharp.Dnn' in body:
         fail(f'OpenCV DNN dependency remains in node: {source.name}')
@@ -1425,7 +1433,7 @@ algorithm_project = read_safe('backend/src/VisionStudio.Engine/VisionStudio.Engi
 for package in ['JLVisionLib', 'Microsoft.ML.OnnxRuntime']:
     if f'Include="{package}"' not in algorithm_project:
         fail(f'Missing algorithm backend dependency: {package}')
-ok('JLVision traditional algorithms + ONNX Runtime; no OpenCV algorithm/DNN fallback in nodes')
+ok('JLVision traditional algorithms + ONNX Runtime; explicit 3D hand-eye/preview exceptions, no OpenCV DNN fallback')
 
 if errors:
     print('STATIC AUDIT FAILED')

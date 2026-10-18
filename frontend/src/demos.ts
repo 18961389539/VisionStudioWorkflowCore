@@ -487,6 +487,29 @@ export const forEachDemo = (): DemoGraph => ({
   ]
 });
 
+export const caliperWidthDemo = (): DemoGraph => ({
+  nodes: [
+    node('source', 'image.synthetic', 20, 180, { width: 640, height: 480, centerX: 320, centerY: 240, radius: 80 }),
+    node('width', 'measure.caliperWidth', 300, 180, { startX: 10, startY: 100, endX: 220, endY: 100,
+      polarity: 'bright', edgeThreshold: 8, sampleWidth: 7, minWidth: 100, maxWidth: 130,
+      direction: 'closestwidth', nominalWidth: 115 }),
+    node('found', 'flow.ifBoolean', 580, 180),
+    node('tolerance', 'value.range', 850, 80, { min: 114, max: 116 }),
+    node('result', 'flow.result', 1120, 80),
+    node('missing', 'flow.result', 850, 340),
+    node('join', 'flow.join', 1390, 180)
+  ],
+  edges: [
+    control('c1', 'source', 'next', 'width', 'exec'), data('d1', 'source', 'image', 'width', 'image'),
+    control('c2', 'width', 'next', 'found', 'exec'), data('d2', 'width', 'found', 'found', 'condition'),
+    control('c3', 'found', 'true', 'tolerance', 'exec'), data('d3', 'width', 'width', 'tolerance', 'value'),
+    control('c4', 'tolerance', 'next', 'result', 'exec'), data('d4', 'tolerance', 'pass', 'result', 'pass'),
+    control('c5', 'result', 'next', 'join', 'branch1'),
+    control('c6', 'found', 'false', 'missing', 'exec'), data('d5', 'found', 'condition', 'missing', 'pass'),
+    control('c7', 'missing', 'next', 'join', 'branch2')
+  ]
+});
+
 export const precisionDemo = (): DemoGraph => ({
   nodes: [
     node('source', 'image.synthetic', 20, 240, { width: 640, height: 480, centerX: 320, centerY: 240, radius: 80 }),
@@ -923,6 +946,7 @@ export const regionShapeDemo = (): { nodes: Node[]; edges: Edge[] } => ({
 });
 
 export const demos = {
+  caliperWidth: caliperWidthDemo,
   smallFeatures: smallFeatureDemo,
   regionShapes: regionShapeDemo,
   circularTolerance: circularToleranceDemo,
@@ -957,6 +981,7 @@ export type DemoKey = keyof typeof demos;
 
 /** 每个示例的一句话用途说明：让用户在打开前就知道“这个示例是干什么的、适合谁” */
 export const demoDescriptions: Record<DemoKey, string> = {
+  caliperWidth: '合成亮条 → 双边缘卡尺测宽 → 宽度公差判定；演示 115 px 标称宽度筛选、中心与两端点输出，找不到边缘对时走 NG。',
   smallFeatures: '生成带亮细条与暗缝的区域测试图，分别做顶帽、底帽和梯度；统计暗缝底帽响应，空检测域走 NG。',
   regionShapes: 'ROI 多边形生成区域，计算凸包与凹陷差，展示边界和骨架，并按凹陷像素面积判定。',
   circularTolerance: '点列生成内外轮廓 → 圆度拟合 → 包含检查与壁厚 → 同心偏差 → 最小壁厚判定；缺失轮廓和内圆不包含时走 NG。',

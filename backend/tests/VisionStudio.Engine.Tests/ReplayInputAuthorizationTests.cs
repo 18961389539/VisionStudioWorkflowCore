@@ -3,6 +3,7 @@ using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
+using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Tests;
 
@@ -75,6 +76,39 @@ public sealed class ReplayInputAuthorizationTests
         finally
         {
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(123L)]
+    [InlineData(2147483648L)]
+    public async Task HostInjectedNumericSequence_CompilesAndSurvivesReplay(long sequence)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "visionstudio-replay-sequence", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "frame.png");
+        try
+        {
+            using (var pixels = new Mat(24, 32, MatType.CV_8UC1, Scalar.All(90)))
+                Assert.True(Cv2.ImWrite(path, pixels));
+
+            await using var manager = new CameraManager();
+            var executor = new AcquireImageNode(manager, new FixedResolver(path));
+            var definition = Definition(path);
+            definition.Parameters!["__replaySequence"] = JsonSerializer.SerializeToElement(sequence);
+            using var registry = new VisionNodeRegistry();
+            registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "replay-test");
+            var workflow = new WorkflowDefinition("replay-sequence", "Replay sequence", [definition], []);
+
+            var compiled = new VisionWorkflowCompiler(registry).Compile(workflow);
+            Assert.Contains(definition.Id, compiled.OrderedNodeIds);
+            var result = await executor.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), definition, default);
+            using var image = result.Outputs["image"].Require<VisionImage>("image");
+            Assert.Equal(sequence, result.Outputs["sequence"].Require<long>("sequence"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 }

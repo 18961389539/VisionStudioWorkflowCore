@@ -5,7 +5,7 @@ import ExecutionStatus from './ExecutionStatus';
 import { portNames } from '../i18n/catalog';
 import { pickSummaryKeys } from '../summaryText';
 
-const measurementNodeTypes = new Set(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle']);
+const measurementNodeTypes = new Set(['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle']);
 const geometryResultNodeTypes = new Set(['image.crop', 'roi.transform', ...measurementNodeTypes]);
 
 function measurementNotFoundMessage(type: string, summary: Record<string, unknown> | undefined) {
@@ -21,6 +21,8 @@ function measurementNotFoundMessage(type: string, summary: Record<string, unknow
     return noEdgeMessages[type] ?? '搜索范围内没有达到最小对比度的边缘。请检查搜索几何、最小对比度、边缘极性、搜索方向和 ROI。';
   }
   const messages: Record<string, string> = {
+    'no-edge-pair-above-threshold': '没有找到完整的两侧边缘。请让搜索线横穿目标两侧，并检查亮条/暗槽极性、边缘阈值和 ROI。',
+    'no-pair-within-width-range': '已找到边缘对，但宽度均超出范围。请核对最小/最大宽度，以及搜索线是否垂直于被测边界。',
     'search-line-outside-image': '搜索线完全位于输入图像之外。请调整搜索线，或检查图像裁剪和坐标变换。',
     'search-region-outside-image': '所有卡尺都落在输入图像之外。请移动搜索区域，或检查图像裁剪和坐标变换。',
     'search-line-clipped-too-short': '搜索线与图像只有很短的交集，裁切后不足 2 px。请调整线的位置或方向。',
@@ -58,16 +60,16 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
     'Cannot clip a search line to an empty image.': '无法将搜索线裁剪到空图像。请检查输入图像尺寸和上游输出。',
     'Measurement transform must be a finite, orientation-preserving rigid px-to-px transform (translation and rotation only).': '测量变换必须是有效的像素坐标刚性变换，只能包含平移和旋转。请检查 transform 输入。'
   };
-  if (common[error] && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
+  if (common[error] && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
     return common[error];
   const invalidParameter = error.match(/^Parameter '([^']+)' must be a finite number\.$/);
-  if (invalidParameter && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle', 'roi.transform'].includes(type)) {
+  if (invalidParameter && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle', 'roi.transform'].includes(type)) {
     const name = invalidParameter[1];
     const label = catalog.parameters.find(parameter => parameter.name === name)?.label ?? name;
     return `参数“${label}”必须是有限数值。请检查并修正后重试。`;
   }
   const invalidChoice = error.match(/^Parameter '([^']+)' must be one of \[([^\]]+)\]\.$/);
-  if (invalidChoice && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+  if (invalidChoice && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
     const [, name, rawChoices] = invalidChoice;
     const parameter = catalog.parameters.find(item => item.name === name);
     const label = parameter?.label ?? name;
@@ -76,9 +78,9 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
     return `参数“${label}”的选项值无效。可选项：${choices.join('、')}。`;
   }
   if (error === 'Polygon ROI exceeds the 500000-point limit.'
-    && ['image.crop', 'roi.transform', 'feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
+    && ['image.crop', 'roi.transform', 'feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle'].includes(type))
     return '多边形 ROI 最多允许 500000 个顶点。';
-  if (['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
+  if (['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine', 'measure.caliperCircle'].includes(type)) {
     const emptyRasterRoi = error.match(/^(Rectangle|Circle|Polygon|Brush) ROI does not cover any pixels in the measurement image \((\d+)×(\d+)\)\. Move the ROI into the image or check its coordinate frame\.$/);
     if (emptyRasterRoi) {
       const roiName: Record<string, string> = { Rectangle: '矩形', Circle: '圆形', Polygon: '多边形', Brush: '笔刷' };
@@ -121,6 +123,12 @@ function executionErrorMessage(catalog: NodeCatalogItem, error: string): string 
     },
     'measure.caliper': {
       'Caliper measurement requires a non-empty image.': '卡尺输入图像为空。请检查 image 输入和上游节点输出。'
+    },
+    'measure.caliperWidth': {
+      'Caliper width measurement requires a non-empty image.': '卡尺测宽输入图像为空。请检查 image 输入。',
+      'Edge threshold must be within 0..255.': '边缘阈值必须在 0 至 255 之间。',
+      'Width limits must satisfy 0 <= minWidth <= maxWidth; maxWidth=0 disables the upper limit.': '最小宽度不能为负；最大宽度必须为 0（不限）或不小于最小宽度。',
+      'Nominal width must be positive when selecting the closest width.': '按标称宽度选择时，标称宽度必须大于 0。'
     },
     'measure.caliperLine': {
       'Caliper line measurement requires a non-empty image.': '卡尺找线的输入图像为空。请检查 image 输入和上游节点输出。'

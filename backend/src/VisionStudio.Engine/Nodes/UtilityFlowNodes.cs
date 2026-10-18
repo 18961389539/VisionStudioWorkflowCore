@@ -7,8 +7,17 @@ public sealed class DelayNode : IVisionNodeExecutor
     {
         var delayMs = node.GetInt("delayMs", 1000);
         if (delayMs is < 0 or > 600000) throw new InvalidOperationException("flow.delay delayMs must be between 0 and 600000.");
+        cancellationToken.ThrowIfCancellationRequested();
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
-        await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+        // Windows timer ticks can complete Task.Delay before the requested duration
+        // according to the high-resolution clock. Recheck the actual deadline.
+        var remaining = (double)delayMs;
+        while (remaining > 0)
+        {
+            await Task.Delay((int)Math.Ceiling(remaining), cancellationToken).ConfigureAwait(false);
+            remaining = delayMs - System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        }
+        cancellationToken.ThrowIfCancellationRequested();
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         CoordinateValidation.RequireFinite(elapsed, "delay.elapsedMs");
         var diag = CoordinateValidation.Diagnostics(Type, ("requestedMs", delayMs), ("elapsedMs", elapsed));

@@ -56,6 +56,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'image.channel': ['channel'],
   'measure.blob': ['area', 'radius', 'x', 'y'],
   'measure.caliper': ['found', 'x', 'y', 'strength', 'sampleCount'],
+  'measure.caliperWidth': ['found', 'width', 'pairCount', 'strength'],
   'measure.rotatedRect': ['width', 'height', 'angleDeg'],
   'feature.edge': ['edgePixels'],
   'feature.line': ['length', 'angleDeg'],

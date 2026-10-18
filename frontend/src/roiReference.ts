@@ -226,7 +226,7 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
             pending.push(target.id);
           }
         } else if (portNameIs(edge.targetHandle, 'transform')
-          && ['feature.edgesubpixel', 'measure.caliper', 'measure.caliperline', 'measure.calipercircle'].includes(type)) {
+          && ['feature.edgesubpixel', 'measure.caliper', 'measure.caliperwidth', 'measure.caliperline', 'measure.calipercircle'].includes(type)) {
           targets.add(target.id);
         }
       }
@@ -248,7 +248,7 @@ export function applyReferenceParameters(nodes: Node[], edges: Edge[], nodeId: s
       const normalizedArc = normalizeCaliperCircleArc(start, end);
       geometry = { centerX: center.x, centerY: center.y,
         angleStartDeg: normalizedArc.start, angleEndDeg: normalizedArc.end };
-    } else if (['measure.caliper', 'measure.caliperline', 'feature.edgesubpixel'].includes(type)
+    } else if (['measure.caliper', 'measure.caliperwidth', 'measure.caliperline', 'feature.edgesubpixel'].includes(type)
       && !edges.some(edge => edge.target === node.id && portNameIs(edge.targetHandle, 'searchLine'))) {
       const start = move(Number(current.startX ?? 120), Number(current.startY ?? 240));
       const end = move(Number(current.endX ?? 520), Number(current.endY ?? 240));

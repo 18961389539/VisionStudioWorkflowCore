@@ -34,7 +34,7 @@ const aliases: Record<string, string[]> = {
   'measure.blobs': ['斑点', '连通域', '最大斑点', 'blob', 'largest blob'],
   'feature.edge': ['边缘', '找边', 'canny'], 'feature.circle': ['找圆', '圆检测', 'circle'],
   'feature.line': ['找线', '直线', 'line'], 'measure.blob': ['斑点', '连通域', 'blob'],
-  'measure.caliper': ['卡尺', '测宽', 'caliper'], 'geometry.distance': ['测距', '距离', 'distance'],
+  'measure.caliper': ['卡尺', 'caliper'], 'measure.caliperWidth': ['卡尺', '测宽', '线宽', '槽宽', '间隙', 'width', 'gap'], 'geometry.distance': ['测距', '距离', 'distance'],
   'flow.if': ['条件', '分支', 'if'], 'flow.parallel': ['并行', 'parallel'],
   'flow.join': ['汇合', '合并', 'join'], 'flow.result': ['判定', '结果', 'ok', 'ng'],
   'device.readTag': ['plc', '读取', 'read'], 'device.writeTag': ['plc', '写入', 'write'],

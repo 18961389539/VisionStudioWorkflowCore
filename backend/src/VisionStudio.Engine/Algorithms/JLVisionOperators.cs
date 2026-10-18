@@ -157,6 +157,12 @@ internal static partial class JLVisionOperators
         using var resized = image.ZoomImageSize(size.Width, size.Height, interpolation == InterpolationFlags.Nearest ? "nearest_neighbor" : interpolation == InterpolationFlags.Cubic ? "bicubic" : interpolation == InterpolationFlags.Area ? "weighted" : "bilinear");
         JLVisionImages.Store(resized, target);
     }
+    public static void MirrorHorizontal(Mat source, Mat target)
+    {
+        using var image = JLVisionImages.FromMat(source);
+        using var mirrored = image.MirrorImage("column");
+        JLVisionImages.Store(mirrored, target);
+    }
     public static Mat GetStructuringElement(MorphShapes shape, Size size)
     {
         var kernel = new Mat(size.Height, size.Width, MatType.CV_8UC1, Scalar.All(shape == MorphShapes.Rect ? 1 : 0));

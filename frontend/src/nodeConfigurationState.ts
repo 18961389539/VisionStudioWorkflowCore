@@ -302,7 +302,7 @@ export function configurationIssues(
   const roiInputOverridesParameter = hasConnectedInput('roi', 'Roi');
   const searchLineInputOverridesGeometry = hasConnectedInput('searchLine', 'Line2D');
   if (!searchLineInputOverridesGeometry
-    && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperLine'].includes(catalog.type)) {
+    && ['feature.edgeSubpixel', 'measure.caliper', 'measure.caliperWidth', 'measure.caliperLine'].includes(catalog.type)) {
     const startX = numericParameter('startX');
     const startY = numericParameter('startY');
     const endX = numericParameter('endX');
@@ -310,6 +310,15 @@ export function configurationIssues(
     if ([startX, startY, endX, endY].every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))
       && Math.hypot(endX! - startX!, endY! - startY!) < 2)
       issues.push('搜索线长度至少需要 2 px；请调整起点/终点，或连接有效的 searchLine 输入。');
+  }
+  if (catalog.type === 'measure.caliperWidth') {
+    const minimum = validNumericParameter('minWidth');
+    const maximum = validNumericParameter('maxWidth');
+    if (minimum !== undefined && maximum !== undefined && maximum > 0 && maximum < minimum)
+      issues.push('最大宽度必须为 0（不限）或不小于最小宽度。');
+    const nominal = validNumericParameter('nominalWidth');
+    if (parameters.direction === 'closestwidth' && nominal !== undefined && nominal <= 0)
+      issues.push('按标称宽度选择时，标称宽度必须大于 0。');
   }
   if (catalog.type === 'measure.caliperCircle') {
     const angleStart = validNumericParameter('angleStartDeg');
