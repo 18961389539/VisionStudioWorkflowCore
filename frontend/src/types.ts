@@ -897,6 +897,22 @@ export type VisionTransform2D = {
   matrix?: number[];
 };
 
+export type VisionTransform3D = {
+  sourceFrame: string;
+  targetFrame: string;
+  unit: string;
+  /** Row-major 4x4 homogeneous matrix. */
+  matrix: number[];
+};
+
+export type VisionCoordinatePoint3D = {
+  x: number;
+  y: number;
+  z: number;
+  frame: string;
+  unit: string;
+};
+
 export type CalibrationWorkspaceRequest = {
   sourceFrame: string;
   targetFrame: string;

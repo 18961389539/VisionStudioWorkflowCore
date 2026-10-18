@@ -386,6 +386,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<CameraIntrinsicCalibrationNode>();
         services.AddSingleton<ImageUndistortNode>();
         services.AddSingleton<PlanarHandEyeCalibrationNode>();
+        services.AddSingleton<HandEye3DCalibrationNode>();
         services.AddSingleton<DetectionFilterNode>();
         services.AddSingleton<DetectionSortNode>();
         services.AddSingleton<DetectionAtIndexNode>();
@@ -426,6 +427,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<AngleNode>();
         services.AddSingleton<PlanarCalibrationNode>();
         services.AddSingleton<TransformPointNode>();
+        services.AddSingleton<CoordinatePoint3DNode>();
+        services.AddSingleton<TransformCoordinatePoint3DNode>();
         services.AddSingleton<TransformLineNode>();
         services.AddSingleton<TransformPoseNode>();
         services.AddSingleton<CoordinatePointNode>();

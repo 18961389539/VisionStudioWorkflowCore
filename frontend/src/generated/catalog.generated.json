@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "3d993f2d43d6d44cb7d98d33bc36cf5d724847d700c97e8d73fd5ba91713282a",
+  "hash": "9184f40f45011209e933529a8ed031ea22afdc356e2fc781021ce60e0f834e14",
   "items": [
     {
       "type": "image.acquire",
@@ -701,6 +701,179 @@
         }
       ],
       "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Requires rotation coverage and translation span in both robot and vision samples, rejects duplicate robot poses, and limits input to 1000 pairs. Angular residual weight is configurable in translation units per radian. Reports per-sample translation and angle errors with separate worst indexes, coverage and optional residual gates. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "calibration.handEye3D",
+      "displayName": "3D Hand-Eye Calibration",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform3D",
+          "required": true
+        },
+        {
+          "name": "translationRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rotationRmsDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "robotTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxTranslationError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxRotationErrorDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstTranslationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstRotationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sampleResidualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Setup",
+          "type": "select",
+          "defaultValue": "eyeInHand",
+          "options": [
+            {
+              "label": "Eye in hand (camera on tool)",
+              "value": "eyeInHand"
+            },
+            {
+              "label": "Eye to hand (fixed camera)",
+              "value": "eyeToHand"
+            }
+          ]
+        },
+        {
+          "name": "method",
+          "label": "OpenCV Method",
+          "type": "select",
+          "defaultValue": "DANIILIDIS",
+          "options": [
+            {
+              "label": "Daniilidis (dual quaternion)",
+              "value": "DANIILIDIS"
+            },
+            {
+              "label": "Tsai",
+              "value": "TSAI"
+            },
+            {
+              "label": "Park",
+              "value": "PARK"
+            },
+            {
+              "label": "Horaud",
+              "value": "HORAUD"
+            },
+            {
+              "label": "Andreff",
+              "value": "ANDREFF"
+            }
+          ]
+        },
+        {
+          "name": "samplesJson",
+          "label": "Pose Pairs JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "description": "{samples:[{robotToBase:[16 row-major values],targetToCamera:[16 row-major values]},...]}; each is a rigid homogeneous transform. At least six poses with rotation about two non-parallel axes; max 1000."
+        },
+        {
+          "name": "rotationWeight",
+          "label": "Rotation Weight (translation units/radian)",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 1000000,
+          "step": 1,
+          "description": "Used only to rank the combined worst sample; it does not alter the OpenCV fit or separate residuals."
+        },
+        {
+          "name": "maxTranslationError",
+          "label": "Max Sample Translation Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001
+        },
+        {
+          "name": "maxRotationErrorDeg",
+          "label": "Max Sample Rotation Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 180,
+          "step": 0.01
+        },
+        {
+          "name": "sourceFrame",
+          "label": "Transform Source Frame",
+          "type": "text",
+          "defaultValue": "Camera"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Transform Target Frame",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand."
+        },
+        {
+          "name": "unit",
+          "label": "Translation Unit",
+          "type": "text",
+          "defaultValue": "mm"
+        }
+      ],
+      "description": "Solve a full rigid SE(3) camera-to-tool (eye-in-hand) or camera-to-base (eye-to-hand) transform using OpenCV hand-eye methods. Inputs are row-major 4x4 robotToBase and targetToCamera matrices in one shared translation unit. Validates rigid matrices, rejects translation-only/single-axis motion, reports mean-centered per-sample translation/rotation residuals and separate worst indexes, and supports residual gates. Requires at least six samples. Robot translation span is reported for context but does not gate valid rotational calibration. Outputs a typed Transform3D; target coordinates are expected to be static relative to the robot base for eye-in-hand, or fixed to the tool for eye-to-hand.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -2122,6 +2295,142 @@
       "declaresActions": true
     },
     {
+      "type": "coordinate.point3D",
+      "displayName": "Coordinate Point 3D",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "z",
+          "label": "Z",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "frame",
+          "label": "Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Point"
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Point"
+        }
+      ],
+      "description": "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants, so upstream measurements can drive the point. Coordinates must be finite and bounded; frame must be non-empty.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
       "type": "coordinate.pose",
       "displayName": "Coordinate Pose",
       "category": "Coordinate",
@@ -2521,6 +2830,75 @@
         }
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "coordinate.transformPoint3D",
+      "displayName": "Transform 3D Point",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform3D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true

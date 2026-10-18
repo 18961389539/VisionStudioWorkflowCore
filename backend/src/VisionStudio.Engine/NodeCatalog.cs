@@ -611,6 +611,15 @@ public static class BuiltInNodeCatalog
             "Convert an image-space Point2D into a frame/unit-aware coordinate point through a validated Transform2D. Rejects non-finite points and singular transforms; emits frame, unit and JSON diagnostics alongside the point.",
             "builtin"),
         new(
+            "coordinate.transformPoint3D",
+            "Transform 3D Point",
+            "Coordinate",
+            [ExecIn, new("point", VisionDataType.CoordinatePoint3D), new("transform", VisionDataType.Transform3D)],
+            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [],
+            "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
+            "builtin"),
+        new(
             "coordinate.transformLine",
             "Transform Line",
             "Coordinate",
@@ -641,6 +650,21 @@ public static class BuiltInNodeCatalog
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
             ],
             "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
+            "builtin"),
+        new(
+            "coordinate.point3D",
+            "Coordinate Point 3D",
+            "Coordinate",
+            [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("z", VisionDataType.Double, Required: false)],
+            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [
+                new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("y", "Y", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("z", "Z", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("frame", "Frame", "text", "Workpiece", Group: "Point"),
+                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
+            ],
+            "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants, so upstream measurements can drive the point. Coordinates must be finite and bounded; frame must be non-empty.",
             "builtin"),
         new(
             "coordinate.distance",
