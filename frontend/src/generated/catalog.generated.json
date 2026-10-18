@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "1adf0fad7b69cc2691e7a113d9dcdb723281f1eeef95aac435755e39c2758899",
+  "hash": "52a96836fcd36f6c96ced45219af476c52a8f3d6b75d4b08d5c6bd759a3e5c84",
   "items": [
     {
       "type": "image.acquire",
@@ -6376,6 +6376,26 @@
           "required": false
         },
         {
+          "name": "mapPeak",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMean",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMin",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMax",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "peakX",
           "dataType": "Double",
           "required": false
@@ -6490,8 +6510,60 @@
           "defaultValue": false
         },
         {
+          "name": "scoreOutputName",
+          "label": "Score Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional scalar image-level anomaly score output. Set together with mapOutputName when the model exposes both outputs."
+        },
+        {
+          "name": "mapOutputName",
+          "label": "Anomaly Map Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional spatial anomaly map output. Set together with scoreOutputName for image-level gating plus pixel localization."
+        },
+        {
+          "name": "mapLayout",
+          "label": "Map Layout",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic",
+              "value": "auto"
+            },
+            {
+              "label": "Channels First",
+              "value": "channelsFirst"
+            },
+            {
+              "label": "Channels Last",
+              "value": "channelsLast"
+            }
+          ],
+          "description": "Spatial output may be [1,1,H,W], [1,H,W], [H,W], [1,H,W,1], or [H,W,1]. Explicitly select a layout when a narrow map shape is ambiguous."
+        },
+        {
           "name": "threshold",
           "label": "Anomaly Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01,
+          "description": "Image-level score threshold; also used for the map when separate map threshold is off."
+        },
+        {
+          "name": "useSeparateMapThreshold",
+          "label": "Use Separate Map Threshold",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "When enabled, mapThreshold controls pixel-area statistics independently of the image-level score threshold."
+        },
+        {
+          "name": "mapThreshold",
+          "label": "Map Threshold",
           "type": "number",
           "defaultValue": 0.5,
           "min": -1000000,
@@ -6513,10 +6585,10 @@
               "value": "otsu"
             }
           ],
-          "description": "Otsu derives the effective threshold from the spatial anomaly map distribution (suggestedThreshold); scalar outputs always use the manual threshold."
+          "description": "Otsu derives the pixel threshold from the map distribution; image-level scores always use the manual Anomaly Threshold."
         }
       ],
-      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the manual threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above the effective threshold (isAnomaly follows the peak). thresholdMode=otsu uses the Otsu threshold of the map itself as the effective threshold.",
+      "description": "Run an ONNX anomaly model with a scalar image score, a spatial map, or both by selecting scoreOutputName and mapOutputName. The score drives isAnomaly when present; map-only models use the map peak. Maps in [1,1,H,W], [1,H,W], [H,W], or channels-last [1,H,W,1] form emit a source-sized normalized heatmap, map peak/mean/min/max, peak location, and area fraction over the effective map threshold. Otsu applies to pixel maps only. If no separate names are configured, outputName or the first model output keeps the single-output behavior.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,

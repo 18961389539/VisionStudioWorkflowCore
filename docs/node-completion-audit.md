@@ -357,3 +357,9 @@ The Intrinsics Wizard can save solved models as immutable, hashed SQLite version
 
 Usage and limits are documented in [ONNX Oriented Box Detection](onnx-obb.md). Embedded-NMS exports, tracking, rotated crops, and automatic class-name extraction remain open product gaps.
 
+## Follow-up implementation: multi-output anomaly inference
+
+`inference.anomaly` can now select separate scalar image-score and spatial-map outputs from one ONNX inference call. Scalar scores drive the workflow decision while map outputs independently provide heatmaps, map statistics, peak location, and thresholded area. It accepts common NCHW, squeezed, and channels-last map tensors, with an explicit layout setting for ambiguous narrow shapes. A separate pixel threshold is optional; existing single-output and shared-threshold workflows retain their defaults. The historic anomaly score remains unrated against the full audit rubric.
+
+Usage and limits are documented in [ONNX Anomaly Inference](onnx-anomaly.md). Dataset-based threshold calibration and normal-sample model training remain open product gaps.
+
