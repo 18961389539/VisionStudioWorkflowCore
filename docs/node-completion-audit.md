@@ -347,3 +347,7 @@ The Intrinsics Wizard can save solved models as immutable, hashed SQLite version
 
 `calibration.cameraIntrinsics` and the Intrinsics Wizard now also support JLVision's `area_scan_telecentric_polynomial` model for standard object-side telecentric lenses. The session document and immutable camera-intrinsic assets preserve magnification, fixed sensor pixel pitch, and the native camera tuple; `image.undistort` builds its radial map with the correct native camera type. The wizard asks for datasheet-based magnification and pixel-pitch values. Telecentric solves report planar homography quality and overall RMS; pinhole pose RMS is disabled because it does not model telecentric projection. Tilted/bilateral models and full audit rescoring remain open work.
 
+## Follow-up implementation: end-to-end instance segmentation
+
+`inference.instanceSegmentation` now decodes YOLO26 end-to-end rows (`[x1,y1,x2,y2,score,class,mask coefficients]`) alongside raw YOLO-Seg heads. Automatic NMS applies class-aware suppression to raw candidates and skips it for end-to-end rows. Each detected mask can also be included in the `instances` JSON as an independent row-major alternating run-length array, so overlapping objects are preserved even though the image output is a highest-score-wins class-id composite. The historic score table above predates this change; a full audit re-score and runtime comparison against exported YOLO26-seg ONNX models remain outstanding.
+

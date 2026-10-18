@@ -384,10 +384,9 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
 }
 
 /// <summary>
-/// YOLO26 / YOLOv8 instance segmentation ONNX: dual outputs
-/// (1) boxes+scores+mask coeffs [1, 4+nc+32, N] and (2) prototypes [1, 32, mh, mw].
-/// Emits detections, a combined class-id mask (last instance wins on overlap), overlay and instance JSON.
-/// Does not embed NMS in the graph; class-aware NMS runs here. OBB heads are not supported; use inference.pose for keypoints.
+/// YOLO26 / YOLOv8 instance segmentation ONNX: raw or YOLO26 end-to-end detection rows plus mask prototypes.
+/// Emits detections, a combined class-id mask, overlay, and per-instance geometry/mask-run JSON.
+/// Raw heads use class-aware NMS; end-to-end rows already have NMS-free top detections. OBB heads are not supported.
 /// </summary>
 public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
 {
@@ -422,19 +421,30 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             { var tmp = det; det = proto; proto = tmp; }
             var detShape = OnnxInferenceHelpers.Shape(det);
             var protoShape = OnnxInferenceHelpers.Shape(proto);
-            if (protoShape.Length != 4 || protoShape[0] != 1 || protoShape[1] < 1)
+            if (protoShape.Length != 4 || protoShape[0] != 1 || protoShape[1] < 1 || protoShape[2] < 1 || protoShape[3] < 1)
                 throw new InvalidOperationException($"YOLO-Seg prototype output must have shape [1,maskDim,H,W]; received [{string.Join(',', protoShape)}].");
             var maskDim = protoShape[1];
             var protoH = protoShape[2];
             var protoW = protoShape[3];
             var detValues = OnnxInferenceHelpers.ReadFloatTensor(det, "instance-seg-det");
             var protoValues = OnnxInferenceHelpers.ReadFloatTensor(proto, "instance-seg-proto");
-            var candidates = InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim);
+            var layout = node.GetString("layout", "yolo26-seg").Trim().ToLowerInvariant();
+            if (layout is "yolo26-e2e" or "end2end") layout = "xyxy";
+            if (layout is not ("yolo26-seg" or "xyxy"))
+                throw new InvalidOperationException($"Unsupported instance-segmentation layout '{layout}'. Supported values are 'yolo26-seg' (raw head) and 'xyxy' (YOLO26 end-to-end).");
+            var candidates = layout == "xyxy"
+                ? InferenceStats.DecodeYoloSegXyxy(detValues, detShape, maskDim)
+                : InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim);
             var threshold = node.GetDouble("confidenceThreshold", 0.25);
             var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
             var maskThreshold = (float)node.GetDouble("maskThreshold", 0.5);
+            var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
+            if (nmsMode is not ("auto" or "on" or "off"))
+                throw new InvalidOperationException("nmsMode must be auto, on, or off.");
+            var applyNms = nmsMode == "on" || (nmsMode == "auto" && layout == "yolo26-seg");
+            var includeMaskRuns = node.GetBool("includeMaskRuns", true);
             var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
-            if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !float.IsFinite(maskThreshold))
+            if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !float.IsFinite(maskThreshold) || maskThreshold is < 0 or > 1)
                 throw new InvalidOperationException("Instance segmentation thresholds must be finite values from 0 to 1.");
             var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
             if (coordinates is not ("normalized" or "pixels"))
@@ -462,7 +472,8 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var c = candidates[i];
-                if (c.Score < threshold || !double.IsFinite(c.Score)) continue;
+                if (c.Score < threshold || c.Score <= 0 || !double.IsFinite(c.Score)) continue;
+                if (c.ClassId < 0 || c.ClassId > 254) throw new InvalidOperationException($"Instance-seg class id {c.ClassId} is outside the supported 0..254 range for the byte class-mask output.");
                 var x1 = c.CenterX - c.Width / 2; var y1 = c.CenterY - c.Height / 2;
                 var x2 = c.CenterX + c.Width / 2; var y2 = c.CenterY + c.Height / 2;
                 if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
@@ -476,7 +487,7 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             var kept = new List<(InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom)>();
             foreach (var candidate in scored.OrderByDescending(x => x.Cand.Score))
             {
-                if (kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
+                if (applyNms && kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
                 kept.Add(candidate);
                 if (kept.Count == maxCount) break;
             }
@@ -508,19 +519,33 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     boxInInputL, boxInInputT, boxInInputR, boxInInputB,
                     inputWidth, inputHeight, source.Width, source.Height, maskThreshold, letterbox);
                 var area = 0;
+                var maskRuns = includeMaskRuns ? new List<int>() : null;
+                var runValue = 0;
+                var runLength = 0;
                 for (var p = 0; p < instanceMask.Length; p++)
                 {
-                    if (instanceMask[p] == 0) continue;
+                    var value = instanceMask[p] == 0 ? 0 : 1;
+                    if (value != runValue)
+                    {
+                        maskRuns?.Add(runLength);
+                        runValue = value;
+                        runLength = 0;
+                    }
+                    runLength++;
+                    if (value == 0) continue;
                     area++;
-                    // Store classId+1 so background stays 0; clamp to byte.
-                    var label = (byte)Math.Clamp(c.ClassId + 1, 1, 255);
-                    combined[p] = label;
+                    // Store classId+1 so background stays 0. Candidates are score-sorted,
+                    // so the first foreground instance owns composite-mask overlaps.
+                    if (combined[p] == 0) combined[p] = (byte)(c.ClassId + 1);
                 }
+                maskRuns?.Add(runLength);
                 var w = right - left; var h = bottom - top;
                 detections.Add(new VisionDetection(i, left, top, w, h, area, 0, 0,
                     new VisionCircle((left + right) / 2, (top + bottom) / 2, Math.Sqrt(w * w + h * h) / 2),
                     new VisionRectangle2D(left, top, w, h), c.Score, c.ClassId));
-                instancePayload.Add(new { index = i, classId = c.ClassId, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area });
+                instancePayload.Add(new { index = i, classId = c.ClassId, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area,
+                    maskSize = includeMaskRuns ? new[] { source.Height, source.Width } : null,
+                    maskRuns = maskRuns?.ToArray(), maskRunOrder = includeMaskRuns ? "row-major, alternating background/foreground runs" : null });
             }
 
             using var maskMat = new Mat(source.Height, source.Width, MatType.CV_8UC1);
@@ -535,9 +560,9 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     ["mask"] = VisionValue.Image(VisionImage.Own(maskOut)),
                     ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
                     ["instances"] = VisionValue.String(JsonSerializer.Serialize(instancePayload)),
-                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, detShape, protoShape, instances = instancePayload }))
+                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, nmsMode, detShape, protoShape, instances = instancePayload }))
                 },
-                new Dictionary<string, object?> { ["count"] = detections.Count, ["maskDim"] = maskDim, ["letterbox"] = letterbox, ["layout"] = "yolo26-seg", ["detShape"] = detShape, ["protoShape"] = protoShape }));
+                new Dictionary<string, object?> { ["count"] = detections.Count, ["maskDim"] = maskDim, ["letterbox"] = letterbox, ["layout"] = layout, ["nmsMode"] = nmsMode, ["applyNms"] = applyNms, ["includeMaskRuns"] = includeMaskRuns, ["detShape"] = detShape, ["protoShape"] = protoShape }));
         }
         finally { foreach (var o in outputs) o.Dispose(); }
     }

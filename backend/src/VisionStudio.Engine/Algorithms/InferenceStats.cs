@@ -241,6 +241,37 @@ public static class InferenceStats
     }
 
     /// <summary>
+    /// Decode YOLO26 end-to-end instance-seg rows: [x1,y1,x2,y2,score,class,mask coefficients].
+    /// Accepts [1,N,C] and [N,C]; coordinates stay in the tensor's own units.
+    /// </summary>
+    public static YoloSegCandidate[] DecodeYoloSegXyxy(float[] values, IReadOnlyList<int> shape, int maskDim = 32)
+    {
+        if (maskDim < 1) throw new InvalidOperationException("YOLO-Seg maskDim must be positive.");
+        var expected = 6 + maskDim;
+        int count, channels;
+        if (shape.Count == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] >= expected) { count = shape[1]; channels = shape[2]; }
+        else if (shape.Count == 2 && shape[0] > 0 && shape[1] >= expected) { count = shape[0]; channels = shape[1]; }
+        else throw new InvalidOperationException($"YOLO26-Seg end-to-end output must have shape [1,N,{expected}+] or [N,{expected}+]; received [{string.Join(',', shape)}].");
+        if (values.Length != count * channels) throw new InvalidOperationException("YOLO26-Seg tensor element count does not match its shape.");
+        var result = new YoloSegCandidate[count];
+        for (var n = 0; n < count; n++)
+        {
+            var offset = n * channels;
+            var x1 = values[offset]; var y1 = values[offset + 1];
+            var x2 = values[offset + 2]; var y2 = values[offset + 3];
+            var score = values[offset + 4];
+            var classValue = values[offset + 5];
+            var classId = (int)MathF.Round(classValue);
+            if (score > 0 && (classValue < 0 || Math.Abs(classValue - classId) > 1e-3))
+                throw new InvalidOperationException($"YOLO26-Seg end-to-end row {n} has a non-integer or negative class id.");
+            var coeffs = new float[maskDim];
+            Array.Copy(values, offset + 6, coeffs, 0, maskDim);
+            result[n] = new((x1 + x2) / 2d, (y1 + y2) / 2d, x2 - x1, y2 - y1, score, score > 0 ? classId : 0, coeffs);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Compose one instance mask from prototype tensor [maskDim, protoH, protoW] and coefficients,
     /// then crop to the box (in proto / input pixels) and bilinear-resize into an output buffer of outH×outW.
     /// Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "7a12cf3c1d40c4f42e836f2344f1b1867dcd15281737f671611e5e013dd5b577",
+  "hash": "92b80080483530f478ea02bd86b8bf1574d8d25a03e27229bf2031cd15632c94",
   "items": [
     {
       "type": "image.acquire",
@@ -7104,11 +7104,15 @@
           "defaultValue": "yolo26-seg",
           "options": [
             {
-              "label": "YOLO26 / YOLOv8-Seg dual head",
+              "label": "Raw YOLO-Seg head",
               "value": "yolo26-seg"
+            },
+            {
+              "label": "YOLO26 end-to-end rows",
+              "value": "xyxy"
             }
           ],
-          "description": "Expects detection tensor [1,4+nc+32,N] and prototypes [1,32,H,W] (mask dim may differ)."
+          "description": "Raw head: [1,4+nc+maskDim,N]. YOLO26 end-to-end: [1,N,6+maskDim] rows [x1,y1,x2,y2,score,class,coeffs]. Both use the prototype tensor [1,maskDim,H,W]."
         },
         {
           "name": "coordinates",
@@ -7152,6 +7156,27 @@
           "step": 0.01
         },
         {
+          "name": "nmsMode",
+          "label": "NMS Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (raw=on, end-to-end=off)",
+              "value": "auto"
+            },
+            {
+              "label": "On",
+              "value": "on"
+            },
+            {
+              "label": "Off",
+              "value": "off"
+            }
+          ],
+          "description": "YOLO26 end-to-end output is already NMS-free top detections; automatic mode skips duplicate suppression there and applies class-aware NMS to raw heads."
+        },
+        {
           "name": "maskThreshold",
           "label": "Mask Threshold",
           "type": "number",
@@ -7159,6 +7184,13 @@
           "min": 0,
           "max": 1,
           "step": 0.01
+        },
+        {
+          "name": "includeMaskRuns",
+          "label": "Include Per-Instance Masks",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available."
         },
         {
           "name": "maxCount",
@@ -7170,7 +7202,7 @@
           "step": 1
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box; letterbox-aware remap to source), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not OBB. For keypoints use inference.pose. Embedded-NMS / single-tensor e2e seg exports are unsupported—use raw dual-head ONNX.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. Not semantic segmentation or OBB. For keypoints use inference.pose.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
