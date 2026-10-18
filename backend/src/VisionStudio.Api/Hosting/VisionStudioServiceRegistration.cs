@@ -260,6 +260,10 @@ public static class VisionStudioServiceRegistration
         var tcpSimulatorPort = configuration.GetValue("RobotTcpSimulator:Port", 40501);
         services.AddSingleton(_ => new TcpRobotSimulatorServer(tcpSimulatorPort));
 
+        // 离线回放读盘授权：默认可读数据根与媒体库根，现场如需额外根目录用 VisionStudio:ReplayInputRoots 显式放开。
+        services.AddSingleton<IReplayInputResolver>(provider =>
+            new ConfiguredReplayInputResolver(configuration, provider.GetRequiredService<IWebHostEnvironment>()));
+
         AddBuiltInNodes(services);
         services.Configure<PluginWorkerOptions>(configuration.GetSection("PluginWorkers"));
         services.AddSingleton<PluginWorkerSupervisor>();

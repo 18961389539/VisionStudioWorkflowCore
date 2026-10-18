@@ -15,8 +15,13 @@ public sealed class Batch2UtilityNodeTests
     public async Task Delay_CompletesAndHonorsCancellation()
     {
         var node = new DelayNode();
-        var result = await Run(node, new(), "{\"delayMs\":1}");
-        Assert.Equal(1d, (double)result.Outputs["elapsedMs"].Value!);
+        var result = await Run(node, new(), "{\"delayMs\":40}");
+        // elapsedMs 报告实测耗时：必须覆盖请求值，同时不能被当成请求值原样回显。
+        var elapsed = (double)result.Outputs["elapsedMs"].Value!;
+        Assert.True(elapsed >= 40, $"elapsedMs {elapsed} should cover the requested 40ms");
+        Assert.True(elapsed < 5000, $"elapsedMs {elapsed} should stay near the requested delay");
+        Assert.Equal(40, (int)result.Summary["delayMs"]!);
+        Assert.Equal(Math.Round(elapsed, 3), (double)result.Summary["elapsedMs"]!);
         using var cts = new CancellationTokenSource(20);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await node.ExecuteAsync(new(new Dictionary<string, VisionValue>()), Definition(node.Type, "{\"delayMs\":600000}"), cts.Token));
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await Run(node, new(), "{\"delayMs\":600001}"));

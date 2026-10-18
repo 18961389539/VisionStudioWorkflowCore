@@ -105,7 +105,7 @@ public sealed class Batch3GeometryNodeTests
     [Fact]
     public void CatalogListsEveryExecutorInThisBatch()
     {
-        string[] types=["calibration.cameraIntrinsics","image.undistort","calibration.handEye2D","collection.detections.filter","collection.detections.sort","collection.detections.at","collection.detections.count"];
+        string[] types=["calibration.cameraIntrinsics","image.undistort","calibration.handEye2D","calibration.handEye3D","collection.detections.filter","collection.detections.sort","collection.detections.at","collection.detections.count"];
         Assert.Equal(types.Order(),Batch3GeometryCatalog.Items.Select(x=>x.Type).Order());
     }
 

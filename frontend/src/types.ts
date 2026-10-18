@@ -27,6 +27,11 @@ export type ParameterDescriptor = {
   group?: string | null;
   description?: string | null;
   visibleWhen?: { parameter: string; values: string[] } | null;
+  /**
+   * 宿主注入/画布资产参数（ROI 对象、基准图像、离线回放路径等）：
+   * 目录必须声明以便执行器读取，但不渲染到配置面板、不写入新节点默认值。
+   */
+  internal?: boolean;
 };
 
 export type VisionToolCapabilities = {

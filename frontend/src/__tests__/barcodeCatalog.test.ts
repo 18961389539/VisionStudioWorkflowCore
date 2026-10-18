@@ -8,7 +8,7 @@ describe('industrial barcode catalog', () => {
 
     expect(barcode).toBeDefined();
     expect(barcode.description).toMatch(/[\u4e00-\u9fff]/);
-    for (const parameterName of ['preprocess', 'tryInverted', 'adaptiveBlockSize', 'adaptiveConstant', 'maxResults']) {
+    for (const parameterName of ['preprocess', 'tryInverted', 'adaptiveBlockSize', 'adaptiveConstant', 'maxResults', 'dedupRadiusPx', 'tileSearch']) {
       const parameter = barcode.parameters.find(candidate => candidate.name === parameterName)!;
       expect(parameter).toBeDefined();
       expect(parameter.label).toMatch(/[\u4e00-\u9fff]/);

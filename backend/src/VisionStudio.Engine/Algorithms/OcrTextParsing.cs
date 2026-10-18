@@ -33,7 +33,9 @@ public static class OcrTextParsing
         if (conflict != default) throw new InvalidOperationException($"OCR character '{conflict}' cannot be in both whitelist and blacklist.");
     }
 
-    public sealed record OcrChar(string Text, double X, double Y, double Width, double Height);
+    /// <summary>Per-character box in source pixels. Confidence is 0-1, or 0 when the source
+    /// (Tesseract box output) carries no per-character confidence.</summary>
+    public sealed record OcrChar(string Text, double X, double Y, double Width, double Height, double Confidence = 0);
 
     /// <summary>
     /// Parse Tesseract box output (one line per character: char left bottom right top page,

@@ -36,10 +36,60 @@ internal static class OnnxInferenceHelpers
 
     public static (OnnxPreparedInput Blob, string OutputName, int Width, int Height) PrepareInput(OnnxModelSession net, Mat source, NodeDefinition node)
     {
-        if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
-        if (source.Depth() != MatType.CV_8U) throw new InvalidOperationException("ONNX preprocessing requires byte pixels.");
+        var (width, height) = ResolveInputSize(node);
+        var values = new float[checked(3 * width * height)];
+        NormalizeInto(values, 0, source, width, height, node);
+        var tensor = new DenseTensor<float>(values, new[] { 1, 3, height, width });
+        RequireSingleInput(net);
+        net.Input = tensor;
+        return (new(tensor), node.GetString("outputName", string.Empty).Trim(), width, height);
+    }
+
+    /// <summary>True when one run can process <paramref name="count"/> views (dynamic or matching batch dimension).</summary>
+    public static bool SupportsBatch(OnnxModelSession net, int count)
+    {
+        if (count < 2) return false;
+        var metadata = net.Session.InputMetadata;
+        if (metadata.Count != 1) return false;
+        var dimensions = metadata.Single().Value.Dimensions;
+        return dimensions.Length == 4 && (dimensions[0] <= 0 || dimensions[0] == count);
+    }
+
+    /// <summary>
+    /// Packs several views into one [N,3,H,W] tensor so test-time augmentation costs one session
+    /// run instead of N. Callers must check <see cref="SupportsBatch"/> first; a model with a
+    /// fixed batch dimension of one cannot be fed here.
+    /// </summary>
+    public static OnnxPreparedInput PrepareBatchInput(OnnxModelSession net, IReadOnlyList<Mat> sources, NodeDefinition node)
+    {
+        if (sources.Count == 0) throw new InvalidOperationException("ONNX batch inference requires at least one image.");
+        var (width, height) = ResolveInputSize(node);
+        var viewLength = checked(3 * checked(width * height));
+        var values = new float[checked(sources.Count * viewLength)];
+        for (var index = 0; index < sources.Count; index++)
+            NormalizeInto(values, index * viewLength, sources[index], width, height, node);
+        var tensor = new DenseTensor<float>(values, new[] { sources.Count, 3, height, width });
+        RequireSingleInput(net);
+        net.Input = tensor;
+        return new(tensor);
+    }
+
+    private static (int Width, int Height) ResolveInputSize(NodeDefinition node)
+    {
         var width = node.GetInt("inputWidth", 224); var height = node.GetInt("inputHeight", 224);
         if (width is < 1 or > 4096 || height is < 1 or > 4096) throw new InvalidOperationException("ONNX inputWidth and inputHeight must be between 1 and 4096.");
+        return (width, height);
+    }
+
+    private static void RequireSingleInput(OnnxModelSession net)
+    {
+        if (net.Session.InputMetadata.Count != 1) throw new InvalidOperationException("Image inference requires a model with exactly one input tensor.");
+    }
+
+    private static void NormalizeInto(float[] values, int offset, Mat source, int width, int height, NodeDefinition node)
+    {
+        if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
+        if (source.Depth() != MatType.CV_8U) throw new InvalidOperationException("ONNX preprocessing requires byte pixels.");
         var scale = node.GetDouble("scale", 1d / 255);
         var means = new[] { node.GetDouble("meanB", 0), node.GetDouble("meanG", 0), node.GetDouble("meanR", 0) };
         if (!double.IsFinite(scale) || means.Any(x => !double.IsFinite(x))) throw new InvalidOperationException("ONNX normalization scale and mean values must be finite.");
@@ -74,7 +124,6 @@ internal static class OnnxInferenceHelpers
         }
         else JLVisionOperators.Resize(bgr, resized, new Size(width, height));
         var pixels = checked(width * height);
-        var values = new float[checked(3 * pixels)];
         var swap = node.GetBool("swapRB", false);
         for (var y = 0; y < height; y++) for (var x = 0; x < width; x++)
         {
@@ -85,14 +134,9 @@ internal static class OnnxInferenceHelpers
                 var sourceChannel = swap ? 2 - channel : channel;
                 var normalized = (color[sourceChannel] - means[sourceChannel]) * scale;
                 if (!float.IsFinite((float)normalized)) throw new InvalidOperationException("ONNX normalized input contains a non-finite value.");
-                values[channel * pixels + index] = (float)normalized;
+                values[offset + channel * pixels + index] = (float)normalized;
             }
         }
-        var tensor = new DenseTensor<float>(values, new[] { 1, 3, height, width });
-        var metadata = net.Session.InputMetadata;
-        if (metadata.Count != 1) throw new InvalidOperationException("Image inference requires a model with exactly one input tensor.");
-        net.Input = tensor;
-        return (new(tensor), node.GetString("outputName", string.Empty).Trim(), width, height);
     }
 
     public static OnnxOutputTensor Forward(OnnxModelSession net, string outputName, string modelPath, CancellationToken cancellationToken = default)

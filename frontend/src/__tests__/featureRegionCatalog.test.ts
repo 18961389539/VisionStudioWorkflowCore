@@ -13,7 +13,8 @@ describe('small features and region shapes', () => {
       const item = catalog.find(entry => entry.type === type)!;
       expect(item).toBeDefined(); expect(item.displayName).toMatch(/[\u4e00-\u9fff]/);
       expect(item.description).toMatch(/[\u4e00-\u9fff]/); expect(nodeCategory(type)).not.toBe('plugin');
-      for (const parameter of item.parameters) {
+      // internal 参数（ROI 对象/画布资产）不进配置面板，不参与 UI 文案覆盖率。
+      for (const parameter of item.parameters.filter((entry) => !entry.internal)) {
         expect(parameter.label).toMatch(/[\u4e00-\u9fff]/);
         for (const option of parameter.options ?? []) expect(option.label).toMatch(/[\u4e00-\u9fff]/);
       }

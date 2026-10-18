@@ -15,7 +15,7 @@ public sealed class ParameterValidationTests
     [InlineData("calibration.planar", "assetVersion", """{"assetVersion":-1}""", "below the minimum 0")]
     [InlineData("calibration.planar", "assetVersion", """{"assetVersion":1000000}""", "above the maximum 999999")]
     [InlineData("calibration.planar", "targetUnit", """{"targetUnit":"furlong"}""", "not an allowed option")]
-    [InlineData("calibration.planar", "targetUnit", """{"targetUnit":7}""", "expects one of [mm, cm, m]")]
+    [InlineData("calibration.planar", "targetUnit", """{"targetUnit":7}""", "expects one of [mm, cm, m, px]")]
     [InlineData("calibration.planar", "targetFrame", """{"targetFrame":42}""", "expects text")]
     [InlineData("image.acquire", "autoStart", """{"autoStart":"true"}""", "expects a boolean")]
     [InlineData("image.acquire", "timeoutMs", """{"timeoutMs":{"value":100}}""", "expects a number")]

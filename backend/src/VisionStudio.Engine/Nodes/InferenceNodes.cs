@@ -52,28 +52,62 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
             int[]? outputShape = null;
             var viewPredictions = new List<object>(views.Count);
             var classCount = 0;
-            for (var viewIndex = 0; viewIndex < views.Count; viewIndex++)
+            var batchSize = 1;
+            // Test-time augmentation is N views of the same image, so a dynamic-batch model can
+            // score them in one run. Models with a fixed batch dimension of one fall back to the
+            // per-view loop below; the outputs are identical either way.
+            if (multiCrop != "none" && OnnxInferenceHelpers.SupportsBatch(net, views.Count))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                using var input = OnnxInferenceHelpers.PrepareInput(net, views[viewIndex], node).Blob;
-                using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
-                var shape = OnnxInferenceHelpers.Shape(output);
-                var scores = ReadClassificationScores(output, shape);
-                if (aggregate is not null && scores.Length != classCount)
-                    throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {scores.Length} classes; expected {classCount}.");
-                classCount = scores.Length;
-                outputShape ??= shape;
-                var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
-                viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
-                if (multiCrop == "none")
+                using var batchInput = OnnxInferenceHelpers.PrepareBatchInput(net, views, node);
+                using var batchOutput = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+                var batchShape = OnnxInferenceHelpers.Shape(batchOutput);
+                var batchValues = OnnxInferenceHelpers.ReadFloatTensor(batchOutput, "classification batch");
+                var batchShapeValid = batchShape.Length == 2 && batchShape[0] == views.Count && batchShape[1] > 0
+                    || batchShape.Length == 4 && batchShape[0] == views.Count && batchShape[1] > 0 && batchShape[2] == 1 && batchShape[3] == 1;
+                if (batchShapeValid && batchValues.Length % views.Count == 0)
                 {
-                    aggregate = scores.Select(value => (double)value).ToArray();
-                    break;
+                    batchSize = views.Count;
+                    var perView = batchValues.Length / views.Count;
+                    classCount = perView;
+                    outputShape = batchShape;
+                    for (var viewIndex = 0; viewIndex < views.Count; viewIndex++)
+                    {
+                        var scores = batchValues.AsSpan(viewIndex * perView, perView).ToArray();
+                        var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
+                        viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
+                        var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                        aggregate ??= new double[distribution.Length];
+                        if (distribution.Length != aggregate.Length) throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {distribution.Length} classes; expected {aggregate.Length}.");
+                        for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
+                    }
                 }
+            }
 
-                var distribution = ClassificationDistribution(scores, layout, applySoftmax);
-                aggregate ??= new double[distribution.Length];
-                for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
+            if (batchSize == 1)
+            {
+                for (var viewIndex = 0; viewIndex < views.Count; viewIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var input = OnnxInferenceHelpers.PrepareInput(net, views[viewIndex], node).Blob;
+                    using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+                    var shape = OnnxInferenceHelpers.Shape(output);
+                    var scores = ReadClassificationScores(output, shape);
+                    if (aggregate is not null && scores.Length != classCount)
+                        throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {scores.Length} classes; expected {classCount}.");
+                    classCount = scores.Length;
+                    outputShape ??= shape;
+                    var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
+                    viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
+                    if (multiCrop == "none")
+                    {
+                        aggregate = scores.Select(value => (double)value).ToArray();
+                        break;
+                    }
+
+                    var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                    aggregate ??= new double[distribution.Length];
+                    for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
+                }
             }
 
             var aggregateIsProbability = layout == "yolo26" || applySoftmax;
@@ -83,7 +117,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                 : InferenceStats.RankClassification(averaged, aggregateIsProbability ? "yolo26" : "scores", false, topK, labels);
             var best = rank.Top[0];
             var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
-            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count));
+            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count), ("batchSize", batchSize));
             var jsonFields = new Dictionary<string, object?>
             {
                 ["classes"] = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }),
@@ -95,6 +129,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                 jsonFields["multiCrop"] = multiCrop;
                 jsonFields["viewCropFraction"] = viewCropFraction;
                 jsonFields["views"] = viewPredictions;
+                jsonFields["batchSize"] = batchSize;
             }
             var json = JsonSerializer.Serialize(jsonFields);
             return ValueTask.FromResult(new NodeExecutorResult(
@@ -110,7 +145,7 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
                     ["classCount"] = VisionValue.Integer(rank.ClassCount),
                     ["diagnostics"] = VisionValue.String(diag)
                 },
-                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["diagnostics"] = diag }));
+                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["batchSize"] = batchSize, ["diagnostics"] = diag }));
         }
         finally
         {

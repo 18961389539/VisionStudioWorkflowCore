@@ -23,8 +23,13 @@ export const fallbackCatalog: NodeCatalogItem[] = localizeCatalog(document.items
 export const fallbackCatalogHash = document.hash;
 export const fallbackCatalogSchemaVersion = document.schemaVersion;
 
+/** 配置面板可见参数：internal 参数由画布/宿主维护，不出现在表单与默认值里。 */
+export const editableParameters = (item: NodeCatalogItem) => item.parameters.filter((parameter) => !parameter.internal);
+
 export const makeDefaultParameters = (item: NodeCatalogItem) =>
-  Object.fromEntries(item.parameters.map((p) => [p.name, p.defaultValue]));
+  Object.fromEntries(editableParameters(item)
+    .filter((parameter) => parameter.defaultValue !== undefined)
+    .map((parameter) => [parameter.name, parameter.defaultValue]));
 
 export const validateCatalog = (value: unknown): NodeCatalogItem[] => {
   if (!Array.isArray(value) || value.length === 0) throw new Error('Catalog is empty or invalid.');

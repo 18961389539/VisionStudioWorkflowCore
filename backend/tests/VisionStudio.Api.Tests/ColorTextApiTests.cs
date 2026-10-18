@@ -80,7 +80,8 @@ public sealed class ColorTextApiTests(VisionStudioApiFactory factory) : IClassFi
         var workflow = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "samples", "color-enhancement-workflow.json")))!;
         workflow["nodes"]!.AsArray().Single(n => n!["id"]!.GetValue<string>() == "range")!["parameters"] = JsonSerializer.SerializeToNode(new { space = "rgb", min1 = 0, max1 = 0, min2 = 1, max2 = 1, min3 = 0, max3 = 0 });
         var response = await _client.PostAsJsonAsync("/api/run", workflow);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var diagnosticBody = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, diagnosticBody);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>(); Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
         var reports = result.GetProperty("nodeReports").EnumerateArray().ToArray();
         Assert.DoesNotContain(reports, r => r.GetProperty("nodeId").GetString() == "tolerance");

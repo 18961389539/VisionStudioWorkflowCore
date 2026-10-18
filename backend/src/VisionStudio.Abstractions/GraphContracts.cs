@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace VisionStudio.Abstractions;
 
@@ -46,7 +47,13 @@ public sealed record ParameterDescriptor(
     string? Unit = null,
     string? Group = null,
     string? Description = null,
-    ParameterVisibility? VisibleWhen = null);
+    ParameterVisibility? VisibleWhen = null,
+    /// <summary>
+    /// 宿主注入或画布资产参数：不渲染到配置面板、不写入新节点默认值，
+    /// 但必须在目录中声明，避免执行器读取"目录里不存在"的键。
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool Internal = false);
 
 public enum VisionExecutionMode
 {

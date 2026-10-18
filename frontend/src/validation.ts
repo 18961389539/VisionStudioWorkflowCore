@@ -100,6 +100,8 @@ export function isParameterVisible(
   descriptors: ParameterDescriptor[],
   values: Record<string, unknown>
 ): boolean {
+  // internal 参数由画布/宿主维护（ROI 对象、基准图像、离线回放路径），既不是表单字段也不做表单校验。
+  if (descriptor.internal) return false;
   const condition = descriptor.visibleWhen;
   if (!condition) return true;
   const controller = descriptors.find((item) => item.name === condition.parameter);

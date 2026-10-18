@@ -87,8 +87,10 @@ describe('precision workflow catalog', () => {
     for (const [type, groups] of Object.entries(expected)) {
       const englishItem = english.find(item => item.type === type)!;
       const chineseItem = chinese.find(item => item.type === type)!;
-      expect([...new Set(chineseItem.parameters.map(parameter => parameter.group).filter(Boolean))]).toEqual(groups);
-      expect([...new Set(englishItem.parameters.map(parameter => parameter.group).filter(Boolean))]).not.toEqual(groups);
+      // internal 参数（ROI 对象、基准图像）没有可见分组，不参与配置面板分组断言。
+      const visibleGroups = (item: typeof chineseItem) => [...new Set(item.parameters.filter(parameter => !parameter.internal).map(parameter => parameter.group).filter(Boolean))];
+      expect(visibleGroups(chineseItem)).toEqual(groups);
+      expect(visibleGroups(englishItem)).not.toEqual(groups);
     }
   });
 

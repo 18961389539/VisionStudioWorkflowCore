@@ -282,6 +282,8 @@ public sealed class CaliperDiagnosticsApiFactory : WebApplicationFactory<Program
         builder.UseSetting("Security:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Enabled", "false");
         builder.UseSetting("RobotTcpSimulator:Port", "0");
+        // 回放读盘是宿主授权能力：测试把临时像素目录显式加入允许根，等价于宿主注入回放路径。
+        builder.UseSetting("VisionStudio:ReplayInputRoots", _root);
     }
     protected override void Dispose(bool disposing)
     {

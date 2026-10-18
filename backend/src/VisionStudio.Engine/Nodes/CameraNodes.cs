@@ -3,7 +3,7 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeExecutor
+public sealed class AcquireImageNode(CameraManager cameraManager, IReplayInputResolver? replayInput = null) : IVisionNodeExecutor
 {
     public string Type => "image.acquire";
 
@@ -15,7 +15,11 @@ public sealed class AcquireImageNode(CameraManager cameraManager) : IVisionNodeE
         var replayInputPath = node.GetString("__replayInputPath", string.Empty);
         if (!string.IsNullOrWhiteSpace(replayInputPath))
         {
-            var full = Path.GetFullPath(replayInputPath);
+            // 回放读盘是宿主能力，不是工作流能力：文档里的路径必须由宿主授权器放行，
+            // 否则外部导入的流程 JSON 可以借 image.acquire 读取任意本地文件。
+            var full = replayInput?.Resolve(replayInputPath)
+                ?? throw new InvalidOperationException(
+                    "Offline replay input is not authorized for this run. __replayInputPath is injected by the host replay pipeline; a workflow document cannot enable local file reads.");
             if (!File.Exists(full)) throw new FileNotFoundException("Offline replay input image was not found.", full);
             var mat = OpenCvSharp.Cv2.ImRead(full, OpenCvSharp.ImreadModes.Unchanged);
             if (mat.Empty())

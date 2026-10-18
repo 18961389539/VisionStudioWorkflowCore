@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "1b867346b45b0ff6639c5c3b9df7ab96e41b07b48340dfd0680b3b514256b743",
+  "hash": "910d34e4e77b0c1f6edd0737263c8aadffed4b7185a192b7a5e0e653cb9d316c",
   "items": [
     {
       "type": "image.acquire",
@@ -113,6 +113,44 @@
           "max": 48,
           "step": 0.5,
           "description": "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."
+        },
+        {
+          "name": "autoOpen",
+          "label": "Auto Open (legacy)",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Compatibility",
+          "description": "Legacy alias of Auto Start. Read only when Auto Start is absent.",
+          "internal": true
+        },
+        {
+          "name": "__replayInputPath",
+          "label": "Replay Input Path",
+          "type": "text",
+          "group": "Offline Replay",
+          "description": "Host-injected offline replay image path. Authorization is enforced by the host replay resolver; workflow documents cannot enable it.",
+          "internal": true
+        },
+        {
+          "name": "__replaySequence",
+          "label": "Replay Sequence",
+          "type": "text",
+          "group": "Offline Replay",
+          "internal": true
+        },
+        {
+          "name": "__replayTimestamp",
+          "label": "Replay Timestamp",
+          "type": "text",
+          "group": "Offline Replay",
+          "internal": true
+        },
+        {
+          "name": "__replayCameraId",
+          "label": "Replay Camera ID",
+          "type": "text",
+          "group": "Offline Replay",
+          "internal": true
         }
       ],
       "description": "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
@@ -1564,6 +1602,14 @@
           "step": 1,
           "group": "Filter",
           "description": "Contours are evenly subsampled to this budget so graph data stays bounded."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Extract contours with hierarchy (external/holes). Returns a Contour list; an empty result is found=false, not a failure. Binarize before extraction or rely on Otsu.",
@@ -3325,6 +3371,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -3679,6 +3730,11 @@
           "required": true
         },
         {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -3912,6 +3968,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -4728,6 +4789,14 @@
           "max": 100,
           "step": 1,
           "group": "Detection"
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Detect multiple circles: candidates are refined against Canny edge points with a robust geometric circle fit and ranked by inlier support (not largest radius). Returns found=false when no circle qualifies; circles JSON lists center, radius, RMS error and inliers per circle.",
@@ -4838,6 +4907,14 @@
           "defaultValue": false,
           "group": "Edge",
           "description": "Refine chain points along the local gradient (parabolic peak interpolation) and include them in the chains JSON, stride-sampled to at most 200 points per chain."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Canny edge extraction with chain analysis. Supports image-space ROI; returns the binary edge image plus per-chain lengths and bounding boxes (chains JSON, longest first), optionally with subpixel-refined chain points. Thresholds must satisfy 0 <= low <= high <= 255.",
@@ -5007,6 +5084,14 @@
           "step": 1,
           "unit": "px",
           "group": "Merging"
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Detect multiple lines: collinear segments are clustered and refit with robust total least squares. Returns found=false (instead of failing) when no line qualifies; lines JSON lists every line with length, angle, RMS/max fit error and inlier support. The primary line/length/angle ports carry the longest line.",
@@ -5221,6 +5306,14 @@
             }
           ],
           "group": "Sampling"
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Subpixel edge location along a search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
@@ -8449,7 +8542,7 @@
           "step": 1,
           "unit": "deg",
           "group": "Search",
-          "description": "Compatibility setting for older shape workflows that use an image template directly."
+          "description": "Compatibility setting for older shape workflows that use an image template directly. Template Match defaults the same key to 0 (no rotation search); here the default is the full 180° coverage."
         },
         {
           "name": "trainingAngleRangeDeg",
@@ -8521,7 +8614,7 @@
           "step": 0.1,
           "unit": "deg",
           "group": "Training",
-          "description": "Model training angle step. Smaller steps improve angular coverage at additional model size."
+          "description": "Model training angle step. Smaller steps improve angular coverage at additional model size. Note: Template Match's same-named key is a search step (default 5°), not a training step."
         },
         {
           "name": "pyramidLevels",
@@ -8580,7 +8673,7 @@
           "step": 0.1,
           "unit": "%",
           "group": "Training",
-          "description": "Scale sampling step used when scale tolerance is enabled."
+          "description": "Scale sampling step used when scale tolerance is enabled. Note: Template Match's same-named key is a search resampling step (default 10%)."
         },
         {
           "name": "trainingMinSampleFraction",
@@ -8685,7 +8778,8 @@
           "min": 0,
           "max": 1,
           "step": 0.01,
-          "group": "Matching"
+          "group": "Matching",
+          "description": "Acceptance threshold for a candidate pose. Template Match defaults the same key to 0.5, so switching node types changes the effective threshold unless it is set explicitly."
         },
         {
           "name": "maxDeformationPx",
@@ -8748,7 +8842,8 @@
           "min": 1,
           "max": 100,
           "step": 1,
-          "group": "Multi-target"
+          "group": "Multi-target",
+          "description": "Accepted matches per run. Template Match defaults the same key to 1 (single result), so a switched-in shape node returns up to 5 unless this is set explicitly."
         },
         {
           "name": "minCenterDistance",
@@ -8759,7 +8854,8 @@
           "max": 10000,
           "step": 1,
           "unit": "px",
-          "group": "Multi-target"
+          "group": "Multi-target",
+          "description": "Candidates closer than this to a better match are dropped. Template Match defaults the same key to 0 (keep every accepted center)."
         },
         {
           "name": "engine",
@@ -8849,6 +8945,38 @@
           "step": 1,
           "group": "Managed Chamfer",
           "description": "Contour points kept after subsampling the template edges; more points are slower but describe finer shape detail."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        },
+        {
+          "name": "searchRoi",
+          "label": "Search ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        },
+        {
+          "name": "templateRoi",
+          "label": "Template ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        },
+        {
+          "name": "clutterRoi",
+          "label": "Clutter ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "JLVision gray-value shape matching with explicit model/search regions, subpixel pose, run-time contrast thresholds, optional bounded local deformation, uniform or independent X/Y scale tolerance, polarity control, native clutter scoring and multi-target suppression. Train up to four equal-size samples; later sample regions follow the first model's pose, then stable XLD contour features are fused into one native composite model by sample frequency. The selected model region limits features without threshold segmentation; the optional Clutter ROI marks nearby image areas where edges should not appear. angle rotates the trained template CCW to align with the scene; scale values are relative to trained width and height. The managedChamfer engine is a cross-platform edge-distance alternative (coverage + distance score, partial-occlusion tolerant, multi-target); it is conceptually in the HALCON shape-model / PatMax direction but not parity: discrete angle/scale, no polarity, XLD refinement, deformation or clutter model.",
@@ -9083,6 +9211,22 @@
           "unit": "%",
           "group": "Scale",
           "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected."
+        },
+        {
+          "name": "searchRoi",
+          "label": "Search ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        },
+        {
+          "name": "templateRoi",
+          "label": "Template ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches use score-ordered box-IoU suppression by default; a search ROI, template mask, and discrete uniform scale range are optional. Defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
@@ -9445,6 +9589,14 @@
           "unit": "px",
           "group": "Fit",
           "description": "Return found=false when the final radial RMS fit error exceeds this value; zero disables this quality gate."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image. The minimum valid caliper gate is checked after outlier rejection.",
@@ -9659,6 +9811,14 @@
             }
           ],
           "group": "Sampling"
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Single-caliper grayscale edge location along a configurable search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",
@@ -9952,6 +10112,14 @@
           "unit": "px",
           "group": "Fit",
           "description": "Return found=false when the final orthogonal RMS fit error exceeds this value; zero disables this quality gate."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Caliper line measurement with orthogonal RMS fit error, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. The minimum valid caliper gate is checked after outlier rejection.",
@@ -11207,6 +11375,14 @@
           "min": 1,
           "max": 999999,
           "step": 10
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Find the largest blob and return typed geometry plus shape features (circularity, bounding-box size). blobs JSON lists every blob at or above Min Area, largest first; no qualifying blob returns found=false instead of failing.",
@@ -11758,6 +11934,14 @@
               "all"
             ]
           }
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
@@ -11993,6 +12177,54 @@
           "step": 0.01,
           "unit": "deg",
           "group": "Current Pose"
+        },
+        {
+          "name": "captureReference",
+          "label": "Capture Reference",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reference Capture",
+          "description": "One-shot action written by the reference-capture command: freeze the connected debugImage and the current pose as the new baseline.",
+          "internal": true
+        },
+        {
+          "name": "referenceImage",
+          "label": "Reference Image (base64 PNG)",
+          "type": "textarea",
+          "group": "Reference Capture",
+          "description": "Captured baseline image asset. Kept on the node so the ROI can be re-anchored after the scene changes.",
+          "internal": true
+        },
+        {
+          "name": "referenceWidth",
+          "label": "Reference Width",
+          "type": "number",
+          "group": "Reference Capture",
+          "internal": true
+        },
+        {
+          "name": "referenceHeight",
+          "label": "Reference Height",
+          "type": "number",
+          "group": "Reference Capture",
+          "internal": true
+        },
+        {
+          "name": "debugImagePreviewOnly",
+          "label": "Debug Preview Only",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reference Capture",
+          "description": "Validation-mode flag: return the debug image without requiring a ROI yet.",
+          "internal": true
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Rigid ROI correction after locating: p' = R(dTheta)(p - base) + current. Angle Period controls orientation symmetry (180 degrees for half-turn-symmetric models, 360 for directional models). Capture a reference image and its actual pose together before drawing the ROI. Rectangle ROIs become polygons when rotated. Feed roi into downstream ROI inputs and transform into measurement transform inputs so reference search geometry follows the workpiece as well. The output transform maps ReferenceImage→CurrentImage; compose it as A with a following crop transform as B to map reference geometry directly into CropImage coordinates. Do not transform already corrected geometry twice. Connect debugImage for reference capture and result overlays.",
@@ -12092,6 +12324,14 @@
           "unit": "px²",
           "group": "Contour",
           "description": "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
@@ -12965,6 +13205,14 @@
           "label": "Invert",
           "type": "boolean",
           "defaultValue": false
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
@@ -13254,7 +13502,63 @@
           "required": true
         }
       ],
-      "parameters": [],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "Legacy X",
+          "type": "number",
+          "min": -10000000,
+          "max": 10000000,
+          "step": 1,
+          "unit": "px",
+          "group": "Legacy Rectangle",
+          "description": "Legacy rectangle fallback used only when neither the roi input nor the local roi parameter exists.",
+          "internal": true
+        },
+        {
+          "name": "y",
+          "label": "Legacy Y",
+          "type": "number",
+          "min": -10000000,
+          "max": 10000000,
+          "step": 1,
+          "unit": "px",
+          "group": "Legacy Rectangle",
+          "internal": true
+        },
+        {
+          "name": "width",
+          "label": "Legacy Width",
+          "type": "number",
+          "min": 0,
+          "max": 10000000,
+          "step": 1,
+          "unit": "px",
+          "group": "Legacy Rectangle",
+          "description": "Absent means the full remaining source width.",
+          "internal": true
+        },
+        {
+          "name": "height",
+          "label": "Legacy Height",
+          "type": "number",
+          "min": 0,
+          "max": 10000000,
+          "step": 1,
+          "unit": "px",
+          "group": "Legacy Rectangle",
+          "description": "Absent means the full remaining source height.",
+          "internal": true
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
       "description": "Crop the visible intersection of a rectangle, circle, polygon, or brush ROI to its tight bounding box. Parts outside the image are clipped; a selection covering no image pixels fails clearly. A connected roi input overrides the local ROI parameters, so the crop can follow a corrected ROI each run. Brush supports add and erase strokes; roiMask outputs the binary selection, while croppedRoi outputs the same selection translated to crop coordinates and can connect to downstream measurement nodes to prevent masked crop boundaries from being detected as edges. cropOrigin is the crop top-left in input-image coordinates, and transform maps CurrentImage geometry to CropImage coordinates. Its transform can compose after roi.transform as A: ReferenceImage→CurrentImage, B: CurrentImage→CropImage. Legacy x/y/width/height parameters remain supported.",
       "pluginId": "builtin",
       "capabilities": {
@@ -13331,6 +13635,14 @@
           "max": 20,
           "step": 0.5,
           "description": "0 mirrors sigmaX."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Validates finite, non-negative sigma values and emits JSON diagnostics with effective kernel, size and channels.",
@@ -13505,6 +13817,14 @@
               "gaussian"
             ]
           }
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Gaussian filtering suppresses general noise; median filtering removes salt-and-pepper noise while preserving edges. Kernel size must be odd.",
@@ -13563,6 +13883,14 @@
           "max": 31,
           "step": 2,
           "description": "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). Emits JSON diagnostics with the effective kernel, image size and channel count.",
@@ -13804,6 +14132,14 @@
               "gradient"
             ]
           }
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Choose erode/dilate/open/close for binary-shape cleanup, or white top hat, black bottom hat and gradient for grayscale feature extraction. Grayscale modes convert color input to gray and use a rectangular odd-sized kernel.",
@@ -14003,6 +14339,14 @@
           "type": "boolean",
           "defaultValue": false,
           "description": "Invert the binary output (dark objects become foreground)."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
@@ -14506,6 +14850,14 @@
               "otsu"
             ]
           }
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Create a binary image with a manual, local adaptive, or Otsu threshold. Adaptive and Otsu modes convert color input to gray; the threshold output is present for manual and Otsu modes.",
@@ -14875,9 +15227,44 @@
           "min": 1,
           "max": 1000,
           "step": 1
+        },
+        {
+          "name": "dedupRadiusPx",
+          "label": "Duplicate Merge Radius (px)",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 0,
+          "max": 512,
+          "step": 1,
+          "description": "Two reads with the same format and text merge only when their centres are within this distance. Identical payloads in different places stay separate so duplicate labels are counted twice; the same symbol re-read by another preprocessing pass or polarity merges."
+        },
+        {
+          "name": "tileSearch",
+          "label": "Tiled Multi-Code Recovery",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic",
+              "value": "auto"
+            },
+            {
+              "label": "Off",
+              "value": "off"
+            }
+          ],
+          "description": "When multi-code decoding finds nothing, retry on overlapping half-frame tiles with single-symbol decoding. Required for frames holding more than one DataMatrix, where ZXing's multi-detector returns no result at all."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
-      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes using ZXing.Net. Supports an image ROI, threshold fallback passes, optional inverted-polarity retries, and multiple symbols. Results include decoded text, format, source-image points, and the preprocessing pass; detected points are drawn on the image preview. text/format expose the first result.",
+      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes using ZXing.Net. Supports an image ROI, threshold fallback passes, optional inverted-polarity retries, and multiple symbols. Identical payloads at different positions are separate results (duplicate labels count twice); reads merge by format, text and centre distance, so the same symbol found by several preprocessing passes is counted once. When multi-code decoding returns nothing, overlapping tiles recover frames with several DataMatrix codes. Results include decoded text, format, source-image points, and the preprocessing pass; detected points are drawn on the image preview. text/format expose the first result.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -15190,9 +15577,17 @@
           "max": 1,
           "step": 0.01,
           "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
-      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, per-word JSON and per-character JSON (chars, from Tesseract box output; empty when the model produces none), with boxes in source pixels and 0-1 confidences. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
+      "description": "Run Tesseract 5 OCR (OCRMax-style controls) on the image or a rectangular ROI parameter. Outputs full text, mean confidence, per-word JSON and per-character JSON (chars) with boxes in source pixels and 0-1 confidences; character entries come from the page layout iterator and keep their own confidence, falling back to box output when an engine exposes no symbols. Engines are pooled per tessdata directory, language list and engine mode, and adaptive-classifier plus whitelist/blacklist/DPI overrides are cleared for every request, so results never depend on the previous image. Font training/teaching is not supported; the configured tessdata directory must include each requested language model.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -15505,6 +15900,11 @@
           "name": "found",
           "dataType": "Boolean",
           "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
         },
         {
           "name": "next",
@@ -16169,6 +16569,14 @@
           "min": 1,
           "max": 16384,
           "step": 1
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
       "description": "Rasterize a connected or configured rectangle/circle/polygon/brush ROI into one native pixel region, clipped to the canvas. Brush strokes support ordered add and erase operations. Optional image supplies canvas dimensions only. Rectangle includes pixel centres in [x,x+width) and [y,y+height); circle and polygon use native rasterization. Missing ROI is an error. Zero rectangle size or circle radius is empty. Limits: 64 million canvas pixels, 1000 polygon points, coordinates within +/-32768.",

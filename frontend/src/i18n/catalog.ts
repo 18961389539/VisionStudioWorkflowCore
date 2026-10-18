@@ -80,6 +80,8 @@ const categories: Record<string, string> = {
 
 const parameterNames: Record<string, string> = {
   'Camera Model': '相机模型',
+  'Duplicate Merge Radius (px)': '重复合并半径（像素）',
+  'Tiled Multi-Code Recovery': '分块多码回补',
   'Fisheye Balance': '鱼眼视场平衡',
   'Max Fitted-Model Pose View RMS (px, 0=off)': '拟合模型单视图 RMS 上限（px，0 为关）',
   'Parallel Tolerance': '平行容差', 'Require Within Segments': '要求交点位于线段内', 'Max RMS Error (0=off)': '最大 RMS 误差（0 为关闭）', 'Max Centre Distance (0=off)': '最大中心距（0 为关闭）', 'Max Angle Error deg (0=off)': '最大角度误差（度，0 为关闭）', 'Output Width (0=input)': '输出宽度（0 为输入宽度）', 'Character Blacklist': '字符黑名单', 'Low Confidence Threshold': '低置信度阈值', 'Threshold Mode': '阈值模式', 'Manual Threshold': '手动阈值', 'Otsu Auto (spatial maps)': 'Otsu 自动阈值（空间图）',
@@ -244,7 +246,7 @@ const optionNames: Record<string, string> = {
   'HSV (degrees, 0-1, 0-1)': 'HSV（角度、0–1、0–1）', 'sRGB (0-1)': 'sRGB（归一化 0–1）', 'CIELAB (D65)': 'CIELAB（D65 白点）',
   'Equals': '完全相等', 'Contains': '包含文本', 'Starts With': '以前缀开头', 'Ends With': '以后缀结尾',
   'Gaussian': '高斯', 'Median': '中值', 'Regular Expression': '正则表达式',
-  'Average Gray': '通道均值灰度', 'Maximum Gray': '通道最大值灰度', 'Adaptive': '自适应', 'Otsu': 'Otsu 自动', 'Automatic': '自动', 'Auto with OSD': '自动（带方向检测）', 'Single Block': '单文本块', 'Single Line': '单行文本', 'Single Word': '单个词', 'Single Character': '单个字符', 'Sparse Text': '稀疏文本', 'Default (LSTM)': '默认（LSTM）', 'LSTM Only': '仅 LSTM', 'Legacy Only': '仅传统引擎', 'Legacy + LSTM': '传统 + LSTM', 'None (grayscale)': '无（灰度）', 'Adaptive Gaussian': '自适应高斯', 'Offset Only': '仅偏移', 'Gain + Offset': '增益 + 偏移', 'Normalized (image-ref)/(image+ref)': '归一化差分', 'Rows [x1,y1,x2,y2,score,class]': '行格式 [x1,y1,x2,y2,分,类]', 'YOLO (cx,cy,w,h + class scores)': 'YOLO（中心+宽高+类别分）', 'Circularity': '圆度',
+  'Average Gray': '通道均值灰度', 'Maximum Gray': '通道最大值灰度', 'Adaptive': '自适应', 'Otsu': 'Otsu 自动', 'Automatic': '自动', 'Off': '关闭', 'Auto with OSD': '自动（带方向检测）', 'Single Block': '单文本块', 'Single Line': '单行文本', 'Single Word': '单个词', 'Single Character': '单个字符', 'Sparse Text': '稀疏文本', 'Default (LSTM)': '默认（LSTM）', 'LSTM Only': '仅 LSTM', 'Legacy Only': '仅传统引擎', 'Legacy + LSTM': '传统 + LSTM', 'None (grayscale)': '无（灰度）', 'Adaptive Gaussian': '自适应高斯', 'Offset Only': '仅偏移', 'Gain + Offset': '增益 + 偏移', 'Normalized (image-ref)/(image+ref)': '归一化差分', 'Rows [x1,y1,x2,y2,score,class]': '行格式 [x1,y1,x2,y2,分,类]', 'YOLO (cx,cy,w,h + class scores)': 'YOLO（中心+宽高+类别分）', 'Circularity': '圆度',
   'Mean': '均值', 'All Blobs': '所有斑点', 'Largest Blob': '最大斑点', 'Gray': '灰度', 'Color': '颜色',
   'Raw YOLOv8/YOLO26 OBB head': 'YOLOv8/YOLO26 OBB 原始头', 'YOLO26 end-to-end xywhr rows': 'YOLO26 端到端 xywhr 行',
   'Automatic (raw=on, end-to-end=off)': '自动（原始头开启，端到端关闭）', 'Input Pixels': '输入像素', 'Normalized 0-1': '归一化 0–1',
@@ -518,6 +520,8 @@ const descriptions: Record<string, string> = {
 const parameterDescriptions: Record<string, string> = {
   'recognition.barcode.preprocess': '自动模式依次尝试原始灰度、Otsu 阈值和自适应阈值。光照不均或背景渐变时可用自适应模式。',
   'recognition.barcode.tryInverted': '常规极性未读到码时自动尝试反色；多码模式也会检查反色结果，以支持同一画面内混合极性。',
+  'recognition.barcode.dedupRadiusPx': '同一码制、同一内容的两条读数只有中心距离不超过该值才合并：位置不同的同内容码按两个零件计数，同一码被不同预处理或反色重复读到只计一次。',
+  'recognition.barcode.tileSearch': '多码模式整幅找不到码时，用重叠半幅分块逐块单码解码再合并。同一画面出现多个 DataMatrix 时必须开启，否则 ZXing 的多码检测会返回空。',
   'recognition.barcode.adaptiveBlockSize': '局部阈值窗口必须为奇数；小图像会自动缩小窗口。',
   'coordinate.transformConstant.unit': '处理图像坐标或连接卡尺测量时选“像素 (px)”；工程坐标变换使用 mm、cm 或 m。卡尺要求最终变换为 px→px，且只包含平移和旋转。',
   'image.synthetic.placementMode': '固定模式保持图案在基准位置；按序移动按“样本序号 × 位移/角度步长”生成位置；固定种子随机可复现；每次运行随机会重新生成位移和角度，并自动避开画幅边界。按序和固定种子模式越界时会把图案整体平移进画幅。',

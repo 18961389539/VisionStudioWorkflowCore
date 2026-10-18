@@ -19,7 +19,8 @@ public sealed class DefectDetectionApiTests(VisionStudioApiFactory factory) : IC
         var workflow = JsonNode.Parse(json)!;
         if (identical) workflow["nodes"]!.AsArray().Single(n => n!["id"]!.GetValue<string>() == "reference")!["parameters"]!["kernelSize"] = 1;
         var response = await _client.PostAsJsonAsync("/api/run", workflow);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var failureBody = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, failureBody);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(result.GetProperty("success").GetBoolean(), result.ToString());
         var reports = result.GetProperty("nodeReports").EnumerateArray().ToArray();

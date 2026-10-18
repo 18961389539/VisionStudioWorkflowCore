@@ -9,7 +9,10 @@ export function cloneParameters(parameters: NodeParameters = {}): NodeParameters
 }
 
 export function configurationParameters(parameters: NodeParameters, catalog: NodeCatalogItem): NodeParameters {
-  const defaults = Object.fromEntries(catalog.parameters.filter((p) => p.defaultValue !== undefined).map((p) => [p.name, p.defaultValue]));
+  // internal 参数（ROI 对象、基准图像、回放路径）由画布/宿主维护，不能当作可见默认值回填。
+  const defaults = Object.fromEntries(catalog.parameters
+    .filter((p) => !p.internal && p.defaultValue !== undefined)
+    .map((p) => [p.name, p.defaultValue]));
   const merged = cloneParameters({ ...defaults, ...parameters });
   // Older image.crop workflows stored a rectangular ROI as four scalar parameters.
   // Present that region in the shared ROI editor while preserving the serialized legacy fields until edited.

@@ -14,7 +14,7 @@ public static class ColorTextCatalog
             [new("channel1", VisionDataType.Image), new("channel2", VisionDataType.Image), new("channel3", VisionDataType.Image), new("channelNames", VisionDataType.String), Next], [Space],
             "Convert 8-bit sRGB/BGR(A) or replicated grayscale into three owned float32 channel images. RGB is 0..1; HSV is H=0..360 degrees and S/V=0..1; Lab uses D65 L*=0..100. Channels are scalar images, never packed pseudo-BGR.", "builtin"),
         new("region.fromColorRange", "Color Range Region", "Region", ScopedImage,
-            [Region, Image, new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), Next],
+            [Region, Image, new("count", VisionDataType.Integer), new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String, Required: false), Next],
             [Space, new("min1", "Channel 1 Minimum", "number", 0, -360, 360, .01), new("max1", "Channel 1 Maximum", "number", 360, -360, 360, .01),
              new("min2", "Channel 2 Minimum", "number", 0, -200, 200, .01), new("max2", "Channel 2 Maximum", "number", 1, -200, 200, .01),
              new("min3", "Channel 3 Minimum", "number", .5, -200, 200, .01), new("max3", "Channel 3 Maximum", "number", 1, -200, 200, .01)],

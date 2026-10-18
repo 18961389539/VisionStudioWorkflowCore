@@ -181,12 +181,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     throw new InvalidOperationException($"Required input '{node.Id}.{required.Name}' ({required.DataType}) is not connected.");
             }
 
-            var roiParameterNames = new List<string>();
-            if (catalog.Capabilities?.SupportsRoi == true) roiParameterNames.Add("roi");
-            if (catalog.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
-                roiParameterNames.AddRange(["searchRoi", "clutterRoi"]);
-            if (catalog.Type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
-                roiParameterNames.AddRange(["searchRoi", "templateRoi"]);
+            var roiParameterNames = BuiltInNodeCatalog.RoiParameterNames(catalog.Type, catalog.Capabilities);
             var roiInputConnected = catalog.Inputs.Any(input =>
                 input.Name.Equals("roi", StringComparison.OrdinalIgnoreCase)
                 && input.DataType == VisionDataType.Roi)

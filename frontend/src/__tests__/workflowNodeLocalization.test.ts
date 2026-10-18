@@ -22,7 +22,8 @@ function localizedSlots(type: string) {
     { name: 'name', filled: translated.displayName !== raw.displayName && han.test(translated.displayName) },
     { name: 'description', filled: !!translated.description && translated.description !== raw.description && han.test(translated.description) }
   ];
-  raw.parameters.forEach((parameter, index) => {
+  raw.parameters.filter((parameter) => !parameter.internal).forEach((parameter) => {
+    const index = raw.parameters.indexOf(parameter);
     const localized = translated.parameters[index];
     slots.push({
       name: `param:${parameter.name}`,

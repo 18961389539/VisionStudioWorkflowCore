@@ -1513,9 +1513,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     <p className="node-info-description">{catalogItem.description || '暂无节点说明。'}</p>
     <h3>输入端口</h3><PortTable ports={catalogItem.inputs} input />
     <h3>输出端口</h3><PortTable ports={catalogItem.outputs} />
-    {catalogItem.parameters.length > 0 && <>
+    {catalogItem.parameters.some((parameter) => !parameter.internal) && <>
       <h3>参数说明</h3>
-      <dl className="node-info-parameters">{catalogItem.parameters.map((parameter) => {
+      <dl className="node-info-parameters">{catalogItem.parameters.filter((parameter) => !parameter.internal).map((parameter) => {
         // P1（评审）：说明行补充“默认值 · 范围 · 步进”，描述缺失时不再重复兜底句
         const meta = parameterMeta(parameter);
         return <div key={parameter.name}>

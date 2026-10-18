@@ -33,6 +33,14 @@ public static class BuiltInNodeCatalog
                 new("triggerBeforeGrab", "Trigger Before Grab", "boolean", false),
                 new("exposureUs", "Exposure (us, 0=leave)", "number", 0, 0, 10000000, 100, Description: "Applied through the camera device layer before grabbing; 0 leaves the current exposure unchanged. Cameras without exposure support fail deterministically."),
                 new("gainDb", "Gain (dB, -1=leave)", "number", -1, -1, 48, 0.5, Description: "Applied through the camera device layer before grabbing; -1 leaves the current gain unchanged."),
+                // 兼容/宿主注入参数：autoOpen 是 Auto Start 的旧键名；__replay* 只允许离线回放宿主写入。
+                new("autoOpen", "Auto Open (legacy)", "boolean", true, Group: "Compatibility", Internal: true,
+                    Description: "Legacy alias of Auto Start. Read only when Auto Start is absent."),
+                new("__replayInputPath", "Replay Input Path", "text", null, Group: "Offline Replay", Internal: true,
+                    Description: "Host-injected offline replay image path. Authorization is enforced by the host replay resolver; workflow documents cannot enable it."),
+                new("__replaySequence", "Replay Sequence", "text", null, Group: "Offline Replay", Internal: true),
+                new("__replayTimestamp", "Replay Timestamp", "text", null, Group: "Offline Replay", Internal: true),
+                new("__replayCameraId", "Replay Camera ID", "text", null, Group: "Offline Replay", Internal: true),
             ],
             "Acquire a frame lease from the continuous CameraFrameHub. Latest reuses the newest frame; Next waits for a newer sequence.",
             "builtin",
@@ -1127,12 +1135,55 @@ public static class BuiltInNodeCatalog
 
     // Compute-only built-ins explicitly declare absence of device actions, including for Try validation.
     // File-backed template matching stays outside automatic retry because its file can change between attempts.
-    public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems.Select(item =>
-        item.Type == "match.template"
+    public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems
+        .Select(item => item.Type == "match.template"
             ? item with { Capabilities = (item.Capabilities ?? new VisionToolCapabilities()) with { Deterministic = false } }
             : item.Actions is null && Runtime.VisionExecutionPolicy.IsPipelineEligible(item)
                 ? item with { Actions = [] }
-                : item).ToArray();
+                : item)
+        .Select(DeclareLocalRoiParameters)
+        .ToArray();
+
+    /// <summary>
+    /// 执行器通过 <c>NodeDefinition.GetRoi(parameterName)</c> 读取的本地 ROI 参数名。
+    /// 目录声明与编译期校验共用这一处，避免"目录里没有、运行时却在读"的漂移。
+    /// </summary>
+    public static IReadOnlyList<string> RoiParameterNames(string type, VisionToolCapabilities? capabilities)
+    {
+        var names = new List<string>(3);
+        if (capabilities?.SupportsRoi == true || ReadsLocalRoiWithoutCapability(type)) names.Add("roi");
+        if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
+            names.AddRange(["searchRoi", "templateRoi", "clutterRoi"]);
+        if (type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
+            names.AddRange(["searchRoi", "templateRoi"]);
+        return names;
+    }
+
+    // 这些节点运行时会读本地 ROI，但尚未声明 SupportsRoi（能力位待补）；契约仍必须暴露真实参数。
+    private static bool ReadsLocalRoiWithoutCapability(string type) =>
+        type.Equals("measure.blob", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase)
+        || type.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase);
+
+    private static NodeCatalogItem DeclareLocalRoiParameters(NodeCatalogItem item)
+    {
+        var declared = item.Parameters.Select(parameter => parameter.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = RoiParameterNames(item.Type, item.Capabilities)
+            .Where(name => !declared.Contains(name))
+            .Select(name => new ParameterDescriptor(name, RoiLabel(name), "roi", Group: "ROI", Internal: true,
+                Description: "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field."))
+            .ToArray();
+        return missing.Length == 0 ? item : item with { Parameters = [.. item.Parameters, .. missing] };
+    }
+
+    private static string RoiLabel(string name) => name switch
+    {
+        "searchRoi" => "Search ROI",
+        "templateRoi" => "Template ROI",
+        "clutterRoi" => "Clutter ROI",
+        _ => "ROI"
+    };
 
     public static NodeCatalogItem Require(string type) =>
         Items.FirstOrDefault(x => x.Type.Equals(type, StringComparison.OrdinalIgnoreCase))

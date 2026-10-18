@@ -94,6 +94,29 @@ for typ in executor_types:
     if typ not in generated_catalog_types: fail(f'Missing generated frontend fallback catalog type: {typ}')
 ok(f'Built-in executors closed: {len(executor_types)}')
 
+# 参数契约：执行器读取的每个参数键都必须在目录里声明（含 internal 隐藏参数）。
+# 这是"目录里没有、运行时却在读"这类漂移的唯一自动闸门——新增读取必须同步目录声明。
+declared_parameters = {
+    item.get('type'): {p.get('name') for p in item.get('parameters', [])}
+    for item in generated_catalog_items
+}
+param_drift = []
+for source_path in sorted((ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs')):
+    blocks = re.split(r'(?:^|\n)(?=(?:public|internal)\s+(?:sealed\s+|static\s+|abstract\s+)*class\s)',
+                      source_path.read_text(encoding='utf-8'))
+    for block in blocks:
+        node_type = re.search(r'public string Type => "([a-z][\w.]+)"', block)
+        if not node_type:
+            continue
+        type_name = node_type.group(1)
+        reads = set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', block))
+        undeclared = sorted(reads - declared_parameters.get(type_name, set()))
+        if undeclared:
+            param_drift.append(f'{type_name} reads undeclared parameter(s): {", ".join(undeclared)}')
+for problem in param_drift:
+    fail(f'Catalog parameter drift: {problem}')
+ok(f'Catalog parameter contract: {len(declared_parameters)} nodes, no undeclared reads')
+
 # Workflow sample graph references and known node types
 sample_files = sorted((ROOT/'samples').glob('*-workflow.json'))
 known_types = set(executor_types) | {'math.offset'}

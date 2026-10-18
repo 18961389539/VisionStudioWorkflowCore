@@ -63,6 +63,67 @@ public sealed class Batch3RecognitionNodeTests
         finally { vision.Dispose(); }
     }
 
+    [Theory]
+    [InlineData("QR_CODE")]
+    [InlineData("DATA_MATRIX")]
+    public async Task BarcodeCountsIdenticalContentSymbolsSeparately(string formatName)
+    {
+        var format = Enum.Parse<BarcodeFormat>(formatName);
+        var left = new MultiFormatWriter().encode("SAME-SN-001", format, 220, 220);
+        var right = new MultiFormatWriter().encode("SAME-SN-001", format, 220, 220);
+        using var source = new Mat(260, 520, MatType.CV_8UC1, Scalar.All(255));
+        for (var y = 0; y < 220; y++)
+        for (var x = 0; x < 220; x++)
+        {
+            source.Set(y + 20, x + 20, left[x, y] ? (byte)0 : (byte)255);
+            source.Set(y + 20, x + 280, right[x, y] ? (byte)0 : (byte)255);
+        }
+        var vision = VisionImage.Own(source.Clone());
+        try
+        {
+            var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) },
+                $"{{\"mode\":\"{(formatName == "QR_CODE" ? "qr" : "2d")}\",\"multiple\":true,\"preprocess\":\"none\",\"tryInverted\":false}}");
+            Assert.Equal(2, checked((int)result.Outputs["count"].Require<long>("count")));
+            Assert.Equal(0, Convert.ToInt32(result.Summary["duplicatesMerged"]));
+            Assert.Equal("SAME-SN-001", result.Outputs["text"].Require<string>("text"));
+            // ZXing's DataMatrix multi-detector returns nothing for two symbols, so the count
+            // above is only reachable through the tiled single-symbol recovery path.
+            if (formatName == "DATA_MATRIX") Assert.True(Convert.ToInt32(result.Summary["tileAttempts"]) > 0);
+        }
+        finally { vision.Dispose(); }
+    }
+
+    [Fact]
+    public async Task BarcodeMergesSameSymbolAcrossPreprocessingVariants()
+    {
+        var matrix = new MultiFormatWriter().encode("VARIANT-ONE", BarcodeFormat.QR_CODE, 220, 220);
+        using var source = new Mat(260, 260, MatType.CV_8UC1, Scalar.All(255));
+        for (var y = 0; y < 220; y++)
+        for (var x = 0; x < 220; x++) source.Set(y + 20, x + 20, matrix[x, y] ? (byte)0 : (byte)255);
+        var vision = VisionImage.Own(source.Clone());
+        try
+        {
+            // Position matters, not just content: one physical symbol re-read by the original,
+            // Otsu and adaptive passes must collapse back to a single count.
+            var result = await Run(new BarcodeDecodeNode(), "recognition.barcode", new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(vision) },
+                "{\"mode\":\"qr\",\"multiple\":true,\"preprocess\":\"auto\",\"tryInverted\":true}");
+            Assert.Equal(1, checked((int)result.Outputs["count"].Require<long>("count")));
+            Assert.True(Convert.ToInt32(result.Summary["duplicatesMerged"]) >= 1);
+        }
+        finally { vision.Dispose(); }
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(513)]
+    public async Task BarcodeRejectsInvalidDedupRadius(double radius)
+    {
+        using var source = new Mat(16, 16, MatType.CV_8UC1, Scalar.All(255));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(new BarcodeDecodeNode(), "recognition.barcode", Inputs(source),
+            JsonSerializer.Serialize(new { mode = "qr", dedupRadiusPx = radius })));
+        Assert.Contains("dedupRadiusPx", ex.Message);
+    }
+
     [Fact]
     public async Task BarcodeRoiRestrictsSearchAndReturnsPreviewOverlays()
     {
@@ -143,6 +204,35 @@ public sealed class Batch3RecognitionNodeTests
     }
 
     [Fact]
+    public async Task OcrReportsPerCharacterConfidenceAndDoesNotLeakWhitelist()
+    {
+        var tessdata = Environment.GetEnvironmentVariable("VISIONSTUDIO_TESSDATA");
+        if (string.IsNullOrWhiteSpace(tessdata)) return;
+        using var source = new Mat(180, 900, MatType.CV_8UC1, Scalar.All(255));
+        Cv2.PutText(source, "VISION 123", new Point(35, 125), HersheyFonts.HersheySimplex, 3.0, Scalar.All(0), 6, LineTypes.AntiAlias);
+
+        // The same tessdata/language/mode reuses a pooled engine; the second request's whitelist
+        // must win. A leaked whitelist would leave no letters in the second result.
+        var digitsOnly = await Run(new OcrNode(), "recognition.ocr", Inputs(source),
+            JsonSerializer.Serialize(new { dataPath = tessdata, language = "eng", whitelist = "0123456789", psm = "singleline" }));
+        var letters = await Run(new OcrNode(), "recognition.ocr", Inputs(source),
+            JsonSerializer.Serialize(new { dataPath = tessdata, language = "eng", whitelist = "VISION", psm = "singleline" }));
+
+        Assert.DoesNotContain(digitsOnly.Outputs["text"].Require<string>("text"), char.IsLetter);
+        var text = letters.Outputs["text"].Require<string>("text");
+        Assert.True(text.Any(char.IsLetter), $"Expected letters under the second whitelist, got '{text}'.");
+
+        var chars = JsonDocument.Parse(letters.Outputs["chars"].Require<string>("chars")).RootElement;
+        Assert.True(chars.GetArrayLength() > 0);
+        Assert.Contains(chars.EnumerateArray(), ch => ch.GetProperty("confidence").GetDouble() > 0);
+        Assert.All(chars.EnumerateArray(), ch =>
+        {
+            Assert.InRange(ch.GetProperty("confidence").GetDouble(), 0, 1);
+            Assert.All(new[] { "x", "y", "width", "height" }, key => Assert.True(double.IsFinite(ch.GetProperty(key).GetDouble())));
+        });
+    }
+
+    [Fact]
     public async Task ClassificationUsesActualOnnxOutputAndPreservesInput()
     {
         using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
@@ -150,6 +240,32 @@ public sealed class Batch3RecognitionNodeTests
             source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false });
         Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
         Assert.Equal(220, source.At<Vec3b>(0, 0).Item2);
+    }
+
+    [Fact]
+    public async Task ClassificationBatchesMultiCropViewsInOneRun()
+    {
+        using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
+        var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.ClassificationDynamicBatch,
+            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop = "five" });
+        // Five TTA views feed one [5,3,8,8] tensor and one session run.
+        Assert.Equal(5, Convert.ToInt32(result.Summary["batchSize"]));
+        Assert.Equal(5, Convert.ToInt32(result.Summary["viewCount"]));
+        Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
+        using var json = JsonDocument.Parse(result.Outputs["result"].Require<string>("result"));
+        Assert.Equal(5, json.RootElement.GetProperty("views").GetArrayLength());
+        Assert.Equal(5, json.RootElement.GetProperty("batchSize").GetInt32());
+    }
+
+    [Fact]
+    public async Task ClassificationFallsBackToPerViewWhenModelBatchIsFixed()
+    {
+        using var source = new Mat(40, 60, MatType.CV_8UC3, new Scalar(20, 90, 220));
+        var result = await RunOnnx(new OnnxClassificationNode(), "inference.classification", TinyModels.Classification,
+            source, new { inputWidth = 8, inputHeight = 8, applySoftmax = false, multiCrop = "five" });
+        Assert.Equal(1, Convert.ToInt32(result.Summary["batchSize"]));
+        Assert.Equal(5, Convert.ToInt32(result.Summary["viewCount"]));
+        Assert.Equal(2, checked((int)result.Outputs["classIndex"].Require<long>("classIndex")));
     }
 
     [Fact]
@@ -251,6 +367,8 @@ public sealed class Batch3RecognitionNodeTests
         // ONNX protobufs below are tiny real graphs produced from the public ONNX schema: global average pool/flatten,
         // identity segmentation logits, scalar reduce-mean, and a detector head whose confidence is image-dependent.
         public static readonly byte[] Classification = Convert.FromBase64String("CAcSElZpc2lvblN0dWRpbyB0ZXN0czqQAQoiCgVpbnB1dBIGcG9vbGVkIhFHbG9iYWxBdmVyYWdlUG9vbAomCgZwb29sZWQSBnNjb3JlcyIHRmxhdHRlbioLCgRheGlzGAGgAQISB2ZpeHR1cmVaHwoFaW5wdXQSFgoUCAESEAoCCAEKAggDCgIICAoCCAhiGAoGc2NvcmVzEg4KDAgBEggKAggBCgIIA0IECgAQCw==");
+        // Same graph with a dynamic batch dimension (dim_param "N") for batched TTA.
+        public static readonly byte[] ClassificationDynamicBatch = Convert.FromBase64String("CAcSElZpc2lvblN0dWRpbyB0ZXN0czqdAQoiCgVpbnB1dBIGcG9vbGVkIhFHbG9iYWxBdmVyYWdlUG9vbAomCgZwb29sZWQSBnNjb3JlcyIHRmxhdHRlbioLCgRheGlzGAGgAQISElZpc2lvblN0dWRpbyB0ZXN0c1ogCgVpbnB1dBIXChUIARIRCgMSAU4KAggDCgIICAoCCAhiGQoGc2NvcmVzEg8KDQgBEgkKAxIBTgoCCANCBAoAEAs=");
         public static readonly byte[] Segmentation = Convert.FromBase64String("CAcSElZpc2lvblN0dWRpbyB0ZXN0czpjChcKBWlucHV0EgRtYXNrIghJZGVudGl0eRIHZml4dHVyZVofCgVpbnB1dBIWChQIARIQCgIIAQoCCAMKAggICgIICGIeCgRtYXNrEhYKFAgBEhAKAggBCgIIAwoCCAgKAggIQgQKABAL");
         public static readonly byte[] Anomaly = Convert.FromBase64String("CAcSElZpc2lvblN0dWRpbyB0ZXN0czqqAQoiCgVpbnB1dBIGcG9vbGVkIhFHbG9iYWxBdmVyYWdlUG9vbAo5CgZwb29sZWQSBXNjb3JlIgpSZWR1Y2VNZWFuKgsKBGF4ZXNAAaABByoPCghrZWVwZGltcxgBoAECEgdmaXh0dXJlWh8KBWlucHV0EhYKFAgBEhAKAggBCgIIAwoCCAgKAggIYh8KBXNjb3JlEhYKFAgBEhAKAggBCgIIAQoCCAEKAggBQgQKABAL");
         public static readonly byte[] Detection = Convert.FromBase64String("CAcSElZpc2lvblN0dWRpbyB0ZXN0czrcAgoiCgVpbnB1dBIGcG9vbGVkIhFHbG9iYWxBdmVyYWdlUG9vbAo5CgZwb29sZWQSBXNjb3JlIgpSZWR1Y2VNZWFuKgsKBGF4ZXNAAaABByoPCghrZWVwZGltcxgBoAECChsKBXNjb3JlCgVzY2FsZRIGc2NhbGVkIgNNdWwKGgoGc2NhbGVkCgZvZmZzZXQSA3JvdyIDQWRkCicKA3JvdxIKZGV0ZWN0aW9ucyIHRmxhdHRlbioLCgRheGlzGAGgAQISB2ZpeHR1cmUqJwgBCAYQASIYAAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAQgVzY2FsZSooCAEIBhABIhgAAIA+AACAPgAAQD8AAEA/AAAAAAAAAEBCBm9mZnNldFofCgVpbnB1dBIWChQIARIQCgIIAQoCCAMKAggICgIICGIcCgpkZXRlY3Rpb25zEg4KDAgBEggKAggBCgIIBkIECgAQCw==");

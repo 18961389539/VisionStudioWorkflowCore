@@ -12,7 +12,8 @@ public sealed class DelayNode : IVisionNodeExecutor
         var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         CoordinateValidation.RequireFinite(elapsed, "delay.elapsedMs");
         var diag = CoordinateValidation.Diagnostics(Type, ("requestedMs", delayMs), ("elapsedMs", elapsed));
-        return new NodeExecutorResult(new Dictionary<string, VisionValue> { ["elapsedMs"] = VisionValue.Double(delayMs), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["delayMs"] = delayMs, ["elapsedMs"] = Math.Round(elapsed, 3), ["diagnostics"] = diag });
+        // elapsedMs 是实测耗时（含调度抖动），不是请求值——两者在 diagnostics 里分开记录。
+        return new NodeExecutorResult(new Dictionary<string, VisionValue> { ["elapsedMs"] = VisionValue.Double(elapsed), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["delayMs"] = delayMs, ["elapsedMs"] = Math.Round(elapsed, 3), ["diagnostics"] = diag });
     }
 }
 public sealed class BooleanIfConditionNode : IVisionNodeExecutor

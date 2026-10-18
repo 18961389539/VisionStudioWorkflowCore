@@ -15,6 +15,8 @@ namespace VisionStudio.Engine.Nodes;
 /// <summary>Decodes QR, DataMatrix/PDF417/Aztec and common one-dimensional formats from a real image.</summary>
 public sealed class BarcodeDecodeNode : IVisionNodeExecutor
 {
+    // Identical payloads in different places are distinct parts (duplicate labels, repeated DPM
+    // marks), so results merge on content plus position, not on content alone.
     private static readonly BarcodeFormat[] OneDimensionalFormats =
     [
         BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93,
@@ -46,6 +48,12 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         var tryInverted = node.GetBool("tryInverted", true);
         var maxResults = node.GetInt("maxResults", 100);
         if (maxResults is < 1 or > 1000) throw new InvalidOperationException("Barcode maxResults must be between 1 and 1000.");
+        var dedupRadius = node.GetDouble("dedupRadiusPx", 8);
+        if (!double.IsFinite(dedupRadius) || dedupRadius is < 0 or > 512)
+            throw new InvalidOperationException("Barcode dedupRadiusPx must be between 0 and 512 pixels.");
+        var tileSearch = node.GetString("tileSearch", "auto").Trim().ToLowerInvariant();
+        if (tileSearch is not ("auto" or "off"))
+            throw new InvalidOperationException("Barcode tileSearch must be auto or off.");
         var preprocess = node.GetString("preprocess", "auto").Trim().ToLowerInvariant();
         if (preprocess is not ("auto" or "none" or "otsu" or "adaptive"))
             throw new InvalidOperationException("Barcode preprocess must be auto, none, otsu, or adaptive.");
@@ -67,8 +75,10 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         var roi = node.GetRoi();
         using var scanImage = ApplyRoi(gray, roi, cancellationToken);
         var variants = BuildVariants(scanImage, preprocess, adaptiveBlockSize, adaptiveConstant);
-        var resultByKey = new Dictionary<string, BarcodeResult>(StringComparer.Ordinal);
+        var resultsFound = new List<BarcodeCandidate>();
+        var rawCount = 0;
         var attempts = 0;
+        var tileAttempts = 0;
         try
         {
             foreach (var variant in variants)
@@ -76,13 +86,13 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 attempts++;
                 AddDecoded(Decode(variant.Image, formats, tryHarder, multiple, cancellationToken), variant.Name, false);
-                if (resultByKey.Count > maxResults || !multiple && resultByKey.Count > 0) break;
+                if (resultsFound.Count > maxResults || !multiple && resultsFound.Count > 0) break;
             }
 
             // Search opposite polarity only when it can add value. A first successful
             // normal-polarity read is enough for single-result mode; multi mode still
             // checks inverted pixels because a frame can contain mixed code polarity.
-            if (tryInverted && (multiple || resultByKey.Count == 0))
+            if (tryInverted && (multiple || resultsFound.Count == 0))
             {
                 foreach (var variant in variants)
                 {
@@ -91,7 +101,24 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
                     JLVisionOperators.BitwiseNot(variant.Image, inverted);
                     attempts++;
                     AddDecoded(Decode(inverted, formats, tryHarder, multiple, cancellationToken), variant.Name, true);
-                    if (resultByKey.Count > maxResults || !multiple && resultByKey.Count > 0) break;
+                    if (resultsFound.Count > maxResults || !multiple && resultsFound.Count > 0) break;
+                }
+            }
+
+            // ZXing's DataMatrix multi-detector returns nothing as soon as a frame holds more
+            // than one symbol (verified: one DataMatrix decodes, two identical ones yield zero
+            // results), which silently turned "multiple" into a single-symbol reader for DPM
+            // parts. Retry once on overlapping half-frame tiles with single-symbol decoding:
+            // each tile sees one symbol, and position-based deduplication removes the overlap.
+            if (multiple && resultsFound.Count == 0 && tileSearch == "auto" && formats.Any(TwoDimensionalFormats.Contains))
+            {
+                foreach (var tile in BuildRecoveryTiles(variants[0].Image.Width, variants[0].Image.Height))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var view = new Mat(variants[0].Image, tile);
+                    tileAttempts++;
+                    AddDecoded(Decode(view, formats, tryHarder, false, cancellationToken), variants[0].Name, false, tile.X, tile.Y);
+                    if (resultsFound.Count > maxResults) break;
                 }
             }
         }
@@ -100,7 +127,8 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             foreach (var variant in variants) variant.Image.Dispose();
         }
 
-        var results = resultByKey.Values.Take(maxResults).ToArray();
+        var truncated = resultsFound.Count > maxResults;
+        var results = resultsFound.Take(maxResults).Select(candidate => candidate.Result).ToArray();
         var json = JsonSerializer.Serialize(results);
         var outputs = new Dictionary<string, VisionValue>
         {
@@ -130,26 +158,49 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             ["roiApplied"] = roi is not null,
             ["attempts"] = attempts,
             ["count"] = results.Length,
-            ["truncated"] = resultByKey.Count > maxResults,
+            ["rawCount"] = rawCount,
+            ["duplicatesMerged"] = rawCount - resultsFound.Count,
+            ["dedupRadiusPx"] = dedupRadius,
+            ["tileSearch"] = tileSearch,
+            ["tileAttempts"] = tileAttempts,
+            ["truncated"] = truncated,
             ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
             ["winningPass"] = results.FirstOrDefault()?.Preprocessing,
             ["inverted"] = results.FirstOrDefault()?.Inverted
         }, overlays));
 
-        void AddDecoded(IEnumerable<ZXing.Result> decoded, string variant, bool inverted)
+        void AddDecoded(IEnumerable<ZXing.Result> decoded, string variant, bool inverted, int offsetX = 0, int offsetY = 0)
         {
             foreach (var result in decoded)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!formats.Contains(result.BarcodeFormat)) continue;
-                var key = $"{result.BarcodeFormat}\u001f{result.Text}";
-                resultByKey.TryAdd(key, new BarcodeResult(
-                    result.Text,
-                    result.BarcodeFormat.ToString(),
-                    result.ResultPoints?.Select(p => new BarcodePoint(p.X, p.Y)).ToArray() ?? [],
-                    variant,
-                    inverted));
-                if (resultByKey.Count > maxResults) return;
+                rawCount++;
+                var points = result.ResultPoints?.Select(p => new BarcodePoint(p.X + offsetX, p.Y + offsetY)).ToArray() ?? [];
+                var format = result.BarcodeFormat.ToString();
+                // Deduplicate by position, never by content alone: two physical symbols that carry
+                // the same payload (duplicate labels, repeated DPM marks) must still be counted
+                // twice, while the same symbol re-read from another preprocessing variant or from
+                // inverted pixels lands within a few pixels of the first hit.
+                if (points.Length > 0)
+                {
+                    var centerX = points.Average(p => p.X);
+                    var centerY = points.Average(p => p.Y);
+                    var duplicate = resultsFound.Any(existing =>
+                        existing.Result.Format == format
+                        && existing.Result.Text == result.Text
+                        && (!existing.HasGeometry
+                            || MeasurementMath.Hypot(existing.CenterX - centerX, existing.CenterY - centerY) <= dedupRadius));
+                    if (!duplicate)
+                        resultsFound.Add(new BarcodeCandidate(new BarcodeResult(result.Text, format, points, variant, inverted), centerX, centerY, true));
+                }
+                else if (!resultsFound.Any(existing => existing.Result.Format == format && existing.Result.Text == result.Text))
+                {
+                    // A decoder without result points cannot be located; fall back to content so
+                    // repeated variant passes do not inflate the count.
+                    resultsFound.Add(new BarcodeCandidate(new BarcodeResult(result.Text, format, [], variant, inverted), double.NaN, double.NaN, false));
+                }
+                if (resultsFound.Count > maxResults) return;
             }
         }
     }
@@ -204,6 +255,30 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         catch { foreach (var variant in variants) variant.Image.Dispose(); throw; }
     }
 
+    /// <summary>
+    /// Overlapping tiles for multi-symbol recovery. Each tile spans 60% of one axis and the full
+    /// other axis, so any symbol up to 60% of the frame fits inside at least one tile, while the
+    /// overlap lets position-based deduplication discard double reads.
+    /// </summary>
+    private static IEnumerable<OpenCvSharp.Rect> BuildRecoveryTiles(int width, int height)
+    {
+        const double span = 0.6;
+        var tileWidth = Math.Max(1, (int)Math.Ceiling(width * span));
+        var tileHeight = Math.Max(1, (int)Math.Ceiling(height * span));
+        var tiles = new List<OpenCvSharp.Rect>(4);
+        if (tileWidth < width)
+        {
+            tiles.Add(new OpenCvSharp.Rect(0, 0, tileWidth, height));
+            tiles.Add(new OpenCvSharp.Rect(width - tileWidth, 0, tileWidth, height));
+        }
+        if (tileHeight < height)
+        {
+            tiles.Add(new OpenCvSharp.Rect(0, 0, width, tileHeight));
+            tiles.Add(new OpenCvSharp.Rect(0, height - tileHeight, width, tileHeight));
+        }
+        return tiles.Where(tile => tile.Width >= 16 && tile.Height >= 16).Distinct();
+    }
+
     private static Mat ApplyRoi(Mat source, VisionRoi? roi, CancellationToken token)
     {
         if (roi is null) return source.Clone();
@@ -221,6 +296,7 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
         [property: System.Text.Json.Serialization.JsonPropertyName("x")] float X,
         [property: System.Text.Json.Serialization.JsonPropertyName("y")] float Y);
     private sealed record BarcodeResult(string Text, string Format, BarcodePoint[] Points, string Preprocessing, bool Inverted);
+    private sealed record BarcodeCandidate(BarcodeResult Result, double CenterX, double CenterY, bool HasGeometry);
 }
 
 /// <summary>
@@ -302,6 +378,7 @@ public sealed class OcrNode : IVisionNodeExecutor
             workSource = cropped; offsetX = x; offsetY = y;
         }
 
+        var engineLease = OcrEnginePool.Rent(resolvedDataPath, language, oem);
         try
         {
             using var gray = RecognitionImageHelpers.ToGray8(workSource);
@@ -310,19 +387,23 @@ public sealed class OcrNode : IVisionNodeExecutor
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                using var engine = new TesseractOCR.Engine(resolvedDataPath, language, oem);
-                if (whitelist.Length > 0) engine.SetVariable("tessedit_char_whitelist", whitelist);
-                if (blacklist.Length > 0) engine.SetVariable("tessedit_char_blacklist", blacklist);
-                if (dpi > 0) engine.SetVariable("user_defined_dpi", dpi);
+                var engine = engineLease.Engine;
+                OcrEnginePool.ResetForRequest(engine, whitelist, blacklist, dpi);
                 using var image = TesseractPixImage.LoadFromMemory(encoded);
                 using var page = engine.Process(image, psm);
                 cancellationToken.ThrowIfCancellationRequested();
                 var allWords = OcrTextParsing.ParseTsvWords(page.TsvText, scale, offsetX, offsetY);
-                // Per-character boxes come from Tesseract box output (bottom-origin);
-                // empty when the engine/model produces none - reported, never invented.
+                // Per-character boxes and confidences come from the page layout iterator; Tesseract's
+                // box output has no confidence and a bottom-left origin, so it stays as a fallback
+                // for engines that expose no symbols. Empty is reported, never invented.
                 OcrTextParsing.OcrChar[] chars = [];
-                try { chars = OcrTextParsing.ParseBoxChars(page.BoxText, scale, offsetX, offsetY, (int)Math.Round(workSource.Height * scale)); }
+                try { chars = ReadLayoutChars(page, scale, offsetX, offsetY); }
                 catch (Exception) { chars = []; }
+                if (chars.Length == 0)
+                {
+                    try { chars = OcrTextParsing.ParseBoxChars(page.BoxText, scale, offsetX, offsetY, (int)Math.Round(workSource.Height * scale)); }
+                    catch (Exception) { chars = []; }
+                }
                 var words = minConfidence > 0 ? allWords.Where(w => w.Confidence >= minConfidence).ToArray() : allWords;
                 var text = minConfidence > 0 ? string.Join(" ", words.Select(w => w.Text)) : page.Text.Trim();
                 var confidence = words.Length > 0
@@ -336,13 +417,14 @@ public sealed class OcrNode : IVisionNodeExecutor
                         ["confidence"] = VisionValue.Double(confidence),
                         ["wordCount"] = VisionValue.Integer(words.Length),
                         ["words"] = VisionValue.String(wordsJson),
-                        ["chars"] = VisionValue.String(JsonSerializer.Serialize(chars.Select(ch => new { text = ch.Text, x = ch.X, y = ch.Y, width = ch.Width, height = ch.Height }))),
+                        ["chars"] = VisionValue.String(JsonSerializer.Serialize(chars.Select(ch => new { text = ch.Text, confidence = ch.Confidence, x = ch.X, y = ch.Y, width = ch.Width, height = ch.Height }))),
                         ["result"] = VisionValue.String(JsonSerializer.Serialize(new { text, confidence, language, psm = psmName, oem = oemName, wordCount = words.Length, words }))
                     },
-                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length, ["lowConfidenceWordCount"] = allWords.Length - words.Length, ["blacklist"] = blacklist.Length > 0 }));
+                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length, ["lowConfidenceWordCount"] = allWords.Length - words.Length, ["blacklist"] = blacklist.Length > 0, ["engineReused"] = engineLease.Reused }));
             }
             catch (Exception ex) when (ex is not (InvalidOperationException or OperationCanceledException))
             {
+                engineLease.Discard();
                 throw new InvalidOperationException($"OCR failed using language '{language}' and tessdata directory '{resolvedDataPath}': {ex.Message}", ex);
             }
             finally
@@ -350,7 +432,39 @@ public sealed class OcrNode : IVisionNodeExecutor
                 System.Array.Clear(encoded);
             }
         }
-        finally { cropped?.Dispose(); }
+        finally
+        {
+            engineLease.Dispose();
+            cropped?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Walks blocks → paragraphs → lines → words → symbols to collect per-character boxes with
+    /// their own confidence. Tesseract reports 0-100 confidences and top-left origin boxes in
+    /// processed-image pixels, so they map back by scale and ROI offset without a Y flip.
+    /// </summary>
+    private static OcrTextParsing.OcrChar[] ReadLayoutChars(TesseractOCR.Page page, double scale, double offsetX, double offsetY)
+    {
+        var chars = new List<OcrTextParsing.OcrChar>();
+        foreach (var block in page.Layout)
+        foreach (var paragraph in block.Paragraphs)
+        foreach (var line in paragraph.TextLines)
+        foreach (var word in line.Words)
+        foreach (var symbol in word.Symbols)
+        {
+            var text = symbol.Text;
+            if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(text)) continue;
+            var box = symbol.BoundingBox;
+            if (box is null) continue;
+            chars.Add(new OcrTextParsing.OcrChar(text,
+                box.Value.X1 / scale + offsetX,
+                box.Value.Y1 / scale + offsetY,
+                box.Value.Width / scale,
+                box.Value.Height / scale,
+                Math.Clamp(symbol.Confidence / 100d, 0, 1)));
+        }
+        return chars.ToArray();
     }
 
     private static Mat Preprocess(Mat gray, double scale, string binarize, bool invert)
