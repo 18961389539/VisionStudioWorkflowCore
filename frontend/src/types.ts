@@ -897,6 +897,22 @@ export type VisionTransform2D = {
   matrix?: number[];
 };
 
+export type VisionTransform3D = {
+  sourceFrame: string;
+  targetFrame: string;
+  unit: string;
+  /** Row-major 4x4 homogeneous matrix. */
+  matrix: number[];
+};
+
+export type VisionCoordinatePoint3D = {
+  x: number;
+  y: number;
+  z: number;
+  frame: string;
+  unit: string;
+};
+
 export type CalibrationWorkspaceRequest = {
   sourceFrame: string;
   targetFrame: string;
@@ -905,6 +921,8 @@ export type CalibrationWorkspaceRequest = {
   verificationPoints: CalibrationWorkspacePoint[];
   heatmapColumns: number;
   heatmapRows: number;
+  maxRmse?: number;
+  maxPointError?: number;
 };
 
 export type CalibrationWorkspaceResult = {
@@ -950,6 +968,39 @@ export type CalibrationVersionSnapshot = {
   result: CalibrationWorkspaceResult;
 };
 
+export type CameraIntrinsicVersionInfo = {
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  published: boolean;
+};
+
+export type CameraIntrinsicAssetDescriptor = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  latestVersion: number;
+  publishedVersion?: number | null;
+  versions: CameraIntrinsicVersionInfo[];
+  publicationHistory: Array<{ version: number; action: string; at: string }>;
+};
+
+export type CameraIntrinsicVersionSnapshot = {
+  assetId: string;
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  model: unknown;
+  sourceDocumentJson: string;
+  summaryJson: string;
+};
+
 
 export type CalibrationWizardQuality = {
   cornerCount: number;
@@ -985,6 +1036,9 @@ export type CalibrationWizardSession = {
   imageHeight?: number | null;
   views: CalibrationWizardView[];
   enabledCount: number;
+  cameraModel: 'pinhole' | 'fisheye' | 'telecentric';
+  telecentricMagnification: number;
+  telecentricPixelSizeUm: number;
   model?: unknown;
   lastSolveSummary?: Record<string, unknown> | null;
 };

@@ -39,7 +39,9 @@ public sealed record CalibrationWorkspaceRequest(
     IReadOnlyList<CalibrationWorkspacePoint> Points,
     IReadOnlyList<CalibrationWorkspacePoint>? VerificationPoints = null,
     int HeatmapColumns = 5,
-    int HeatmapRows = 5);
+    int HeatmapRows = 5,
+    double MaxRmse = 0,
+    double MaxPointError = 0);
 
 public sealed record CalibrationWorkspaceResult(
     VisionTransform2D Transform,
@@ -112,17 +114,31 @@ public sealed class CalibrationWorkspaceService
 {
     public CalibrationWorkspaceResult Solve(CalibrationWorkspaceRequest request)
     {
+        if (request.Points.Count > 10000) throw new ApiValidationException("At most 10000 calibration points are allowed.");
+        if ((request.VerificationPoints?.Count ?? 0) > 10000) throw new ApiValidationException("At most 10000 verification points are allowed.");
+        var sourceFrame = CoordinateValidation.RequireFrame(request.SourceFrame, "sourceFrame");
+        var targetFrame = CoordinateValidation.RequireFrame(request.TargetFrame, "targetFrame");
+        var targetUnit = CoordinateValidation.RequireUnit(request.TargetUnit, "targetUnit", "mm", "cm", "m", "px");
         var used = request.Points.Where(x => x.Enabled).OrderBy(x => x.Index).ToArray();
         if (used.Length < 4) throw new ApiValidationException("At least 4 enabled calibration points are required.");
         var pairs = used.Select(x => new CalibrationPair(x.ImageX, x.ImageY, x.WorldX, x.WorldY)).ToArray();
-        var transform = CalibrationMath.SolveHomography(pairs, request.SourceFrame, request.TargetFrame, request.TargetUnit);
+        var transform = CalibrationMath.SolveHomography(pairs, sourceFrame, targetFrame, targetUnit);
         var residuals = Evaluate(transform, used);
-        var rmse = Math.Sqrt(residuals.Select(x => x.Error * x.Error).Average());
+        var rmse = CalibrationMath.RootMeanSquare(residuals.Select(x => x.Error));
         var max = residuals.Max(x => x.Error);
+        if (!double.IsFinite(request.MaxRmse) || request.MaxRmse < 0 || !double.IsFinite(request.MaxPointError) || request.MaxPointError < 0)
+            throw new ApiValidationException("Calibration quality limits must be finite and >= 0 (0 disables each gate).");
+        if (request.MaxRmse > 0 && rmse > request.MaxRmse)
+            throw new ApiValidationException($"Calibration RMSE {rmse:F6} {targetUnit} exceeds maxRmse {request.MaxRmse:F6} {targetUnit}.");
+        if (request.MaxPointError > 0 && max > request.MaxPointError)
+        {
+            var worst = residuals.MaxBy(point => point.Error)!;
+            throw new ApiValidationException($"Calibration point {worst.Index} error {max:F6} {targetUnit} exceeds maxPointError {request.MaxPointError:F6} {targetUnit}.");
+        }
 
         var verificationPoints = (request.VerificationPoints ?? []).Where(x => x.Enabled).OrderBy(x => x.Index).ToArray();
         var verificationResiduals = Evaluate(transform, verificationPoints);
-        double? verificationRmse = verificationResiduals.Count == 0 ? null : Math.Sqrt(verificationResiduals.Select(x => x.Error * x.Error).Average());
+        double? verificationRmse = verificationResiduals.Count == 0 ? null : CalibrationMath.RootMeanSquare(verificationResiduals.Select(x => x.Error));
         double? verificationMax = verificationResiduals.Count == 0 ? null : verificationResiduals.Max(x => x.Error);
 
         var heatmapSource = verificationResiduals.Count > 0 ? verificationResiduals : residuals;
@@ -135,9 +151,12 @@ public sealed class CalibrationWorkspaceService
         var result = new List<CalibrationResidual>(points.Count);
         foreach (var point in points)
         {
+            if (!double.IsFinite(point.ImageX) || !double.IsFinite(point.ImageY) || !double.IsFinite(point.WorldX) || !double.IsFinite(point.WorldY))
+                throw new ApiValidationException($"Calibration point {point.Index} must contain only finite coordinates.");
             var predicted = transform.Apply(new VisionPoint2D(point.ImageX, point.ImageY));
             var dx = predicted.X - point.WorldX;
             var dy = predicted.Y - point.WorldY;
+            if (!double.IsFinite(dx) || !double.IsFinite(dy)) throw new ApiValidationException($"Calibration point {point.Index} produced a non-finite residual.");
             result.Add(new CalibrationResidual(
                 point.Index,
                 point.ImageX,
@@ -148,7 +167,7 @@ public sealed class CalibrationWorkspaceService
                 predicted.Y,
                 dx,
                 dy,
-                Math.Sqrt(dx * dx + dy * dy),
+                CalibrationMath.Distance(dx, dy),
                 point.Source));
         }
         return result;
@@ -298,17 +317,32 @@ public sealed class CalibrationAssetStore
     public async Task<CalibrationVersionSnapshot?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
         await using var connection = await _db.OpenConnectionAsync(ct);
+        return await ReadVersionAsync(connection, null, id, version, ct);
+    }
+
+    private async Task<CalibrationVersionSnapshot?> ReadVersionAsync(
+        Microsoft.Data.Sqlite.SqliteConnection connection,
+        Microsoft.Data.Sqlite.SqliteTransaction? transaction,
+        string id,
+        int version,
+        CancellationToken ct)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT snapshot_hash,created_at,note,workspace_json,result_json FROM calibration_versions WHERE asset_id=$id AND version=$version;";
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$version", version);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
+        var storedHash = reader.GetString(0);
         var workspace = JsonSerializer.Deserialize<CalibrationWorkspaceRequest>(reader.GetString(3), _json)
             ?? throw new InvalidOperationException($"Stored workspace for calibration '{id}' v{version} is invalid.");
         var result = JsonSerializer.Deserialize<CalibrationWorkspaceResult>(reader.GetString(4), _json)
             ?? throw new InvalidOperationException($"Stored result for calibration '{id}' v{version} is invalid.");
-        return new CalibrationVersionSnapshot(id, version, reader.GetString(0), ParseTime(reader.GetString(1)), reader.GetString(2), workspace, result);
+        var actualHash = ComputeSnapshotHash(workspace, result);
+        if (!string.Equals(storedHash, actualHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"Calibration '{id}' v{version} failed snapshot integrity validation: stored hash {storedHash}, computed hash {actualHash}.");
+        return new CalibrationVersionSnapshot(id, version, storedHash, ParseTime(reader.GetString(1)), reader.GetString(2), workspace, result);
     }
 
     public async Task<CalibrationVersionSnapshot> GetPublishedAsync(string id, CancellationToken ct)
@@ -328,15 +362,8 @@ public sealed class CalibrationAssetStore
         var row = await LoadAssetRowAsync(connection, id, transaction, ct)
             ?? throw new ApiNotFoundException($"Calibration asset '{id}' does not exist.");
 
-        await using (var exists = connection.CreateCommand())
-        {
-            exists.Transaction = transaction;
-            exists.CommandText = "SELECT 1 FROM calibration_versions WHERE asset_id=$id AND version=$version LIMIT 1;";
-            exists.Parameters.AddWithValue("$id", id);
-            exists.Parameters.AddWithValue("$version", version);
-            if (await exists.ExecuteScalarAsync(ct) is null)
-                throw new ApiNotFoundException($"Calibration version {version} does not exist for '{id}'.");
-        }
+        if (await ReadVersionAsync(connection, transaction, id, version, ct) is null)
+            throw new ApiNotFoundException($"Calibration version {version} does not exist for '{id}'.");
 
         var now = DateTimeOffset.UtcNow;
         await ExecuteAsync(connection, transaction,
@@ -352,9 +379,14 @@ public sealed class CalibrationAssetStore
     private CalibrationVersionSnapshot CreateSnapshot(string id, int version, CalibrationWorkspaceRequest workspace, string note, DateTimeOffset now)
     {
         var result = _solver.Solve(workspace);
-        var canonical = JsonSerializer.Serialize(new { workspace, result }, _json);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+        var hash = ComputeSnapshotHash(workspace, result);
         return new CalibrationVersionSnapshot(id, version, hash, now, note, workspace, result);
+    }
+
+    private string ComputeSnapshotHash(CalibrationWorkspaceRequest workspace, CalibrationWorkspaceResult result)
+    {
+        var canonical = JsonSerializer.Serialize(new { workspace, result }, _json);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
     private async Task InsertVersionAsync(Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction, CalibrationVersionSnapshot snapshot, CancellationToken ct)

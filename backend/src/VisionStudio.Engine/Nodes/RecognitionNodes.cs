@@ -34,6 +34,7 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
         using var gray = RecognitionImageHelpers.ToGray8(source);
@@ -42,6 +43,18 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             throw new InvalidOperationException($"Unsupported barcode mode '{mode}'. Supported modes are 'all', 'qr', '1d', and '2d'.");
         var tryHarder = node.GetBool("tryHarder", true);
         var multiple = node.GetBool("multiple", true);
+        var tryInverted = node.GetBool("tryInverted", true);
+        var maxResults = node.GetInt("maxResults", 100);
+        if (maxResults is < 1 or > 1000) throw new InvalidOperationException("Barcode maxResults must be between 1 and 1000.");
+        var preprocess = node.GetString("preprocess", "auto").Trim().ToLowerInvariant();
+        if (preprocess is not ("auto" or "none" or "otsu" or "adaptive"))
+            throw new InvalidOperationException("Barcode preprocess must be auto, none, otsu, or adaptive.");
+        var adaptiveBlockSize = node.GetInt("adaptiveBlockSize", 31);
+        if (adaptiveBlockSize is < 3 or > 101 || adaptiveBlockSize % 2 == 0)
+            throw new InvalidOperationException("Barcode adaptiveBlockSize must be an odd number between 3 and 101.");
+        var adaptiveConstant = node.GetDouble("adaptiveConstant", 10);
+        if (!double.IsFinite(adaptiveConstant) || adaptiveConstant is < -100 or > 100)
+            throw new InvalidOperationException("Barcode adaptiveConstant must be between -100 and 100.");
         var formats = mode switch
         {
             "qr" => [BarcodeFormat.QR_CODE],
@@ -51,20 +64,43 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             _ => throw new InvalidOperationException($"Unsupported barcode mode '{mode}'.")
         };
 
-        gray.GetArray(out byte[] pixels);
-        var luminance = new RGBLuminanceSource(pixels, gray.Width, gray.Height, RGBLuminanceSource.BitmapFormat.Gray8);
-        var reader = new BarcodeReaderGeneric { AutoRotate = true };
-        reader.Options.PossibleFormats = formats.ToList();
-        reader.Options.TryHarder = tryHarder;
-        var decoded = multiple ? reader.DecodeMultiple(luminance) : Wrap(reader.Decode(luminance));
-        cancellationToken.ThrowIfCancellationRequested();
-        var results = (decoded ?? System.Array.Empty<ZXing.Result>())
-            .Where(x => formats.Contains(x.BarcodeFormat))
-            .Select(x => new BarcodeResult(
-                x.Text,
-                x.BarcodeFormat.ToString(),
-                x.ResultPoints?.Select(p => new { x = p.X, y = p.Y }).ToArray() ?? []))
-            .ToArray();
+        var roi = node.GetRoi();
+        using var scanImage = ApplyRoi(gray, roi, cancellationToken);
+        var variants = BuildVariants(scanImage, preprocess, adaptiveBlockSize, adaptiveConstant);
+        var resultByKey = new Dictionary<string, BarcodeResult>(StringComparer.Ordinal);
+        var attempts = 0;
+        try
+        {
+            foreach (var variant in variants)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                attempts++;
+                AddDecoded(Decode(variant.Image, formats, tryHarder, multiple, cancellationToken), variant.Name, false);
+                if (resultByKey.Count > maxResults || !multiple && resultByKey.Count > 0) break;
+            }
+
+            // Search opposite polarity only when it can add value. A first successful
+            // normal-polarity read is enough for single-result mode; multi mode still
+            // checks inverted pixels because a frame can contain mixed code polarity.
+            if (tryInverted && (multiple || resultByKey.Count == 0))
+            {
+                foreach (var variant in variants)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    using var inverted = new Mat();
+                    JLVisionOperators.BitwiseNot(variant.Image, inverted);
+                    attempts++;
+                    AddDecoded(Decode(inverted, formats, tryHarder, multiple, cancellationToken), variant.Name, true);
+                    if (resultByKey.Count > maxResults || !multiple && resultByKey.Count > 0) break;
+                }
+            }
+        }
+        finally
+        {
+            foreach (var variant in variants) variant.Image.Dispose();
+        }
+
+        var results = resultByKey.Values.Take(maxResults).ToArray();
         var json = JsonSerializer.Serialize(results);
         var outputs = new Dictionary<string, VisionValue>
         {
@@ -79,17 +115,112 @@ public sealed class BarcodeDecodeNode : IVisionNodeExecutor
             outputs["text"] = VisionValue.String(results[0].Text);
             outputs["format"] = VisionValue.String(results[0].Format);
         }
+        var overlays = results.Take(30).SelectMany((result, index) => result.Points.Take(8).Select((point, pointIndex) =>
+            new VisionOverlay($"barcode-{index}-point-{pointIndex}", VisionOverlayType.Point,
+                X: point.X, Y: point.Y, Label: pointIndex == 0 ? $"{result.Format}: {result.Text}" : null,
+                Stroke: "#13c2c2", StrokeWidth: 3))).ToArray();
+        timer.Stop();
         return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
         {
             ["mode"] = mode,
             ["tryHarder"] = tryHarder,
             ["multiple"] = multiple,
-            ["count"] = results.Length
-        }));
+            ["tryInverted"] = tryInverted,
+            ["preprocess"] = preprocess,
+            ["roiApplied"] = roi is not null,
+            ["attempts"] = attempts,
+            ["count"] = results.Length,
+            ["truncated"] = resultByKey.Count > maxResults,
+            ["elapsedMs"] = timer.Elapsed.TotalMilliseconds,
+            ["winningPass"] = results.FirstOrDefault()?.Preprocessing,
+            ["inverted"] = results.FirstOrDefault()?.Inverted
+        }, overlays));
+
+        void AddDecoded(IEnumerable<ZXing.Result> decoded, string variant, bool inverted)
+        {
+            foreach (var result in decoded)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!formats.Contains(result.BarcodeFormat)) continue;
+                var key = $"{result.BarcodeFormat}\u001f{result.Text}";
+                resultByKey.TryAdd(key, new BarcodeResult(
+                    result.Text,
+                    result.BarcodeFormat.ToString(),
+                    result.ResultPoints?.Select(p => new BarcodePoint(p.X, p.Y)).ToArray() ?? [],
+                    variant,
+                    inverted));
+                if (resultByKey.Count > maxResults) return;
+            }
+        }
+    }
+
+    private static IEnumerable<ZXing.Result> Decode(Mat image, BarcodeFormat[] formats, bool tryHarder, bool multiple, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        image.GetArray(out byte[] pixels);
+        var luminance = new RGBLuminanceSource(pixels, image.Width, image.Height, RGBLuminanceSource.BitmapFormat.Gray8);
+        var reader = new BarcodeReaderGeneric { AutoRotate = true };
+        reader.Options.PossibleFormats = formats.ToList();
+        reader.Options.TryHarder = tryHarder;
+        var decoded = multiple ? reader.DecodeMultiple(luminance) : Wrap(reader.Decode(luminance));
+        token.ThrowIfCancellationRequested();
+        return decoded ?? System.Array.Empty<ZXing.Result>();
+    }
+
+    private static List<(string Name, Mat Image)> BuildVariants(Mat source, string preprocess, int adaptiveBlockSize, double adaptiveConstant)
+    {
+        var variants = new List<(string Name, Mat Image)>();
+        try
+        {
+            if (preprocess is "auto" or "none") variants.Add(("original", source.Clone()));
+            if (preprocess is "auto" or "otsu")
+            {
+                var otsu = new Mat();
+                try { JLVisionOperators.Threshold(source, otsu, 0, 255, ThresholdTypes.Binary | ThresholdTypes.Otsu); variants.Add(("otsu", otsu)); }
+                catch { otsu.Dispose(); throw; }
+            }
+            if (preprocess is "auto" or "adaptive")
+            {
+                // OpenCV requires the local window to fit the image. Shrink it for small
+                // symbols while retaining an odd window size of at least three pixels.
+                var largestOdd = Math.Min(source.Width, source.Height);
+                if (largestOdd % 2 == 0) largestOdd--;
+                var blockSize = Math.Min(adaptiveBlockSize, largestOdd);
+                if (blockSize >= 3)
+                {
+                    var adaptive = new Mat();
+                    try
+                    {
+                        JLVisionOperators.AdaptiveThreshold(source, adaptive, 255, AdaptiveThresholdTypes.MeanC,
+                            ThresholdTypes.Binary, blockSize, adaptiveConstant);
+                        variants.Add(("adaptive", adaptive));
+                    }
+                    catch { adaptive.Dispose(); throw; }
+                }
+            }
+            if (variants.Count == 0) throw new InvalidOperationException("Barcode preprocessing could not produce a usable image; image dimensions must be at least 3x3 for adaptive thresholding.");
+            return variants;
+        }
+        catch { foreach (var variant in variants) variant.Image.Dispose(); throw; }
+    }
+
+    private static Mat ApplyRoi(Mat source, VisionRoi? roi, CancellationToken token)
+    {
+        if (roi is null) return source.Clone();
+        roi.ValidateForMeasurement(token);
+        using var mask = roi.BuildMask(source.Size(), token);
+        if (JLVisionOperators.CountNonZero(mask) == 0)
+            throw new InvalidOperationException("Barcode ROI does not overlap the input image.");
+        var result = new Mat(source.Size(), source.Type(), Scalar.All(255));
+        try { source.CopyTo(result, mask); return result; }
+        catch { result.Dispose(); throw; }
     }
 
     private static ZXing.Result[]? Wrap(ZXing.Result? result) => result is null ? null : [result];
-    private sealed record BarcodeResult(string Text, string Format, object[] Points);
+    private sealed record BarcodePoint(
+        [property: System.Text.Json.Serialization.JsonPropertyName("x")] float X,
+        [property: System.Text.Json.Serialization.JsonPropertyName("y")] float Y);
+    private sealed record BarcodeResult(string Text, string Format, BarcodePoint[] Points, string Preprocessing, bool Inverted);
 }
 
 /// <summary>

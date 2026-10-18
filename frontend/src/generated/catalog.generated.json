@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "8d8be1f9daebccb1a493658f5454679d46a16edb96050fd9868877837b1c31a1",
+  "hash": "1b867346b45b0ff6639c5c3b9df7ab96e41b07b48340dfd0680b3b514256b743",
   "items": [
     {
       "type": "image.acquire",
@@ -582,6 +582,36 @@
           "required": true
         },
         {
+          "name": "worstTranslationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstAngleSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "robotRotationCoverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "visionRotationCoverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "robotTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "visionTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "sampleResidualsJson",
           "dataType": "String",
           "required": true
@@ -614,7 +644,17 @@
           "label": "Pose Pairs JSON",
           "type": "textarea",
           "defaultValue": "{}",
-          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses."
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; at least four diverse planar pose pairs with distinct robot poses, at most 1000."
+        },
+        {
+          "name": "angularWeight",
+          "label": "Angular Weight (translation units/radian)",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 1000000,
+          "step": 1,
+          "description": "Translation-equivalent weight for angular closure residuals. Adjust to the characteristic working distance; default 50 preserves prior behavior."
         },
         {
           "name": "maxTranslationError",
@@ -660,7 +700,180 @@
           "defaultValue": "mm"
         }
       ],
-      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Reports translation/angle RMS plus per-sample residuals, worst sample index, and optional residual gates. Rejects duplicate robot poses. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
+      "description": "Numerically solve planar SE(2) closure for eye-in-hand or eye-to-hand pose pairs. Requires rotation coverage and translation span in both robot and vision samples, rejects duplicate robot poses, and limits input to 1000 pairs. Angular residual weight is configurable in translation units per radian. Reports per-sample translation and angle errors with separate worst indexes, coverage and optional residual gates. Outputs Pose2D and composable Transform2D. Planar only — no 3D hand-eye.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "calibration.handEye3D",
+      "displayName": "3D Hand-Eye Calibration",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform3D",
+          "required": true
+        },
+        {
+          "name": "translationRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rotationRmsDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "robotTranslationSpan",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxTranslationError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxRotationErrorDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstTranslationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstRotationSampleIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sampleResidualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Setup",
+          "type": "select",
+          "defaultValue": "eyeInHand",
+          "options": [
+            {
+              "label": "Eye in hand (camera on tool)",
+              "value": "eyeInHand"
+            },
+            {
+              "label": "Eye to hand (fixed camera)",
+              "value": "eyeToHand"
+            }
+          ]
+        },
+        {
+          "name": "method",
+          "label": "OpenCV Method",
+          "type": "select",
+          "defaultValue": "DANIILIDIS",
+          "options": [
+            {
+              "label": "Daniilidis (dual quaternion)",
+              "value": "DANIILIDIS"
+            },
+            {
+              "label": "Tsai",
+              "value": "TSAI"
+            },
+            {
+              "label": "Park",
+              "value": "PARK"
+            },
+            {
+              "label": "Horaud",
+              "value": "HORAUD"
+            },
+            {
+              "label": "Andreff",
+              "value": "ANDREFF"
+            }
+          ]
+        },
+        {
+          "name": "samplesJson",
+          "label": "Pose Pairs JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "description": "{samples:[{robotToBase:[16 row-major values],targetToCamera:[16 row-major values]},...]}; each is a rigid homogeneous transform. At least six poses with rotation about two non-parallel axes; max 1000."
+        },
+        {
+          "name": "rotationWeight",
+          "label": "Rotation Weight (translation units/radian)",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 1000000,
+          "step": 1,
+          "description": "Used only to rank the combined worst sample; it does not alter the OpenCV fit or separate residuals."
+        },
+        {
+          "name": "maxTranslationError",
+          "label": "Max Sample Translation Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001
+        },
+        {
+          "name": "maxRotationErrorDeg",
+          "label": "Max Sample Rotation Error deg (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 180,
+          "step": 0.01
+        },
+        {
+          "name": "sourceFrame",
+          "label": "Transform Source Frame",
+          "type": "text",
+          "defaultValue": "Camera"
+        },
+        {
+          "name": "targetFrame",
+          "label": "Transform Target Frame",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand."
+        },
+        {
+          "name": "unit",
+          "label": "Translation Unit",
+          "type": "text",
+          "defaultValue": "mm"
+        }
+      ],
+      "description": "Solve a full rigid SE(3) camera-to-tool (eye-in-hand) or camera-to-base (eye-to-hand) transform using OpenCV hand-eye methods. Inputs are row-major 4x4 robotToBase and targetToCamera matrices in one shared translation unit. Validates rigid matrices, rejects translation-only/single-axis motion, reports mean-centered per-sample translation/rotation residuals and separate worst indexes, and supports residual gates. Requires at least six samples. Robot translation span is reported for context but does not gate valid rotational calibration. Outputs a typed Transform3D; target coordinates are expected to be static relative to the robot base for eye-in-hand, or fixed to the tool for eye-to-hand.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -708,12 +921,93 @@
           "required": false
         },
         {
+          "name": "worstPoseViewRms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "worstPoseViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "outlierViewIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "meanCoverageX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanCoverageY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "nativePolynomialDistortionActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "fisheyeModelActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "telecentricModelActive",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
         }
       ],
       "parameters": [
+        {
+          "name": "cameraModel",
+          "label": "Camera Model",
+          "type": "select",
+          "defaultValue": "pinhole",
+          "options": [
+            {
+              "label": "Pinhole (JLVision polynomial)",
+              "value": "pinhole"
+            },
+            {
+              "label": "Fisheye (OpenCV Kannala-Brandt)",
+              "value": "fisheye"
+            },
+            {
+              "label": "Object-Side Telecentric (JLVision polynomial)",
+              "value": "telecentric"
+            }
+          ],
+          "description": "Select the lens model that matches the camera. Fisheye uses OpenCV's four Kannala-Brandt coefficients. Object-side telecentric uses JLVision area_scan_telecentric_polynomial; calibrate with magnification and sensor pixel pitch seeded from datasheets."
+        },
+        {
+          "name": "telecentricMagnification",
+          "label": "Telecentric Magnification",
+          "type": "number",
+          "defaultValue": 0.2,
+          "min": 0.001,
+          "max": 10,
+          "step": 0.001,
+          "description": "Object-side telecentric lens magnification. Seed from the lens datasheet; the calibration refines this value."
+        },
+        {
+          "name": "telecentricPixelSizeUm",
+          "label": "Sensor Pixel Size (µm)",
+          "type": "number",
+          "defaultValue": 3.45,
+          "min": 0.1,
+          "max": 100,
+          "step": 0.01,
+          "description": "Physical sensor pixel pitch in micrometers. Set from the camera datasheet and keep fixed during calibration."
+        },
         {
           "name": "calibrationDataJson",
           "label": "Views JSON",
@@ -728,7 +1022,18 @@
           "defaultValue": 0,
           "min": 0,
           "max": 100,
-          "step": 0.1
+          "step": 0.1,
+          "description": "For pinhole and object-side telecentric, gates the planar homography pre-fit. For fisheye, gates fitted fisheye per-view reprojection."
+        },
+        {
+          "name": "maxPoseViewRms",
+          "label": "Max Fitted-Model Pose View RMS (px, 0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100,
+          "step": 0.1,
+          "description": "Gate fitted-camera per-view reprojection. Unavailable for telecentric projection and when native polynomial distortion is active."
         },
         {
           "name": "maxRms",
@@ -740,7 +1045,7 @@
           "step": 0.1
         }
       ],
-      "description": "JLVision native polynomial camera calibration from supplied correspondences, accumulated calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views. viewStats reports per-view coverage and planar/camera-pose reprojection RMS/max; worstViewIndex and outlierViewIndex flag suspect views. maxViewRms and maxRms optionally gate acceptance. No fisheye/telecentric model.",
+      "description": "Calibrate pinhole lenses with the JLVision native area_scan_polynomial model, or fisheye lenses with OpenCV's four-coefficient Kannala-Brandt model. Accepts supplied correspondences, calibration.detectBoard views, or the guided Calibration Wizard session API. Requires at least three varied views and limits input to 500 views/100000 points. viewStats reports coverage and fitted-model reprojection RMS/max where available; configurable per-view and overall RMS gates reject weak solves. Object-side telecentric models use JLVision area_scan_telecentric_polynomial and preserve the native parameter tuple; the pixel pitch should be fixed from camera data and magnification seeded from the lens data. Telecentric pose RMS is not reported.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -993,6 +1298,16 @@
           "required": true
         },
         {
+          "name": "worstPairIndex",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "residualsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -1035,6 +1350,10 @@
             {
               "label": "m",
               "value": "m"
+            },
+            {
+              "label": "px",
+              "value": "px"
             }
           ],
           "group": "Frames"
@@ -1058,6 +1377,30 @@
           "group": "Provenance"
         },
         {
+          "name": "maxRmse",
+          "label": "Maximum Calibration RMSE (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Quality Gate",
+          "description": "Fail the node when the fit RMSE exceeds this value; 0 disables the gate."
+        },
+        {
+          "name": "maxPointError",
+          "label": "Maximum Point Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Quality Gate",
+          "description": "Fail the node when any calibration pair residual exceeds this value; 0 disables the gate."
+        },
+        {
           "name": "pairsJson",
           "label": "Calibration Pairs JSON",
           "type": "textarea",
@@ -1066,7 +1409,7 @@
           "description": "Four or more image/world point pairs. Nine points are recommended for MVP validation."
         }
       ],
-      "description": "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
+      "description": "Coordinate-normalized, rank-revealing least-squares planar homography from image coordinates to a named target frame. Requires at least four finite, spatially distributed pairs; reports per-pair residuals and supports optional RMSE and maximum-point-error gates. Singular or poorly conditioned geometry fails deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -1981,6 +2324,142 @@
       "declaresActions": true
     },
     {
+      "type": "coordinate.point3D",
+      "displayName": "Coordinate Point 3D",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "z",
+          "label": "Z",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "target",
+          "group": "Point"
+        },
+        {
+          "name": "frame",
+          "label": "Frame",
+          "type": "text",
+          "defaultValue": "Workpiece",
+          "group": "Point"
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "select",
+          "defaultValue": "mm",
+          "options": [
+            {
+              "label": "mm",
+              "value": "mm"
+            },
+            {
+              "label": "cm",
+              "value": "cm"
+            },
+            {
+              "label": "m",
+              "value": "m"
+            }
+          ],
+          "group": "Point"
+        }
+      ],
+      "description": "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants, so upstream measurements can drive the point. Coordinates must be finite and bounded; frame must be non-empty.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
       "type": "coordinate.pose",
       "displayName": "Coordinate Pose",
       "category": "Coordinate",
@@ -2380,6 +2859,75 @@
         }
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true
+    },
+    {
+      "type": "coordinate.transformPoint3D",
+      "displayName": "Transform 3D Point",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "transform",
+          "dataType": "Transform3D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "point",
+          "dataType": "CoordinatePoint3D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "frame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -3059,6 +3607,26 @@
           "required": true
         },
         {
+          "name": "reference2",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference3",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference4",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "reference5",
+          "dataType": "Image",
+          "required": false
+        },
+        {
           "name": "region",
           "dataType": "Region",
           "required": false
@@ -3088,6 +3656,11 @@
         {
           "name": "found",
           "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "referenceSampleCount",
+          "dataType": "Integer",
           "required": true
         },
         {
@@ -3139,7 +3712,8 @@
           "defaultValue": 15,
           "min": 0.001,
           "max": 65535,
-          "step": 1
+          "step": 1,
+          "description": "Minimum grayscale difference in the source image intensity units; 16-bit grayscale images keep their full 0–65535 range."
         },
         {
           "name": "minArea",
@@ -3170,7 +3744,24 @@
           "max": 25,
           "step": 1,
           "unit": "px",
-          "description": "Exhaustively search reference shifts within +/- this many pixels and keep the best alignment. 0 disables registration."
+          "description": "Search reference translation within +/- this many pixels and keep the best alignment. Search is scored only inside the effective inspection domain (image domain intersected with optional region). 0 disables registration."
+        },
+        {
+          "name": "subpixelRegistration",
+          "label": "Subpixel Registration",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "After integer translation search, optionally refine X/Y offsets to fractional pixels using normalized correlation and bilinear sampling. Requires Registration Tolerance > 0."
+        },
+        {
+          "name": "maxRegistrationError",
+          "label": "Maximum Registration Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "description": "Fail inspection if source or any extra reference cannot align below this mean absolute grayscale error inside the inspection domain. Uses source intensity units."
         },
         {
           "name": "compensation",
@@ -3191,7 +3782,7 @@
               "value": "gainoffset"
             }
           ],
-          "description": "Least-squares fit of the reference toward the inspected image before differencing (variation-model style)."
+          "description": "Least-squares fit of the reference toward the inspected image using only pixels inside the effective inspection domain before differencing (variation-model style)."
         },
         {
           "name": "morphologyOpen",
@@ -3223,7 +3814,7 @@
           "min": 0,
           "max": 20,
           "step": 0.5,
-          "description": "When > 0, a pixel must differ by at least threshold + K * local reference standard deviation (variation-model style; local variation is estimated from the single reference)."
+          "description": "When > 0, a pixel must differ by at least threshold + K * reference standard deviation. With multiple references, deviation is learned per pixel from aligned samples; with one reference, it is estimated locally."
         },
         {
           "name": "variationWindow",
@@ -3234,7 +3825,7 @@
           "max": 101,
           "step": 2,
           "unit": "px",
-          "description": "Odd window for the local variation estimate."
+          "description": "Odd neighborhood for local variation when only one reference image is connected; ignored by a multi-reference model."
         },
         {
           "name": "majorArea",
@@ -3257,7 +3848,7 @@
           "unit": "px²"
         }
       ],
-      "description": "Golden-template defect comparison (PatInspect/variation-model style): optional small-shift registration and illumination compensation align the good reference, differences are thresholded, morphology cleans the mask, defects are split, area-filtered and graded minor/major/critical. defects JSON lists area and bounding box per defect; grade is the worst defect grade (none when clean). Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
+      "description": "Golden-template defect comparison: connect one to five known-good images with matching dimensions and pixel depth; optional translation registration aligns extra samples and the current image inside the inspection domain, with optional subpixel refinement. Multiple references build a per-pixel mean and sample-standard-deviation model; a single reference uses the legacy local-texture estimate. Optional registration error gating and illumination compensation precede thresholding, morphology, defect splitting, area filtering and minor/major/critical grading. defects JSON lists area and bounding box per defect; referenceSampleCount reports used samples. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5792,6 +6383,26 @@
           "required": false
         },
         {
+          "name": "mapPeak",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMean",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMin",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "mapMax",
+          "dataType": "Double",
+          "required": false
+        },
+        {
           "name": "peakX",
           "dataType": "Double",
           "required": false
@@ -5906,8 +6517,60 @@
           "defaultValue": false
         },
         {
+          "name": "scoreOutputName",
+          "label": "Score Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional scalar image-level anomaly score output. Set together with mapOutputName when the model exposes both outputs."
+        },
+        {
+          "name": "mapOutputName",
+          "label": "Anomaly Map Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional spatial anomaly map output. Set together with scoreOutputName for image-level gating plus pixel localization."
+        },
+        {
+          "name": "mapLayout",
+          "label": "Map Layout",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic",
+              "value": "auto"
+            },
+            {
+              "label": "Channels First",
+              "value": "channelsFirst"
+            },
+            {
+              "label": "Channels Last",
+              "value": "channelsLast"
+            }
+          ],
+          "description": "Spatial output may be [1,1,H,W], [1,H,W], [H,W], [1,H,W,1], or [H,W,1]. Explicitly select a layout when a narrow map shape is ambiguous."
+        },
+        {
           "name": "threshold",
           "label": "Anomaly Threshold",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.01,
+          "description": "Image-level score threshold; also used for the map when separate map threshold is off."
+        },
+        {
+          "name": "useSeparateMapThreshold",
+          "label": "Use Separate Map Threshold",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "When enabled, mapThreshold controls pixel-area statistics independently of the image-level score threshold."
+        },
+        {
+          "name": "mapThreshold",
+          "label": "Map Threshold",
           "type": "number",
           "defaultValue": 0.5,
           "min": -1000000,
@@ -5929,10 +6592,10 @@
               "value": "otsu"
             }
           ],
-          "description": "Otsu derives the effective threshold from the spatial anomaly map distribution (suggestedThreshold); scalar outputs always use the manual threshold."
+          "description": "Otsu derives the pixel threshold from the map distribution; image-level scores always use the manual Anomaly Threshold."
         }
       ],
-      "description": "Run an ONNX anomaly model. A scalar output is compared directly with the manual threshold; a spatial anomaly map ([1,1,H,W] or [1,H,W]) also emits a normalized heatmap resized to the source, the peak score/location and the fraction of map pixels at or above the effective threshold (isAnomaly follows the peak). thresholdMode=otsu uses the Otsu threshold of the map itself as the effective threshold.",
+      "description": "Run an ONNX anomaly model with a scalar image score, a spatial map, or both by selecting scoreOutputName and mapOutputName. The score drives isAnomaly when present; map-only models use the map peak. Maps in [1,1,H,W], [1,H,W], [H,W], or channels-last [1,H,W,1] form emit a source-sized normalized heatmap, map peak/mean/min/max, peak location, and area fraction over the effective map threshold. Otsu applies to pixel maps only. If no separate names are configured, outputName or the first model output keeps the single-output behavior.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5979,6 +6642,11 @@
         {
           "name": "confidence",
           "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "accepted",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -6115,6 +6783,37 @@
           "description": "Preserve aspect with gray (114) padding. Usually off for classifiers."
         },
         {
+          "name": "multiCrop",
+          "label": "Multi-crop Aggregation",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "Single view",
+              "value": "none"
+            },
+            {
+              "label": "Five crops",
+              "value": "five"
+            },
+            {
+              "label": "Five crops + horizontal flips",
+              "value": "ten"
+            }
+          ],
+          "description": "Optionally average predictions from the center and four corner crops. The ten-view mode also evaluates horizontal flips. Each view runs independently through the model."
+        },
+        {
+          "name": "viewCropFraction",
+          "label": "View Crop Fraction",
+          "type": "number",
+          "defaultValue": 0.9,
+          "min": 0.5,
+          "max": 1,
+          "step": 0.01,
+          "description": "Width and height of each crop as a fraction of the largest crop matching the model aspect ratio. Used only when multiCrop is five or ten."
+        },
+        {
           "name": "labels",
           "label": "Class Labels",
           "type": "text",
@@ -6136,10 +6835,20 @@
           "min": 1,
           "max": 100,
           "step": 1,
-          "description": "Number of ranked classes in the result JSON (clamped to the class count); values below 1 fail."
+          "description": "Number of ranked classes in the result JSON (clamped to the class count); values outside 1–100 fail."
+        },
+        {
+          "name": "minimumConfidence",
+          "label": "Minimum Classification Confidence (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Emit accepted=false when the winning probability is below this threshold. Requires softmax probabilities; 0 disables the gate."
         }
       ],
-      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Output [1,C] or [1,C,1,1]. layout=scores applies optional numerically stable softmax; layout=yolo26 matches Ultralytics YOLO26-cls ONNX (already softmaxed, probabilities are validated and never re-softmaxed). Label lists must match the class count or be empty; unknown layouts and invalid topK fail deterministically. Emits top-K JSON plus best label/index/confidence, winner margin, distribution entropy, class count and JSON diagnostics. No training/evaluation is performed. Tip: set swapRB=true for RGB-trained YOLO models.",
+      "description": "Run an ONNX image classifier with NCHW float input [1,3,H,W]. Output [1,C] or [1,C,1,1]. layout=scores applies optional numerically stable softmax; layout=yolo26 matches Ultralytics YOLO26-cls ONNX (already softmaxed, probabilities are validated and never re-softmaxed). Optional five-crop or ten-view aggregation averages each crop's probability distribution (or raw scores when softmax is disabled); per-view winners remain in the result JSON. Label lists must match the class count or be empty; unknown layouts and invalid topK fail deterministically. Emits top-K JSON plus best label/index/confidence, an optional minimum-confidence acceptance signal, winner margin, distribution entropy, class count and JSON diagnostics. No training/evaluation is performed. Tip: set swapRB=true for RGB-trained YOLO models.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -6505,11 +7214,15 @@
           "defaultValue": "yolo26-seg",
           "options": [
             {
-              "label": "YOLO26 / YOLOv8-Seg dual head",
+              "label": "Raw YOLO-Seg head",
               "value": "yolo26-seg"
+            },
+            {
+              "label": "YOLO26 end-to-end rows",
+              "value": "xyxy"
             }
           ],
-          "description": "Expects detection tensor [1,4+nc+32,N] and prototypes [1,32,H,W] (mask dim may differ)."
+          "description": "Raw head: [1,4+nc+maskDim,N]. YOLO26 end-to-end: [1,N,6+maskDim] rows [x1,y1,x2,y2,score,class,coeffs]. Both use the prototype tensor [1,maskDim,H,W]."
         },
         {
           "name": "coordinates",
@@ -6553,6 +7266,27 @@
           "step": 0.01
         },
         {
+          "name": "nmsMode",
+          "label": "NMS Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (raw=on, end-to-end=off)",
+              "value": "auto"
+            },
+            {
+              "label": "On",
+              "value": "on"
+            },
+            {
+              "label": "Off",
+              "value": "off"
+            }
+          ],
+          "description": "YOLO26 end-to-end output is already NMS-free top detections; automatic mode skips duplicate suppression there and applies class-aware NMS to raw heads."
+        },
+        {
           "name": "maskThreshold",
           "label": "Mask Threshold",
           "type": "number",
@@ -6560,6 +7294,13 @@
           "min": 0,
           "max": 1,
           "step": 0.01
+        },
+        {
+          "name": "includeMaskRuns",
+          "label": "Include Per-Instance Masks",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available."
         },
         {
           "name": "maxCount",
@@ -6571,7 +7312,267 @@
           "step": 1
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX (dual outputs: boxes+coeffs and prototypes). Applies class-aware NMS, composes per-instance masks (sigmoid of coeff·proto, cropped to box; letterbox-aware remap to source), merges into a class-id label mask (classId+1; overlaps last-wins), and returns detections. Not semantic segmentation; not OBB. For keypoints use inference.pose. Embedded-NMS / single-tensor e2e seg exports are unsupported—use raw dual-head ONNX.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "declaresActions": false
+    },
+    {
+      "type": "inference.obb",
+      "displayName": "ONNX Oriented Box Detection (YOLO-OBB)",
+      "category": "Inference",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "result",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "modelPath",
+          "label": "ONNX Model File",
+          "type": "text",
+          "defaultValue": ""
+        },
+        {
+          "name": "outputName",
+          "label": "Output Name",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+        },
+        {
+          "name": "inputWidth",
+          "label": "Input Width",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "inputHeight",
+          "label": "Input Height",
+          "type": "number",
+          "defaultValue": 640,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "px"
+        },
+        {
+          "name": "scale",
+          "label": "Normalization Scale",
+          "type": "number",
+          "defaultValue": 0.00392156862745,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001
+        },
+        {
+          "name": "meanB",
+          "label": "Mean B",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanG",
+          "label": "Mean G",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "meanR",
+          "label": "Mean R",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1
+        },
+        {
+          "name": "swapRB",
+          "label": "Swap Red and Blue",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+        },
+        {
+          "name": "crop",
+          "label": "Center Crop After Resize",
+          "type": "boolean",
+          "defaultValue": false
+        },
+        {
+          "name": "layout",
+          "label": "Output Layout",
+          "type": "select",
+          "defaultValue": "yolo",
+          "options": [
+            {
+              "label": "Raw YOLOv8/YOLO26 OBB head",
+              "value": "yolo"
+            },
+            {
+              "label": "YOLO26 end-to-end xywhr rows",
+              "value": "xywhr"
+            }
+          ],
+          "description": "Raw head: [1,5+nc,N] (cx,cy,w,h,class scores,angle rad). End-to-end: [1,N,7] rows (cx,cy,w,h,score,classId,angle rad)."
+        },
+        {
+          "name": "tensorOrder",
+          "label": "Raw Tensor Order",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (smaller dimension is channels)",
+              "value": "auto"
+            },
+            {
+              "label": "Channels First [1,C,N]",
+              "value": "channelsFirst"
+            },
+            {
+              "label": "Channels Last [1,N,C]",
+              "value": "channelsLast"
+            }
+          ],
+          "description": "Only used for raw 3D tensors. Auto detects the smaller channel dimension; select an explicit order for unusual class counts or small input sizes."
+        },
+        {
+          "name": "coordinates",
+          "label": "Coordinate Units",
+          "type": "select",
+          "defaultValue": "pixels",
+          "options": [
+            {
+              "label": "Input Pixels",
+              "value": "pixels"
+            },
+            {
+              "label": "Normalized 0-1",
+              "value": "normalized"
+            }
+          ]
+        },
+        {
+          "name": "letterbox",
+          "label": "Letterboxed Input",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Default on: Ultralytics gray (114) letterbox with exact padding removal. Disable only when source/model aspect ratios match."
+        },
+        {
+          "name": "confidenceThreshold",
+          "label": "Confidence Threshold",
+          "type": "number",
+          "defaultValue": 0.25,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsThreshold",
+          "label": "Rotated IoU Threshold",
+          "type": "number",
+          "defaultValue": 0.45,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "nmsMode",
+          "label": "NMS Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (raw=on, end-to-end=off)",
+              "value": "auto"
+            },
+            {
+              "label": "On",
+              "value": "on"
+            },
+            {
+              "label": "Off",
+              "value": "off"
+            }
+          ],
+          "description": "Uses exact oriented polygon IoU and class-aware suppression. Automatic mode skips NMS on YOLO26 end-to-end predictions."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Detections",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
+        },
+        {
+          "name": "labels",
+          "label": "Class Labels",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional comma-separated labels in model class order; leave empty to emit class_N labels."
+        }
+      ],
+      "description": "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -8037,6 +9038,17 @@
           "description": "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."
         },
         {
+          "name": "duplicateOverlapThreshold",
+          "label": "Duplicate Box IoU Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0.3,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Search",
+          "description": "Suppress later template matches whose axis-aligned box IoU reaches this threshold; 0 disables overlap suppression."
+        },
+        {
           "name": "scaleMinPercent",
           "label": "Scale Min",
           "type": "number",
@@ -8073,7 +9085,7 @@
           "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected."
         }
       ],
-      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches, a search ROI, a template mask, and a discrete uniform scale range are optional; defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
+      "description": "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches use score-ordered box-IoU suppression by default; a search ROI, template mask, and discrete uniform scale range are optional. Defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -13549,9 +14561,35 @@
           "type": "textarea",
           "defaultValue": "{}",
           "description": "Optional fallback when calibrationJson is not connected; accepts CameraCalibrationModel JSON from calibration.cameraIntrinsics."
+        },
+        {
+          "name": "intrinsicsAssetId",
+          "label": "Intrinsic Asset ID",
+          "type": "text",
+          "defaultValue": "",
+          "description": "Optional immutable camera-intrinsic asset used to verify this model during workflow execution, publication, and production dependency checks."
+        },
+        {
+          "name": "intrinsicsAssetVersion",
+          "label": "Intrinsic Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999,
+          "step": 1
+        },
+        {
+          "name": "fisheyeBalance",
+          "label": "Fisheye Balance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "OpenCV fisheye output-field balance: 0 favors a tighter rectified field; 1 preserves more field of view with additional border."
         }
       ],
-      "description": "Correct lens distortion with JLVision using native camera parameters or legacy Brown-Conrady coordinate maps. Intrinsics are scaled when image resolution differs. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
+      "description": "Correct lens distortion with JLVision native pinhole or object-side telecentric polynomial models, Brown-Conrady models, or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true
@@ -13777,13 +14815,73 @@
           "label": "Decode Multiple",
           "type": "boolean",
           "defaultValue": true
+        },
+        {
+          "name": "preprocess",
+          "label": "Preprocessing",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic fallback",
+              "value": "auto"
+            },
+            {
+              "label": "Original only",
+              "value": "none"
+            },
+            {
+              "label": "Otsu threshold",
+              "value": "otsu"
+            },
+            {
+              "label": "Adaptive threshold",
+              "value": "adaptive"
+            }
+          ],
+          "description": "Automatic tries original grayscale, Otsu, and adaptive threshold images."
+        },
+        {
+          "name": "tryInverted",
+          "label": "Try Inverted Polarity",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Retries with inverted pixels when no normal-polarity code is found; multi-code mode also searches inverted pixels."
+        },
+        {
+          "name": "adaptiveBlockSize",
+          "label": "Adaptive Window Size",
+          "type": "number",
+          "defaultValue": 31,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "description": "Odd local window size; reduced automatically for small images."
+        },
+        {
+          "name": "adaptiveConstant",
+          "label": "Adaptive Threshold Offset",
+          "type": "number",
+          "defaultValue": 10,
+          "min": -100,
+          "max": 100,
+          "step": 1
+        },
+        {
+          "name": "maxResults",
+          "label": "Maximum Results",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1
         }
       ],
-      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes from the input image using ZXing.Net. results is a JSON array with decoded text, format and points; text/format expose the first result even when multiple codes are found.",
+      "description": "Decode QR/DataMatrix/PDF417/Aztec and supported 1D barcodes using ZXing.Net. Supports an image ROI, threshold fallback passes, optional inverted-polarity retries, and multiple symbols. Results include decoded text, format, source-image points, and the preprocessing pass; detected points are drawn on the image preview. text/format expose the first result.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": false,
+        "supportsRoi": true,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,

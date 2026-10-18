@@ -330,6 +330,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ProductionRuntimeService>();
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
+        services.AddSingleton<CameraIntrinsicAssetStore>();
         services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(
             sp.GetRequiredService<SqliteMetadataDatabase>(),
@@ -378,6 +379,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<OcrNode>();
         services.AddSingleton<OnnxClassificationNode>();
         services.AddSingleton<OnnxDetectionNode>();
+        services.AddSingleton<OnnxOrientedDetectionNode>();
         services.AddSingleton<OnnxSegmentationNode>();
         services.AddSingleton<OnnxAnomalyNode>();
         services.AddSingleton<OnnxInstanceSegmentationNode>();
@@ -385,6 +387,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<CameraIntrinsicCalibrationNode>();
         services.AddSingleton<ImageUndistortNode>();
         services.AddSingleton<PlanarHandEyeCalibrationNode>();
+        services.AddSingleton<HandEye3DCalibrationNode>();
         services.AddSingleton<DetectionFilterNode>();
         services.AddSingleton<DetectionSortNode>();
         services.AddSingleton<DetectionAtIndexNode>();
@@ -425,6 +428,8 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<AngleNode>();
         services.AddSingleton<PlanarCalibrationNode>();
         services.AddSingleton<TransformPointNode>();
+        services.AddSingleton<CoordinatePoint3DNode>();
+        services.AddSingleton<TransformCoordinatePoint3DNode>();
         services.AddSingleton<TransformLineNode>();
         services.AddSingleton<TransformPoseNode>();
         services.AddSingleton<CoordinatePointNode>();

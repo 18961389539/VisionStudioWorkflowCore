@@ -81,6 +81,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         var sessionId = Guid.NewGuid().ToString("N");
         // N01：用**展开后的执行计划**判定副作用（模块内的设备动作不能被漏检）。
         var effectiveWorkflow = (await _modules.ExpandAsync(workflow, ct)).Workflow;
+        await _dependencies.ValidateCalibrationBindingsAsync(effectiveWorkflow, ct);
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, _catalog))
             guard = await _authorization.BeginWorkflowIntentAsync("debug.session.create", effectiveWorkflow, sessionId, ct);
@@ -160,6 +161,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // 已有会话也不能继续下发动作。
         // N01：继续执行同样用展开后的执行计划判定（模块内的设备动作不能被漏检）。
         var effectiveWorkflow = (await _modules.ExpandAsync(entry.Session.Workflow, ct)).Workflow;
+        await _dependencies.ValidateCalibrationBindingsAsync(effectiveWorkflow, ct);
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, _catalog))
             guard = await _authorization.BeginWorkflowIntentAsync("debug.session.continue", effectiveWorkflow, sessionId, ct);
@@ -197,6 +199,7 @@ public sealed class DebugSessionService : IDisposable, IAsyncDisposable
         // F01：单节点执行与"继续"同一契约——未闭合意图存在时不得再下发任何动作。
         // N01：单节点执行同样用展开后的执行计划判定。
         var effectiveWorkflow = (await _modules.ExpandAsync(entry.Session.Workflow, ct)).Workflow;
+        await _dependencies.ValidateCalibrationBindingsAsync(effectiveWorkflow, ct);
         DeviceActionHandle? guard = null;
         if (DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, _catalog))
             guard = await _authorization.BeginWorkflowIntentAsync("debug.session.run-node", effectiveWorkflow, sessionId, ct);

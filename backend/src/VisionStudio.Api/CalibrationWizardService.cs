@@ -31,11 +31,13 @@ public sealed record CalibrationWizardAddViewRequest(
 
 public sealed record CalibrationWizardSetEnabledRequest(bool Enabled);
 
-public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0);
+public sealed record CalibrationWizardSolveRequest(double MaxViewRms = 0, double MaxRms = 0, double MaxPoseViewRms = 0, string CameraModel = "pinhole", double TelecentricMagnification = 0.2, double TelecentricPixelSizeUm = 3.45);
 
 public sealed record CalibrationWizardPreviewRequest(string CameraId, bool AddIfAccepted = false, string? Label = null);
 
 public sealed record CalibrationWizardImportRequest(string DocumentJson);
+public sealed record CreateCameraIntrinsicAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
+public sealed record SaveCameraIntrinsicVersionFromSessionRequest(string SessionId, string? Note = null);
 
 public sealed record CalibrationWizardDisableOutliersRequest(int[]? ViewIndexes = null, bool UseSolveOutlier = true);
 
@@ -49,6 +51,17 @@ public sealed record CalibrationHandEyeSolveRequest(
     string Unit = "mm",
     string SourceUnit = "mm");
 
+public sealed record CalibrationHandEye3DSolveRequest(
+    string SamplesJson,
+    string Mode = "eyeInHand",
+    string Method = "DANIILIDIS",
+    double MaxTranslationError = 0,
+    double MaxRotationErrorDeg = 0,
+    double RotationWeight = 50,
+    string SourceFrame = "Camera",
+    string TargetFrame = "",
+    string Unit = "mm");
+
 /// <summary>
 /// HTTP-facing guided calibration wizards: intrinsics session store (memory + disk),
 /// board detect from upload/camera preview, solve, export/import, and planar hand-eye.
@@ -59,7 +72,9 @@ public sealed class CalibrationWizardService
     private readonly CalibrationDetectBoardNode _detectBoard;
     private readonly CameraIntrinsicCalibrationNode _intrinsics;
     private readonly PlanarHandEyeCalibrationNode _handEye;
+    private readonly HandEye3DCalibrationNode _handEye3D;
     private readonly CameraManager _cameras;
+    private readonly CameraIntrinsicAssetStore _intrinsicAssets;
     private readonly string _persistRoot;
     private static readonly JsonSerializerOptions PersistJson = new()
     {
@@ -72,13 +87,17 @@ public sealed class CalibrationWizardService
         CalibrationDetectBoardNode detectBoard,
         CameraIntrinsicCalibrationNode intrinsics,
         PlanarHandEyeCalibrationNode handEye,
+        HandEye3DCalibrationNode handEye3D,
         CameraManager cameras,
+        CameraIntrinsicAssetStore intrinsicAssets,
         IWebHostEnvironment environment)
     {
         _detectBoard = detectBoard;
         _intrinsics = intrinsics;
         _handEye = handEye;
+        _handEye3D = handEye3D;
         _cameras = cameras;
+        _intrinsicAssets = intrinsicAssets;
         _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "calibration-wizard");
         Directory.CreateDirectory(_persistRoot);
         TryHydrateFromDisk();
@@ -325,12 +344,19 @@ public sealed class CalibrationWizardService
     public async Task<object> SolveAsync(string sessionId, CalibrationWizardSolveRequest request, CancellationToken ct)
     {
         var session = ResolveSession(sessionId);
+        session.SetCameraModel(request.CameraModel);
+        session.SetTelecentricParameters(request.TelecentricMagnification, request.TelecentricPixelSizeUm);
+        Persist(session);
         var calibRequest = session.BuildRequest();
         var parameters = new Dictionary<string, JsonElement>
         {
             ["calibrationDataJson"] = JsonSerializer.SerializeToElement(JsonSerializer.Serialize(calibRequest)),
+            ["cameraModel"] = JsonSerializer.SerializeToElement(request.CameraModel.Trim().ToLowerInvariant()),
             ["maxViewRms"] = JsonSerializer.SerializeToElement(request.MaxViewRms),
-            ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms)
+            ["maxRms"] = JsonSerializer.SerializeToElement(request.MaxRms),
+            ["maxPoseViewRms"] = JsonSerializer.SerializeToElement(request.MaxPoseViewRms),
+            ["telecentricMagnification"] = JsonSerializer.SerializeToElement(request.TelecentricMagnification),
+            ["telecentricPixelSizeUm"] = JsonSerializer.SerializeToElement(request.TelecentricPixelSizeUm)
         };
         var node = new NodeDefinition("wizard-intrinsics", "calibration.cameraIntrinsics", "Wizard", null, parameters);
         try
@@ -345,9 +371,15 @@ public sealed class CalibrationWizardService
                 ["viewStats"] = result.Outputs.TryGetValue("viewStats", out var vs) ? vs.Require<string>("viewStats") : null,
                 ["worstViewRms"] = result.Outputs.TryGetValue("worstViewRms", out var wr) ? wr.Require<double>("worstViewRms") : null,
                 ["worstViewIndex"] = result.Outputs.TryGetValue("worstViewIndex", out var wi) ? wi.Require<long>("worstViewIndex") : null,
+                ["worstPoseViewRms"] = result.Outputs.TryGetValue("worstPoseViewRms", out var wpr) ? wpr.Require<double>("worstPoseViewRms") : null,
+                ["worstPoseViewIndex"] = result.Outputs.TryGetValue("worstPoseViewIndex", out var wpi) ? wpi.Require<long>("worstPoseViewIndex") : null,
+                ["outlierViewIndex"] = result.Outputs.TryGetValue("outlierViewIndex", out var oi) ? oi.Require<long>("outlierViewIndex") : null,
                 ["nodeSummary"] = result.Summary,
                 ["calibrationJson"] = json,
-                ["enabledViews"] = calibRequest.Views.Count
+                ["enabledViews"] = calibRequest.Views.Count,
+                ["cameraModel"] = session.Snapshot().CameraModel,
+                ["telecentricMagnification"] = session.Snapshot().TelecentricMagnification,
+                ["telecentricPixelSizeUm"] = session.Snapshot().TelecentricPixelSizeUm
             };
             var state = session.StoreSolveResult(model, summary);
             Persist(session);
@@ -375,10 +407,36 @@ public sealed class CalibrationWizardService
                     state.Views.Where(v => v.Enabled).Select(v => v.View).ToList()))
                 : null,
             calibrationJson = state.Model is null ? null : JsonSerializer.Serialize(state.Model),
+            cameraModel = state.CameraModel,
             hints = PoseHints(session),
-            fisheyeSupported = false,
-            fisheyeNote = "Fisheye / telecentric models are not available; JLVision path is polynomial pinhole only."
+            fisheyeSupported = true,
+            fisheyeNote = "Fisheye uses OpenCV's four-coefficient angular model.",
+            telecentricSupported = true,
+            telecentricNote = "Object-side area-scan telecentric calibration uses the JLVision native polynomial model. Seed magnification and fixed sensor pixel pitch from the lens/camera datasheets."
         };
+    }
+
+    public async Task<CameraIntrinsicAssetDescriptor> CreateIntrinsicAssetAsync(CreateCameraIntrinsicAssetFromSessionRequest request, CancellationToken ct)
+    {
+        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        return await _intrinsicAssets.CreateAsync(new CreateCameraIntrinsicAssetRequest(
+            request.Id, request.Name, request.Description, solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
+    }
+
+    public async Task<CameraIntrinsicVersionSnapshot> AddIntrinsicVersionAsync(string id, SaveCameraIntrinsicVersionFromSessionRequest request, CancellationToken ct)
+    {
+        var solved = RequireSolvedModel(ResolveSession(request.SessionId));
+        return await _intrinsicAssets.AddVersionAsync(id, new SaveCameraIntrinsicVersionRequest(
+            solved.Model, solved.DocumentJson, solved.SummaryJson, request.Note), ct);
+    }
+
+    private static (CameraCalibrationModel Model, string DocumentJson, string SummaryJson) RequireSolvedModel(CalibrationIntrinsicsWizard.Session session)
+    {
+        var state = session.Snapshot();
+        if (state.Model is null) throw new ApiConflictException("Solve camera intrinsics before saving a versioned calibration asset.");
+        var document = session.ExportDocument();
+        if (document.Model is null) throw new InvalidOperationException("Solved session model was not included in the wizard source document.");
+        return (state.Model, JsonSerializer.Serialize(document, PersistJson), JsonSerializer.Serialize(state.LastSolveSummary ?? new { }, PersistJson));
     }
 
     public CalibrationIntrinsicsWizard.SessionState ImportDocument(CalibrationWizardImportRequest request)
@@ -437,6 +495,56 @@ public sealed class CalibrationWizardService
                 samplesJson = request.SamplesJson,
                 mode = request.Mode
             };
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ApiValidationException(ex.Message, ex);
+        }
+    }
+
+    public async Task<object> SolveHandEye3DAsync(CalibrationHandEye3DSolveRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.SamplesJson))
+            throw new ApiValidationException("samplesJson is required.");
+        var parameters = new Dictionary<string, JsonElement>
+        {
+            ["samplesJson"] = JsonSerializer.SerializeToElement(request.SamplesJson),
+            ["mode"] = JsonSerializer.SerializeToElement(request.Mode),
+            ["method"] = JsonSerializer.SerializeToElement(request.Method),
+            ["maxTranslationError"] = JsonSerializer.SerializeToElement(request.MaxTranslationError),
+            ["maxRotationErrorDeg"] = JsonSerializer.SerializeToElement(request.MaxRotationErrorDeg),
+            ["rotationWeight"] = JsonSerializer.SerializeToElement(request.RotationWeight),
+            ["sourceFrame"] = JsonSerializer.SerializeToElement(request.SourceFrame),
+            ["unit"] = JsonSerializer.SerializeToElement(request.Unit)
+        };
+        if (!string.IsNullOrWhiteSpace(request.TargetFrame))
+            parameters["targetFrame"] = JsonSerializer.SerializeToElement(request.TargetFrame);
+
+        var node = new NodeDefinition("wizard-handeye-3d", "calibration.handEye3D", "Wizard", null, parameters);
+        try
+        {
+            var result = await _handEye3D.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
+            return new
+            {
+                transform = result.Outputs["transform"].Value,
+                translationRms = result.Outputs["translationRms"].Require<double>("translationRms"),
+                rotationRmsDeg = result.Outputs["rotationRmsDeg"].Require<double>("rotationRmsDeg"),
+                robotTranslationSpan = result.Outputs["robotTranslationSpan"].Require<double>("robotTranslationSpan"),
+                maxTranslationError = result.Outputs["maxTranslationError"].Require<double>("maxTranslationError"),
+                maxRotationErrorDeg = result.Outputs["maxRotationErrorDeg"].Require<double>("maxRotationErrorDeg"),
+                worstSampleIndex = result.Outputs["worstSampleIndex"].Require<long>("worstSampleIndex"),
+                worstTranslationSampleIndex = result.Outputs["worstTranslationSampleIndex"].Require<long>("worstTranslationSampleIndex"),
+                worstRotationSampleIndex = result.Outputs["worstRotationSampleIndex"].Require<long>("worstRotationSampleIndex"),
+                sampleResidualsJson = result.Outputs["sampleResidualsJson"].Require<string>("sampleResidualsJson"),
+                summary = result.Summary,
+                samplesJson = request.SamplesJson,
+                mode = request.Mode,
+                method = request.Method
+            };
+        }
+        catch (OpenCVException ex)
+        {
+            throw new ApiValidationException($"OpenCV 3D hand-eye solve failed: {ex.Message}", ex);
         }
         catch (InvalidOperationException ex)
         {

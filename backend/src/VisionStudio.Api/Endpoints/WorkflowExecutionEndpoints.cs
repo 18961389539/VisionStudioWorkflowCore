@@ -70,6 +70,7 @@ public static class WorkflowExecutionEndpoints
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
+            RuntimeDependencyManifestService dependencies,
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
             CancellationToken ct) =>
@@ -84,6 +85,7 @@ public static class WorkflowExecutionEndpoints
             // 模块调用在运行期展开（报告 ID 带 `module-xxx::` 前缀），用未展开定义判定会漏检；
             // 纯计算流程不登记动作意图（失败不应阻断设备动作）。
             var effectiveWorkflow = (await modules.ExpandAsync(workflow, ct)).Workflow;
+            await dependencies.ValidateCalibrationBindingsAsync(effectiveWorkflow, ct);
             var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, nodes);
             using var actionIntent = hasSideEffects
                 ? await auth.BeginWorkflowIntentAsync("workflow.run.adhoc", effectiveWorkflow, runId, ct)
@@ -114,6 +116,7 @@ public static class WorkflowExecutionEndpoints
             RunTraceRecorder recorder,
             ProductionRuntimeService production,
             DeviceActionAuthorizationService auth,
+            RuntimeDependencyManifestService dependencies,
             WorkflowModuleExpander modules,
             VisionNodeRegistry nodes,
             CancellationToken ct) =>
@@ -127,6 +130,7 @@ public static class WorkflowExecutionEndpoints
             using var commandScope = DeviceCommandOwnership.Enter(lease);
             // N01/N06：展开执行计划后判定副作用；纯计算调试不登记动作意图。
             var effectiveWorkflow = (await modules.ExpandAsync(request.Workflow, ct)).Workflow;
+            await dependencies.ValidateCalibrationBindingsAsync(effectiveWorkflow, ct);
             var hasSideEffects = DeviceSideEffectClassifier.HasDeviceSideEffects(effectiveWorkflow, nodes);
             using var actionIntent = hasSideEffects
                 ? await auth.BeginWorkflowIntentAsync("workflow.run.debug", effectiveWorkflow, runId, ct)

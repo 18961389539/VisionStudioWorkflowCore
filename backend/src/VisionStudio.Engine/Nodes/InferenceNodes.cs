@@ -18,41 +18,171 @@ public sealed class OnnxClassificationNode : IVisionNodeExecutor
     {
         cancellationToken.ThrowIfCancellationRequested();
         var source = context.RequireImage("image").Mat;
+        if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
         using var net = OnnxInferenceHelpers.LoadNet(node);
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
-        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
-        cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        var shape = OnnxInferenceHelpers.Shape(output);
+        var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
+        // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
+        var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
+        var multiCrop = node.GetString("multiCrop", "none").Trim().ToLowerInvariant();
+        if (multiCrop is not ("none" or "five" or "ten"))
+            throw new InvalidOperationException("Classification multiCrop must be none, five, or ten.");
+        var viewCropFraction = node.GetDouble("viewCropFraction", 0.9);
+        if (multiCrop != "none" && (!double.IsFinite(viewCropFraction) || viewCropFraction is < 0.5 or > 1))
+            throw new InvalidOperationException("Classification viewCropFraction must be between 0.5 and 1.");
+        var minimumConfidence = node.GetDouble("minimumConfidence", 0);
+        if (!double.IsFinite(minimumConfidence) || minimumConfidence is < 0 or > 1)
+            throw new InvalidOperationException("Classification minimumConfidence must be finite and between 0 and 1.");
+        if (minimumConfidence > 0 && layout == "scores" && !applySoftmax)
+            throw new InvalidOperationException("Classification minimumConfidence requires probabilities; enable applySoftmax or choose layout=yolo26.");
+        var topK = node.GetInt("topK", 5);
+        if (topK is < 1 or > 100) throw new InvalidOperationException("Classification topK must be between 1 and 100.");
+        var labelsText = node.GetString("labels", string.Empty);
+        var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
+        var inputWidth = node.GetInt("inputWidth", 224); var inputHeight = node.GetInt("inputHeight", 224);
+        if (inputWidth is < 1 or > 4096 || inputHeight is < 1 or > 4096)
+            throw new InvalidOperationException("Classification inputWidth and inputHeight must be between 1 and 4096.");
+        var views = multiCrop == "none"
+            ? new List<Mat> { source }
+            : CreateClassificationViews(source, inputWidth, inputHeight, viewCropFraction, multiCrop == "ten", cancellationToken);
+        var ownsViews = multiCrop != "none";
+        try
+        {
+            double[]? aggregate = null;
+            int[]? outputShape = null;
+            var viewPredictions = new List<object>(views.Count);
+            var classCount = 0;
+            for (var viewIndex = 0; viewIndex < views.Count; viewIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var input = OnnxInferenceHelpers.PrepareInput(net, views[viewIndex], node).Blob;
+                using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+                var shape = OnnxInferenceHelpers.Shape(output);
+                var scores = ReadClassificationScores(output, shape);
+                if (aggregate is not null && scores.Length != classCount)
+                    throw new InvalidOperationException($"Classification view {viewIndex + 1} produced {scores.Length} classes; expected {classCount}.");
+                classCount = scores.Length;
+                outputShape ??= shape;
+                var viewRank = InferenceStats.RankClassification(scores, layout, applySoftmax, 1, labels);
+                viewPredictions.Add(new { view = viewIndex + 1, index = viewRank.Top[0].Index, label = viewRank.Top[0].Label, score = viewRank.Top[0].Score });
+                if (multiCrop == "none")
+                {
+                    aggregate = scores.Select(value => (double)value).ToArray();
+                    break;
+                }
+
+                var distribution = ClassificationDistribution(scores, layout, applySoftmax);
+                aggregate ??= new double[distribution.Length];
+                for (var classIndex = 0; classIndex < aggregate.Length; classIndex++) aggregate[classIndex] += distribution[classIndex];
+            }
+
+            var aggregateIsProbability = layout == "yolo26" || applySoftmax;
+            var averaged = aggregate!.Select(value => (float)(value / views.Count)).ToArray();
+            var rank = multiCrop == "none"
+                ? InferenceStats.RankClassification(averaged, layout, applySoftmax, topK, labels)
+                : InferenceStats.RankClassification(averaged, aggregateIsProbability ? "yolo26" : "scores", false, topK, labels);
+            var best = rank.Top[0];
+            var accepted = minimumConfidence <= 0 || best.Score >= minimumConfidence;
+            var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("minimumConfidence", minimumConfidence), ("accepted", accepted), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)), ("multiCrop", multiCrop), ("viewCropFraction", viewCropFraction), ("viewCount", views.Count));
+            var jsonFields = new Dictionary<string, object?>
+            {
+                ["classes"] = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }),
+                ["outputShape"] = outputShape, ["layout"] = layout, ["margin"] = rank.Margin, ["entropy"] = rank.Entropy,
+                ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted
+            };
+            if (multiCrop != "none")
+            {
+                jsonFields["multiCrop"] = multiCrop;
+                jsonFields["viewCropFraction"] = viewCropFraction;
+                jsonFields["views"] = viewPredictions;
+            }
+            var json = JsonSerializer.Serialize(jsonFields);
+            return ValueTask.FromResult(new NodeExecutorResult(
+                new Dictionary<string, VisionValue>
+                {
+                    ["result"] = VisionValue.String(json),
+                    ["label"] = VisionValue.String(best.Label),
+                    ["classIndex"] = VisionValue.Integer(best.Index),
+                    ["confidence"] = VisionValue.Double(best.Score),
+                    ["accepted"] = VisionValue.Boolean(accepted),
+                    ["margin"] = VisionValue.Double(rank.Margin),
+                    ["entropy"] = VisionValue.Double(rank.Entropy),
+                    ["classCount"] = VisionValue.Integer(rank.ClassCount),
+                    ["diagnostics"] = VisionValue.String(diag)
+                },
+                new Dictionary<string, object?> { ["outputShape"] = outputShape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["minimumConfidence"] = minimumConfidence, ["accepted"] = accepted, ["multiCrop"] = multiCrop, ["viewCropFraction"] = viewCropFraction, ["viewCount"] = views.Count, ["diagnostics"] = diag }));
+        }
+        finally
+        {
+            if (ownsViews) foreach (var view in views) view.Dispose();
+        }
+    }
+
+    private static float[] ReadClassificationScores(OnnxOutputTensor output, int[] shape)
+    {
         var valid = shape.Length == 2 && shape[0] == 1 && shape[1] > 0
             || shape.Length == 4 && shape[0] == 1 && shape[1] > 0 && shape[2] == 1 && shape[3] == 1;
         if (!valid)
             throw new InvalidOperationException($"Classification output must have shape [1,C] or [1,C,1,1]; received [{string.Join(',', shape)}].");
-        var scores = OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
-        if (scores.Length == 0) throw new InvalidOperationException("Classification output contained no class scores.");
-        var layout = node.GetString("layout", "scores").Trim().ToLowerInvariant();
-        // YOLO26-cls ONNX already embeds softmax; applying it again flattens the distribution.
-        var applySoftmax = layout == "yolo26" ? false : node.GetBool("applySoftmax", true);
-        var labelsText = node.GetString("labels", string.Empty);
-        var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
-        var rank = InferenceStats.RankClassification(scores, layout, applySoftmax, node.GetInt("topK", 5), labels);
-        var best = rank.Top[0];
-        var diag = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("applySoftmax", applySoftmax), ("classCount", rank.ClassCount), ("bestIndex", best.Index), ("bestLabel", best.Label), ("confidence", best.Score), ("margin", rank.Margin), ("entropy", rank.Entropy), ("letterbox", node.GetBool("letterbox", false)));
-        var json = JsonSerializer.Serialize(new { classes = rank.Top.Select(x => new { index = x.Index, label = x.Label, score = x.Score }), outputShape = shape, layout, margin = rank.Margin, entropy = rank.Entropy });
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
+        return OnnxInferenceHelpers.ReadFloatTensor(output, "classification");
+    }
+
+    private static double[] ClassificationDistribution(float[] scores, string layout, bool applySoftmax)
+    {
+        if (layout == "yolo26" || !applySoftmax) return scores.Select(value => (double)value).ToArray();
+        var maximum = scores.Max();
+        var exponentials = scores.Select(value => Math.Exp(value - maximum)).ToArray();
+        var total = exponentials.Sum();
+        if (!double.IsFinite(total) || total <= 0) throw new InvalidOperationException("Classification crop softmax produced an invalid normalizer.");
+        return exponentials.Select(value => value / total).ToArray();
+    }
+
+    private static List<Mat> CreateClassificationViews(Mat source, int inputWidth, int inputHeight, double cropFraction,
+        bool includeHorizontalFlips, CancellationToken cancellationToken)
+    {
+        var targetAspect = (double)inputWidth / inputHeight;
+        var fitWidth = (double)source.Width; var fitHeight = fitWidth / targetAspect;
+        if (fitHeight > source.Height) { fitHeight = source.Height; fitWidth = fitHeight * targetAspect; }
+        var cropWidth = Math.Clamp((int)Math.Round(fitWidth * cropFraction), 1, source.Width);
+        var cropHeight = Math.Clamp((int)Math.Round(fitHeight * cropFraction), 1, source.Height);
+        var maxX = source.Width - cropWidth; var maxY = source.Height - cropHeight;
+        if (maxX == 0 && maxY == 0)
+            throw new InvalidOperationException("Multi-crop aggregation needs a smaller viewCropFraction or a source aspect ratio that yields distinct views.");
+
+        var centerX = maxX / 2; var centerY = maxY / 2;
+        var rectangles = new[]
+        {
+            new Rect(0, 0, cropWidth, cropHeight),
+            new Rect(maxX, 0, cropWidth, cropHeight),
+            new Rect(0, maxY, cropWidth, cropHeight),
+            new Rect(maxX, maxY, cropWidth, cropHeight),
+            new Rect(centerX, centerY, cropWidth, cropHeight)
+        };
+        var views = new List<Mat>(includeHorizontalFlips ? 10 : 5);
+        try
+        {
+            foreach (var rectangle in rectangles)
             {
-                ["result"] = VisionValue.String(json),
-                ["label"] = VisionValue.String(best.Label),
-                ["classIndex"] = VisionValue.Integer(best.Index),
-                ["confidence"] = VisionValue.Double(best.Score),
-                ["margin"] = VisionValue.Double(rank.Margin),
-                ["entropy"] = VisionValue.Double(rank.Entropy),
-                ["classCount"] = VisionValue.Integer(rank.ClassCount),
-                ["diagnostics"] = VisionValue.String(diag)
-            },
-            new Dictionary<string, object?> { ["outputShape"] = shape, ["topK"] = rank.Top.Length, ["applySoftmax"] = applySoftmax, ["layout"] = layout, ["diagnostics"] = diag }));
+                cancellationToken.ThrowIfCancellationRequested();
+                using var roi = new Mat(source, rectangle);
+                var view = new Mat();
+                try { JLVisionOperators.Resize(roi, view, new Size(inputWidth, inputHeight)); }
+                catch { view.Dispose(); throw; }
+                views.Add(view);
+                if (includeHorizontalFlips)
+                {
+                    var mirrored = new Mat();
+                    try { Cv2.Flip(view, mirrored, FlipMode.Y); views.Add(mirrored); }
+                    catch { mirrored.Dispose(); throw; }
+                }
+            }
+            return views;
+        }
+        catch
+        {
+            foreach (var view in views) view.Dispose();
+            throw;
+        }
     }
 }
 
@@ -194,6 +324,199 @@ public sealed class OnnxDetectionNode : IVisionNodeExecutor
     }
 
     private sealed record DetectionCandidate(double Left, double Top, double Right, double Bottom, double Score, int ClassId);
+}
+
+/// <summary>YOLOv8/YOLO26 ONNX oriented-box inference with exact rotated IoU suppression.</summary>
+public sealed class OnnxOrientedDetectionNode : IVisionNodeExecutor
+{
+    public string Type => "inference.obb";
+
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var source = context.RequireImage("image").Mat;
+        if (node.GetBool("crop", false))
+            throw new InvalidOperationException("OBB inference with crop=true is unsupported because crop mapping does not preserve box geometry. Set crop=false.");
+        using var net = OnnxInferenceHelpers.LoadNet(node);
+        var modelPath = OnnxInferenceHelpers.ResolvePath(node);
+        using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
+        cancellationToken.ThrowIfCancellationRequested();
+        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var shape = OnnxInferenceHelpers.Shape(output);
+        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "oriented detection");
+        var layout = node.GetString("layout", "yolo").Trim().ToLowerInvariant();
+        if (layout is "yolo26" or "raw") layout = "yolo";
+        if (layout is "end2end" or "xywhr") layout = "xywhr";
+        if (layout is not ("yolo" or "xywhr"))
+            throw new InvalidOperationException($"Unsupported OBB layout '{layout}'. Supported values are 'yolo' (raw) and 'xywhr' (YOLO26 end-to-end).");
+        var tensorOrder = node.GetString("tensorOrder", "auto").Trim().ToLowerInvariant();
+        if (tensorOrder is not ("auto" or "channelsfirst" or "channelslast"))
+            throw new InvalidOperationException("OBB tensorOrder must be auto, channelsFirst, or channelsLast.");
+
+        var threshold = node.GetDouble("confidenceThreshold", 0.25);
+        var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
+        if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1)
+            throw new InvalidOperationException("OBB confidenceThreshold and nmsThreshold must be finite values from 0 to 1.");
+        var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
+        var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
+        if (coordinates is not ("pixels" or "normalized"))
+            throw new InvalidOperationException($"Unsupported OBB coordinates '{coordinates}'. Supported values are 'pixels' and 'normalized'.");
+        var letterbox = node.GetBool("letterbox", true);
+        var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
+        if (nmsMode is not ("auto" or "on" or "off"))
+            throw new InvalidOperationException("OBB nmsMode must be auto, on, or off.");
+        var applyNms = nmsMode == "on" || nmsMode == "auto" && layout == "yolo";
+        var inputWidth = node.GetInt("inputWidth", 640);
+        var inputHeight = node.GetInt("inputHeight", 640);
+        if (inputWidth < 1 || inputHeight < 1) throw new InvalidOperationException("OBB inputWidth/inputHeight must be positive.");
+
+        // A rotated rectangle remains a rotated rectangle through letterbox (uniform scale).
+        // A stretch with different X/Y scales turns it into a parallelogram, which Rectangle2D cannot represent.
+        var stretchScaleX = (double)inputWidth / source.Width;
+        var stretchScaleY = (double)inputHeight / source.Height;
+        if (!letterbox && Math.Abs(stretchScaleX - stretchScaleY) > 1e-6 * Math.Max(stretchScaleX, stretchScaleY))
+            throw new InvalidOperationException("OBB letterbox=false requires source and model input to have the same aspect ratio; enable letterbox to preserve rotated-box geometry.");
+        var letterboxScale = Math.Min(stretchScaleX, stretchScaleY);
+        var padX = letterbox ? (inputWidth - source.Width * letterboxScale) / 2 : 0;
+        var padY = letterbox ? (inputHeight - source.Height * letterboxScale) / 2 : 0;
+        var scaleX = letterbox ? letterboxScale : stretchScaleX;
+        var scaleY = letterbox ? letterboxScale : stretchScaleY;
+        double MapX(double x) => (x - padX) / scaleX;
+        double MapY(double y) => (y - padY) / scaleY;
+
+        var decoded = layout == "yolo"
+            ? InferenceStats.DecodeYoloObb(values, shape, tensorOrder)
+            : InferenceStats.DecodeYoloObbXywhr(values, shape);
+        var candidates = new List<ObbCandidate>();
+        for (var i = 0; i < decoded.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var item = decoded[i];
+            if (!double.IsFinite(item.Score) || item.Score is < 0 or > 1)
+                throw new InvalidOperationException($"OBB row {i} has a non-finite score or a score outside [0,1].");
+            if (item.ClassId < 0) throw new InvalidOperationException($"OBB row {i} has a negative classId.");
+            if (item.Score == 0 || item.Score < threshold) continue; // zero-score padding rows are normal in end-to-end exports
+            if (!double.IsFinite(item.CenterX) || !double.IsFinite(item.CenterY) || !double.IsFinite(item.Width) || !double.IsFinite(item.Height) ||
+                !double.IsFinite(item.AngleRad) || item.Width <= 0 || item.Height <= 0)
+                throw new InvalidOperationException($"OBB row {i} has non-finite geometry, angle, or a non-positive width/height.");
+
+            var cx = item.CenterX; var cy = item.CenterY; var width = item.Width; var height = item.Height;
+            if (coordinates == "normalized")
+            {
+                cx *= inputWidth; cy *= inputHeight; width *= inputWidth; height *= inputHeight;
+            }
+            cx = MapX(cx); cy = MapY(cy);
+            width /= scaleX; height /= scaleY;
+            var corners = InferenceStats.OrientedBoxCorners(cx, cy, width, height, item.AngleRad);
+            candidates.Add(new ObbCandidate(cx, cy, width, height, item.AngleRad, item.Score, item.ClassId, corners));
+        }
+
+        var kept = new List<ObbCandidate>();
+        foreach (var candidate in candidates.OrderByDescending(x => x.Score))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (applyNms && kept.Any(x => x.ClassId == candidate.ClassId && BoundsOverlap(x, candidate) &&
+                InferenceStats.RotatedBoxIoU(x.CenterX, x.CenterY, x.Width, x.Height, x.AngleRad,
+                    candidate.CenterX, candidate.CenterY, candidate.Width, candidate.Height, candidate.AngleRad) > nmsThreshold))
+                continue;
+            kept.Add(candidate);
+            if (kept.Count == maxCount) break;
+        }
+
+        var labelsText = node.GetString("labels", string.Empty).Trim();
+        var labels = string.IsNullOrWhiteSpace(labelsText) ? [] : labelsText.Split(',', StringSplitOptions.TrimEntries);
+        var detections = new List<VisionDetection>(kept.Count);
+        var payload = new List<object>(kept.Count);
+        for (var i = 0; i < kept.Count; i++)
+        {
+            var item = kept[i];
+            if (labels.Length > 0 && item.ClassId >= labels.Length)
+                throw new InvalidOperationException($"OBB classId {item.ClassId} is outside the configured labels list ({labels.Length} labels).");
+            var minX = item.Corners.Min(p => p.X); var maxX = item.Corners.Max(p => p.X);
+            var minY = item.Corners.Min(p => p.Y); var maxY = item.Corners.Max(p => p.Y);
+            var perimeter = 2 * (item.Width + item.Height);
+            detections.Add(new VisionDetection(i, minX, minY, maxX - minX, maxY - minY,
+                item.Width * item.Height, perimeter, perimeter > 0 ? 4 * Math.PI * item.Width * item.Height / (perimeter * perimeter) : 0,
+                new VisionCircle(item.CenterX, item.CenterY, Math.Sqrt(item.Width * item.Width + item.Height * item.Height) / 2),
+                new VisionRectangle2D(item.CenterX, item.CenterY, item.Width, item.Height, item.AngleRad * 180 / Math.PI), item.Score, item.ClassId));
+            payload.Add(new
+            {
+                index = i,
+                classId = item.ClassId,
+                label = labels.Length > 0 ? labels[item.ClassId] : $"class_{item.ClassId}",
+                score = item.Score,
+                centerX = item.CenterX,
+                centerY = item.CenterY,
+                width = item.Width,
+                height = item.Height,
+                angleRad = item.AngleRad,
+                angleDeg = item.AngleRad * 180 / Math.PI,
+                bounds = new { x = minX, y = minY, width = maxX - minX, height = maxY - minY },
+                polygon = item.Corners.Select(p => new { x = p.X, y = p.Y }).ToArray()
+            });
+        }
+
+        var overlay = BuildObbOverlay(source, kept, labels);
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("count", detections.Count), ("nmsMode", nmsMode),
+            ("letterbox", letterbox), ("coordinates", coordinates), ("outputShape", shape));
+        return ValueTask.FromResult(new NodeExecutorResult(
+            new Dictionary<string, VisionValue>
+            {
+                ["detections"] = VisionValue.Detections(detections),
+                ["count"] = VisionValue.Integer(detections.Count),
+                ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
+                ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, outputShape = shape, nmsApplied = applyNms, detections = payload })),
+                ["diagnostics"] = VisionValue.String(diagnostics)
+            },
+            new Dictionary<string, object?> { ["count"] = detections.Count, ["layout"] = layout, ["nmsApplied"] = applyNms,
+                ["nmsMode"] = nmsMode, ["letterbox"] = letterbox, ["coordinates"] = coordinates, ["outputShape"] = shape, ["diagnostics"] = diagnostics }));
+    }
+
+    private static bool BoundsOverlap(ObbCandidate a, ObbCandidate b) =>
+        a.Right > b.Left && b.Right > a.Left && a.Bottom > b.Top && b.Bottom > a.Top;
+
+    private static Mat BuildObbOverlay(Mat source, IReadOnlyList<ObbCandidate> boxes, string[] labels)
+    {
+        var overlay = new Mat();
+        try
+        {
+            if (source.Channels() == 1) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.GRAY2BGR);
+            else if (source.Channels() == 3) source.CopyTo(overlay);
+            else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
+            else throw new InvalidOperationException($"OBB overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
+
+            for (var i = 0; i < boxes.Count; i++)
+            {
+                var box = boxes[i];
+                var color = InferenceStats.SegmentationColorBgr(box.ClassId + 1);
+                var scalar = new Scalar(color.B, color.G, color.R);
+                var points = box.Corners.Select(p => new Point(
+                    (int)Math.Round(Math.Clamp(p.X, -2d * source.Width, 3d * source.Width)),
+                    (int)Math.Round(Math.Clamp(p.Y, -2d * source.Height, 3d * source.Height)))).ToArray();
+                for (var edge = 0; edge < points.Length; edge++)
+                    Cv2.Line(overlay, points[edge], points[(edge + 1) % points.Length], scalar, 2, LineTypes.AntiAlias);
+                var label = labels.Length > box.ClassId ? labels[box.ClassId] : $"class_{box.ClassId}";
+                if (label.Any(character => character > 127)) label = $"class_{box.ClassId}"; // OpenCV Hershey fonts are ASCII-only.
+                var text = $"{label} {box.Score:0.00} {box.AngleRad * 180 / Math.PI:0.0}deg";
+                var textX = (int)Math.Round(Math.Clamp(box.Left, 0, source.Width - 1));
+                var textY = (int)Math.Round(Math.Clamp(box.Top - 5, 16, Math.Max(16, source.Height - 1)));
+                Cv2.PutText(overlay, text, new Point(textX, textY),
+                    HersheyFonts.HersheySimplex, 0.45, scalar, 1, LineTypes.AntiAlias);
+            }
+            return overlay;
+        }
+        catch { overlay.Dispose(); throw; }
+    }
+
+    private sealed record ObbCandidate(double CenterX, double CenterY, double Width, double Height, double AngleRad, double Score, int ClassId, (double X, double Y)[] Corners)
+    {
+        public double Left => Corners.Min(p => p.X);
+        public double Right => Corners.Max(p => p.X);
+        public double Top => Corners.Min(p => p.Y);
+        public double Bottom => Corners.Max(p => p.Y);
+    }
 }
 
 /// <summary>ONNX semantic segmentation. layout=logits expects [1,C,H,W]; layout=yolo26-semantic expects YOLO26 class map [1,H,W]/[H,W]/[1,1,H,W].</summary>
@@ -375,10 +698,9 @@ public sealed class OnnxSegmentationNode : IVisionNodeExecutor
 }
 
 /// <summary>
-/// YOLO26 / YOLOv8 instance segmentation ONNX: dual outputs
-/// (1) boxes+scores+mask coeffs [1, 4+nc+32, N] and (2) prototypes [1, 32, mh, mw].
-/// Emits detections, a combined class-id mask (last instance wins on overlap), overlay and instance JSON.
-/// Does not embed NMS in the graph; class-aware NMS runs here. OBB heads are not supported; use inference.pose for keypoints.
+/// YOLO26 / YOLOv8 instance segmentation ONNX: raw or YOLO26 end-to-end detection rows plus mask prototypes.
+/// Emits detections, a combined class-id mask, overlay, and per-instance geometry/mask-run JSON.
+/// Raw heads use class-aware NMS; end-to-end rows already have NMS-free top detections. OBB heads are not supported.
 /// </summary>
 public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
 {
@@ -413,19 +735,30 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             { var tmp = det; det = proto; proto = tmp; }
             var detShape = OnnxInferenceHelpers.Shape(det);
             var protoShape = OnnxInferenceHelpers.Shape(proto);
-            if (protoShape.Length != 4 || protoShape[0] != 1 || protoShape[1] < 1)
+            if (protoShape.Length != 4 || protoShape[0] != 1 || protoShape[1] < 1 || protoShape[2] < 1 || protoShape[3] < 1)
                 throw new InvalidOperationException($"YOLO-Seg prototype output must have shape [1,maskDim,H,W]; received [{string.Join(',', protoShape)}].");
             var maskDim = protoShape[1];
             var protoH = protoShape[2];
             var protoW = protoShape[3];
             var detValues = OnnxInferenceHelpers.ReadFloatTensor(det, "instance-seg-det");
             var protoValues = OnnxInferenceHelpers.ReadFloatTensor(proto, "instance-seg-proto");
-            var candidates = InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim);
+            var layout = node.GetString("layout", "yolo26-seg").Trim().ToLowerInvariant();
+            if (layout is "yolo26-e2e" or "end2end") layout = "xyxy";
+            if (layout is not ("yolo26-seg" or "xyxy"))
+                throw new InvalidOperationException($"Unsupported instance-segmentation layout '{layout}'. Supported values are 'yolo26-seg' (raw head) and 'xyxy' (YOLO26 end-to-end).");
+            var candidates = layout == "xyxy"
+                ? InferenceStats.DecodeYoloSegXyxy(detValues, detShape, maskDim)
+                : InferenceStats.DecodeYoloSeg(detValues, detShape, maskDim);
             var threshold = node.GetDouble("confidenceThreshold", 0.25);
             var nmsThreshold = node.GetDouble("nmsThreshold", 0.45);
             var maskThreshold = (float)node.GetDouble("maskThreshold", 0.5);
+            var nmsMode = node.GetString("nmsMode", "auto").Trim().ToLowerInvariant();
+            if (nmsMode is not ("auto" or "on" or "off"))
+                throw new InvalidOperationException("nmsMode must be auto, on, or off.");
+            var applyNms = nmsMode == "on" || (nmsMode == "auto" && layout == "yolo26-seg");
+            var includeMaskRuns = node.GetBool("includeMaskRuns", true);
             var maxCount = Math.Clamp(node.GetInt("maxCount", 100), 1, 1000);
-            if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !float.IsFinite(maskThreshold))
+            if (!double.IsFinite(threshold) || threshold is < 0 or > 1 || !double.IsFinite(nmsThreshold) || nmsThreshold is < 0 or > 1 || !float.IsFinite(maskThreshold) || maskThreshold is < 0 or > 1)
                 throw new InvalidOperationException("Instance segmentation thresholds must be finite values from 0 to 1.");
             var coordinates = node.GetString("coordinates", "pixels").Trim().ToLowerInvariant();
             if (coordinates is not ("normalized" or "pixels"))
@@ -453,7 +786,8 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var c = candidates[i];
-                if (c.Score < threshold || !double.IsFinite(c.Score)) continue;
+                if (c.Score < threshold || c.Score <= 0 || !double.IsFinite(c.Score)) continue;
+                if (c.ClassId < 0 || c.ClassId > 254) throw new InvalidOperationException($"Instance-seg class id {c.ClassId} is outside the supported 0..254 range for the byte class-mask output.");
                 var x1 = c.CenterX - c.Width / 2; var y1 = c.CenterY - c.Height / 2;
                 var x2 = c.CenterX + c.Width / 2; var y2 = c.CenterY + c.Height / 2;
                 if (coordinates == "normalized") { x1 *= inputWidth; x2 *= inputWidth; y1 *= inputHeight; y2 *= inputHeight; }
@@ -467,7 +801,7 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
             var kept = new List<(InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom)>();
             foreach (var candidate in scored.OrderByDescending(x => x.Cand.Score))
             {
-                if (kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
+                if (applyNms && kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
                 kept.Add(candidate);
                 if (kept.Count == maxCount) break;
             }
@@ -499,19 +833,33 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     boxInInputL, boxInInputT, boxInInputR, boxInInputB,
                     inputWidth, inputHeight, source.Width, source.Height, maskThreshold, letterbox);
                 var area = 0;
+                var maskRuns = includeMaskRuns ? new List<int>() : null;
+                var runValue = 0;
+                var runLength = 0;
                 for (var p = 0; p < instanceMask.Length; p++)
                 {
-                    if (instanceMask[p] == 0) continue;
+                    var value = instanceMask[p] == 0 ? 0 : 1;
+                    if (value != runValue)
+                    {
+                        maskRuns?.Add(runLength);
+                        runValue = value;
+                        runLength = 0;
+                    }
+                    runLength++;
+                    if (value == 0) continue;
                     area++;
-                    // Store classId+1 so background stays 0; clamp to byte.
-                    var label = (byte)Math.Clamp(c.ClassId + 1, 1, 255);
-                    combined[p] = label;
+                    // Store classId+1 so background stays 0. Candidates are score-sorted,
+                    // so the first foreground instance owns composite-mask overlaps.
+                    if (combined[p] == 0) combined[p] = (byte)(c.ClassId + 1);
                 }
+                maskRuns?.Add(runLength);
                 var w = right - left; var h = bottom - top;
                 detections.Add(new VisionDetection(i, left, top, w, h, area, 0, 0,
                     new VisionCircle((left + right) / 2, (top + bottom) / 2, Math.Sqrt(w * w + h * h) / 2),
                     new VisionRectangle2D(left, top, w, h), c.Score, c.ClassId));
-                instancePayload.Add(new { index = i, classId = c.ClassId, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area });
+                instancePayload.Add(new { index = i, classId = c.ClassId, score = c.Score, x1 = left, y1 = top, x2 = right, y2 = bottom, area,
+                    maskSize = includeMaskRuns ? new[] { source.Height, source.Width } : null,
+                    maskRuns = maskRuns?.ToArray(), maskRunOrder = includeMaskRuns ? "row-major, alternating background/foreground runs" : null });
             }
 
             using var maskMat = new Mat(source.Height, source.Width, MatType.CV_8UC1);
@@ -526,9 +874,9 @@ public sealed class OnnxInstanceSegmentationNode : IVisionNodeExecutor
                     ["mask"] = VisionValue.Image(VisionImage.Own(maskOut)),
                     ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
                     ["instances"] = VisionValue.String(JsonSerializer.Serialize(instancePayload)),
-                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, detShape, protoShape, instances = instancePayload }))
+                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, nmsMode, detShape, protoShape, instances = instancePayload }))
                 },
-                new Dictionary<string, object?> { ["count"] = detections.Count, ["maskDim"] = maskDim, ["letterbox"] = letterbox, ["layout"] = "yolo26-seg", ["detShape"] = detShape, ["protoShape"] = protoShape }));
+                new Dictionary<string, object?> { ["count"] = detections.Count, ["maskDim"] = maskDim, ["letterbox"] = letterbox, ["layout"] = layout, ["nmsMode"] = nmsMode, ["applyNms"] = applyNms, ["includeMaskRuns"] = includeMaskRuns, ["detShape"] = detShape, ["protoShape"] = protoShape }));
         }
         finally { foreach (var o in outputs) o.Dispose(); }
     }
@@ -769,62 +1117,181 @@ public sealed class OnnxAnomalyNode : IVisionNodeExecutor
         var modelPath = OnnxInferenceHelpers.ResolvePath(node);
         using var input = OnnxInferenceHelpers.PrepareInput(net, source, node).Blob;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = OnnxInferenceHelpers.Forward(net, node.GetString("outputName", string.Empty).Trim(), modelPath, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        var shape = OnnxInferenceHelpers.Shape(output);
-        var count = shape.Aggregate(1L, (a, b) => a * b);
         var threshold = node.GetDouble("threshold", 0.5);
         if (!double.IsFinite(threshold)) throw new InvalidOperationException("Anomaly threshold must be finite.");
-        var values = OnnxInferenceHelpers.ReadFloatTensor(output, "anomaly");
-
-        var scalarShape = shape.Length is >= 1 and <= 4 && shape[0] == 1 && count == 1;
-        if (scalarShape)
-        {
-            var scalar = (double)values[0];
-            var scalarAnomaly = scalar >= threshold;
-            return ValueTask.FromResult(new NodeExecutorResult(
-                new Dictionary<string, VisionValue>
-                {
-                    ["score"] = VisionValue.Double(scalar),
-                    ["isAnomaly"] = VisionValue.Boolean(scalarAnomaly),
-                    ["result"] = VisionValue.String(JsonSerializer.Serialize(new { score = scalar, threshold, isAnomaly = scalarAnomaly, outputShape = shape }))
-                },
-                new Dictionary<string, object?> { ["score"] = scalar, ["threshold"] = threshold, ["isAnomaly"] = scalarAnomaly, ["outputShape"] = shape }));
-        }
-
-        int mapWidth, mapHeight;
-        if (shape.Length == 4 && shape[0] == 1 && shape[1] == 1 && shape[2] > 0 && shape[3] > 0) { mapHeight = (int)shape[2]; mapWidth = (int)shape[3]; }
-        else if (shape.Length == 3 && shape[0] == 1 && shape[1] > 0 && shape[2] > 0) { mapHeight = (int)shape[1]; mapWidth = (int)shape[2]; }
-        else throw new InvalidOperationException($"Anomaly output must be a single scalar tensor (for example [1] or [1,1]) or an anomaly map [1,1,H,W] / [1,H,W]; received [{string.Join(',', shape)}].");
-        if (values.Length != mapWidth * mapHeight) throw new InvalidOperationException("Anomaly map element count does not match its shape.");
+        var mapThreshold = node.GetDouble("mapThreshold", 0.5);
+        if (!double.IsFinite(mapThreshold)) throw new InvalidOperationException("Anomaly mapThreshold must be finite.");
+        var useSeparateMapThreshold = node.GetBool("useSeparateMapThreshold", false);
         var thresholdMode = node.GetString("thresholdMode", "manual").Trim().ToLowerInvariant();
         if (thresholdMode is not ("manual" or "otsu")) throw new InvalidOperationException("Anomaly thresholdMode must be manual or otsu.");
-        var suggestedThreshold = InferenceStats.OtsuThreshold(values);
-        var effectiveThreshold = thresholdMode == "otsu" ? suggestedThreshold : threshold;
-        var stat = InferenceStats.AnomalyMap(values, mapWidth, mapHeight, effectiveThreshold);
-        threshold = effectiveThreshold;
-        var normalized = InferenceStats.NormalizeMap(values);
-        using var mapMat = new Mat(mapHeight, mapWidth, MatType.CV_8UC1);
-        mapMat.SetArray(normalized);
-        var heatmap = new Mat();
-        try { JLVisionOperators.Resize(mapMat, heatmap, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Linear); }
-        catch { heatmap.Dispose(); throw; }
-        var peakX = stat.PeakX * (double)source.Width / mapWidth;
-        var peakY = stat.PeakY * (double)source.Height / mapHeight;
-        var isAnomaly = stat.Peak >= threshold;
-        var json = JsonSerializer.Serialize(new { score = stat.Peak, mean = stat.Mean, min = stat.Min, max = stat.Max, threshold, suggestedThreshold, isAnomaly, peakX, peakY, areaFraction = stat.AreaFraction, outputShape = shape });
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
+        var mapLayout = node.GetString("mapLayout", "auto").Trim().ToLowerInvariant();
+        if (mapLayout is not ("auto" or "channelsfirst" or "channelslast"))
+            throw new InvalidOperationException("Anomaly mapLayout must be auto, channelsFirst, or channelsLast.");
+
+        var scoreOutputName = node.GetString("scoreOutputName", string.Empty).Trim();
+        var mapOutputName = node.GetString("mapOutputName", string.Empty).Trim();
+        if (scoreOutputName.Length > 0 && mapOutputName.Length > 0 && scoreOutputName.Equals(mapOutputName, StringComparison.Ordinal))
+            throw new InvalidOperationException("Anomaly scoreOutputName and mapOutputName must refer to different ONNX outputs.");
+        var explicitNames = new[] { scoreOutputName, mapOutputName }.Where(x => x.Length > 0).ToArray();
+        var legacyOutputName = node.GetString("outputName", string.Empty).Trim();
+        var requested = explicitNames.Length > 0 ? explicitNames : string.IsNullOrEmpty(legacyOutputName) ? null : [legacyOutputName];
+        var outputs = OnnxInferenceHelpers.ForwardOutputs(net, requested, modelPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        OnnxOutputTensor? scoreTensor = null;
+        OnnxOutputTensor? mapTensor = null;
+        if (explicitNames.Length > 0)
+        {
+            if (scoreOutputName.Length > 0) scoreTensor = outputs[Array.IndexOf(explicitNames, scoreOutputName)];
+            if (mapOutputName.Length > 0) mapTensor = outputs[Array.IndexOf(explicitNames, mapOutputName)];
+        }
+        else
+        {
+            var selected = outputs[0];
+            if (IsScalarOutput(selected.Dimensions)) scoreTensor = selected;
+            else mapTensor = selected;
+        }
+
+        double? scalarScore = null;
+        int[]? scoreShape = null;
+        if (scoreTensor is not null)
+        {
+            scoreShape = scoreTensor.Dimensions;
+            if (!IsScalarOutput(scoreShape))
+                throw new InvalidOperationException($"Anomaly score output must contain exactly one value; received [{string.Join(',', scoreShape)}]. Use mapOutputName for a spatial output.");
+            scalarScore = OnnxInferenceHelpers.ReadFloatTensor(scoreTensor, "anomaly score")[0];
+        }
+
+        Mat? heatmap = null;
+        double? mapPeak = null, mapMean = null, mapMin = null, mapMax = null;
+        double? peakX = null, peakY = null, areaFraction = null, suggestedThreshold = null;
+        int[]? mapShape = null;
+        double? effectiveMapThreshold = null;
+        if (mapTensor is not null)
+        {
+            mapShape = mapTensor.Dimensions;
+            var mapDims = ReadMapDimensions(mapShape, mapLayout);
+            var mapWidth = mapDims.Width; var mapHeight = mapDims.Height;
+            var mapValues = OnnxInferenceHelpers.ReadFloatTensor(mapTensor, "anomaly map");
+            if (mapValues.Length != mapWidth * mapHeight) throw new InvalidOperationException("Anomaly map element count does not match its shape.");
+            suggestedThreshold = InferenceStats.OtsuThreshold(mapValues);
+            effectiveMapThreshold = thresholdMode == "otsu"
+                ? suggestedThreshold
+                : useSeparateMapThreshold ? mapThreshold : threshold;
+            var stat = InferenceStats.AnomalyMap(mapValues, mapWidth, mapHeight, effectiveMapThreshold.Value);
+            mapPeak = stat.Peak; mapMean = stat.Mean; mapMin = stat.Min; mapMax = stat.Max;
+            peakX = stat.PeakX * (double)source.Width / mapWidth;
+            peakY = stat.PeakY * (double)source.Height / mapHeight;
+            areaFraction = stat.AreaFraction;
+            var normalized = InferenceStats.NormalizeMap(mapValues);
+            using var mapMat = new Mat(mapHeight, mapWidth, MatType.CV_8UC1);
+            mapMat.SetArray(normalized);
+            heatmap = new Mat();
+            try { JLVisionOperators.Resize(mapMat, heatmap, new Size(source.Width, source.Height), 0, 0, InterpolationFlags.Linear); }
+            catch { heatmap.Dispose(); heatmap = null; throw; }
+        }
+
+        if (scalarScore is null && mapPeak is null)
+            throw new InvalidOperationException("Anomaly model outputs must include a scalar score, an anomaly map, or both.");
+        var score = scalarScore ?? mapPeak!.Value;
+        var isAnomaly = scalarScore is { } imageScore
+            ? imageScore >= threshold
+            : mapPeak!.Value >= effectiveMapThreshold!.Value;
+        var outputShape = explicitNames.Length == 0 ? scoreShape ?? mapShape : null;
+        var legacyThreshold = scalarScore is null ? effectiveMapThreshold ?? threshold : threshold;
+        var json = JsonSerializer.Serialize(new
+        {
+            score,
+            scoreSource = scalarScore is null ? "mapPeak" : "scalarOutput",
+            isAnomaly,
+            threshold = legacyThreshold,
+            scoreThreshold = threshold,
+            mapThreshold = effectiveMapThreshold,
+            thresholdMode,
+            useSeparateMapThreshold,
+            mapLayout,
+            scoreOutputName = scoreOutputName.Length > 0 ? scoreOutputName : null,
+            mapOutputName = mapOutputName.Length > 0 ? mapOutputName : null,
+            scoreOutputShape = scoreShape,
+            mapOutputShape = mapShape,
+            mapPeak,
+            mapMean,
+            mapMin,
+            mapMax,
+            mean = mapMean,
+            min = mapMin,
+            max = mapMax,
+            suggestedThreshold,
+            peakX,
+            peakY,
+            areaFraction,
+            outputShape
+        });
+        var values = new Dictionary<string, VisionValue>
+        {
+            ["score"] = VisionValue.Double(score),
+            ["isAnomaly"] = VisionValue.Boolean(isAnomaly),
+            ["result"] = VisionValue.String(json)
+        };
+        if (heatmap is not null) values["heatmap"] = VisionValue.Image(VisionImage.Own(heatmap));
+        if (mapPeak is { } peak) values["mapPeak"] = VisionValue.Double(peak);
+        if (mapMean is { } mean) values["mapMean"] = VisionValue.Double(mean);
+        if (mapMin is { } min) values["mapMin"] = VisionValue.Double(min);
+        if (mapMax is { } max) values["mapMax"] = VisionValue.Double(max);
+        if (peakX is { } x) values["peakX"] = VisionValue.Double(x);
+        if (peakY is { } y) values["peakY"] = VisionValue.Double(y);
+        if (areaFraction is { } fraction) values["areaFraction"] = VisionValue.Double(fraction);
+        if (suggestedThreshold is { } suggested) values["suggestedThreshold"] = VisionValue.Double(suggested);
+
+        return ValueTask.FromResult(new NodeExecutorResult(values,
+            new Dictionary<string, object?>
             {
-                ["score"] = VisionValue.Double(stat.Peak),
-                ["isAnomaly"] = VisionValue.Boolean(isAnomaly),
-                ["heatmap"] = VisionValue.Image(VisionImage.Own(heatmap)),
-                ["peakX"] = VisionValue.Double(peakX),
-                ["peakY"] = VisionValue.Double(peakY),
-                ["areaFraction"] = VisionValue.Double(stat.AreaFraction),
-                ["suggestedThreshold"] = VisionValue.Double(suggestedThreshold),
-                ["result"] = VisionValue.String(json)
-            },
-            new Dictionary<string, object?> { ["score"] = stat.Peak, ["mean"] = stat.Mean, ["threshold"] = threshold, ["suggestedThreshold"] = suggestedThreshold, ["isAnomaly"] = isAnomaly, ["peakX"] = peakX, ["peakY"] = peakY, ["areaFraction"] = stat.AreaFraction, ["outputShape"] = shape }));
+                ["score"] = score, ["scoreSource"] = scalarScore is null ? "mapPeak" : "scalarOutput", ["threshold"] = legacyThreshold,
+                ["scoreThreshold"] = threshold, ["mean"] = mapMean, ["min"] = mapMin, ["max"] = mapMax,
+                ["mapThreshold"] = effectiveMapThreshold, ["useSeparateMapThreshold"] = useSeparateMapThreshold, ["thresholdMode"] = thresholdMode,
+                ["mapLayout"] = mapLayout, ["isAnomaly"] = isAnomaly,
+                ["scoreOutputName"] = scoreOutputName, ["mapOutputName"] = mapOutputName, ["scoreOutputShape"] = scoreShape,
+                ["mapOutputShape"] = mapShape, ["mapPeak"] = mapPeak, ["mapMean"] = mapMean, ["mapMin"] = mapMin,
+                ["mapMax"] = mapMax, ["suggestedThreshold"] = suggestedThreshold, ["peakX"] = peakX,
+                ["peakY"] = peakY, ["areaFraction"] = areaFraction, ["outputShape"] = outputShape
+            }));
+    }
+
+    private static bool IsScalarOutput(IReadOnlyList<int> shape) =>
+        shape.Count == 0 || shape[0] == 1 && shape.Aggregate(1L, (product, dimension) => product * dimension) == 1;
+
+    private static (int Width, int Height) ReadMapDimensions(IReadOnlyList<int> shape, string mapLayout)
+    {
+        if (shape.Count == 4 && shape[0] == 1)
+        {
+            var channelsFirst = shape[1] == 1 && shape[2] > 0 && shape[3] > 0;
+            var channelsLast = shape[1] > 0 && shape[2] > 0 && shape[3] == 1;
+            if (mapLayout == "channelsfirst" && channelsFirst) return (shape[3], shape[2]);
+            if (mapLayout == "channelslast" && channelsLast) return (shape[2], shape[1]);
+            if (mapLayout == "auto")
+            {
+                if (channelsFirst && channelsLast)
+                    throw new InvalidOperationException("Anomaly map layout is ambiguous for this 4D shape; set mapLayout to channelsFirst or channelsLast.");
+                if (channelsFirst) return (shape[3], shape[2]);
+                if (channelsLast) return (shape[2], shape[1]);
+            }
+        }
+        if (shape.Count == 3)
+        {
+            var channelsFirst = shape[0] == 1 && shape[1] > 0 && shape[2] > 0;
+            var channelsLast = shape[0] > 0 && shape[1] > 0 && shape[2] == 1;
+            if (mapLayout == "channelsfirst" && channelsFirst) return (shape[2], shape[1]);
+            if (mapLayout == "channelslast" && channelsLast) return (shape[1], shape[0]);
+            if (mapLayout == "auto")
+            {
+                if (channelsFirst && channelsLast)
+                    throw new InvalidOperationException("Anomaly map layout is ambiguous for this 3D shape; set mapLayout to channelsFirst or channelsLast.");
+                if (channelsFirst) return (shape[2], shape[1]);
+                if (channelsLast) return (shape[1], shape[0]);
+            }
+        }
+        if (shape.Count == 2 && shape[0] > 0 && shape[1] > 0)
+            return (shape[1], shape[0]);
+        throw new InvalidOperationException($"Anomaly map must have shape [1,1,H,W], [1,H,W], [H,W], channels-last [1,H,W,1], or [H,W,1]; received [{string.Join(',', shape)}] for mapLayout={mapLayout}.");
     }
 }

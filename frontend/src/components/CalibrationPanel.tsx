@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
 import CalibrationIntrinsicsWizard from './CalibrationIntrinsicsWizard';
 import CalibrationHandEyeWizard from './CalibrationHandEyeWizard';
+import CalibrationHandEye3DWizard from './CalibrationHandEye3DWizard';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -51,6 +52,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const [targetUnit, setTargetUnit] = useState('mm');
   const [points, setPoints] = useState<CalibrationWorkspacePoint[]>(ninePointGrid());
   const [verificationPoints, setVerificationPoints] = useState<CalibrationWorkspacePoint[]>(verificationGrid());
+  const [maxRmse, setMaxRmse] = useState(0);
+  const [maxPointError, setMaxPointError] = useState(0);
   const [result, setResult] = useState<CalibrationWorkspaceResult>();
   const [assets, setAssets] = useState<CalibrationAssetDescriptor[]>([]);
   const [selectedAssetId, setSelectedAssetId] = useState<string>();
@@ -61,8 +64,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const [busy, setBusy] = useState(false);
 
   const workspace = useMemo<CalibrationWorkspaceRequest>(() => ({
-    sourceFrame, targetFrame, targetUnit, points, verificationPoints, heatmapColumns: 5, heatmapRows: 5
-  }), [sourceFrame, targetFrame, targetUnit, points, verificationPoints]);
+    sourceFrame, targetFrame, targetUnit, points, verificationPoints, heatmapColumns: 5, heatmapRows: 5, maxRmse, maxPointError
+  }), [sourceFrame, targetFrame, targetUnit, points, verificationPoints, maxRmse, maxPointError]);
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -144,6 +147,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
     setTargetUnit(data.workspace.targetUnit);
     setPoints(data.workspace.points);
     setVerificationPoints(data.workspace.verificationPoints ?? []);
+    setMaxRmse(Number(data.workspace.maxRmse ?? 0));
+    setMaxPointError(Number(data.workspace.maxPointError ?? 0));
     setResult(data.result);
     setAssetId(id);
     setSelectedAssetId(id);
@@ -205,6 +210,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
       sourceFrame,
       targetFrame,
       targetUnit,
+      maxRmse,
+      maxPointError,
       assetId: workspaceDirty ? '' : (selectedAssetId ?? ''),
       assetVersion: workspaceDirty ? 0 : loadedAssetVersion,
       pairsJson: JSON.stringify(points.filter((x) => x.enabled).map((x) => ({ imageX: x.imageX, imageY: x.imageY, worldX: x.worldX, worldY: x.worldY })))
@@ -227,7 +234,9 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
         <Space wrap>
           <Input value={sourceFrame} onChange={(e) => { setSourceFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="源坐标系" style={{ width: 205 }} />
           <Input value={targetFrame} onChange={(e) => { setTargetFrame(e.target.value); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="目标坐标系" style={{ width: 205 }} />
-          <Select value={targetUnit} onChange={(v) => { setTargetUnit(v); setWorkspaceDirty(true); setResult(undefined); }} style={{ width: 88 }} options={[{ value: 'mm' }, { value: 'cm' }, { value: 'm' }]} />
+          <Select value={targetUnit} onChange={(v) => { setTargetUnit(v); setWorkspaceDirty(true); setResult(undefined); }} style={{ width: 88 }} options={[{ value: 'mm' }, { value: 'cm' }, { value: 'm' }, { value: 'px' }]} />
+          <InputNumber value={maxRmse} min={0} step={0.001} onChange={(value) => { setMaxRmse(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="RMSE 上限" addonAfter={targetUnit} style={{ width: 178 }} />
+          <InputNumber value={maxPointError} min={0} step={0.001} onChange={(value) => { setMaxPointError(Number(value ?? 0)); setWorkspaceDirty(true); setResult(undefined); }} addonBefore="单点误差上限" addonAfter={targetUnit} style={{ width: 198 }} />
           <Button onClick={() => { setPoints(ninePointGrid()); setVerificationPoints(verificationGrid()); setWorkspaceDirty(true); setResult(undefined); }}>重置 9 点</Button>
           <Button onClick={autoCapture} loading={busy}>自动采集 9 点</Button>
           <Button type="primary" onClick={solve} loading={busy}>计算</Button>
@@ -306,7 +315,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             label: '相机内参向导',
             children: (
               <CalibrationIntrinsicsWizard
-                canApplyToSelectedNode={canApplyToSelectedNode}
+                canApplyToSelectedNode={canApplyToSelectedNode && ['calibration.cameraIntrinsics', 'image.undistort'].includes(selectedNodeType ?? '')}
                 selectedNodeType={selectedNodeType}
                 onApplyToSelectedNode={onApplyToSelectedNode}
               />
@@ -317,7 +326,18 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             label: '手眼向导',
             children: (
               <CalibrationHandEyeWizard
-                canApplyToSelectedNode={canApplyToSelectedNode}
+                canApplyToSelectedNode={canApplyToSelectedNode && selectedNodeType === 'calibration.handEye2D'}
+                selectedNodeType={selectedNodeType}
+                onApplyToSelectedNode={onApplyToSelectedNode}
+              />
+            )
+          },
+          {
+            key: 'handeye3d',
+            label: '三维手眼向导',
+            children: (
+              <CalibrationHandEye3DWizard
+                canApplyToSelectedNode={canApplyToSelectedNode && selectedNodeType === 'calibration.handEye3D'}
                 selectedNodeType={selectedNodeType}
                 onApplyToSelectedNode={onApplyToSelectedNode}
               />

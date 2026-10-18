@@ -360,11 +360,12 @@ public static class BuiltInNodeCatalog
                 ]),
                 new("maxTargets", "Max Targets", "number", 1, 1, 50, 1, Group: "Search", Description: "Accepted matches. found/score/x/y/angle stay the best match. Default 1 keeps older single-result workflows."),
                 new("minCenterDistance", "Min Center Distance", "number", 0, 0, 10000, 1, Unit: "px", Group: "Search", Description: "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."),
+                new("duplicateOverlapThreshold", "Duplicate Box IoU Threshold (0=off)", "number", 0.3, 0, 1, 0.01, Group: "Search", Description: "Suppress later template matches whose axis-aligned box IoU reaches this threshold; 0 disables overlap suppression."),
                 new("scaleMinPercent", "Scale Min", "number", 100, 50, 200, 1, Unit: "%", Group: "Scale", Description: "Uniform scale is a discrete resampled NCC search, not a continuous scaled model. 100 with Scale Max 100 keeps the original single-scale search. Use match.shape for trained scale."),
                 new("scaleMaxPercent", "Scale Max", "number", 100, 50, 200, 1, Unit: "%", Group: "Scale", Description: "Largest uniform scale to resample. Must be greater than or equal to Scale Min."),
                 new("scaleStepPercent", "Scale Step (%)", "number", 10, 1, 50, 1, Unit: "%", Group: "Scale", Description: "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected.")
             ],
-            "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches, a search ROI, a template mask, and a discrete uniform scale range are optional; defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
+            "JLVision cached NCC pyramid matching with subpixel translation and rotation. Multiple matches use score-ordered box-IoU suppression by default; a search ROI, template mask, and discrete uniform scale range are optional. Defaults stay single-scale and single-result. This is not shape-based matching: there is no polarity ignore, clutter, deformation, or continuous scaled model. Use match.shape for those. Squared-difference mode verifies native NCC proposals using native SSD arithmetic. angle aligns the template with the image (positive = counter-clockwise).",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
         new(
@@ -573,6 +574,8 @@ public static class BuiltInNodeCatalog
                 new("rmse", VisionDataType.Double),
                 new("maxError", VisionDataType.Double),
                 new("pointCount", VisionDataType.Integer),
+                new("worstPairIndex", VisionDataType.Integer),
+                new("residualsJson", VisionDataType.String),
                 new("diagnostics", VisionDataType.String),
                 Next
             ],
@@ -583,16 +586,19 @@ public static class BuiltInNodeCatalog
                 [
                     new("mm", "mm"),
                     new("cm", "cm"),
-                    new("m", "m")
+                    new("m", "m"),
+                    new("px", "px")
                 ], Group: "Frames"),
                 new("assetId", "Calibration Asset ID", "text", "", Group: "Provenance", Description: "Optional immutable calibration asset provenance."),
                 new("assetVersion", "Calibration Asset Version", "number", 0, 0, 999999, 1, Group: "Provenance"),
+                new("maxRmse", "Maximum Calibration RMSE (0=off)", "number", 0, 0, 1000000000, 0.001, Unit: "target", Group: "Quality Gate", Description: "Fail the node when the fit RMSE exceeds this value; 0 disables the gate."),
+                new("maxPointError", "Maximum Point Error (0=off)", "number", 0, 0, 1000000000, 0.001, Unit: "target", Group: "Quality Gate", Description: "Fail the node when any calibration pair residual exceeds this value; 0 disables the gate."),
                 new("pairsJson", "Calibration Pairs JSON", "textarea",
                     "[{\"imageX\":100,\"imageY\":100,\"worldX\":0,\"worldY\":0},{\"imageX\":320,\"imageY\":100,\"worldX\":22,\"worldY\":0},{\"imageX\":540,\"imageY\":100,\"worldX\":44,\"worldY\":0},{\"imageX\":100,\"imageY\":240,\"worldX\":0,\"worldY\":14},{\"imageX\":320,\"imageY\":240,\"worldX\":22,\"worldY\":14},{\"imageX\":540,\"imageY\":240,\"worldX\":44,\"worldY\":14},{\"imageX\":100,\"imageY\":380,\"worldX\":0,\"worldY\":28},{\"imageX\":320,\"imageY\":380,\"worldX\":22,\"worldY\":28},{\"imageX\":540,\"imageY\":380,\"worldX\":44,\"worldY\":28}]",
                     Group: "Calibration",
                     Description: "Four or more image/world point pairs. Nine points are recommended for MVP validation.")
             ],
-            "Least-squares planar homography from pixel coordinates to a named target coordinate frame. Requires at least four finite, non-degenerate point pairs; reports RMSE, maximum residual, worst-pair index, pair count and JSON diagnostics. Singular or poorly conditioned geometry fails deterministically.",
+            "Coordinate-normalized, rank-revealing least-squares planar homography from image coordinates to a named target frame. Requires at least four finite, spatially distributed pairs; reports per-pair residuals and supports optional RMSE and maximum-point-error gates. Singular or poorly conditioned geometry fails deterministically.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -603,6 +609,15 @@ public static class BuiltInNodeCatalog
             [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
             "Convert an image-space Point2D into a frame/unit-aware coordinate point through a validated Transform2D. Rejects non-finite points and singular transforms; emits frame, unit and JSON diagnostics alongside the point.",
+            "builtin"),
+        new(
+            "coordinate.transformPoint3D",
+            "Transform 3D Point",
+            "Coordinate",
+            [ExecIn, new("point", VisionDataType.CoordinatePoint3D), new("transform", VisionDataType.Transform3D)],
+            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [],
+            "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
             "builtin"),
         new(
             "coordinate.transformLine",
@@ -635,6 +650,21 @@ public static class BuiltInNodeCatalog
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
             ],
             "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
+            "builtin"),
+        new(
+            "coordinate.point3D",
+            "Coordinate Point 3D",
+            "Coordinate",
+            [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("z", VisionDataType.Double, Required: false)],
+            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [
+                new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("y", "Y", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("z", "Z", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point"),
+                new("frame", "Frame", "text", "Workpiece", Group: "Point"),
+                new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point")
+            ],
+            "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants, so upstream measurements can drive the point. Coordinates must be finite and bounded; frame must be non-empty.",
             "builtin"),
         new(
             "coordinate.distance",

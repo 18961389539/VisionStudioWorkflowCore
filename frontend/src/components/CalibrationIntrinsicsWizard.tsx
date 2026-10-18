@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
-import type { CalibrationWizardHint, CalibrationWizardSession } from '../types';
+import type { CameraIntrinsicAssetDescriptor, CameraIntrinsicVersionSnapshot, CalibrationWizardHint, CalibrationWizardSession } from '../types';
 
 type Props = {
   canApplyToSelectedNode: boolean;
@@ -9,6 +9,15 @@ type Props = {
 };
 
 type CameraListItem = { id: string; name?: string; acquisition?: { acquisitionState?: string } };
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
 
 const stepTitles = ['标定板设置', '采集 / 导入视图', '审核视图', '求解内参', '导出应用'];
 
@@ -30,12 +39,23 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [solveSummary, setSolveSummary] = useState<Record<string, unknown>>();
   const [maxViewRms, setMaxViewRms] = useState(0);
   const [maxRms, setMaxRms] = useState(0);
+  const [maxPoseViewRms, setMaxPoseViewRms] = useState(0);
+  const [cameraModel, setCameraModel] = useState<'pinhole' | 'fisheye' | 'telecentric'>('pinhole');
+  const [telecentricMagnification, setTelecentricMagnification] = useState(0.2);
+  const [telecentricPixelSizeUm, setTelecentricPixelSizeUm] = useState(3.45);
+  const [fisheyeBalance, setFisheyeBalance] = useState(0);
   const [hints, setHints] = useState<CalibrationWizardHint[]>([]);
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
   const [cameraId, setCameraId] = useState<string>();
   const [previewUrl, setPreviewUrl] = useState<string>();
   const [previewQuality, setPreviewQuality] = useState<string>();
   const [viewStatsRows, setViewStatsRows] = useState<Record<string, unknown>[]>([]);
+  const [intrinsicAssets, setIntrinsicAssets] = useState<CameraIntrinsicAssetDescriptor[]>([]);
+  const [intrinsicAssetId, setIntrinsicAssetId] = useState('camera-intrinsics-1');
+  const [intrinsicAssetName, setIntrinsicAssetName] = useState('Camera Intrinsic Calibration');
+  const [pinnedAssetId, setPinnedAssetId] = useState<string>();
+  const [pinnedVersion, setPinnedVersion] = useState(0);
+  const [pinnedModel, setPinnedModel] = useState<unknown>();
 
   const enabledCount = session?.enabledCount ?? 0;
   const guidance = useMemo(() => {
@@ -58,12 +78,59 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     })();
   }, []);
 
+  const refreshIntrinsicAssets = async () => {
+    try {
+      const response = await fetch('/api/camera-intrinsics');
+      if (response.ok) setIntrinsicAssets(await response.json() as CameraIntrinsicAssetDescriptor[]);
+    } catch { setIntrinsicAssets([]); }
+  };
+
+  useEffect(() => { void refreshIntrinsicAssets(); }, []);
+
+  const pinMatchesSession = Boolean(pinnedAssetId && pinnedVersion > 0 && session?.model && stableJson(session.model) === stableJson(pinnedModel));
+
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
+  const applySessionState = (next: CalibrationWizardSession) => {
+    setSession(next);
+    setCameraModel(next.cameraModel === 'fisheye' || next.cameraModel === 'telecentric' ? next.cameraModel : 'pinhole');
+    setTelecentricMagnification(next.telecentricMagnification ?? 0.2);
+    setTelecentricPixelSizeUm(next.telecentricPixelSizeUm ?? 3.45);
+  };
+
   const refresh = async (next: CalibrationWizardSession) => {
     setSession(next);
+  };
+
+  const changeCameraModel = (next: 'pinhole' | 'fisheye' | 'telecentric') => {
+    if (next === cameraModel) return;
+    setCameraModel(next);
+    setSession((current) => current ? { ...current, cameraModel: next, model: undefined, lastSolveSummary: null } : current);
+    if (next === 'telecentric') setMaxPoseViewRms(0);
+    setSolveSummary(undefined);
+    setViewStatsRows([]);
+    setPinnedAssetId(undefined);
+    setPinnedVersion(0);
+    setPinnedModel(undefined);
+  };
+
+  const changeTelecentricParameters = (magnification: number, pixelSizeUm: number) => {
+    setTelecentricMagnification(magnification);
+    setTelecentricPixelSizeUm(pixelSizeUm);
+    setSession((current) => current ? {
+      ...current,
+      telecentricMagnification: magnification,
+      telecentricPixelSizeUm: pixelSizeUm,
+      model: undefined,
+      lastSolveSummary: null
+    } : current);
+    setSolveSummary(undefined);
+    setViewStatsRows([]);
+    setPinnedAssetId(undefined);
+    setPinnedVersion(0);
+    setPinnedModel(undefined);
   };
 
   const createSession = async () => {
@@ -76,7 +143,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '创建向导会话失败');
-      setSession(data);
+      applySessionState(data);
       setSolveSummary(undefined);
       setViewStatsRows([]);
       setHints([]);
@@ -137,7 +204,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '会话文档导入失败');
-      setSession(data);
+      applySessionState(data);
       setSolveSummary((data.lastSolveSummary as Record<string, unknown> | null) ?? undefined);
       setStep(data.views?.length ? 2 : 1);
       await loadHints(data.sessionId);
@@ -230,12 +297,15 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxViewRms, maxRms })
+        body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, cameraModel, telecentricMagnification, telecentricPixelSizeUm })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '标定求解失败');
-      setSession(data.session);
+      applySessionState(data.session);
       setSolveSummary(data.result);
+      setPinnedAssetId(undefined);
+      setPinnedVersion(0);
+      setPinnedModel(undefined);
       if (Array.isArray(data.hints)) setHints(data.hints);
       const statsRaw = data.result?.viewStats;
       if (typeof statsRaw === 'string') {
@@ -254,12 +324,89 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
-      const text = typeof data.documentJson === 'string' ? data.documentJson : JSON.stringify(data.document, null, 2);
+      const sourceDocument = data.document && typeof data.document === 'object' ? data.document as Record<string, unknown> : {};
+      const exportedDocument = {
+        ...sourceDocument,
+        cameraModel,
+        telecentricMagnification,
+        telecentricPixelSizeUm,
+        model: session.model ?? null,
+        lastSolveSummary: session.model ? sourceDocument.lastSolveSummary ?? null : null
+      };
+      const text = JSON.stringify(exportedDocument, null, 2);
       setDocumentJson(text);
       if (Array.isArray(data.hints)) setHints(data.hints);
       await navigator.clipboard?.writeText(text).catch(() => undefined);
       messageApi.success('已导出完整会话文档（含视图点与结果），可复制保存');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '导出失败'); }
+    finally { setBusy(false); }
+  };
+
+  const saveIntrinsicAsset = async () => {
+    if (!session?.model) return messageApi.warning('请先完成内参求解');
+    if (!intrinsicAssetId.trim() || !intrinsicAssetName.trim()) return messageApi.warning('请填写资产 ID 和名称');
+    setBusy(true);
+    try {
+      const existing = intrinsicAssets.find((asset) => asset.id === intrinsicAssetId.trim());
+      const url = existing ? `/api/camera-intrinsics/${encodeURIComponent(existing.id)}/versions` : '/api/camera-intrinsics';
+      const body = existing
+        ? { sessionId: session.sessionId, note: `Wizard save ${new Date().toISOString()}` }
+        : { sessionId: session.sessionId, id: intrinsicAssetId.trim(), name: intrinsicAssetName.trim(), description: 'Camera intrinsic model with source wizard views', note: 'Initial intrinsic calibration' };
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await response.json() as Record<string, unknown>;
+      if (!response.ok) throw new Error(String(data.error ?? '保存相机内参资产失败'));
+      const version = Number(data.version ?? data.latestVersion ?? 0);
+      if (!Number.isInteger(version) || version < 1) throw new Error('服务端未返回有效版本号');
+      setPinnedAssetId(intrinsicAssetId.trim());
+      setPinnedVersion(version);
+      setPinnedModel(session.model);
+      await refreshIntrinsicAssets();
+      messageApi.success(`已保存相机内参资产 ${intrinsicAssetId.trim()} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '保存失败'); }
+    finally { setBusy(false); }
+  };
+
+  const loadIntrinsicVersion = async (id: string, version: number) => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}`);
+      const snapshot = await response.json() as CameraIntrinsicVersionSnapshot & { error?: string };
+      if (!response.ok) throw new Error(snapshot.error ?? '加载相机内参版本失败');
+      const importResponse = await fetch('/api/calibration/wizard/sessions/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentJson: snapshot.sourceDocumentJson })
+      });
+      const restored = await importResponse.json() as CalibrationWizardSession & { error?: string };
+      if (!importResponse.ok) throw new Error(restored.error ?? '恢复标定源视图失败');
+      let summary: Record<string, unknown> = {};
+      try { summary = JSON.parse(snapshot.summaryJson) as Record<string, unknown>; } catch { /* checksum validation already rejects invalid saved JSON */ }
+      applySessionState(restored);
+      setSolveSummary(summary);
+      const stats = summary.viewStats;
+      if (typeof stats === 'string') { try { setViewStatsRows(JSON.parse(stats) as Record<string, unknown>[]); } catch { setViewStatsRows([]); } }
+      else setViewStatsRows([]);
+      setIntrinsicAssetId(id);
+      setIntrinsicAssetName(intrinsicAssets.find((asset) => asset.id === id)?.name ?? id);
+      setPinnedAssetId(id);
+      setPinnedVersion(version);
+      setPinnedModel(snapshot.model);
+      setStep(4);
+      messageApi.success(`已加载相机内参资产 ${id} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '加载失败'); }
+    finally { setBusy(false); }
+  };
+
+  const publishIntrinsicVersion = async (id: string, version: number, rollback = false) => {
+    setBusy(true);
+    try {
+      const url = rollback
+        ? `/api/camera-intrinsics/${encodeURIComponent(id)}/rollback/${version}`
+        : `/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}/publish`;
+      const response = await fetch(url, { method: 'POST' });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? '发布相机内参版本失败');
+      await refreshIntrinsicAssets();
+      messageApi.success(`${rollback ? '已回滚' : '已发布'}相机内参资产 ${id} V${version}`);
+    } catch (error) { messageApi.error(error instanceof Error ? error.message : '发布失败'); }
     finally { setBusy(false); }
   };
 
@@ -271,15 +418,22 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       if (selectedNodeType === 'calibration.cameraIntrinsics') {
-        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '' });
+        onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', cameraModel, maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, telecentricMagnification, telecentricPixelSizeUm });
         messageApi.success('已将视图 JSON 应用到相机内参节点');
       } else if (selectedNodeType === 'image.undistort') {
-        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '' });
-        messageApi.success('已将内参模型应用到去畸变节点');
+        if (!session.model) throw new Error('相机模型已失效或尚未求解，请先重新运行标定。');
+        const bound = pinMatchesSession && pinnedAssetId
+          ? { intrinsicsAssetId: pinnedAssetId, intrinsicsAssetVersion: pinnedVersion }
+          : { intrinsicsAssetId: '', intrinsicsAssetVersion: 0 };
+        onApplyToSelectedNode({ calibrationJson: data.calibrationJson ?? '', fisheyeBalance, ...bound });
+        messageApi.success(pinMatchesSession ? `已应用并绑定内参资产 ${pinnedAssetId} V${pinnedVersion}` : '已将内参模型应用到去畸变节点（未绑定资产版本）');
       } else {
         onApplyToSelectedNode({
           calibrationDataJson: data.calibrationDataJson ?? '',
-          calibrationJson: data.calibrationJson ?? ''
+          cameraModel,
+          telecentricMagnification,
+          telecentricPixelSizeUm,
+          calibrationJson: session.model ? data.calibrationJson ?? '' : ''
         });
         messageApi.success('已导出标定结果（请选择内参或去畸变节点以精确写入）');
       }
@@ -296,7 +450,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message="相机内参向导（Batch F）"
-        description="会话落盘 + 导出/导入完整文档 · 相机刷新检测预览 · 规则姿态提示 · 离群一键禁用 · 导出到节点。鱼眼/远心：当前 JLVision 仅支持多项式针孔，已跳过。" />
+        description="会话落盘 · 质量审核与离群处理 · JLVision 多项式针孔 / 物方远心模型、OpenCV 鱼眼模型 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。远心倍率和像元尺寸请按镜头与相机数据表填写。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
       {hints.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
@@ -389,11 +543,21 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       {step === 3 && session && (
         <Space direction="vertical" size="middle">
           <Space>
-            <InputNumber addonBefore="单视图 RMS 上限" min={0} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
-            <InputNumber addonBefore="模型 RMS 上限" min={0} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
+            <Select value={cameraModel} onChange={changeCameraModel} style={{ width: 220 }} options={[
+              { value: 'pinhole', label: '针孔（JLVision 多项式）' },
+              { value: 'fisheye', label: '鱼眼（OpenCV 四系数）' },
+              { value: 'telecentric', label: '物方远心（JLVision 多项式）' }
+            ]} />
+            {cameraModel === 'telecentric' && <>
+              <InputNumber addonBefore="镜头倍率" min={0.001} max={10} step={0.01} value={telecentricMagnification} onChange={(value) => changeTelecentricParameters(Number(value ?? 0.2), telecentricPixelSizeUm)} />
+              <InputNumber addonBefore="像元尺寸 μm" min={0.1} max={100} step={0.01} value={telecentricPixelSizeUm} onChange={(value) => changeTelecentricParameters(telecentricMagnification, Number(value ?? 3.45))} />
+            </>}
+            <InputNumber addonBefore="单视图 RMS 上限" min={0} max={100} step={0.1} value={maxViewRms} onChange={(v) => setMaxViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="拟合模型单视图 RMS 上限" min={0} max={100} step={0.1} value={maxPoseViewRms} disabled={cameraModel === 'telecentric'} onChange={(v) => setMaxPoseViewRms(Number(v ?? 0))} />
+            <InputNumber addonBefore="模型 RMS 上限" min={0} max={1000} step={0.1} value={maxRms} onChange={(v) => setMaxRms(Number(v ?? 0))} />
             <Button type="primary" loading={busy} disabled={enabledCount < 3} onClick={calibrate}>运行内参标定</Button>
           </Space>
-          <Typography.Text type="secondary">0 = 关闭门控。求解使用与节点 calibration.cameraIntrinsics 相同的 JLVision 后端。</Typography.Text>
+          <Typography.Text type="secondary">0 = 关闭门控。针孔与远心单视图门限采用平面预检；鱼眼采用拟合模型逐视图重投影。远心倍率和像元尺寸初值应来自数据表；远心投影不提供针孔位姿 RMS。</Typography.Text>
         </Space>
       )}
 
@@ -410,9 +574,30 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
                 { title: 'covX', render: (_: unknown, r) => Number(r.coverageX ?? 0).toFixed(2) },
                 { title: 'covY', render: (_: unknown, r) => Number(r.coverageY ?? 0).toFixed(2) },
                 { title: 'H-RMS', render: (_: unknown, r) => r.homographyRms == null ? '-' : Number(r.homographyRms).toFixed(3) },
-                { title: 'Pose-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
+                { title: 'Model-RMS', render: (_: unknown, r) => r.poseReprojectionRms == null ? '-' : Number(r.poseReprojectionRms).toFixed(3) }
               ]} />
           )}
+          <Space wrap>
+            <Input value={intrinsicAssetId} onChange={(event) => setIntrinsicAssetId(event.target.value)} addonBefore="资产 ID" style={{ width: 300 }} />
+            <Input value={intrinsicAssetName} onChange={(event) => setIntrinsicAssetName(event.target.value)} addonBefore="名称" style={{ width: 330 }} />
+            <Button type="primary" loading={busy} disabled={!session?.model} onClick={() => void saveIntrinsicAsset()}>
+              {intrinsicAssets.some((asset) => asset.id === intrinsicAssetId.trim()) ? '保存新版本' : '创建版本资产'}
+            </Button>
+            <Button loading={busy} onClick={() => void refreshIntrinsicAssets()}>刷新资产</Button>
+            {pinMatchesSession && pinnedAssetId && <Tag color="green">绑定 {pinnedAssetId} V{pinnedVersion}</Tag>}
+          </Space>
+          {selectedNodeType === 'image.undistort' && cameraModel === 'fisheye' && (
+            <Space>
+              <InputNumber addonBefore="鱼眼视场平衡" min={0} max={1} step={0.01} value={fisheyeBalance} onChange={(value) => setFisheyeBalance(Number(value ?? 0))} />
+              <Typography.Text type="secondary">0 收紧校正视场，1 保留更多视场并允许边缘留黑。</Typography.Text>
+            </Space>
+          )}
+          <Table size="small" rowKey="id" pagination={false} dataSource={intrinsicAssets} scroll={{ x: 900, y: 220 }}
+            columns={[
+              { title: '资产', width: 240, render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => <><b>{row.name}</b><div><Typography.Text type="secondary" code>{row.id}</Typography.Text></div></> },
+              { title: '已发布', width: 90, render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => row.publishedVersion ? <Tag color="green">V{row.publishedVersion}</Tag> : <Tag>无</Tag> },
+              { title: '版本 / 加载 / 发布', render: (_: unknown, row: CameraIntrinsicAssetDescriptor) => <Space wrap>{row.versions.map((version) => <Space key={version.version} size={4}><Button size="small" loading={busy} type={version.published ? 'primary' : 'default'} onClick={() => void loadIntrinsicVersion(row.id, version.version)}>加载 V{version.version}</Button>{version.published ? <Tag color="green">生效</Tag> : <Button size="small" loading={busy} onClick={() => void publishIntrinsicVersion(row.id, version.version, Boolean(row.publishedVersion && version.version < row.latestVersion))}>{row.publishedVersion && version.version < row.latestVersion ? `回滚到 V${version.version}` : `发布 V${version.version}`}</Button>}</Space>)}</Space> }
+            ]} />
           <Space wrap>
             <Button danger loading={busy} onClick={() => void disableOutliers()}>禁用离群/最差视图</Button>
             <Button loading={busy} onClick={() => void exportDocument()}>导出完整会话文档</Button>

@@ -6,10 +6,11 @@ namespace VisionStudio.Engine.Algorithms;
 
 /// <summary>
 /// Guided camera-intrinsics session: accumulate board views with quality gates,
-/// accept/reject, then solve with the existing JLVision calibrator. Supports
+/// accept/reject, then solve with the selected pinhole, fisheye, or object-side telecentric model. Supports
 /// export/import of the full session document (views + results). Live preview and
-/// disk persistence live in the API layer. No fisheye/telecentric model; pose
-/// hints are rule-based occupancy suggestions, not an auto planner.
+/// disk persistence live in the API layer. Telecentric magnification and pixel pitch
+/// should be seeded from lens and camera datasheets;
+/// pose hints are rule-based occupancy suggestions, not an auto planner.
 /// </summary>
 public static class CalibrationIntrinsicsWizard
 {
@@ -38,7 +39,10 @@ public static class CalibrationIntrinsicsWizard
         IReadOnlyList<ViewEntry> Views,
         int EnabledCount,
         CameraCalibrationModel? Model,
-        object? LastSolveSummary);
+        object? LastSolveSummary,
+        string CameraModel = "pinhole",
+        double TelecentricMagnification = 0.2,
+        double TelecentricPixelSizeUm = 3.45);
 
     /// <summary>Durable export of a wizard session (views with points + optional solve result).</summary>
     public sealed record SessionDocument(
@@ -49,7 +53,10 @@ public static class CalibrationIntrinsicsWizard
         int? ImageHeight,
         IReadOnlyList<ViewEntry> Views,
         CameraCalibrationModel? Model,
-        object? LastSolveSummary)
+        object? LastSolveSummary,
+        string CameraModel = "pinhole",
+        double TelecentricMagnification = 0.2,
+        double TelecentricPixelSizeUm = 3.45)
     {
         public const string CurrentVersion = "intrinsics-wizard-v1";
     }
@@ -63,6 +70,9 @@ public static class CalibrationIntrinsicsWizard
         private int? _imageHeight;
         private CameraCalibrationModel? _model;
         private object? _lastSolveSummary;
+        private string _cameraModel = "pinhole";
+        private double _telecentricMagnification = 0.2;
+        private double _telecentricPixelSizeUm = 3.45;
 
         public Session(string sessionId, BoardConfig board)
         {
@@ -85,7 +95,10 @@ public static class CalibrationIntrinsicsWizard
                     _views.Select(CloneEntry).ToArray(),
                     _views.Count(v => v.Enabled),
                     _model,
-                    _lastSolveSummary);
+                    _lastSolveSummary,
+                    _cameraModel,
+                    _telecentricMagnification,
+                    _telecentricPixelSizeUm);
             }
         }
 
@@ -196,6 +209,42 @@ public static class CalibrationIntrinsicsWizard
             }
         }
 
+        public SessionState SetCameraModel(string cameraModel)
+        {
+            var normalized = (cameraModel ?? "").Trim().ToLowerInvariant();
+            if (normalized is not ("pinhole" or "fisheye" or "telecentric"))
+                throw new InvalidOperationException("Camera model must be pinhole, fisheye, or telecentric.");
+            lock (_gate)
+            {
+                if (_cameraModel != normalized)
+                {
+                    _cameraModel = normalized;
+                    _model = null;
+                    _lastSolveSummary = null;
+                }
+                return SnapshotUnlocked();
+            }
+        }
+
+        public SessionState SetTelecentricParameters(double magnification, double pixelSizeUm)
+        {
+            if (!double.IsFinite(magnification) || magnification is < 0.001 or > 10)
+                throw new InvalidOperationException("telecentricMagnification must be finite and between 0.001 and 10.");
+            if (!double.IsFinite(pixelSizeUm) || pixelSizeUm is < 0.1 or > 100)
+                throw new InvalidOperationException("telecentricPixelSizeUm must be finite and between 0.1 and 100.");
+            lock (_gate)
+            {
+                if (_telecentricMagnification != magnification || _telecentricPixelSizeUm != pixelSizeUm)
+                {
+                    _telecentricMagnification = magnification;
+                    _telecentricPixelSizeUm = pixelSizeUm;
+                    _model = null;
+                    _lastSolveSummary = null;
+                }
+                return SnapshotUnlocked();
+            }
+        }
+
         
         public SessionDocument ExportDocument()
         {
@@ -209,7 +258,10 @@ public static class CalibrationIntrinsicsWizard
                     _imageHeight,
                     _views.Select(CloneEntry).ToArray(),
                     _model,
-                    _lastSolveSummary);
+                    _lastSolveSummary,
+                    _cameraModel,
+                    _telecentricMagnification,
+                    _telecentricPixelSizeUm);
             }
         }
 
@@ -245,7 +297,10 @@ public static class CalibrationIntrinsicsWizard
             _views.Select(CloneEntry).ToArray(),
             _views.Count(v => v.Enabled),
             _model,
-            _lastSolveSummary);
+            _lastSolveSummary,
+            _cameraModel,
+            _telecentricMagnification,
+            _telecentricPixelSizeUm);
 
         private static ViewEntry CloneEntry(ViewEntry e) => e with { View = CloneView(e.View) };
 
@@ -299,6 +354,13 @@ public static class CalibrationIntrinsicsWizard
             if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Failed to allocate a wizard session id.");
             if (document.ImageWidth is int w && document.ImageHeight is int h)
                 session.SetImageSize(w, h);
+            var cameraModel = document.Model?.NativeCameraType == "area_scan_telecentric_polynomial"
+                ? "telecentric"
+                : document.Model?.LensModel == "opencv_fisheye"
+                    ? "fisheye"
+                    : string.IsNullOrWhiteSpace(document.CameraModel) ? "pinhole" : document.CameraModel;
+            session.SetCameraModel(cameraModel);
+            session.SetTelecentricParameters(document.TelecentricMagnification, document.TelecentricPixelSizeUm);
             session.ImportViews(document.Views ?? Array.Empty<ViewEntry>(), document.Model, document.LastSolveSummary);
             return session;
         }

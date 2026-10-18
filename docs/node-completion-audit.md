@@ -1,5 +1,7 @@
 # VisionStudioWorkflowCore - Node Completion Audit (re-run)
 
+> Baseline snapshot: the scores and limitation statements below predate the follow-up work recorded at the end of this file. They are not current scores for nodes that have since changed.
+
 - Date: 2026-10-18 (Asia/Shanghai)
 - Repo: D:\SourceCode\Workflow, branch `local/halcon-cognex-node-audit`, HEAD `5b816eb` (Batch F, local, ahead of remote)
 - Catalog source: `frontend/src/generated/catalog.generated.json` - **142 nodes**
@@ -288,7 +290,80 @@ Only anchors actually cited in earlier batches are compared above; a full previo
 
 ## Interpretation
 
-- No node reaches 90+: the top band vs HALCON/Cognex is still limited by product depth (training-free inference is now solid, but OBB/depth/3D, fisheye/telecentric, OCR font training, and full variation-model workflows are absent - training nodes are explicitly out of scope per user).
+- In this baseline snapshot, no node reaches 90+: the top band vs HALCON/Cognex is limited by product depth (OBB/depth/3D, fisheye/telecentric, OCR font training, and full variation-model workflows were absent - training nodes are explicitly out of scope per user).
 - The long 60-69 band is mostly complete-but-thin utility/preprocess/coordinate nodes and a few complex nodes with weak direct evidence (`inference.classification`, `match.template`, `calibration.planar`).
 - Lowest scores are evidence-thin narrow transforms, not known-broken nodes; prioritise them only if direct tests/debug outputs matter, not for feature work.
+
+## Follow-up implementation: reference defect model
+
+After the baseline audit, `defect.referenceCompare` was extended to accept one to five known-good image inputs. With multiple samples it aligns extra references by translation inside the effective inspection domain, then builds a per-pixel mean and sample-standard-deviation model using online Welford accumulation. `variationK` now uses that measured sample deviation; single-reference workflows retain the prior local-texture estimate. The model keeps the full source grayscale intensity range, including 16-bit images, and reports reference count and sample alignment errors. An optional registration-error gate rejects poorly aligned references or inspected images.
+
+The earlier **74** score and `<=74` cap describe only the baseline snapshot; this implementation has not yet been rescored against the full audit rubric. Persistent/cached model assets, rotation/scale registration, and a larger managed sample set remain product gaps.
+Usage and limits are documented in [Reference Defect Compare](reference-defect-comparison.md).
+
+## Follow-up implementation: subpixel reference registration
+
+`defect.referenceCompare` can optionally refine integer translation with normalized-correlation peak interpolation, then bilinearly resample extra good samples and the reference mean/deviation model. The setting is opt-in and requires nonzero `registrationTolerance`, preserving prior graph behavior by default. Registration summaries now retain fractional-pixel offsets. The historical score has not been rerated; rotation/scale/deformation and persistent reusable models remain open product gaps.
+
+## Follow-up implementation: planar calibration
+
+`calibration.planar` now normalizes image and target coordinates and solves the overdetermined homography with column-pivoted QR instead of normal equations. The node returns per-pair residual JSON and the worst pair index, and can fail on configured RMSE or single-point error limits. The calibration workspace uses the same solver, exposes the same quality gates before saving or applying a calibration, and validates coordinate frames, units, finite verification points, and input size limits. The baseline **63** score has not been rerated against the full audit rubric.
+
+Usage and limitations are documented in [Planar Calibration](planar-calibration.md). Lens distortion correction, automatic outlier rejection, and binding runtime solves directly to immutable calibration assets remain open product gaps.
+
+## Follow-up implementation: image classification
+
+`inference.classification` adds an optional minimum-probability gate and an `accepted` output for workflow routing. The gate is available only when scores represent probabilities (Softmax logits or YOLO26-cls probabilities); disabled by default, it preserves existing classifier behavior. `topK` is explicitly limited to 1–100 at execution. The baseline **66** score has not been rerated.
+
+Usage and limits are documented in [ONNX Image Classification](onnx-classification.md). Multi-crop aggregation is now available; multi-image batching and calibration of classifier confidence remain open product gaps.
+
+## Follow-up implementation: template matching
+
+`match.template` already supports a cached NCC pyramid, optional subpixel translation and angle search, discrete uniform scale samples, search ROI, template masks, and multiple targets. Multi-target mode now suppresses duplicate matches in score order using configurable axis-aligned box IoU, while the default one-target behavior remains unchanged. The baseline **61** score is historical and has not been rerated.
+
+Usage and limits are documented in [Template Matching](template-matching.md). Continuous scale models, polarity invariance, clutter handling, and deformation tolerance remain in the separate shape-matching family.
+
+## Follow-up implementation: camera intrinsics
+
+The camera-intrinsics node and wizard now expose a fitted-K per-view RMS gate in addition to the planar pre-fit and overall model gates. Since that pose residual omits JLVision's native polynomial distortion, the node rejects this gate when distortion is active and does not mark pinhole-derived views as outliers in that case. Typed outputs now expose worst pose-view errors, coverage, and outlier indexes. Input limits bound calibration sets to 500 views and 100000 total correspondences. The baseline **72** score remains historical and has not been rerated.
+
+Usage and model limits are documented in [Camera Intrinsic Calibration](camera-intrinsics.md). At the time of this baseline follow-up, fisheye and telecentric support remained gaps; the later fisheye implementation is recorded below.
+
+## Follow-up implementation: planar hand-eye calibration
+
+`calibration.handEye2D` now checks circular rotation coverage and translation span in both robot and vision samples, limits inputs to 1000 poses, validates frame/unit metadata, and exposes a configurable angular-to-translation weight while preserving the prior default. Per-sample residuals now identify separate worst translation and angle samples; angle-gate errors point to the correct sample. The baseline score has not been rerated.
+
+Usage and scope are documented in [2D Hand-Eye Calibration](hand-eye-2d.md). The node remains planar SE(2); 3D robot/camera hand-eye calibration is still a substantial feature gap.
+
+## Follow-up implementation: calibration asset integrity
+
+Planar calibration asset reads and publication now recompute the stored workspace/result snapshot hash and reject mismatches. Production dependency capture reads the same immutable version and verifies the workflow node's embedded frames, units, quality gates, and enabled point pairs match it. The node solves from workflow parameters after this binding check, so publishing and production validation cannot silently associate an unrelated asset version with the solve.
+
+## Follow-up implementation: camera intrinsic assets
+
+The Intrinsics Wizard can save solved models as immutable, hashed SQLite versions together with the full source-view document and solve summary. Versions support publication and rollback. `image.undistort` can pin an asset version; workflow execution and dependency capture verify the embedded model hash, and manifests record the snapshot hash. Telecentric calibration and dynamic upstream-model asset binding remain open gaps; fisheye support is described in the following update.
+
+## Follow-up implementation: fisheye camera intrinsics
+
+`calibration.cameraIntrinsics` and the wizard now support selecting OpenCV's four-coefficient Kannala-Brandt fisheye model alongside the existing JLVision native polynomial pinhole model. The fisheye solve reports fitted-model per-view RMS/max residuals, supports the view and overall RMS gates, serializes its lens model into immutable camera-intrinsic assets, and is consumed by `image.undistort` with resolution-scaled intrinsics and a field-of-view balance control. Telecentric and non-central fisheye models remain unsupported. This extension has not been rescored against the full audit rubric.
+
+## Follow-up implementation: object-side telecentric intrinsics
+
+`calibration.cameraIntrinsics` and the Intrinsics Wizard now also support JLVision's `area_scan_telecentric_polynomial` model for standard object-side telecentric lenses. The session document and immutable camera-intrinsic assets preserve magnification, fixed sensor pixel pitch, and the native camera tuple; `image.undistort` builds its radial map with the correct native camera type. The wizard asks for datasheet-based magnification and pixel-pitch values. Telecentric solves report planar homography quality and overall RMS; pinhole pose RMS is disabled because it does not model telecentric projection. Tilted/bilateral models and full audit rescoring remain open work.
+
+## Follow-up implementation: end-to-end instance segmentation
+
+`inference.instanceSegmentation` now decodes YOLO26 end-to-end rows (`[x1,y1,x2,y2,score,class,mask coefficients]`) alongside raw YOLO-Seg heads. Automatic NMS applies class-aware suppression to raw candidates and skips it for end-to-end rows. Each detected mask can also be included in the `instances` JSON as an independent row-major alternating run-length array, so overlapping objects are preserved even though the image output is a highest-score-wins class-id composite. The historic score table above predates this change; a full audit re-score and runtime comparison against exported YOLO26-seg ONNX models remain outstanding.
+
+## Follow-up implementation: oriented box detection
+
+`inference.obb` fills the prior OBB gap with YOLOv8/YOLO26 raw-head decoding and YOLO26 end-to-end `[1,N,7]` `xywhr` rows. It maps angle-aware boxes through Ultralytics letterboxing, applies exact polygon-IoU class-aware suppression to raw candidates, skips NMS by default for end-to-end output, and emits oriented `DetectionList` rectangles, four-corner JSON, labels, and an overlay. The historic audit scores predate this node; runtime comparison against exported OBB models and a full audit re-score remain outstanding.
+
+Usage and limits are documented in [ONNX Oriented Box Detection](onnx-obb.md). Embedded-NMS exports, tracking, rotated crops, and automatic class-name extraction remain open product gaps.
+
+## Follow-up implementation: multi-output anomaly inference
+
+`inference.anomaly` can now select separate scalar image-score and spatial-map outputs from one ONNX inference call. Scalar scores drive the workflow decision while map outputs independently provide heatmaps, map statistics, peak location, and thresholded area. It accepts common NCHW, squeezed, and channels-last map tensors, with an explicit layout setting for ambiguous narrow shapes. A separate pixel threshold is optional; existing single-output and shared-threshold workflows retain their defaults. The historic anomaly score remains unrated against the full audit rubric.
+
+Usage and limits are documented in [ONNX Anomaly Inference](onnx-anomaly.md). Dataset-based threshold calibration and normal-sample model training remain open product gaps.
 

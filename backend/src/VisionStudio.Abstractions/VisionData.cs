@@ -32,7 +32,9 @@ public enum VisionDataType
     ContourProperties,
     Roi,
     Region,
-    DomainImage
+    DomainImage,
+    Transform3D,
+    CoordinatePoint3D
 }
 
 /// <summary>
@@ -118,7 +120,15 @@ public sealed record VisionTransform2D(
     }
 }
 
+/// <summary>Rigid row-major 4x4 homogeneous transform that maps coordinates from SourceFrame to TargetFrame.</summary>
+public sealed record VisionTransform3D(
+    string SourceFrame,
+    string TargetFrame,
+    string Unit,
+    double[] Matrix);
+
 public readonly record struct VisionCoordinatePoint2D(double X, double Y, string Frame, string Unit);
+public readonly record struct VisionCoordinatePoint3D(double X, double Y, double Z, string Frame, string Unit);
 public readonly record struct VisionCoordinateLine2D(VisionCoordinatePoint2D Start, VisionCoordinatePoint2D End)
 {
     public double Length => Math.Sqrt(Math.Pow(End.X - Start.X, 2) + Math.Pow(End.Y - Start.Y, 2));
@@ -177,6 +187,8 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
     public static VisionValue Rectangle(VisionRectangle2D value) => new(VisionDataType.Rectangle2D, value);
     public static VisionValue Circle(VisionCircle value) => new(VisionDataType.Circle, value);
     public static VisionValue Transform(VisionTransform2D value) => new(VisionDataType.Transform2D, value);
+    public static VisionValue Transform3D(VisionTransform3D value) => new(VisionDataType.Transform3D, value);
+    public static VisionValue CoordinatePoint3D(VisionCoordinatePoint3D value) => new(VisionDataType.CoordinatePoint3D, value);
     public static VisionValue FrameTree(VisionFrameTree2D value) => new(VisionDataType.FrameTree2D, value);
     public static VisionValue CoordinatePoint(VisionCoordinatePoint2D value) => new(VisionDataType.CoordinatePoint2D, value);
     public static VisionValue CoordinateLine(VisionCoordinateLine2D value) => new(VisionDataType.CoordinateLine2D, value);
