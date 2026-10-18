@@ -208,6 +208,13 @@ public static class CalibrationEndpoints
             { throw new ApiValidationException(ex.Message, ex); }
         }).RequireEngineer("calibration.wizard.handeye", "calibration");
 
+        app.MapPost("/api/calibration/wizard/handeye3d/solve", async (CalibrationHandEye3DSolveRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await wizard.SolveHandEye3DAsync(request, ct)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.handeye3d", "calibration");
+
         return app;
     }
 }

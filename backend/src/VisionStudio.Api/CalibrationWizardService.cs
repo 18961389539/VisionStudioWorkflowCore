@@ -51,6 +51,17 @@ public sealed record CalibrationHandEyeSolveRequest(
     string Unit = "mm",
     string SourceUnit = "mm");
 
+public sealed record CalibrationHandEye3DSolveRequest(
+    string SamplesJson,
+    string Mode = "eyeInHand",
+    string Method = "DANIILIDIS",
+    double MaxTranslationError = 0,
+    double MaxRotationErrorDeg = 0,
+    double RotationWeight = 50,
+    string SourceFrame = "Camera",
+    string TargetFrame = "",
+    string Unit = "mm");
+
 /// <summary>
 /// HTTP-facing guided calibration wizards: intrinsics session store (memory + disk),
 /// board detect from upload/camera preview, solve, export/import, and planar hand-eye.
@@ -61,6 +72,7 @@ public sealed class CalibrationWizardService
     private readonly CalibrationDetectBoardNode _detectBoard;
     private readonly CameraIntrinsicCalibrationNode _intrinsics;
     private readonly PlanarHandEyeCalibrationNode _handEye;
+    private readonly HandEye3DCalibrationNode _handEye3D;
     private readonly CameraManager _cameras;
     private readonly CameraIntrinsicAssetStore _intrinsicAssets;
     private readonly string _persistRoot;
@@ -75,6 +87,7 @@ public sealed class CalibrationWizardService
         CalibrationDetectBoardNode detectBoard,
         CameraIntrinsicCalibrationNode intrinsics,
         PlanarHandEyeCalibrationNode handEye,
+        HandEye3DCalibrationNode handEye3D,
         CameraManager cameras,
         CameraIntrinsicAssetStore intrinsicAssets,
         IWebHostEnvironment environment)
@@ -82,6 +95,7 @@ public sealed class CalibrationWizardService
         _detectBoard = detectBoard;
         _intrinsics = intrinsics;
         _handEye = handEye;
+        _handEye3D = handEye3D;
         _cameras = cameras;
         _intrinsicAssets = intrinsicAssets;
         _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "calibration-wizard");
@@ -474,6 +488,56 @@ public sealed class CalibrationWizardService
                 samplesJson = request.SamplesJson,
                 mode = request.Mode
             };
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ApiValidationException(ex.Message, ex);
+        }
+    }
+
+    public async Task<object> SolveHandEye3DAsync(CalibrationHandEye3DSolveRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.SamplesJson))
+            throw new ApiValidationException("samplesJson is required.");
+        var parameters = new Dictionary<string, JsonElement>
+        {
+            ["samplesJson"] = JsonSerializer.SerializeToElement(request.SamplesJson),
+            ["mode"] = JsonSerializer.SerializeToElement(request.Mode),
+            ["method"] = JsonSerializer.SerializeToElement(request.Method),
+            ["maxTranslationError"] = JsonSerializer.SerializeToElement(request.MaxTranslationError),
+            ["maxRotationErrorDeg"] = JsonSerializer.SerializeToElement(request.MaxRotationErrorDeg),
+            ["rotationWeight"] = JsonSerializer.SerializeToElement(request.RotationWeight),
+            ["sourceFrame"] = JsonSerializer.SerializeToElement(request.SourceFrame),
+            ["unit"] = JsonSerializer.SerializeToElement(request.Unit)
+        };
+        if (!string.IsNullOrWhiteSpace(request.TargetFrame))
+            parameters["targetFrame"] = JsonSerializer.SerializeToElement(request.TargetFrame);
+
+        var node = new NodeDefinition("wizard-handeye-3d", "calibration.handEye3D", "Wizard", null, parameters);
+        try
+        {
+            var result = await _handEye3D.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
+            return new
+            {
+                transform = result.Outputs["transform"].Value,
+                translationRms = result.Outputs["translationRms"].Require<double>("translationRms"),
+                rotationRmsDeg = result.Outputs["rotationRmsDeg"].Require<double>("rotationRmsDeg"),
+                robotTranslationSpan = result.Outputs["robotTranslationSpan"].Require<double>("robotTranslationSpan"),
+                maxTranslationError = result.Outputs["maxTranslationError"].Require<double>("maxTranslationError"),
+                maxRotationErrorDeg = result.Outputs["maxRotationErrorDeg"].Require<double>("maxRotationErrorDeg"),
+                worstSampleIndex = result.Outputs["worstSampleIndex"].Require<long>("worstSampleIndex"),
+                worstTranslationSampleIndex = result.Outputs["worstTranslationSampleIndex"].Require<long>("worstTranslationSampleIndex"),
+                worstRotationSampleIndex = result.Outputs["worstRotationSampleIndex"].Require<long>("worstRotationSampleIndex"),
+                sampleResidualsJson = result.Outputs["sampleResidualsJson"].Require<string>("sampleResidualsJson"),
+                summary = result.Summary,
+                samplesJson = request.SamplesJson,
+                mode = request.Mode,
+                method = request.Method
+            };
+        }
+        catch (OpenCVException ex)
+        {
+            throw new ApiValidationException($"OpenCV 3D hand-eye solve failed: {ex.Message}", ex);
         }
         catch (InvalidOperationException ex)
         {

@@ -1488,9 +1488,9 @@ function Editor() {
 
     const applyCalibrationParameters = (parameters: Record<string, unknown>) => {
     const typeKey = String(selectedNode?.data.typeKey ?? '');
-    const supported = ['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort'];
+    const supported = ['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort', 'calibration.handEye2D', 'calibration.handEye3D'];
     if (!selectedId || !supported.includes(typeKey)) {
-      messageApi.warning('请先选择平面标定、相机内参或去畸变节点');
+      messageApi.warning('请先选择受支持的标定节点');
       return;
     }
     setNodes((current) => current.map((node) =>
@@ -2209,7 +2209,7 @@ function Editor() {
             <LazyPanel open={calibrationOpen}><CalibrationPanel
         open
         onClose={() => setCalibrationOpen(false)}
-        canApplyToSelectedNode={['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort'].includes(String(selectedNode?.data.typeKey ?? ''))}
+        canApplyToSelectedNode={['calibration.planar', 'calibration.cameraIntrinsics', 'image.undistort', 'calibration.handEye2D', 'calibration.handEye3D'].includes(String(selectedNode?.data.typeKey ?? ''))}
         selectedNodeType={selectedNode ? String(selectedNode.data.typeKey) : undefined}
         onApplyToSelectedNode={applyCalibrationParameters}
       /></LazyPanel>

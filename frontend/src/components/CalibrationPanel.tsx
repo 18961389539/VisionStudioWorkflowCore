@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
 import CalibrationIntrinsicsWizard from './CalibrationIntrinsicsWizard';
 import CalibrationHandEyeWizard from './CalibrationHandEyeWizard';
+import CalibrationHandEye3DWizard from './CalibrationHandEye3DWizard';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -314,7 +315,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             label: '相机内参向导',
             children: (
               <CalibrationIntrinsicsWizard
-                canApplyToSelectedNode={canApplyToSelectedNode}
+                canApplyToSelectedNode={canApplyToSelectedNode && ['calibration.cameraIntrinsics', 'image.undistort'].includes(selectedNodeType ?? '')}
                 selectedNodeType={selectedNodeType}
                 onApplyToSelectedNode={onApplyToSelectedNode}
               />
@@ -325,7 +326,18 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             label: '手眼向导',
             children: (
               <CalibrationHandEyeWizard
-                canApplyToSelectedNode={canApplyToSelectedNode}
+                canApplyToSelectedNode={canApplyToSelectedNode && selectedNodeType === 'calibration.handEye2D'}
+                selectedNodeType={selectedNodeType}
+                onApplyToSelectedNode={onApplyToSelectedNode}
+              />
+            )
+          },
+          {
+            key: 'handeye3d',
+            label: '三维手眼向导',
+            children: (
+              <CalibrationHandEye3DWizard
+                canApplyToSelectedNode={canApplyToSelectedNode && selectedNodeType === 'calibration.handEye3D'}
                 selectedNodeType={selectedNodeType}
                 onApplyToSelectedNode={onApplyToSelectedNode}
               />
