@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError, apiFetch, apiJson, isAbortError, isTimeoutError,
-  apiFetchDeduped, cachedGet, invalidateCache, RequestToken, clearDedupedRequests
+  apiFetchDeduped, cancelDedupedRequest, cachedGet, invalidateCache, RequestToken, clearDedupedRequests
 } from '../apiClient';
 
 function abortableFetch() {
@@ -121,6 +121,72 @@ describe('apiFetchDeduped', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('gives each caller an independently consumable response body', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: 1 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [a, b, c] = await Promise.all([
+      apiFetchDeduped('/api/body-share', { dedupe: true }).then((r) => r.json()),
+      apiFetchDeduped('/api/body-share', { dedupe: true }).then((r) => r.json()),
+      apiFetchDeduped('/api/body-share', { dedupe: true }).then((r) => r.json())
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(a).toEqual({ ok: 1 });
+    expect(b).toEqual({ ok: 1 });
+    expect(c).toEqual({ ok: 1 });
+  });
+
+  it('does not dedupe GET requests that carry a body', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await Promise.all([
+      apiFetchDeduped('/api/body-get', { dedupe: true, body: '{"x":1}' }),
+      apiFetchDeduped('/api/body-get', { dedupe: true, body: '{"x":1}' })
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancelDedupedRequest aborts the shared request for all callers', async () => {
+    vi.stubGlobal('fetch', abortableFetch());
+
+    const first = apiFetchDeduped('/api/cancel-shared', { dedupe: true }).catch((reason) => reason);
+    const second = apiFetchDeduped('/api/cancel-shared', { dedupe: true }).catch((reason) => reason);
+    cancelDedupedRequest('/api/cancel-shared');
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(isAbortError(a)).toBe(true);
+    expect(isAbortError(b)).toBe(true);
+  });
+
+  it('starts a new request after the shared one was cancelled', async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((resolve, reject) => {
+        resolvers.push(resolve);
+        const signal = init?.signal;
+        if (signal) {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = apiFetchDeduped('/api/restart', { dedupe: true }).catch((reason) => reason);
+    cancelDedupedRequest('/api/restart');
+    const second = apiFetchDeduped('/api/restart', { dedupe: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // 收尾：放行第二个（未取消的）请求，避免悬挂 promise
+    resolvers[resolvers.length - 1]?.(new Response('{}', { status: 200 }));
+    const [a, b] = await Promise.all([first, second]);
+    expect(isAbortError(a)).toBe(true);
+    expect((b as Response).status).toBe(200);
+  });
 });
 
 describe('cachedGet', () => {
@@ -162,6 +228,45 @@ describe('cachedGet', () => {
     await cachedGet('/api/inv', { ttlMs: 60_000 });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache failed responses', async () => {
+    let calls = 0;
+    const fetchMock = vi.fn(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response('boom', { status: 500 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(cachedGet('/api/flaky', { ttlMs: 60_000 })).rejects.toBeInstanceOf(ApiError);
+    await expect(cachedGet('/api/flaky', { ttlMs: 60_000 })).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns deep copies so callers cannot poison the cache', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ list: [1, 2] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = await cachedGet<{ list: number[] }>('/api/mutable', { ttlMs: 60_000 });
+    first.list.push(3);
+    const second = await cachedGet<{ list: number[] }>('/api/mutable', { ttlMs: 60_000 });
+
+    expect(second.list).toEqual([1, 2]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts the oldest entry beyond maxEntries (FIFO)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      new Response(JSON.stringify({ url: String(input) }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cachedGet('/api/evict-a', { ttlMs: 60_000, maxEntries: 1 });
+    await cachedGet('/api/evict-b', { ttlMs: 60_000, maxEntries: 1 }); // 淘汰 evict-a
+    await cachedGet('/api/evict-a', { ttlMs: 60_000, maxEntries: 1 }); // 未命中，重新请求
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 

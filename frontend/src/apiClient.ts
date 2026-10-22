@@ -103,41 +103,64 @@ export async function apiText(
 
 // ── 请求去重 ──────────────────────────────────────────────────────────────────
 
-/** 进行中的去重请求；key 为 `method url body` 拼接。 */
-const inFlightRequests = new Map<string, Promise<Response>>();
-
-/** 取消指定去重请求（例如面板关闭时）。 */
-export function cancelDedupedRequest(url: string, method = 'GET'): void {
-  const key = `${method.toUpperCase()} ${url}`;
-  inFlightRequests.delete(key);
+interface DedupeEntry {
+  promise: Promise<Response>;
+  controller: AbortController;
 }
 
-/** 清空全部去重请求；仅测试用。 */
+/** 进行中的去重请求；key 为 `GET url`。 */
+const inFlightRequests = new Map<string, DedupeEntry>();
+
+/** 取消指定去重请求：中止共享请求，所有共享方收到 AbortError（例如面板关闭时）。 */
+export function cancelDedupedRequest(url: string, method = 'GET'): void {
+  const key = `${method.toUpperCase()} ${url}`;
+  const entry = inFlightRequests.get(key);
+  if (!entry) return;
+  inFlightRequests.delete(key);
+  entry.controller.abort();
+}
+
+/** 清空全部去重请求记录（不中止底层请求）；仅测试用。 */
 export function clearDedupedRequests(): void {
   inFlightRequests.clear();
 }
 
 /**
- * 相同 `method url body` 的并发 GET 请求只发一次，后续调用共享同一 Promise。
- * 仅对无 body 且 dedupe: true 的请求生效（默认 false，不影响现有调用）。
+ * 相同 URL 的并发 GET 请求只发一次，后续调用共享同一请求。
+ * - 仅对无 body 且 dedupe: true 的 GET 生效（默认 false，不影响现有调用）；
+ * - 每个调用方拿到独立的 Response 克隆，body 可各自消费；
+ * - 共享方共用一个请求生命周期：任一调用方的 signal 中止或 cancelDedupedRequest
+ *   都会中止共享请求，所有共享方收到 AbortError。接入前须确认没有
+ *   “变更后刷新同 URL”的调用顺序（合并会读到变更前的在途响应）。
  */
 export async function apiFetchDeduped(
   input: RequestInfo | URL,
   options: ApiFetchOptions & { dedupe?: boolean } = {}
 ): Promise<Response> {
-  const { dedupe = false, ...rest } = options;
-  if (!dedupe || (rest.method && rest.method.toUpperCase() !== 'GET')) {
-    return apiFetch(input, rest);
+  const { dedupe = false, signal, ...rest } = options;
+  if (!dedupe || (rest.method && rest.method.toUpperCase() !== 'GET') || rest.body != null) {
+    return apiFetch(input, { ...rest, signal });
   }
 
   const url = String(input);
   const key = `GET ${url}`;
   const existing = inFlightRequests.get(key);
-  if (existing) return existing;
+  if (existing) return existing.promise.then((response) => response.clone());
 
-  const promise = apiFetch(url, rest).finally(() => { inFlightRequests.delete(key); });
-  inFlightRequests.set(key, promise);
-  return promise;
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason);
+    else signal.addEventListener('abort', forwardAbort, { once: true });
+  }
+
+  const promise = apiFetch(url, { ...rest, signal: controller.signal })
+    .finally(() => {
+      inFlightRequests.delete(key);
+      signal?.removeEventListener('abort', forwardAbort);
+    });
+  inFlightRequests.set(key, { promise, controller });
+  return promise.then((response) => response.clone());
 }
 
 // ── 响应缓存 ──────────────────────────────────────────────────────────────────
@@ -147,11 +170,17 @@ interface CacheEntry { data: unknown; timestamp: number }
 /** URL → 缓存条目；仅在 cachedGet 显式使用时生效。 */
 const responseCache = new Map<string, CacheEntry>();
 
+/** 缓存数据恒来自 response.json()（纯 JSON，无 Date/Map 等实例），JSON 往返即安全深拷贝。 */
+function cloneCached<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 /**
  * 带缓存的 GET 请求：
  * - 同一 URL 在 ttlMs 内直接返回缓存结果（不发请求）；
+ * - 返回值是缓存数据的深拷贝，调用方变更返回值不会污染缓存；
  * - `forceRefresh: true` 绕过缓存；
- * - `maxEntries` 超过时按插入顺序淘汰（简单 LRU）。
+ * - `maxEntries` 超过时按插入顺序淘汰最早条目（FIFO，非 LRU）。
  */
 export async function cachedGet<T>(
   url: string,
@@ -167,11 +196,12 @@ export async function cachedGet<T>(
   const { ttlMs = 5_000, forceRefresh = false, maxEntries = 100, ...fetchOptions } = options;
   if (!forceRefresh) {
     const cached = responseCache.get(url);
-    if (cached && Date.now() - cached.timestamp < ttlMs) return cached.data as T;
+    if (cached && Date.now() - cached.timestamp < ttlMs) return cloneCached(cached.data) as T;
   }
 
   const data = await apiJson<T>(url, { ...fetchOptions, errorLabel: options.errorLabel ?? 'Cached GET failed' });
-  responseCache.set(url, { data, timestamp: Date.now() });
+  // 存入深拷贝：新调用方直接持有的 data 与缓存隔离，变更互不影响。
+  responseCache.set(url, { data: cloneCached(data), timestamp: Date.now() });
 
   if (responseCache.size > maxEntries) {
     const firstKey = responseCache.keys().next().value;

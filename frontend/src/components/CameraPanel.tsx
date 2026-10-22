@@ -73,8 +73,8 @@ export default function CameraPanel({ open, onClose }: Props) {
   const selected = useMemo(() => cameras.find((camera) => camera.id === selectedId), [cameras, selectedId]);
 
   // R04：轮询代次 + 取消 + 超时——旧响应绝不覆盖新结果，挂起请求可被显式中断。
+  // 轮询 token 仅在 refresh 作用域内使用（超时触发取消），无需组件级引用。
   const refreshGeneration = useRef(0);
-  const refreshAbort = useRef<RequestToken | null>(null);
   const refreshInFlight = useRef(false);
 
   const refresh = async (quiet = false) => {
@@ -83,7 +83,6 @@ export default function CameraPanel({ open, onClose }: Props) {
     refreshInFlight.current = true;
     const generation = ++refreshGeneration.current;
     const token = new RequestToken();
-    refreshAbort.current = token;
     const timeout = window.setTimeout(() => token.cancel(), CAMERA_POLL_TIMEOUT_MS);
     try {
       const response = await apiFetch(cameraEndpoints.list, { signal: token.signal });
@@ -99,7 +98,6 @@ export default function CameraPanel({ open, onClose }: Props) {
       if (!quiet) messageApi.error(error instanceof Error ? error.message : '相机接口不可用');
     } finally {
       window.clearTimeout(timeout);
-      if (refreshAbort.current === token) refreshAbort.current = null;
       refreshInFlight.current = false;
     }
   };
