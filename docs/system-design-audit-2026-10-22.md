@@ -434,6 +434,11 @@ modelPackages/modules/diagnostics/hardwareProvenance 等 **22 个域**）。新�
 
 `NodeConfigurationDialog`（原 2042 行）拆分：21 个纯逻辑工具函数提取到
 `nodeConfigurationUtils.ts`（192 行），主组件降至 **1876 行**（−166 行）。
+
+`ImageViewer`（原 1772 行）拆分：
+- `imageViewerTypes.ts`（19 行）：ToolMode / ViewState / Point / RoiDragMode / MeasurementDragMode / CaliperDiagnosticSelection 等类型
+- `imageViewerUtils.tsx`（739 行）：卡尺 handle 计算、ROI 几何操作、Konva 子组件（CaliperDiagnosticShape / OverlayShape / RoiShape / RoiHandles / MeasurementGeometryShape / BrushRoiShape）
+- 主组件降至 **1050 行**（−722 行）
 `Dialog` 已有 10 个子面板组件（CaliperCircleQuickSettings、CaliperEdgeDiagnosticsPanel、
 MatchingAutoTunePanel 等）在独立文件中。
 
