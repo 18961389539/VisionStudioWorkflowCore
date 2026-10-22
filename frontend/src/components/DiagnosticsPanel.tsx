@@ -4,6 +4,7 @@ import { Alert, Button, Modal, Segmented, Space, Statistic, Table, Tag, Typograp
 import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
+import { apiUrl } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
 type Filter = 'All' | AssetKind;
@@ -24,7 +25,7 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
   const refresh = useCallback(async () => {
     try {
       const [a, e, s] = await Promise.all([
-        apiFetch('/api/diagnostics/assets'), apiFetch('/api/diagnostics/events?take=250'), apiFetch('/api/diagnostics/summary')
+        apiFetch(apiUrl('diagnostics/assets')), apiFetch(apiUrl('diagnostics/events?take=250')), apiFetch(apiUrl('diagnostics/summary'))
       ]);
       if (!a.ok || !e.ok || !s.ok) throw new Error('Diagnostics API unavailable');
       setAssets(await a.json()); setEvents(await e.json()); setSummary(await s.json()); setError(undefined);

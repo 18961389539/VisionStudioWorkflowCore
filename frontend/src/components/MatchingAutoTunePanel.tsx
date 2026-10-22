@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Space, Tag } from 'antd';
 import { apiFetch } from '../apiClient';
+import { apiUrl } from '../endpoints';
 
 type Warning = { code: string; message: string };
 
@@ -93,7 +94,7 @@ export default function MatchingAutoTunePanel({ nodeType, parameters, disabled, 
     setError(undefined);
     setApplied(false);
     try {
-      const response = await apiFetch('/api/matching/auto-tune', {
+      const response = await apiFetch(apiUrl('matching/auto-tune'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

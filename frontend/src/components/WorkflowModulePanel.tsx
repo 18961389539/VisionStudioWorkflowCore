@@ -4,6 +4,7 @@ import { responseErrorMessage } from '../apiErrors';
 import type { PrepareWorkflowChange, PreparedWorkflowChange } from '../useWorkflowChanges';
 import type { ExtractWorkflowModuleResult, WorkflowModuleDescriptor, WorkflowModuleVersion, WorkflowPayload } from '../types';
 import { apiFetch } from '../apiClient';
+import { API_BASE, apiUrl } from '../endpoints';
 
 type Props = {
   open: boolean;
@@ -52,7 +53,7 @@ export default function WorkflowModulePanel(props: Props) {
     const controller = new AbortController(); catalogAbort.current = controller;
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await apiFetch('/api/modules', { signal: controller.signal });
+      const response = await apiFetch(apiUrl('modules'), { signal: controller.signal });
       if (!response.ok) throw new Error(await responseErrorMessage(response, '模块列表加载失败'));
       const data: WorkflowModuleDescriptor[] = await response.json();
       if (!active.current || generation !== catalogGeneration.current || controller.signal.aborted) return;
@@ -76,7 +77,7 @@ export default function WorkflowModulePanel(props: Props) {
     const timeout = setTimeout(() => controller.abort(), 15_000);
     void (async () => {
       try {
-        const response = await apiFetch(`/api/modules/${encodeURIComponent(activeModuleId)}`, { signal: controller.signal });
+        const response = await apiFetch(`${API_BASE}/modules/${encodeURIComponent(activeModuleId)}`, { signal: controller.signal });
         if (!response.ok) return;
         const detail: WorkflowModuleDescriptor = await response.json();
         if (!cancelled && !controller.signal.aborted && detail?.id === activeModuleId && Array.isArray(detail.versions)) setDetailCache((current) => ({ ...current, [activeModuleId]: detail }));
@@ -122,7 +123,7 @@ export default function WorkflowModulePanel(props: Props) {
     let rejected = false;
     const timeout = setTimeout(() => action.controller.abort(), 20_000);
     try {
-      const response = await apiFetch('/api/modules/extract', {
+      const response = await apiFetch(apiUrl('modules/extract'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: action.controller.signal,
         body: JSON.stringify({ workflow: props.currentWorkflow, selectedNodeIds: selectedNodes, id: moduleId, name, description, note })
       });
@@ -149,7 +150,7 @@ export default function WorkflowModulePanel(props: Props) {
     let rejected = false;
     const timeout = setTimeout(() => action.controller.abort(), 20_000);
     try {
-      const response = await apiFetch(`/api/modules/${encodeURIComponent(editingModuleId)}/versions`, {
+      const response = await apiFetch(`${API_BASE}/modules/${encodeURIComponent(editingModuleId)}/versions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: action.controller.signal,
         body: JSON.stringify({ workflow: props.currentWorkflow, note })
       });

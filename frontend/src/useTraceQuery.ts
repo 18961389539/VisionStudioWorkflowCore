@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TracePage, TraceStats, TraceStorageStatus } from './types';
 import { buildStatsParams, buildTraceParams, describeRange, validateTraceFilter, type TraceFilterState } from './traceQuery';
 import { apiFetch } from './apiClient';
+import { API_BASE, apiUrl } from './endpoints';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -93,7 +94,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
     }
 
     const listRequest = load<TracePage>(
-      `/api/traces/page?${buildTraceParams(filter, offset, page.pageSize, queryTime)}`,
+      `${API_BASE}/traces/page?${buildTraceParams(filter, offset, page.pageSize, queryTime)}`,
       '查询',
       (value) => {
         setData(value);
@@ -104,12 +105,12 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
       setError,
     ).finally(() => { if (active) setLoading(false); });
     const statsRequest = load<TraceStats>(
-      `/api/traces/stats?${buildStatsParams(filter, queryTime)}`,
+      `${API_BASE}/traces/stats?${buildStatsParams(filter, queryTime)}`,
       '统计查询', setStats,
       (message) => setResourceErrors((current) => ({ ...current, stats: message })),
     );
     const storageRequest = load<TraceStorageStatus>(
-      '/api/storage/status', '存储状态查询', setStorage,
+      apiUrl('storage/status'), '存储状态查询', setStorage,
       (message) => setResourceErrors((current) => ({ ...current, storage: message })),
     );
     void Promise.all([listRequest, statsRequest, storageRequest]).finally(() => clearTimeout(timeout));

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd';
 import { apiFetch } from '../apiClient';
+import { apiUrl } from '../endpoints';
 
 type FrameTransform = {
   key: string;
@@ -45,7 +46,7 @@ export default function FrameTreePanel({ open, onClose }: { open: boolean; onClo
   const resolve = async () => {
     setBusy(true);
     try {
-      const response = await apiFetch('/api/frames/resolve', {
+      const response = await apiFetch(apiUrl('frames/resolve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transforms: rows.map(({ key: _key, ...r }) => r), sourceFrame: source, targetFrame: target })

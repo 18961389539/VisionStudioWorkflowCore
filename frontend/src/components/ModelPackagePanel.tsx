@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
+import { API_BASE, apiUrl } from '../endpoints';
 
 type PackageSummary = {
   id: string; kind: string; name: string; description?: string | null; path: string; importedAt: string; fileCount: number;
@@ -19,7 +20,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const [messageApi, holder] = message.useMessage();
 
   const load = async () => {
-    const response = await apiFetch('/api/model-packages');
+    const response = await apiFetch(apiUrl('model-packages'));
     if (response.ok) setPackages(await response.json());
   };
 
@@ -28,7 +29,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const preflight = async () => {
     setBusy(true);
     try {
-      const response = await apiFetch('/api/model-packages/preflight', {
+      const response = await apiFetch(apiUrl('model-packages/preflight'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourcePath, expectedKind: expectedKind || null }),
       });
@@ -43,7 +44,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const importPackage = async () => {
     setBusy(true);
     try {
-      const response = await apiFetch('/api/model-packages/import', {
+      const response = await apiFetch(apiUrl('model-packages/import'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sourcePath, packageId: packageId || null, expectedKind: expectedKind || null }),
       });
@@ -60,7 +61,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const runSmoke = async (id: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`/api/model-packages/${encodeURIComponent(id)}/smoke`, {
+      const response = await apiFetch(`${API_BASE}/model-packages/${encodeURIComponent(id)}/smoke`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ openOnnxSession: false }),
       });
@@ -77,7 +78,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const remove = async (id: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`/api/model-packages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const response = await apiFetch(`${API_BASE}/model-packages/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error(await response.text());
       messageApi.success('已删除');
       await load();

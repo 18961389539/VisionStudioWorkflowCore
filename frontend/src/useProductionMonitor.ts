@@ -3,6 +3,7 @@ import type { AlarmRecord, ProductionRuntimeConfig, ProductionRuntimeStatus } fr
 import { responseErrorMessage } from './apiErrors';
 import { isProductionConfig, isProductionStatus } from './productionConfig';
 import { apiFetch } from './apiClient';
+import { apiUrl } from './endpoints';
 
 export type ProductionJobItem = { id: string; name: string; publishedVersion?: number | null };
 export type DeviceActionPendingState = {
@@ -17,11 +18,11 @@ type Snapshot = {
 };
 type Resource = keyof Snapshot;
 const endpoints: Record<Resource, { url: string; label: string }> = {
-  status: { url: '/api/production/status', label: '生产状态' },
-  config: { url: '/api/production/config', label: '生产配置' },
-  jobs: { url: '/api/jobs', label: '配方列表' },
-  alarms: { url: '/api/alarms?activeOnly=false', label: '告警记录' },
-  pending: { url: '/api/production/device-actions/pending', label: '待核对动作清单' },
+  status: { url: apiUrl('production/status'), label: '生产状态' },
+  config: { url: apiUrl('production/config'), label: '生产配置' },
+  jobs: { url: apiUrl('jobs'), label: '配方列表' },
+  alarms: { url: apiUrl('alarms?activeOnly=false'), label: '告警记录' },
+  pending: { url: apiUrl('production/device-actions/pending'), label: '待核对动作清单' },
 };
 const resources = Object.keys(endpoints) as Resource[];
 type Request = { controller: AbortController; timeout: ReturnType<typeof setTimeout> };

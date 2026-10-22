@@ -5,6 +5,7 @@ import { isValidationRun } from './tuningContracts';
 import { isWorkflowDocument } from './workflowDocument';
 import { withRequestTimeout } from './requestTimeout';
 import { apiFetch } from './apiClient';
+import { API_BASE } from './endpoints';
 
 type Params = {
   open: boolean; datasetId?: string; scopeRevision: number; workflow: WorkflowPayload; revision: number; runs: ValidationRunRecord[];
@@ -68,8 +69,8 @@ export function useTuningCandidates(params: Params) {
     let knownFailure = false;
     const marker = action === 'validation' ? `parameter-tuning:${crypto.randomUUID()}` : undefined;
     try {
-      const url = action === 'validation' ? `/api/validation/datasets/${encodeURIComponent(context.datasetId)}/runs`
-        : `/api/validation/runs/${encodeURIComponent(runId!)}/workflow`;
+      const url = action === 'validation' ? `${API_BASE}/validation/datasets/${encodeURIComponent(context.datasetId)}/runs`
+        : `${API_BASE}/validation/runs/${encodeURIComponent(runId!)}/workflow`;
       const data: unknown = await withRequestTimeout(controller, action === 'validation' ? 20_000 : 15_000, async () => {
         const response = await apiFetch(url, action === 'validation' ? { method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: marker, workflow: JSON.parse(context.snapshot) }) }

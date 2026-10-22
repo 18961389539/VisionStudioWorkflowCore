@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Checkbox, Col, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, OfflineReplayContext, OfflineReplayResult, WorkflowPayload } from '../types';
 import { apiFetch } from '../apiClient';
+import { API_BASE } from '../endpoints';
 
 type Props = { open: boolean; runId?: string; initialNodeId?: string; onClose: () => void };
 type DebugMode = 'Full' | 'RunNode' | 'RunFromNode' | 'Breakpoints';
@@ -25,7 +26,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
 
   const load = async () => {
     if (!runId) return;
-    const response = await apiFetch(`/api/traces/${runId}/replay/context`);
+    const response = await apiFetch(`${API_BASE}/traces/${runId}/replay/context`);
     const data = await response.json();
     if (!response.ok) {
       messageApi.error(data.detail ?? data.error ?? '加载回放上下文失败');
@@ -63,7 +64,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
     if (mode === 'Breakpoints' && breakpoints.length === 0) return messageApi.warning('请至少选择一个断点');
     setRunning(true);
     try {
-      const response = await apiFetch(`/api/traces/${runId}/replay`, {
+      const response = await apiFetch(`${API_BASE}/traces/${runId}/replay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,8 +105,8 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
           <Button loading={running} disabled={!context.replayable || !selectedNodeId} onClick={() => void execute('RunFromNode')}>从此处运行</Button>
           <Button loading={running} disabled={!context.replayable || breakpoints.length === 0} onClick={() => void execute('Breakpoints')}>运行到断点</Button>
           <Button onClick={() => context && setWorkflow(cloneWorkflow(context.workflow))}>重置参数</Button>
-          {context.hasReplayInput && <Button onClick={() => window.open(`/api/traces/${context.sourceRunId}/replay/input`, '_blank')}>回放输入</Button>}
-          {result?.previewAvailable && <Button onClick={() => window.open(`/api/runs/${result.runId}/preview?t=${Date.now()}`, '_blank')}>回放预览</Button>}
+          {context.hasReplayInput && <Button onClick={() => window.open(`${API_BASE}/traces/${context.sourceRunId}/replay/input`, '_blank')}>回放输入</Button>}
+          {result?.previewAvailable && <Button onClick={() => window.open(`${API_BASE}/runs/${result.runId}/preview?t=${Date.now()}`, '_blank')}>回放预览</Button>}
         </Space>
 
         <Row gutter={12}>

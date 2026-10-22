@@ -6,7 +6,7 @@ import { workflowWithNodeParameters, type NodeParameters } from './nodeConfigura
 import { apiErrorMessage, responseErrorMessage } from './apiErrors';
 import { isRunResult } from './runResult';
 import { apiFetch } from './apiClient';
-import { debug as debugEndpoints } from './endpoints';
+import { debug as debugEndpoints, apiUrl } from './endpoints';
 
 export type BottomTab = 'result' | 'issues' | 'observability';
 
@@ -241,7 +241,7 @@ export function useRunController({
     }
   };
 
-  const run = () => execute('/api/run', workflowPayload);
+  const run = () => execute(apiUrl('run'), workflowPayload);
   const abortRun = () => {
     const operation = operationRef.current;
     if (operation?.kind === 'run' || operation?.kind === 'preview') operation.controller.abort();
@@ -280,11 +280,11 @@ export function useRunController({
 
   const runNode = () => {
     if (!selectedId) return messageApi.warning('先选择一个节点');
-    return execute('/api/debug/run', { workflow: workflowPayload, options: { mode: 'RunNode', targetNodeId: selectedId, breakpoints: [] } });
+    return execute(apiUrl('debug/run'), { workflow: workflowPayload, options: { mode: 'RunNode', targetNodeId: selectedId, breakpoints: [] } });
   };
   const runFromHere = () => {
     if (!selectedId) return messageApi.warning('先选择一个节点');
-    return execute('/api/debug/run', { workflow: workflowPayload, options: { mode: 'RunFromNode', targetNodeId: selectedId, breakpoints: [] } });
+    return execute(apiUrl('debug/run'), { workflow: workflowPayload, options: { mode: 'RunFromNode', targetNodeId: selectedId, breakpoints: [] } });
   };
 
   // 切换文档后才返回的会话只用于释放；不允许把现场或结果应用到新文档。

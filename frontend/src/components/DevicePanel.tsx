@@ -4,6 +4,7 @@ import type { DeviceDescriptor, DeviceRuntimeSettings, DeviceTagDefinition } fro
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
+import { API_BASE, apiUrl } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
 type WriteForm = { tagId: string; value: string };
@@ -94,7 +95,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     let timedOut = false;
     const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, DEVICE_POLL_TIMEOUT_MS);
     try {
-      const response = await apiFetch('/api/devices', { signal: controller.signal });
+      const response = await apiFetch(apiUrl('devices'), { signal: controller.signal });
       if (!response.ok) throw new Error(await responseErrorMessage(response, `Device runtime unavailable (HTTP ${response.status})`));
       const data: DeviceDescriptor[] = await response.json();
       if (generation !== refreshGeneration.current || (controller.signal.aborted && !timedOut)) return; // 旧响应/已取消请求不得提交
@@ -154,7 +155,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy(action);
     try {
-      const response = await apiFetch(`/api/devices/${encodeURIComponent(selected.id)}/${action}`, { method: 'POST' });
+      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/${action}`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, `${action} failed`));
       await refresh(true);
@@ -167,7 +168,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('readAll');
     try {
-      const response = await apiFetch(`/api/devices/${encodeURIComponent(selected.id)}/read-all`, { method: 'POST' });
+      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/read-all`, { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, 'Batch read failed'));
       await refresh(true);
@@ -180,7 +181,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('settings');
     try {
-      const response = await apiFetch(`/api/devices/${encodeURIComponent(selected.id)}/settings`, {
+      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/settings`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
       });
       const data = await response.json().catch(() => ({}));
@@ -203,7 +204,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected || !selectedTag?.writable) return;
     setBusy('write');
     try {
-      const response = await apiFetch(`/api/devices/${encodeURIComponent(selected.id)}/tags/${encodeURIComponent(values.tagId)}`, {
+      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/tags/${encodeURIComponent(values.tagId)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: parseValue(selectedTag, values.value) })
       });
       const data = await response.json().catch(() => ({}));
@@ -228,7 +229,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     try {
       const tags = JSON.parse(values.tagsJson) as DeviceTagDefinition[];
       if (!Array.isArray(tags) || tags.length === 0) throw new Error('Tag Mapping JSON must be a non-empty array');
-      const endpoint = values.kind === 'modbus' ? '/api/devices/register/modbus-tcp' : '/api/devices/register/s7';
+      const endpoint = values.kind === 'modbus' ? apiUrl('devices/register/modbus-tcp') : apiUrl('devices/register/s7');
       const payload = values.kind === 'modbus'
         ? { id: values.id, name: values.name, host: values.host, port: values.port, unitId: values.unitId ?? 1, registerOrder: values.registerOrder ?? 'ABCD', timeoutMs: values.timeoutMs, tags }
         : { id: values.id, name: values.name, host: values.host, port: values.port, cpuType: values.cpuType ?? 'S71500', rack: values.rack ?? 0, slot: values.slot ?? 0, timeoutMs: values.timeoutMs, tags };
@@ -247,7 +248,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected || selected.id === 'virtual-modbus-1') return;
     setBusy('remove');
     try {
-      const response = await apiFetch(`/api/devices/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
+      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(apiErrorMessage(data, '移除失败'));

@@ -6,6 +6,7 @@ import { isProductionConfig, isProductionStatus } from '../productionConfig';
 import { useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
 import { useProductionConfigDraft } from '../useProductionConfigDraft';
 import { useProductionActions } from '../useProductionActions';
+import { API_BASE, apiUrl, jobs } from '../endpoints';
 
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 
@@ -36,7 +37,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const startProduction = () => {
     const current = readCurrent();
     if (!statusFresh || !configReady || locked || current.dirty || current.conflict || !current.config?.jobId) return;
-    void call({ url: '/api/production/start', body: { jobId: current.config.jobId }, successMessage: '生产已启动', action: 'start', onSuccess: acceptStatus });
+    void call({ url: apiUrl('production/start'), body: { jobId: current.config.jobId }, successMessage: '生产已启动', action: 'start', onSuccess: acceptStatus });
   };
   const saveConfig = async () => {
     const current = readCurrent();
@@ -45,7 +46,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
     const finishSave = beginSave();
     if (!finishSave) return;
     try {
-      await call({ url: '/api/production/config', method: 'PUT', body: submitted, successMessage: '生产配置已保存', action: 'save', onSuccess: (data) => {
+      await call({ url: apiUrl('production/config'), method: 'PUT', body: submitted, successMessage: '生产配置已保存', action: 'save', onSuccess: (data) => {
         if (!isProductionConfig(data)) throw new Error('响应未包含有效的生产配置');
         acceptSaved(submitted, data);
         monitor.acceptConfig(data);
@@ -99,8 +100,8 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const actions = (
     <div className="production-actions">
       <Button type="primary" disabled={Boolean(startBlockedReason) || busy.size > 0} loading={busy.has('start')} onClick={() => void startProduction()}>启动生产</Button>
-      <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')} onClick={() => void call({ url: '/api/production/stop', successMessage: '生产已停止', action: 'stop', onSuccess: acceptStatus })}>停止</Button>
-      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: '/api/production/recover', successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
+      <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')} onClick={() => void call({ url: apiUrl('production/stop'), successMessage: '生产已停止', action: 'stop', onSuccess: acceptStatus })}>停止</Button>
+      <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: apiUrl('production/recover'), successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
       {startBlockedReason && <span className="production-actions-hint">{startBlockedReason}</span>}
     </div>
   );
@@ -210,7 +211,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         { title: '代码', dataIndex: 'code', width: 150 },
         { title: '消息', dataIndex: 'message' },
         { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
-        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: `/api/alarms/${encodeURIComponent(a.id)}/ack`, successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
+        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: `${API_BASE}/alarms/${encodeURIComponent(a.id)}/ack`, successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
       ]}
     />
   );
@@ -346,7 +347,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
           try {
             const values = await resolveForm.validateFields();
             if (!owns()) return;
-            const result = await call({ url: '/api/production/device-actions/resolve', action: 'resolve', successMessage: '核对证据已提交并写入审计', body: {
+            const result = await call({ url: apiUrl('production/device-actions/resolve'), action: 'resolve', successMessage: '核对证据已提交并写入审计', body: {
               runId: resolveTarget.kind === 'production' ? (resolveTarget.pending.runId ?? '') : '',
               manifestHash: resolveTarget.kind === 'production' ? (resolveTarget.pending.manifestHash ?? '') : '',
               deviceIds: resolveTarget.kind === 'production' ? (resolveTarget.pending.deviceIds ?? []) : [],

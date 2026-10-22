@@ -203,7 +203,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
   const addBinding = () => { if(!bindingTarget || !bindingKey.trim()) return; setBindings(x=>({...x,[bindingTarget]:`recipe.${bindingKey.trim()}`})); };
 
   const createRecipe = () => invoke(async () => {
-    const response = await apiFetch('/api/recipes', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
+    const response = await apiFetch(apiUrl('recipes'), { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建配方失败'); setSelectedId(data.id); setRecipeCreateOpen(false); setQuery(''); setStatusFilter('all'); setTab('versions'); messageApi.success('配方 V1 草稿已创建，验证通过后即可发布');
   });
   const saveVersion = () => selected && workflowMatchesSelectedRecipe && invoke(async () => {

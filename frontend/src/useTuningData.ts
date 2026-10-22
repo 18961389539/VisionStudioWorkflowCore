@@ -4,6 +4,7 @@ import { responseErrorMessage } from './apiErrors';
 import { isDatasetDetail, isDatasetSummary, isValidationRun } from './tuningContracts';
 import { withRequestTimeout } from './requestTimeout';
 import { apiFetch } from './apiClient';
+import { apiUrl } from './endpoints';
 
 type Resource = 'list' | 'detail' | 'runs';
 type Request = { controller: AbortController; id?: string };
@@ -43,7 +44,7 @@ export function useTuningData(open: boolean) {
       && (resource === 'list' || selected.current.datasetId === id);
     const label = resource === 'list' ? '数据集列表' : resource === 'detail' ? '数据集详情' : '验证记录';
     try {
-      const root = '/api/validation/datasets';
+      const root = apiUrl('validation/datasets');
       const url = resource === 'list' ? root : `${root}/${encodeURIComponent(id!)}${resource === 'runs' ? '/runs' : ''}`;
       const data: unknown = await withRequestTimeout(controller, 15_000, async () => {
         const response = await apiFetch(url, { signal: controller.signal });

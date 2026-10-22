@@ -3,6 +3,7 @@ import { Button, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, Ty
 import type { HardwareProvenanceDeclaration, HardwareProvenanceSnapshot } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
+import { API_BASE, apiUrl } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -30,7 +31,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
   const [messageApi, contextHolder] = message.useMessage();
 
   const refresh = async () => {
-    const response = await apiFetch('/api/hardware-provenance');
+    const response = await apiFetch(apiUrl('hardware-provenance'));
     if (!response.ok) return;
     const data: HardwareProvenanceSnapshot[] = await response.json();
     setItems(data);
@@ -69,7 +70,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
     };
     setBusy(true);
     try {
-      const response = await apiFetch(`/api/hardware-provenance/${encodeURIComponent(selected.kind)}/${encodeURIComponent(selected.id)}`, {
+      const response = await apiFetch(`${API_BASE}/hardware-provenance/${encodeURIComponent(selected.kind)}/${encodeURIComponent(selected.id)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
       const data = await response.json().catch(() => ({}));
@@ -86,7 +87,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy(true);
     try {
-      const response = await apiFetch(`/api/hardware-provenance/${encodeURIComponent(selected.kind)}/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
+      const response = await apiFetch(`${API_BASE}/hardware-provenance/${encodeURIComponent(selected.kind)}/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
       if (!response.ok && response.status !== 404) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.detail ?? '删除失败');

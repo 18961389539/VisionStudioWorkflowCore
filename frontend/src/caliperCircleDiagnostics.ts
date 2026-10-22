@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { NodeRunReport, OverlayPoint } from './types';
 import { apiFetch } from './apiClient';
+import { API_BASE } from './endpoints';
 
 export type CaliperSpokeDiagnostic = {
   index: number; angleDeg: number; start: OverlayPoint; end: OverlayPoint; status: string;
@@ -45,7 +46,7 @@ export function useCaliperCircleDiagnostics({ enabled, runId, nodeId, report }: 
 }) {
   const available = report?.success === true && report.summary.caliperDiagnosticsAvailable === true;
   const key = enabled && available && runId ? `${runId}:${nodeId}:${report?.executionSequence ?? 0}` : undefined;
-  const baseUrl = `/api/runs/${encodeURIComponent(runId ?? '')}/nodes/${encodeURIComponent(nodeId)}/caliper-diagnostics`;
+  const baseUrl = `${API_BASE}/runs/${encodeURIComponent(runId ?? '')}/nodes/${encodeURIComponent(nodeId)}/caliper-diagnostics`;
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [manifestState, setManifestState] = useState<{ key: string; data?: CaliperDiagnosticManifest; error?: string }>();

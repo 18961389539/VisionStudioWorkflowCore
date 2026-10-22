@@ -4,6 +4,7 @@ import type { PortDescriptor, RunResult } from './types';
 import { portDisplayName } from './i18n/catalog';
 import { responseErrorMessage } from './apiErrors';
 import { apiFetch } from './apiClient';
+import { API_BASE } from './endpoints';
 
 /** 运行期逐节点、逐图像端口的图像清单条目（/api/runs/{runId}/images）。 */
 export type RunImageEntry = { portName: string; width: number; height: number };
@@ -94,7 +95,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     setCatalogRequest({ ...request, status: 'loading' });
     void (async () => {
       try {
-        const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/images`, { signal: controller.signal });
+        const response = await apiFetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/images`, { signal: controller.signal });
         if (cancelled || controller.signal.aborted) return;
         if (!response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
         const data: unknown = await response.json();
@@ -116,7 +117,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
 
   // 最终预览 URL 派生自结果：无预览的新结果不会保留旧图（cache-busting 时间戳随结果换代）
   const previewUrl = useMemo(
-    () => (result && result.previewAvailable ? `/api/runs/${encodeURIComponent(result.runId)}/preview?t=${Date.now()}` : undefined),
+    () => (result && result.previewAvailable ? `${API_BASE}/runs/${encodeURIComponent(result.runId)}/preview?t=${Date.now()}` : undefined),
     [result]);
 
   // 节点输入图像精确解析为边连接的上游输出端口，而不只是上游节点的默认图像端口。
@@ -149,7 +150,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     const nodeImage = (nodeId: string, portName?: string | null) => {
       const entry = runImageEntryForPort(catalog, nodeId, portName);
       return entry && catalog
-        ? { url: `/api/runs/${encodeURIComponent(catalog.runId)}/nodes/${encodeURIComponent(nodeId)}/image?portName=${encodeURIComponent(entry.portName)}`, width: entry.width, height: entry.height, portName: entry.portName }
+        ? { url: `${API_BASE}/runs/${encodeURIComponent(catalog.runId)}/nodes/${encodeURIComponent(nodeId)}/image?portName=${encodeURIComponent(entry.portName)}`, width: entry.width, height: entry.height, portName: entry.portName }
         : undefined;
     };
     if (imageSource === 'output' && selectedId) {
