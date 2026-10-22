@@ -4,7 +4,7 @@ import type { DeviceDescriptor, DeviceRuntimeSettings, DeviceTagDefinition } fro
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, devices as deviceEndpoints } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
 type WriteForm = { tagId: string; value: string };
@@ -155,7 +155,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy(action);
     try {
-      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/${action}`, { method: 'POST' });
+      const response = await apiFetch(deviceEndpoints.action(selected.id, action), { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, `${action} failed`));
       await refresh(true);
@@ -168,7 +168,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('readAll');
     try {
-      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/read-all`, { method: 'POST' });
+      const response = await apiFetch(deviceEndpoints.readAll(selected.id), { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, 'Batch read failed'));
       await refresh(true);
@@ -181,7 +181,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('settings');
     try {
-      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/settings`, {
+      const response = await apiFetch(deviceEndpoints.settings(selected.id), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
       });
       const data = await response.json().catch(() => ({}));
@@ -204,7 +204,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected || !selectedTag?.writable) return;
     setBusy('write');
     try {
-      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}/tags/${encodeURIComponent(values.tagId)}`, {
+      const response = await apiFetch(deviceEndpoints.tag(selected.id, values.tagId), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: parseValue(selectedTag, values.value) })
       });
       const data = await response.json().catch(() => ({}));
@@ -248,7 +248,7 @@ export default function DevicePanel({ open, onClose }: Props) {
     if (!selected || selected.id === 'virtual-modbus-1') return;
     setBusy('remove');
     try {
-      const response = await apiFetch(`${API_BASE}/devices/${encodeURIComponent(selected.id)}`, { method: 'DELETE' });
+      const response = await apiFetch(deviceEndpoints.byId(selected.id), { method: 'DELETE' });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(apiErrorMessage(data, '移除失败'));

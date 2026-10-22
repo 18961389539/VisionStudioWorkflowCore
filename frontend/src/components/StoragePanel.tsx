@@ -3,7 +3,7 @@ import { Alert, Button, Modal, Popconfirm, Space, Statistic, Switch, Table, Tag,
 import type { SchemaMigrationStatus, StorageBackupDescriptor, StorageCapacityStatus, StorageRestoreResult } from '../types';
 import { getInitialLang, localizeStatus, translate, type MessageKey, type MessageParams } from '../i18n';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, storage } from '../endpoints';
 
 // i18n Provider 尚未接线：按已存储的语言偏好静态解析词条（默认中文）
 const t = (key: MessageKey, params?: MessageParams) => translate(getInitialLang(), key, params);
@@ -64,7 +64,7 @@ export default function StoragePanel({ open, onClose }: Props) {
   const deleteBackup = async (backupId: string) => {
     setBusy(`delete:${backupId}`);
     try {
-      const response = await apiFetch(`${API_BASE}/storage/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
+      const response = await apiFetch(storage.backup(backupId), { method: 'DELETE' });
       if (!response.ok) throw new Error(await readProblem(response));
       messageApi.success(t('storage.backupDeleted'));
       await refresh();

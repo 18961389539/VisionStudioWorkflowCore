@@ -29,7 +29,7 @@ import { catalogItemChangesImageFrame, declaredFrameChange, legacyFrameChangingN
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
-import { API_BASE } from '../endpoints';
+import { runs } from '../endpoints';
 import {
   clipLineToImage,
   connectedRoiGeometry,
@@ -1013,7 +1013,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   }
   const displayImageSource = showCaliperDiagnostics
     ? { url: diagnosticImageMatches && displayedResult
-      ? `${API_BASE}/runs/${encodeURIComponent(displayedResult.runId)}/nodes/${encodeURIComponent(node.id)}/image?portName=image` : '',
+      ? runs.nodeImage(displayedResult.runId, node.id, 'image') : '',
       width: diagnosticImageEntry?.width, height: diagnosticImageEntry?.height,
       label: `${isCaliperEdge ? '边缘剖面诊断' : '单卡尺诊断'} · 本次实际测量图像（运行快照）` }
     : isRoiTransform && roiImageView === 'reference'

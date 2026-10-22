@@ -59,7 +59,7 @@ import { withSwitchPorts } from './switchPorts';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 import { apiFetch } from './apiClient';
-import { API_BASE, apiUrl, plugins as pluginEndpoints, workflows } from './endpoints';
+import { apiUrl, plugins as pluginEndpoints, workflows } from './endpoints';
 
 // R12（2026-10-12 复审）：低频重面板按需加载（dynamic import + Suspense）——首屏不下载其代码，
 // 首次打开时拉取并进入浏览器缓存。配对的渲染侧见 LazyPanel（条件挂载：关闭即卸载）。
@@ -1086,7 +1086,7 @@ function Editor() {
   const workflowImport = useWorkflowImport({ active: workflowPickerOpen, contextKey: workflowToLoad,
     prepare: workflowChanges.prepare, error: (text) => { void messageApi.error(text); } });
   const load = (requestedId: string) => workflowImport.load({
-    label: '加载已保存的工作流', url: `${API_BASE}/workflows/${encodeURIComponent(requestedId)}`,
+    label: '加载已保存的工作流', url: workflows.byId(requestedId),
     select: (data) => {
       if (!isWorkflowDocument(data) || data.id !== requestedId) throw new Error('响应工作流与选中的文档不匹配');
       return data;

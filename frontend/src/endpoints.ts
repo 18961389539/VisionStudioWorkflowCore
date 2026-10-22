@@ -1,8 +1,8 @@
 /**
  * 端点常量：统一所有 /api/ 路径的根与资源域。
  *
- * 当前运行时代码仍有约 300 处硬编码 '/api/...'，由 `apiUsage.test.ts` 的 fetch 棘轮兜底。
- * 本模块按资源域提供常量与 builder，新代码必须从这里取路径；迁移中的面板逐步改写。
+ * 2026-10-22 起运行时代码已全部收敛到本模块（`apiUsage.test.ts` 双棘轮锁死：
+ * 直接 fetch 调用与硬编码 /api/ 路径基线均为 0）。新代码必须从这里取路径；
  * 当 `API_BASE` 需要变化（如部署到子路径）时，只需改一处。
  */
 export const API_BASE = '/api';
@@ -25,13 +25,27 @@ export const jobs = {
   validationCandidates: (id: string, version: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${version}/validation-candidates`),
   validate: (id: string, version: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${version}/validation`),
   dependencies: (id: string) => apiUrl(`jobs/${encodeURIComponent(id)}/dependencies/validate`),
-  diff: (id: string, from: number, to: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${from}/diff/${to}`)
+  diff: (id: string, from: number, to: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${from}/diff/${to}`),
+  publishVersion: (id: string, version: string, expectedUpdatedAt: string) =>
+    apiUrl(`jobs/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}`),
+  rollbackVersion: (id: string, version: string, expectedUpdatedAt: string) =>
+    apiUrl(`jobs/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}`)
 } as const;
 
 // ── traces ────────────────────────────────────────────────────────────────────
 export const traces = {
   page: apiUrl('traces/page'),
-  stats: apiUrl('traces/stats')
+  pageQuery: (query: string) => apiUrl(`traces/page?${query}`),
+  stats: apiUrl('traces/stats'),
+  statsQuery: (query: string) => apiUrl(`traces/stats?${query}`),
+  observability: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/observability?days=7&history=100`),
+  disposition: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/disposition`),
+  compare: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/compare`),
+  failureSignature: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/failure-signature?days=30&take=12`),
+  replay: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay`),
+  replayContext: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay/context`),
+  replayInput: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/replay/input`),
+  preview: (runId: string, query: string) => apiUrl(`traces/${encodeURIComponent(runId)}/preview?${query}`)
 } as const;
 
 // ── validation ────────────────────────────────────────────────────────────────
@@ -53,16 +67,33 @@ export const runs = {
     const base = apiUrl(`runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/image`);
     return portName ? `${base}?portName=${encodeURIComponent(portName)}` : base;
   },
-  preview: (runId: string) => apiUrl(`runs/${encodeURIComponent(runId)}/preview`)
+  preview: (runId: string, query?: string) => {
+    const base = apiUrl(`runs/${encodeURIComponent(runId)}/preview`);
+    return query ? `${base}?${query}` : base;
+  },
+  caliperDiagnostics: (runId: string, nodeId: string) =>
+    apiUrl(`runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/caliper-diagnostics`),
+  caliperEdgeDiagnostics: (runId: string, nodeId: string) =>
+    apiUrl(`runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/caliper-edge-diagnostics`)
+} as const;
+
+// ── robot-traces ──────────────────────────────────────────────────────────────
+export const robotTraces = {
+  page: (query: string) => apiUrl(`robot-traces?${query}`)
 } as const;
 
 // ── cameras ───────────────────────────────────────────────────────────────────
 export const cameras = {
   list: apiUrl('cameras'),
   adapters: apiUrl('cameras/adapters'),
+  discover: (driver: string) => apiUrl(`cameras/discover?driver=${encodeURIComponent(driver)}`),
   byId: (id: string) => apiUrl(`cameras/${encodeURIComponent(id)}`),
   action: (id: string, action: string) => apiUrl(`cameras/${encodeURIComponent(id)}/${action}`),
-  commissioning: (id: string) => apiUrl(`cameras/${encodeURIComponent(id)}/commissioning`)
+  settings: (id: string) => apiUrl(`cameras/${encodeURIComponent(id)}/settings`),
+  commissioning: (id: string) => apiUrl(`cameras/${encodeURIComponent(id)}/commissioning`),
+  features: (id: string) => apiUrl(`cameras/${encodeURIComponent(id)}/features`),
+  feature: (id: string, key: string) => apiUrl(`cameras/${encodeURIComponent(id)}/features/${encodeURIComponent(key)}`),
+  preview: (id: string, query: string) => apiUrl(`cameras/${encodeURIComponent(id)}/preview?${query}`)
 } as const;
 
 // ── auth ──────────────────────────────────────────────────────────────────────
@@ -80,16 +111,30 @@ export const plugins = {
   list: apiUrl('plugins'),
   packages: apiUrl('plugin-packages'),
   install: (mode: string) => apiUrl(`plugin-packages/${mode}`),
+  selectVersion: (id: string, version: string) =>
+    apiUrl(`plugin-packages/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/select`),
+  packageVersion: (id: string, version: string) =>
+    apiUrl(`plugin-packages/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  packageRollback: (id: string) => apiUrl(`plugin-packages/${encodeURIComponent(id)}/rollback`),
   publishers: apiUrl('plugin-publishers'),
+  publisherTrust: apiUrl('plugin-publishers/trust'),
+  publisherByThumbprint: (thumbprint: string) => apiUrl(`plugin-publishers/${encodeURIComponent(thumbprint)}`),
   workers: apiUrl('plugin-workers'),
-  benchmarks: apiUrl('plugin-benchmarks')
+  workerPerformance: apiUrl('plugin-workers/performance'),
+  workerRestart: (pluginId: string) => apiUrl(`plugin-workers/${encodeURIComponent(pluginId)}/restart`),
+  workerPerformanceReset: (pluginId: string) => apiUrl(`plugin-workers/${encodeURIComponent(pluginId)}/performance/reset`),
+  benchmarks: apiUrl('plugin-benchmarks'),
+  benchmarkCancel: (runId: string) => apiUrl(`plugin-benchmarks/${encodeURIComponent(runId)}/cancel`),
+  benchmarkCiSpec: (runId: string) => apiUrl(`plugin-benchmarks/${encodeURIComponent(runId)}/ci-spec`)
 } as const;
 
 // ── workflows ─────────────────────────────────────────────────────────────────
 export const workflows = {
   list: apiUrl('workflows'),
   byId: (id: string) => apiUrl(`workflows/${encodeURIComponent(id)}`),
-  withExpectedRevision: (id: string, revision: string) => apiUrl(`workflows/${encodeURIComponent(id)}?expectedRevision=${encodeURIComponent(revision)}`)
+  withExpectedRevision: (id: string, revision: string) => apiUrl(`workflows/${encodeURIComponent(id)}?expectedRevision=${encodeURIComponent(revision)}`),
+  /** 工作流创作操作：POST /api/validate 与 /api/compile。 */
+  operation: (action: 'validate' | 'compile') => apiUrl(action)
 } as const;
 
 // ── debug sessions ────────────────────────────────────────────────────────────
@@ -116,9 +161,13 @@ export const production = {
 export const cameraSync = {
   groups: apiUrl('camera-sync/groups'),
   group: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}`),
+  groupAction: (id: string, action: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/${action}`),
   groupStatus: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/status`),
   groupStatistics: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/statistics?limit=100&minimumSamples=20`),
-  groupCommissioningTests: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/commissioning-tests`),
+  groupCommissioningTests: (id: string, query?: string) => {
+    const base = apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/commissioning-tests`);
+    return query ? `${base}?${query}` : base;
+  },
   groupPtpDiagnostics: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/ptp-diagnostics?limit=100`),
   groupGigeDiagnostics: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/gige-network-diagnostics?limit=100`),
   groupGigeTests: (id: string) => apiUrl(`camera-sync/groups/${encodeURIComponent(id)}/gige-network-tests`),
@@ -164,13 +213,20 @@ export const calibrations = {
 export const cameraIntrinsics = {
   list: apiUrl('camera-intrinsics'),
   byId: (id: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}`),
-  version: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`)
+  versions: (id: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions`),
+  version: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  publish: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish`),
+  rollback: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}`)
 } as const;
 
 // ── camera-feature-profiles ──────────────────────────────────────────────────
 export const cameraFeatureProfiles = {
   capture: apiUrl('camera-feature-profiles/capture'),
-  import: apiUrl('camera-feature-profiles/import')
+  import: apiUrl('camera-feature-profiles/import'),
+  byDriver: (driver: string) => apiUrl(`camera-feature-profiles?driver=${encodeURIComponent(driver)}`),
+  byId: (id: string) => apiUrl(`camera-feature-profiles/${encodeURIComponent(id)}`),
+  apply: (profileId: string, cameraId: string) =>
+    apiUrl(`camera-feature-profiles/${encodeURIComponent(profileId)}/apply/${encodeURIComponent(cameraId)}`)
 } as const;
 
 // ── devices ───────────────────────────────────────────────────────────────────
@@ -209,6 +265,7 @@ export const media = {
   status: apiUrl('media/status'),
   collections: apiUrl('media/collections'),
   items: apiUrl('media/items'),
+  itemsQuery: (query: string) => apiUrl(`media/items?${query}`),
   import: apiUrl('media/import'),
   preview: (path: string) => apiUrl(`media/preview?path=${encodeURIComponent(path)}`),
   itemByPath: (path: string) => apiUrl(`media/items?path=${encodeURIComponent(path)}`)
@@ -221,18 +278,22 @@ export const storage = {
   capacity: apiUrl('storage/capacity'),
   cleanup: apiUrl('storage/cleanup'),
   restore: apiUrl('storage/restore'),
-  backups: apiUrl('storage/backups')
+  backups: apiUrl('storage/backups'),
+  backup: (id: string) => apiUrl(`storage/backups/${encodeURIComponent(id)}`)
 } as const;
 
 // ── alarms ────────────────────────────────────────────────────────────────────
 export const alarms = {
   list: apiUrl('alarms'),
-  active: apiUrl('alarms?activeOnly=false')
+  active: apiUrl('alarms?activeOnly=false'),
+  ack: (id: string) => apiUrl(`alarms/${encodeURIComponent(id)}/ack`)
 } as const;
 
 // ── model-packages ────────────────────────────────────────────────────────────
 export const modelPackages = {
   list: apiUrl('model-packages'),
+  byId: (id: string) => apiUrl(`model-packages/${encodeURIComponent(id)}`),
+  smoke: (id: string) => apiUrl(`model-packages/${encodeURIComponent(id)}/smoke`),
   preflight: apiUrl('model-packages/preflight'),
   import: apiUrl('model-packages/import')
 } as const;
@@ -240,6 +301,8 @@ export const modelPackages = {
 // ── modules ───────────────────────────────────────────────────────────────────
 export const modules = {
   list: apiUrl('modules'),
+  byId: (id: string) => apiUrl(`modules/${encodeURIComponent(id)}`),
+  versions: (id: string) => apiUrl(`modules/${encodeURIComponent(id)}/versions`),
   extract: apiUrl('modules/extract')
 } as const;
 

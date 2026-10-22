@@ -6,7 +6,7 @@ import { isProductionConfig, isProductionStatus } from '../productionConfig';
 import { useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
 import { useProductionConfigDraft } from '../useProductionConfigDraft';
 import { useProductionActions } from '../useProductionActions';
-import { API_BASE, apiUrl, jobs } from '../endpoints';
+import { apiUrl, alarms as alarmEndpoints, jobs as jobEndpoints } from '../endpoints';
 
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 
@@ -211,7 +211,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         { title: '代码', dataIndex: 'code', width: 150 },
         { title: '消息', dataIndex: 'message' },
         { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
-        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: `${API_BASE}/alarms/${encodeURIComponent(a.id)}/ack`, successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
+        { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: alarmEndpoints.ack(a.id), successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
       ]}
     />
   );

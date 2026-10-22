@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { NodeRunReport, OverlayPoint } from './types';
 import { apiFetch } from './apiClient';
-import { API_BASE } from './endpoints';
+import { runs } from './endpoints';
 
 export type CaliperEdgeDiagnostic = {
   runId: string; nodeId: string; executionSequence: number;
@@ -44,7 +44,7 @@ export function useCaliperEdgeDiagnostics({ enabled, runId, nodeId, report }: {
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setState({ key });
     void (async () => {
-      const response = await apiFetch(`${API_BASE}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/caliper-edge-diagnostics`, { signal: controller.signal });
+      const response = await apiFetch(runs.caliperEdgeDiagnostics(runId, nodeId), { signal: controller.signal });
       if (!response.ok) {
         if (response.status === 404) throw new Error('诊断已过期或未捕获，请重新运行此节点。');
         if (response.status === 403) throw new Error('当前用户无权查看卡尺诊断。');

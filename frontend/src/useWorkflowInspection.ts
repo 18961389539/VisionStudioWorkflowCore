@@ -5,7 +5,7 @@ import { serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './
 import { apiErrorMessage, responseErrorMessage } from './apiErrors';
 import { withRequestTimeout } from './requestTimeout';
 import { apiFetch } from './apiClient';
-import { API_BASE, validation } from './endpoints';
+import { workflows, validation } from './endpoints';
 
 type ValidationState = { status: 'unvalidated' | 'ok' | 'issues'; summary?: string };
 type Params = {
@@ -99,7 +99,7 @@ export function useWorkflowInspection(params: Params) {
       let outcome: { ok: true; value: string } | { ok: false; error: string };
       try {
         const data: unknown = await withRequestTimeout(controller, 15_000, async () => {
-          const response = await apiFetch(`${API_BASE}/${action}`, { method: 'POST', signal: controller.signal,
+          const response = await apiFetch(workflows.operation(action === 'validate' ? 'validate' : 'compile'), { method: 'POST', signal: controller.signal,
             headers: { 'Content-Type': 'application/json' }, body: context.snapshot });
           controller.signal.throwIfAborted();
           if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}失败（HTTP ${response.status}）`));

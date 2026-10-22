@@ -4,7 +4,7 @@ import { responseErrorMessage } from './apiErrors';
 import { isTuningPreview } from './tuningContracts';
 import { withRequestTimeout } from './requestTimeout';
 import { apiFetch } from './apiClient';
-import { API_BASE, apiUrl } from './endpoints';
+import { apiUrl, runs } from './endpoints';
 
 type Params = { open: boolean; workflow: WorkflowPayload; nodeId?: string; sample?: ValidationDatasetItem; ready: boolean; autoPreview: boolean; revision: number };
 type Operation = { controller: AbortController; key: string; fullWorkflow: boolean; automatic: boolean };
@@ -61,7 +61,7 @@ export function useTuningPreview(params: Params) {
         throw new Error('预览响应与当前样本、节点或运行模式不匹配');
       }
       setState({ key: context.key, preview: data });
-      setBackground(data.replay.previewAvailable ? { key: context.imageKey, url: `${API_BASE}/runs/${encodeURIComponent(data.replay.runId)}/preview`,
+      setBackground(data.replay.previewAvailable ? { key: context.imageKey, url: runs.preview(data.replay.runId),
         width: data.replay.previewWidth, height: data.replay.previewHeight } : undefined);
       return true;
     } catch (reason) {

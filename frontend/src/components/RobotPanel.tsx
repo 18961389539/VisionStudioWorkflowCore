@@ -4,7 +4,7 @@ import type { RobotCommandTraceRecord, RobotDescriptor, RobotRuntimeSettings } f
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, robots as robotEndpoints, robotTraces } from '../endpoints';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const ROBOT_POLL_TIMEOUT_MS = 5000;
@@ -57,8 +57,8 @@ export default function RobotPanel({ open, onClose }: Props) {
     const timeout = window.setTimeout(() => controller.abort(), ROBOT_POLL_TIMEOUT_MS);
     try {
       const [robotResponse, traceResponse] = await Promise.all([
-        apiFetch(apiUrl('robots'), { signal: controller.signal }),
-        apiFetch(`${API_BASE}/robot-traces?take=20${selectedId ? `&robotId=${encodeURIComponent(selectedId)}` : ''}`, { signal: controller.signal })
+        apiFetch(robotEndpoints.list, { signal: controller.signal }),
+        apiFetch(robotTraces.page(`take=20${selectedId ? `&robotId=${encodeURIComponent(selectedId)}` : ''}`), { signal: controller.signal })
       ]);
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
       if (!robotResponse.ok) throw new Error(await responseErrorMessage(robotResponse, '机器人接口不可用'));
@@ -108,7 +108,7 @@ export default function RobotPanel({ open, onClose }: Props) {
   const command = async (id: string, action: 'connect' | 'disconnect' | 'stop' | 'reset') => {
     setBusy(action);
     try {
-      const response = await apiFetch(`${API_BASE}/robots/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+      const response = await apiFetch(robotEndpoints.action(id, action), { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, `${localizeStatus(action)}失败`));
       await refresh(true);
@@ -122,7 +122,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     if (!selected?.lastCommandId) return;
     setBusy('ack');
     try {
-      const response = await apiFetch(`${API_BASE}/robots/${encodeURIComponent(selected.id)}/ack/${selected.lastCommandId}`, { method: 'POST' });
+      const response = await apiFetch(robotEndpoints.ack(selected.id, String(selected.lastCommandId)), { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiErrorMessage(data, '确认失败'));
       await refresh(true);
@@ -136,7 +136,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('settings');
     try {
-      const response = await apiFetch(`${API_BASE}/robots/${encodeURIComponent(selected.id)}/settings`, {
+      const response = await apiFetch(robotEndpoints.settings(selected.id), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
       });
       const data = await response.json().catch(() => ({}));
@@ -152,7 +152,7 @@ export default function RobotPanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy('target');
     try {
-      const response = await apiFetch(`${API_BASE}/robots/${encodeURIComponent(selected.id)}/target`, {
+      const response = await apiFetch(robotEndpoints.target(selected.id), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

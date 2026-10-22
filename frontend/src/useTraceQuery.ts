@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TracePage, TraceStats, TraceStorageStatus } from './types';
 import { buildStatsParams, buildTraceParams, describeRange, validateTraceFilter, type TraceFilterState } from './traceQuery';
 import { apiFetch } from './apiClient';
-import { API_BASE, apiUrl } from './endpoints';
+import { apiUrl, traces } from './endpoints';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -94,7 +94,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
     }
 
     const listRequest = load<TracePage>(
-      `${API_BASE}/traces/page?${buildTraceParams(filter, offset, page.pageSize, queryTime)}`,
+      traces.pageQuery(buildTraceParams(filter, offset, page.pageSize, queryTime).toString()),
       '查询',
       (value) => {
         setData(value);
@@ -105,7 +105,7 @@ export function useTraceQuery(open: boolean, filter: TraceFilterState, page: Tra
       setError,
     ).finally(() => { if (active) setLoading(false); });
     const statsRequest = load<TraceStats>(
-      `${API_BASE}/traces/stats?${buildStatsParams(filter, queryTime)}`,
+      traces.statsQuery(buildStatsParams(filter, queryTime).toString()),
       '统计查询', setStats,
       (message) => setResourceErrors((current) => ({ ...current, stats: message })),
     );

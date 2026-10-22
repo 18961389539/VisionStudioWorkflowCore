@@ -3,7 +3,7 @@ import { Alert, Button, Modal, Space, Spin, Typography } from 'antd';
 import type { JobDescriptor, JobVersionDiff } from '../types';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
-import { API_BASE } from '../endpoints';
+import { jobs } from '../endpoints';
 
 export type PublicationTarget = { jobId: string; name: string; version: number; rollback: boolean };
 type Review = { job: JobDescriptor; diff?: JobVersionDiff; blockedReason?: string };
@@ -45,7 +45,7 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
     setRequiresReload(false);
     void (async () => {
       try {
-        const job = await readJson<JobDescriptor>(`${API_BASE}/jobs/${encodeURIComponent(target.jobId)}`, controller.signal);
+        const job = await readJson<JobDescriptor>(jobs.byId(target.jobId), controller.signal);
         if (!active || controller.signal.aborted) return;
         if (job?.id !== target.jobId || typeof job.updatedAt !== 'string' || !Number.isFinite(Date.parse(job.updatedAt)) || !Array.isArray(job.versions)) {
           throw new Error('配方信息不完整，请重新核对。');
@@ -59,7 +59,7 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
               : undefined;
         let diff: JobVersionDiff | undefined;
         if (!blockedReason && current != null) {
-          diff = await readJson<JobVersionDiff>(`${API_BASE}/jobs/${encodeURIComponent(target.jobId)}/versions/${current}/diff/${target.version}`, controller.signal);
+          diff = await readJson<JobVersionDiff>(jobs.diff(target.jobId, current, target.version), controller.signal);
           if (!diff || diff.jobId !== job.id || diff.fromVersion !== current || diff.toVersion !== target.version || !Array.isArray(diff.changes)
             || diff.changes.some((change) => !change || typeof change.kind !== 'string' || typeof change.path !== 'string')) {
             throw new Error('版本差异与发布对象不匹配，请重新核对。');
@@ -83,9 +83,10 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
     setError(undefined);
     const generation = generationRef.current;
     const current = () => mounted.current && generation === generationRef.current;
-    const path = target.rollback ? `rollback/${target.version}` : `versions/${target.version}/publish`;
     // 保留后端原始时间精度；不能转为 Date 再序列化，否则会丢失亚毫秒修订。
-    const url = `${API_BASE}/jobs/${encodeURIComponent(target.jobId)}/${path}?expectedUpdatedAt=${encodeURIComponent(review.job.updatedAt)}`;
+    const url = target.rollback
+      ? jobs.rollbackVersion(target.jobId, String(target.version), review.job.updatedAt)
+      : jobs.publishVersion(target.jobId, String(target.version), review.job.updatedAt);
     try {
       const response = await apiFetch(url, { method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       if (!current()) return;

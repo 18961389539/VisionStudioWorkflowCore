@@ -5,7 +5,7 @@ import type { PluginBenchmarkRun, PluginLoadInfo, PluginPackagePreflightResult, 
 import { localizeStatus } from '../i18n';
 import { APP_VERSION } from '../version';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl, plugins, validation } from '../endpoints';
+import { plugins, validation } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void; onCatalogRefresh: () => Promise<void> };
 
@@ -36,7 +36,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
 
   const refresh = useCallback(async () => {
     const [runtimeResponse, packageResponse, publisherResponse, workerResponse, performanceResponse, benchmarkResponse, datasetResponse] = await Promise.all([
-      apiFetch(plugins.list), apiFetch(plugins.packages), apiFetch(plugins.publishers), apiFetch(plugins.workers), apiFetch(apiUrl('plugin-workers/performance')), apiFetch(plugins.benchmarks), apiFetch(validation.datasets)
+      apiFetch(plugins.list), apiFetch(plugins.packages), apiFetch(plugins.publishers), apiFetch(plugins.workers), apiFetch(plugins.workerPerformance), apiFetch(plugins.benchmarks), apiFetch(validation.datasets)
     ]);
     setRuntime(runtimeResponse.ok ? await runtimeResponse.json() : []);
     setPackages(packageResponse.ok ? await packageResponse.json() : []);
@@ -55,7 +55,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const form = new FormData(); form.append('file', native, native.name);
-      const response = await apiFetch(`${API_BASE}/plugin-packages/${mode}`, { method: 'POST', body: form });
+      const response = await apiFetch(plugins.install(mode), { method: 'POST', body: form });
       if (!response.ok) throw new Error(await readError(response));
       const body = await response.json();
       if (mode === 'preflight') {
@@ -74,7 +74,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const selectVersion = async (id: string, version: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-packages/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/select`, { method: 'POST' });
+      const response = await apiFetch(plugins.selectVersion(id, version), { method: 'POST' });
       if (!response.ok) throw new Error(await readError(response));
       const body = await response.json(); messageApi.success(body.message ?? '已选择版本'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '选择版本失败'); }
@@ -84,7 +84,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const rollback = async (id: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-packages/${encodeURIComponent(id)}/rollback`, {
+      const response = await apiFetch(plugins.packageRollback(id), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetVersion: null })
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -96,7 +96,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const removeVersion = async (id: string, version: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-packages/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`, { method: 'DELETE' });
+      const response = await apiFetch(plugins.packageVersion(id, version), { method: 'DELETE' });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success('已移除已安装版本'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '移除失败'); }
@@ -109,7 +109,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBusy(true);
     try {
       const form = new FormData(); form.append('file', native, native.name);
-      const response = await apiFetch(apiUrl('plugin-publishers/trust'), { method: 'POST', body: form });
+      const response = await apiFetch(plugins.publisherTrust, { method: 'POST', body: form });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success('已信任该发布者'); setPublisherFile(undefined); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '信任发布者失败'); }
@@ -119,7 +119,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const untrustPublisher = async (thumbprint: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-publishers/${encodeURIComponent(thumbprint)}`, { method: 'DELETE' });
+      const response = await apiFetch(plugins.publisherByThumbprint(thumbprint), { method: 'DELETE' });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success('已从信任库移除发布者'); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '移除发布者失败'); }
@@ -129,7 +129,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const restartWorker = async (pluginId: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-workers/${encodeURIComponent(pluginId)}/restart`, { method: 'POST' });
+      const response = await apiFetch(plugins.workerRestart(pluginId), { method: 'POST' });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success(`插件 ${pluginId} 的工作进程已重启`); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '工作进程重启失败'); }
@@ -139,7 +139,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const resetPerformance = async (pluginId: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-workers/${encodeURIComponent(pluginId)}/performance/reset`, { method: 'POST' });
+      const response = await apiFetch(plugins.workerPerformanceReset(pluginId), { method: 'POST' });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success(`已重置插件 ${pluginId} 的性能统计窗口`); await refresh();
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '重置性能统计失败'); }
@@ -152,7 +152,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     setBenchmarkValidationRunId(undefined);
     setValidationRuns([]);
     if (!datasetId) return;
-    const response = await apiFetch(`${API_BASE}/validation/datasets/${encodeURIComponent(datasetId)}/runs`);
+    const response = await apiFetch(validation.datasetRuns(datasetId));
     if (!response.ok) return messageApi.error(await readError(response));
     const runs: ValidationRunRecord[] = await response.json();
     setValidationRuns(runs.filter(x => x.status === 'Completed'));
@@ -186,7 +186,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const cancelBenchmark = async (runId: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-benchmarks/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+      const response = await apiFetch(plugins.benchmarkCancel(runId), { method: 'POST' });
       if (!response.ok) throw new Error(await readError(response));
       messageApi.success('已请求取消基准测试');
       await refresh();
@@ -197,7 +197,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const downloadCiSpec = async (runId: string) => {
     setBusy(true);
     try {
-      const response = await apiFetch(`${API_BASE}/plugin-benchmarks/${encodeURIComponent(runId)}/ci-spec`);
+      const response = await apiFetch(plugins.benchmarkCiSpec(runId));
       if (!response.ok) throw new Error(await readError(response));
       const text = JSON.stringify(await response.json(), null, 2);
       const blob = new Blob([text], { type: 'application/json' });

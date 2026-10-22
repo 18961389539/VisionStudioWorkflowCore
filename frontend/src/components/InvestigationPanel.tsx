@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, Select, Space, Spin, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { InvestigationCaseDetail, InvestigationTrendDashboard, InvestigationVerificationEvidence, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl, validation } from '../endpoints';
+import { apiUrl, investigations, validation } from '../endpoints';
 
 type Props = { runId?: string; onReplay?: (nodeId?: string) => void };
 
@@ -31,7 +31,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
     setLoading(true); setError(undefined);
     try {
       const [caseResponse, trendResponse] = await Promise.all([
-        apiFetch(`${API_BASE}/investigations/for-trace/${runId}`),
+        apiFetch(investigations.forTrace(runId)),
         apiFetch(apiUrl('investigations/trends?days=30&top=8'))
       ]);
       if (caseResponse.ok) {
@@ -56,7 +56,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
 
   const loadValidationRuns = async (selectedDatasetId: string) => {
     try {
-      const response = await apiFetch(`${API_BASE}/validation/datasets/${selectedDatasetId}/runs`);
+      const response = await apiFetch(validation.datasetRuns(selectedDatasetId));
       if (!response.ok) return;
       const runs = (await response.json() as ValidationRunRecord[]).filter(x => x.status === 'Completed' && x.summary);
       setValidationRuns(runs);
@@ -73,7 +73,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
     if (!runId) return;
     setSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE}/investigations/from-trace/${runId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const response = await apiFetch(investigations.fromTrace(runId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail ?? payload.error ?? 'Unable to create investigation');
       setDetail(payload); setRootCause(payload.case.rootCause ?? '');
@@ -87,7 +87,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
     if (!detail) return;
     setSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE}/investigations/${detail.case.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      const response = await apiFetch(investigations.byId(detail.case.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail ?? payload.error ?? 'Case update failed');
       setDetail(payload); setRootCause(payload.case.rootCause ?? ''); setNote('');
@@ -102,7 +102,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
     if (!detail || !datasetId || !baselineRunId || !candidateRunId) return;
     setSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE}/investigations/${detail.case.id}/verification-evidence`, {
+      const response = await apiFetch(investigations.verificationEvidence(detail.case.id), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ datasetId, baselineValidationRunId: baselineRunId, candidateValidationRunId: candidateRunId, note: gateNote || null })
       });

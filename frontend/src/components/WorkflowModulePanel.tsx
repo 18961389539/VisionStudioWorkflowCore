@@ -4,7 +4,7 @@ import { responseErrorMessage } from '../apiErrors';
 import type { PrepareWorkflowChange, PreparedWorkflowChange } from '../useWorkflowChanges';
 import type { ExtractWorkflowModuleResult, WorkflowModuleDescriptor, WorkflowModuleVersion, WorkflowPayload } from '../types';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, modules as moduleEndpoints } from '../endpoints';
 
 type Props = {
   open: boolean;
@@ -77,7 +77,7 @@ export default function WorkflowModulePanel(props: Props) {
     const timeout = setTimeout(() => controller.abort(), 15_000);
     void (async () => {
       try {
-        const response = await apiFetch(`${API_BASE}/modules/${encodeURIComponent(activeModuleId)}`, { signal: controller.signal });
+        const response = await apiFetch(moduleEndpoints.byId(activeModuleId), { signal: controller.signal });
         if (!response.ok) return;
         const detail: WorkflowModuleDescriptor = await response.json();
         if (!cancelled && !controller.signal.aborted && detail?.id === activeModuleId && Array.isArray(detail.versions)) setDetailCache((current) => ({ ...current, [activeModuleId]: detail }));
@@ -150,7 +150,7 @@ export default function WorkflowModulePanel(props: Props) {
     let rejected = false;
     const timeout = setTimeout(() => action.controller.abort(), 20_000);
     try {
-      const response = await apiFetch(`${API_BASE}/modules/${encodeURIComponent(editingModuleId)}/versions`, {
+      const response = await apiFetch(moduleEndpoints.versions(editingModuleId), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: action.controller.signal,
         body: JSON.stringify({ workflow: props.currentWorkflow, note })
       });

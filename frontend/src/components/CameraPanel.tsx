@@ -4,8 +4,8 @@ import type { UploadFile } from 'antd/es/upload/interface';
 import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraOutputPixelFormat, CameraSettings, CameraTriggerMode, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
-import { apiFetch, cachedGet, RequestToken } from '../apiClient';
-import { API_BASE, apiUrl, cameras as cameraEndpoints } from '../endpoints';
+import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
+import { apiUrl, cameras as cameraEndpoints, cameraSync, cameraFeatureProfiles, media } from '../endpoints';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const CAMERA_POLL_TIMEOUT_MS = 5000;
@@ -116,7 +116,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!discoverDriver) return;
     setBusy('discover-vendor');
     try {
-      const response = await apiFetch(`${API_BASE}/cameras/discover?driver=${encodeURIComponent(discoverDriver)}`);
+      const response = await apiFetch(cameraEndpoints.discover(discoverDriver));
       if (!response.ok) throw new Error(await responseError(response, '发现相机失败'));
       const data: CameraDiscoveredDevice[] = await response.json();
       setDiscovered(data); setSelectedDiscovered(undefined); vendorForm.resetFields();
@@ -160,7 +160,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshSyncStatus = async (quiet = false) => {
     if (!selectedSyncId) { setSyncStatus(undefined); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/status`);
+      const response = await apiFetch(cameraSync.groupStatus(selectedSyncId));
       if (!response.ok) throw new Error(await responseError(response, '同步状态不可用'));
       setSyncStatus(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : '同步状态不可用'); }
@@ -169,7 +169,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshSyncRuns = async (quiet = false) => {
     if (!selectedSyncId) { setSyncRuns([]); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/runs?groupId=${encodeURIComponent(selectedSyncId)}&limit=20`);
+      const response = await apiFetch(cameraSync.runs(selectedSyncId));
       if (!response.ok) throw new Error(await responseError(response, '同步历史记录不可用'));
       setSyncRuns(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : '同步历史记录不可用'); }
@@ -178,7 +178,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshSyncStatistics = async (quiet = false) => {
     if (!selectedSyncId) { setSyncStatistics(undefined); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/statistics?limit=100&minimumSamples=20`);
+      const response = await apiFetch(cameraSync.groupStatistics(selectedSyncId));
       if (!response.ok) throw new Error(await responseError(response, '同步统计不可用'));
       setSyncStatistics(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : '同步统计不可用'); }
@@ -187,7 +187,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshSyncPtpDiagnostics = async (quiet = false) => {
     if (!selectedSyncId) { setSyncPtpDiagnostics(undefined); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/ptp-diagnostics?limit=100`);
+      const response = await apiFetch(cameraSync.groupPtpDiagnostics(selectedSyncId));
       if (!response.ok) throw new Error(await responseError(response, 'PTP 诊断不可用'));
       setSyncPtpDiagnostics(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : 'PTP 诊断不可用'); }
@@ -196,7 +196,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshGigEDiagnostics = async (quiet = false) => {
     if (!selectedSyncId) { setGigEDiagnostics(undefined); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/gige-network-diagnostics?limit=100`);
+      const response = await apiFetch(cameraSync.groupGigeDiagnostics(selectedSyncId));
       if (!response.ok) throw new Error(await responseError(response, 'GigE 网络诊断不可用'));
       setGigEDiagnostics(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : 'GigE 网络诊断不可用'); }
@@ -206,7 +206,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selectedSyncId) return;
     setBusy('gige-test-start');
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/gige-network-tests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ iterations: syncTestIterations, scheduled: syncTestScheduled, frameTimeoutMs: 3000, delayMs: 50, minimumSamples: Math.min(20, syncTestIterations) }) });
+      const response = await apiFetch(cameraSync.groupGigeTests(selectedSyncId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ iterations: syncTestIterations, scheduled: syncTestScheduled, frameTimeoutMs: 3000, delayMs: 50, minimumSamples: Math.min(20, syncTestIterations) }) });
       if (!response.ok) throw new Error(await responseError(response, '启动 GigE 网络测试失败'));
       await refreshSyncTests(true); messageApi.success(`GigE 网络测试已启动（${syncTestIterations} 个周期）`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '启动 GigE 网络测试失败'); }
@@ -214,7 +214,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   };
 
   const exportGigENetworkReport = async (testId: string) => {
-    const response = await apiFetch(`${API_BASE}/camera-sync/gige-network-tests/${encodeURIComponent(testId)}/report`);
+    const response = await apiFetch(cameraSync.gigeTestReport(testId));
     if (!response.ok) { messageApi.error(await responseError(response, 'GigE 网络报告不可用')); return; }
     const report = await response.json();
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -225,7 +225,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshSyncTests = async (quiet = false) => {
     if (!selectedSyncId) { setSyncTests([]); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/commissioning-tests?limit=10`);
+      const response = await apiFetch(cameraSync.groupCommissioningTests(selectedSyncId, 'limit=10'));
       if (!response.ok) throw new Error(await responseError(response, '调试测试记录不可用'));
       setSyncTests(await response.json());
     } catch (error) { if (!quiet) messageApi.error(error instanceof Error ? error.message : '调试测试记录不可用'); }
@@ -235,7 +235,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selectedSyncId) return;
     setBusy('sync-test-start');
     try {
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/commissioning-tests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ iterations: syncTestIterations, scheduled: syncTestScheduled, frameTimeoutMs: 3000, delayMs: 50, minimumSamples: Math.min(20, syncTestIterations) }) });
+      const response = await apiFetch(cameraSync.groupCommissioningTests(selectedSyncId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ iterations: syncTestIterations, scheduled: syncTestScheduled, frameTimeoutMs: 3000, delayMs: 50, minimumSamples: Math.min(20, syncTestIterations) }) });
       if (!response.ok) throw new Error(await responseError(response, '启动调试测试失败'));
       await refreshSyncTests(true); messageApi.success(`调试测试已启动（${syncTestIterations} 轮）`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '启动调试测试失败'); }
@@ -243,13 +243,13 @@ export default function CameraPanel({ open, onClose }: Props) {
   };
 
   const cancelSyncTest = async (testId: string) => {
-    const response = await apiFetch(`${API_BASE}/camera-sync/commissioning-tests/${encodeURIComponent(testId)}/cancel`, { method: 'POST' });
+    const response = await apiFetch(cameraSync.commissioningTestCancel(testId), { method: 'POST' });
     if (!response.ok) messageApi.error(await responseError(response, '取消调试测试失败'));
     await refreshSyncTests(true);
   };
 
   const exportSyncTestReport = async (testId: string) => {
-    const response = await apiFetch(`${API_BASE}/camera-sync/commissioning-tests/${encodeURIComponent(testId)}/report`);
+    const response = await apiFetch(cameraSync.commissioningTestReport(testId));
     if (!response.ok) { messageApi.error(await responseError(response, '调试报告不可用')); return; }
     const report = await response.json();
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -257,14 +257,14 @@ export default function CameraPanel({ open, onClose }: Props) {
   };
 
   const exportSyncTestHtml = async (testId: string) => {
-    const response = await apiFetch(`${API_BASE}/camera-sync/commissioning-tests/${encodeURIComponent(testId)}/report.html`);
+    const response = await apiFetch(cameraSync.commissioningTestReportHtml(testId));
     if (!response.ok) { messageApi.error(await responseError(response, '调试 HTML 报告不可用')); return; }
     const blob = await response.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = `camera-sync-commissioning-${testId}.html`; a.click(); URL.revokeObjectURL(url);
   };
 
   const openSyncTestHtml = async (testId: string) => {
-    const response = await apiFetch(`${API_BASE}/camera-sync/commissioning-tests/${encodeURIComponent(testId)}/report.html`);
+    const response = await apiFetch(cameraSync.commissioningTestReportHtml(testId));
     if (!response.ok) { messageApi.error(await responseError(response, '调试 HTML 报告不可用')); return; }
     const blob = await response.blob(); const url = URL.createObjectURL(blob);
     const opened = window.open(url, '_blank', 'noopener,noreferrer');
@@ -277,7 +277,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     setBusy('sync-save');
     try {
       const payload = { ...values, id, cameraIds: values.cameraIds ?? [], groupMask: values.groupMask ?? -1 };
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const response = await apiFetch(cameraSync.group(id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!response.ok) throw new Error(await responseError(response, 'Save synchronization group failed'));
       const saved: CameraSynchronizationGroup = await response.json();
       setSelectedSyncId(saved.id); await refreshSyncGroups(true); messageApi.success(`Synchronization group ${saved.name} saved`);
@@ -290,7 +290,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     setBusy(scheduled ? 'sync-schedule' : 'sync-trigger');
     try {
       const endpoint = scheduled ? 'schedule' : 'trigger';
-      const response = await apiFetch(`${API_BASE}/camera-sync/groups/${encodeURIComponent(selectedSyncId)}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled, frameTimeoutMs: 3000 }) });
+      const response = await apiFetch(cameraSync.groupAction(selectedSyncId, endpoint), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scheduled, frameTimeoutMs: 3000 }) });
       if (!response.ok) throw new Error(await responseError(response, scheduled ? 'Scheduled Action Command failed' : 'Action Command failed'));
       const result: CameraSynchronizationCaptureResult = await response.json();
       setSyncCapture(result); await refreshSyncStatus(true); await refreshSyncRuns(true); await refreshSyncStatistics(true); await refreshSyncPtpDiagnostics(true);
@@ -307,7 +307,7 @@ export default function CameraPanel({ open, onClose }: Props) {
       if (mediaLabel) query.set('label', mediaLabel);
       query.set('take', '300');
       const [statusResponse, collectionsResponse, itemsResponse] = await Promise.all([
-        apiFetch(apiUrl('media/status')), apiFetch(apiUrl('media/collections')), apiFetch(`${API_BASE}/media/items?${query}`)
+        apiFetch(media.status), apiFetch(media.collections), apiFetch(media.itemsQuery(query.toString()))
       ]);
       if (!statusResponse.ok || !collectionsResponse.ok || !itemsResponse.ok) throw new Error('Media Library API unavailable');
       setMediaStatus(await statusResponse.json());
@@ -348,7 +348,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const command = async (id: string, action: 'open' | 'close' | 'start' | 'stop' | 'trigger') => {
     setBusy(`${id}:${action}`);
     try {
-      const response = await apiFetch(`${API_BASE}/cameras/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+      const response = await apiFetch(cameraEndpoints.action(id, action), { method: 'POST' });
       if (!response.ok) throw new Error(await responseError(response, `${action} failed`));
       await refresh(true); setPreviewTick((x) => x + 1);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : `${action} failed`); }
@@ -359,7 +359,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy(`${selected.id}:settings`);
     try {
-      const response = await apiFetch(`${API_BASE}/cameras/${encodeURIComponent(selected.id)}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+      const response = await apiFetch(cameraEndpoints.settings(selected.id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
       if (!response.ok) throw new Error(await responseError(response, 'Update settings failed'));
       await refresh(true); messageApi.success('Camera settings updated');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Update settings failed'); }
@@ -375,8 +375,8 @@ export default function CameraPanel({ open, onClose }: Props) {
     }
     try {
       const [snapshotResponse, featuresResponse] = await Promise.all([
-        apiFetch(`${API_BASE}/cameras/${encodeURIComponent(selected.id)}/commissioning`),
-        apiFetch(`${API_BASE}/cameras/${encodeURIComponent(selected.id)}/features`)
+        apiFetch(cameraEndpoints.commissioning(selected.id)),
+        apiFetch(cameraEndpoints.features(selected.id))
       ]);
       if (!snapshotResponse.ok) throw new Error(await responseError(snapshotResponse, 'Commissioning profile unavailable'));
       if (!featuresResponse.ok) throw new Error(await responseError(featuresResponse, 'Feature browser unavailable'));
@@ -393,7 +393,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const refreshFeatureProfiles = async (quiet = false) => {
     if (!selected || !['basler-pylon', 'hikrobot-mvs'].includes(selected.driver)) { setFeatureProfiles([]); return; }
     try {
-      const response = await apiFetch(`${API_BASE}/camera-feature-profiles?driver=${encodeURIComponent(selected.driver)}`);
+      const response = await apiFetch(cameraFeatureProfiles.byDriver(selected.driver));
       if (!response.ok) throw new Error(await responseError(response, 'Camera profiles unavailable'));
       const data: CameraFeatureProfileRecord[] = await response.json();
       setFeatureProfiles(data);
@@ -406,7 +406,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     setBusy(`${selected.id}:commissioning`);
     try {
       const payload: CameraCommissioningProfile = { ...values, schemaVersion: 1, acquisition: selected.settings };
-      const response = await apiFetch(`${API_BASE}/cameras/${encodeURIComponent(selected.id)}/commissioning`, {
+      const response = await apiFetch(cameraEndpoints.commissioning(selected.id), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       if (!response.ok) throw new Error(await responseError(response, 'Apply commissioning profile failed'));
@@ -419,7 +419,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selected) return;
     setBusy(`feature:${feature.key}`);
     try {
-      const response = await apiFetch(`${API_BASE}/cameras/${encodeURIComponent(selected.id)}/features/${encodeURIComponent(feature.key)}`, {
+      const response = await apiFetch(cameraEndpoints.feature(selected.id, feature.key), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: featureEdits[feature.key] ?? '' })
       });
       if (!response.ok) throw new Error(await responseError(response, `Update ${feature.key} failed`));
@@ -447,7 +447,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selected || !selectedFeatureProfile) return;
     setBusy('profile-apply');
     try {
-      const response = await apiFetch(`${API_BASE}/camera-feature-profiles/${encodeURIComponent(selectedFeatureProfile)}/apply/${encodeURIComponent(selected.id)}`, { method: 'POST' });
+      const response = await apiFetch(cameraFeatureProfiles.apply(selectedFeatureProfile, selected.id), { method: 'POST' });
       if (!response.ok) throw new Error(await responseError(response, 'Apply saved profile failed'));
       await refreshCommissioning(true); await refresh(true); messageApi.success('Saved profile applied');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Apply saved profile failed'); }
@@ -458,7 +458,7 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (!selectedFeatureProfile) return;
     setBusy('profile-delete');
     try {
-      const response = await apiFetch(`${API_BASE}/camera-feature-profiles/${encodeURIComponent(selectedFeatureProfile)}`, { method: 'DELETE' });
+      const response = await apiFetch(cameraFeatureProfiles.byId(selectedFeatureProfile), { method: 'DELETE' });
       if (!response.ok) throw new Error(await responseError(response, 'Delete profile failed'));
       setSelectedFeatureProfile(undefined); await refreshFeatureProfiles(true); messageApi.success('Profile deleted');
     } catch (error) { messageApi.error(error instanceof Error ? error.message : 'Delete profile failed'); }
@@ -530,7 +530,7 @@ export default function CameraPanel({ open, onClose }: Props) {
   const deleteMedia = async (item: MediaItemDescriptor) => {
     setBusy(`delete:${item.relativePath}`);
     try {
-      const response = await apiFetch(`${API_BASE}/media/items?path=${encodeURIComponent(item.relativePath)}`, { method: 'DELETE' });
+      const response = await apiFetch(media.itemByPath(item.relativePath), { method: 'DELETE' });
       if (!response.ok) throw new Error(await responseError(response, 'Delete media failed'));
       if (selectedMedia?.relativePath === item.relativePath) setSelectedMedia(undefined);
       await refreshMedia(true); messageApi.success('Media item deleted');
@@ -550,7 +550,7 @@ export default function CameraPanel({ open, onClose }: Props) {
       <div className="camera-runtime-grid">
         <section className="camera-device-list">
           <Space style={{ marginBottom: 10 }} wrap>
-            <Button onClick={() => refresh()}>刷新</Button><Tag color="cyan">连续采集工作进程</Tag><Tag color="geekblue">环形缓冲区 × 4</Tag><Tag color="purple">共享帧租约</Tag>
+            <Button onClick={() => { refresh(); invalidateCache(cameraEndpoints.adapters); refreshAdapters(); }}>刷新</Button><Tag color="cyan">连续采集工作进程</Tag><Tag color="geekblue">环形缓冲区 × 4</Tag><Tag color="purple">共享帧租约</Tag>
           </Space>
           <Table<CameraDescriptor> size="small" pagination={false} rowKey="id" dataSource={cameras} rowClassName={(row) => row.id === selectedId ? 'camera-selected-row' : ''} onRow={(row) => ({ onClick: () => setSelectedId(row.id) })} columns={[
             { title: '编号', dataIndex: 'id', width: 120 }, { title: '驱动', dataIndex: 'driver', width: 78 },
@@ -586,7 +586,7 @@ export default function CameraPanel({ open, onClose }: Props) {
         <section className="camera-main-section">
           <div className="camera-preview-panel">
             <div className="camera-preview-title"><strong>{selected?.name ?? '未选择相机'}</strong><span>{selected?.id}</span></div>
-            {selected && selected.acquisition.acquisitionState !== 'Stopped' && selected.acquisition.acquisitionState !== 'Faulted' ? <img key={`${selectedId}-${previewTick}`} src={`${API_BASE}/cameras/${encodeURIComponent(selectedId)}/preview?maxWidth=960&quality=78&t=${previewTick}`} alt={`${selectedId} 预览`} onError={(event) => { event.currentTarget.style.opacity = '0.25'; }} onLoad={(event) => { event.currentTarget.style.opacity = '1'; }} /> : <div className="camera-preview-empty">开始采集后即可预览</div>}
+            {selected && selected.acquisition.acquisitionState !== 'Stopped' && selected.acquisition.acquisitionState !== 'Faulted' ? <img key={`${selectedId}-${previewTick}`} src={cameraEndpoints.preview(selectedId, `maxWidth=960&quality=78&t=${previewTick}`)} alt={`${selectedId} 预览`} onError={(event) => { event.currentTarget.style.opacity = '0.25'; }} onLoad={(event) => { event.currentTarget.style.opacity = '1'; }} /> : <div className="camera-preview-empty">开始采集后即可预览</div>}
             <Alert type="info" showIcon message="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
           </div>
           <Tabs
@@ -913,7 +913,7 @@ export default function CameraPanel({ open, onClose }: Props) {
           {/* 所选媒体预览：与媒体库同属一个任务上下文 */}
           <div className="media-preview-panel">
             <div className="media-preview-title"><strong>所选媒体</strong><span>{selectedMedia?.source ?? '—'}</span></div>
-            {selectedMedia ? <img className="media-preview-image" src={`${API_BASE}/media/preview?path=${encodeURIComponent(selectedMedia.relativePath)}`} alt={selectedMedia.name} /> : <div className="media-preview-empty">选择最近样本或 NG 样本进行预览</div>}
+            {selectedMedia ? <img className="media-preview-image" src={media.preview(selectedMedia.relativePath)} alt={selectedMedia.name} /> : <div className="media-preview-empty">选择最近样本或 NG 样本进行预览</div>}
             {selectedMedia && <Space wrap><Tag color={labelColor[selectedMedia.label]}>{labelText[selectedMedia.label] ?? selectedMedia.label}</Tag><Button size="small" onClick={() => form.setFieldsValue({ source: selectedMedia.source })}>用作文件相机来源</Button></Space>}
           </div>
               </>) }

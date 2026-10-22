@@ -13,7 +13,7 @@ import RunObservabilityPanel from './RunObservabilityPanel';
 import TraceAnalysisPanel from './TraceAnalysisPanel';
 import InvestigationPanel from './InvestigationPanel';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, traces } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -95,7 +95,7 @@ export default function TracePanel({ open, onClose }: Props) {
 
   const disposition = async (value: 'OK' | 'NG' | 'REVIEW') => {
     if (!selected) return;
-    const response = await apiFetch(`${API_BASE}/traces/${selected.runId}/disposition`, {
+    const response = await apiFetch(traces.disposition(selected.runId), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disposition: value })
     });
     const data = await response.json();
@@ -229,7 +229,7 @@ export default function TracePanel({ open, onClose }: Props) {
             </div>
             {selected.error && <Alert type="error" showIcon message={selected.error} />}
             {selected.hasPreview
-              ? <img className="trace-preview" src={`${API_BASE}/traces/${selected.runId}/preview?t=${Date.now()}`} />
+              ? <img className="trace-preview" src={traces.preview(selected.runId, `t=${Date.now()}`)} />
               : <div className="trace-no-preview">没有预览图像（未按保留策略采样、已过期清理，或本次执行没有产出预览）</div>}
             <div className="trace-meta">
               <span>工作流：{selected.workflowId}</span>

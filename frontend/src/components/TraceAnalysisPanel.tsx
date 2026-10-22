@@ -3,7 +3,7 @@ import { Alert, Button, Space, Spin, Statistic, Table, Tag, Typography } from 'a
 import type { FailureSignatureAnalysis, RunTraceComparison, TraceNodeDelta } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
-import { API_BASE } from '../endpoints';
+import { traces } from '../endpoints';
 
 type Props = {
   runId?: string;
@@ -39,8 +39,8 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
     setLoading(true);
     setError(undefined);
     Promise.all([
-      apiFetch(`${API_BASE}/traces/${runId}/compare`, { signal: controller.signal }),
-      apiFetch(`${API_BASE}/traces/${runId}/failure-signature?days=30&take=12`, { signal: controller.signal })
+      apiFetch(traces.compare(runId), { signal: controller.signal }),
+      apiFetch(traces.failureSignature(runId), { signal: controller.signal })
     ]).then(async ([compareResponse, signatureResponse]) => {
       const comparePayload = await compareResponse.json();
       const signaturePayload = await signatureResponse.json();

@@ -12,7 +12,7 @@ import type {
   CalibrationWorkspaceResult
 } from '../types';
 import { apiFetch } from '../apiClient';
-import { API_BASE, apiUrl } from '../endpoints';
+import { apiUrl, calibrations } from '../endpoints';
 
 type Props = {
   open: boolean;
@@ -113,7 +113,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
     setBusy(true);
     try {
       const existing = assets.find((x) => x.id === assetId);
-      const url = existing ? `${API_BASE}/calibrations/${encodeURIComponent(assetId)}/versions` : apiUrl('calibrations');
+      const url = existing ? calibrations.versions(assetId) : apiUrl('calibrations');
       const body = existing
         ? { workspace, note: `Workspace save ${new Date().toISOString()}` }
         : { id: assetId, name: assetName, description: 'VisionStudio calibration workspace asset', workspace, note: 'Initial workspace version' };
@@ -131,8 +131,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
   const publish = async (id: string, version: number, rollback = false) => {
     const url = rollback
-      ? `${API_BASE}/calibrations/${encodeURIComponent(id)}/rollback/${version}`
-      : `${API_BASE}/calibrations/${encodeURIComponent(id)}/versions/${version}/publish`;
+      ? calibrations.rollback(id, String(version))
+      : calibrations.publish(id, String(version));
     const response = await apiFetch(url, { method: 'POST' });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.error ?? '发布失败');
@@ -141,7 +141,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   };
 
   const loadVersion = async (id: string, version: number) => {
-    const response = await apiFetch(`${API_BASE}/calibrations/${encodeURIComponent(id)}/versions/${version}`);
+    const response = await apiFetch(calibrations.version(id, String(version)));
     const data: CalibrationVersionSnapshot & { error?: string } = await response.json();
     if (!response.ok) return messageApi.error(data.error ?? '加载标定版本失败');
     setSourceFrame(data.workspace.sourceFrame);
