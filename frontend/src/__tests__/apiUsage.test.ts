@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * 统一请求层的棘轮：新代码必须走 apiClient，不能新增直接 fetch 调用。
- * 已有 150 处历史调用按文件逐步迁移；每迁完一批，把这个基线下调。
+ * 运行时代码已全部迁移；基线为 0，新增直接调用会失败。
  * 通过 Vite 的 raw glob 读取源码，避免测试依赖 node 类型。
  */
-const DIRECT_FETCH_BASELINE = 150;
+const DIRECT_FETCH_BASELINE = 0;
 
 const sources = import.meta.glob('/src/**/*.{ts,tsx}', {
   query: '?raw',

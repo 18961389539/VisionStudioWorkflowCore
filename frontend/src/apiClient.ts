@@ -42,7 +42,10 @@ export function isTimeoutError(error: unknown): boolean {
  */
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
   const { timeoutMs, signal, ...init } = options;
-  if (timeoutMs === undefined) return fetch(input, { ...init, signal });
+  if (timeoutMs === undefined) {
+    // 未提供 signal 时保持与原调用完全一致的参数（不额外写入 signal: undefined）。
+    return signal ? fetch(input, { ...init, signal }) : fetch(input, init);
+  }
 
   // 只有需要超时才组合信号：否则原样透传调用方 signal，保持其身份与后续 abort 可见性。
   const controller = new AbortController();

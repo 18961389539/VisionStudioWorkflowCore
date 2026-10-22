@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
 import type { CameraIntrinsicAssetDescriptor, CameraIntrinsicVersionSnapshot, CalibrationWizardHint, CalibrationWizardSession } from '../types';
+import { apiFetch } from '../apiClient';
 
 type Props = {
   canApplyToSelectedNode: boolean;
@@ -68,7 +69,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch('/api/cameras');
+        const response = await apiFetch('/api/cameras');
         if (response.ok) {
           const list = await response.json() as CameraListItem[];
           setCameras(list);
@@ -80,7 +81,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
 
   const refreshIntrinsicAssets = async () => {
     try {
-      const response = await fetch('/api/camera-intrinsics');
+      const response = await apiFetch('/api/camera-intrinsics');
       if (response.ok) setIntrinsicAssets(await response.json() as CameraIntrinsicAssetDescriptor[]);
     } catch { setIntrinsicAssets([]); }
   };
@@ -138,7 +139,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const body: Record<string, unknown> = { pattern, columns, rows, spacingMm, minBlurVariance, minCoverage };
       if (imageWidth && imageHeight) { body.imageWidth = imageWidth; body.imageHeight = imageHeight; }
-      const response = await fetch('/api/calibration/wizard/sessions', {
+      const response = await apiFetch('/api/calibration/wizard/sessions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
       const data = await response.json();
@@ -162,7 +163,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         const form = new FormData();
         form.append('image', file);
         form.append('label', file.name);
-        const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(current.sessionId)}/views/from-image`, {
+        const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(current.sessionId)}/views/from-image`, {
           method: 'POST', body: form
         });
         const data = await response.json();
@@ -181,7 +182,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return messageApi.warning('请先创建会话');
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views`, {
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ calibrationDataJson: importJson, label: 'import' })
       });
@@ -198,7 +199,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const importDocument = async () => {
     setBusy(true);
     try {
-      const response = await fetch('/api/calibration/wizard/sessions/import', {
+      const response = await apiFetch('/api/calibration/wizard/sessions/import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentJson })
       });
@@ -215,7 +216,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
 
   const loadHints = async (sessionId: string) => {
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(sessionId)}/hints`);
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(sessionId)}/hints`);
       if (!response.ok) return;
       const data = await response.json();
       setHints(Array.isArray(data.hints) ? data.hints : []);
@@ -227,7 +228,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!cameraId) return messageApi.warning('请选择相机');
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/preview`, {
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/preview`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cameraId, addIfAccepted, label: `cam-${cameraId}` })
       });
@@ -251,7 +252,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views/${index}/enabled`, {
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views/${index}/enabled`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
       });
       const data = await response.json();
@@ -266,7 +267,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views/${index}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/views/${index}`, { method: 'DELETE' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '删除失败');
       await refresh(data);
@@ -279,7 +280,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/disable-outliers`, {
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/disable-outliers`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ useSolveOutlier: true })
       });
       const data = await response.json();
@@ -295,7 +296,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/calibrate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, cameraModel, telecentricMagnification, telecentricPixelSizeUm })
       });
@@ -321,7 +322,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       const sourceDocument = data.document && typeof data.document === 'object' ? data.document as Record<string, unknown> : {};
@@ -352,7 +353,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const body = existing
         ? { sessionId: session.sessionId, note: `Wizard save ${new Date().toISOString()}` }
         : { sessionId: session.sessionId, id: intrinsicAssetId.trim(), name: intrinsicAssetName.trim(), description: 'Camera intrinsic model with source wizard views', note: 'Initial intrinsic calibration' };
-      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json() as Record<string, unknown>;
       if (!response.ok) throw new Error(String(data.error ?? '保存相机内参资产失败'));
       const version = Number(data.version ?? data.latestVersion ?? 0);
@@ -369,10 +370,10 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const loadIntrinsicVersion = async (id: string, version: number) => {
     setBusy(true);
     try {
-      const response = await fetch(`/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}`);
+      const response = await apiFetch(`/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}`);
       const snapshot = await response.json() as CameraIntrinsicVersionSnapshot & { error?: string };
       if (!response.ok) throw new Error(snapshot.error ?? '加载相机内参版本失败');
-      const importResponse = await fetch('/api/calibration/wizard/sessions/import', {
+      const importResponse = await apiFetch('/api/calibration/wizard/sessions/import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentJson: snapshot.sourceDocumentJson })
       });
       const restored = await importResponse.json() as CalibrationWizardSession & { error?: string };
@@ -401,7 +402,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       const url = rollback
         ? `/api/camera-intrinsics/${encodeURIComponent(id)}/rollback/${version}`
         : `/api/camera-intrinsics/${encodeURIComponent(id)}/versions/${version}/publish`;
-      const response = await fetch(url, { method: 'POST' });
+      const response = await apiFetch(url, { method: 'POST' });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error ?? '发布相机内参版本失败');
       await refreshIntrinsicAssets();
@@ -414,7 +415,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     if (!session) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
+      const response = await apiFetch(`/api/calibration/wizard/sessions/${encodeURIComponent(session.sessionId)}/export`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '导出失败');
       if (selectedNodeType === 'calibration.cameraIntrinsics') {

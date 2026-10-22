@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import { responseErrorMessage } from './apiErrors';
 import { decideSaveBaseline, pickExpectedRevision, shouldApplySaveResult, type DocumentBaseline, type RemoteBaselineProbe } from './documentSync';
+import { apiFetch } from './apiClient';
 
 const WORKFLOW_IO_TIMEOUT_MS = 15_000;
 
@@ -52,7 +53,7 @@ export function useWorkflowSave(params: Params) {
       if (baseline === undefined) {
         let probe: RemoteBaselineProbe;
         try {
-          const response = await fetch(`/api/workflows/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+          const response = await apiFetch(`/api/workflows/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
           probe = response.status === 404 ? { kind: 'missing' }
             : response.ok ? { kind: 'exists', revision: response.headers.get('X-Workflow-Revision') ?? '' }
               : { kind: 'failed' };
@@ -75,7 +76,7 @@ export function useWorkflowSave(params: Params) {
       }
 
       writeStarted = true;
-      const response = await fetch(`/api/workflows/${encodeURIComponent(id)}?expectedRevision=${encodeURIComponent(baseline)}`, {
+      const response = await apiFetch(`/api/workflows/${encodeURIComponent(id)}?expectedRevision=${encodeURIComponent(baseline)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: snapshot,
         signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS),
       });

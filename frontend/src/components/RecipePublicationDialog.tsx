@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Modal, Space, Spin, Typography } from 'antd';
 import type { JobDescriptor, JobVersionDiff } from '../types';
 import { responseErrorMessage } from '../apiErrors';
+import { apiFetch } from '../apiClient';
 
 export type PublicationTarget = { jobId: string; name: string; version: number; rollback: boolean };
 type Review = { job: JobDescriptor; diff?: JobVersionDiff; blockedReason?: string };
@@ -9,7 +10,7 @@ type Props = { target: PublicationTarget; onCancel: () => void; onPublished: (jo
 const REQUEST_TIMEOUT_MS = 20_000;
 
 async function readJson<T>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+  const response = await apiFetch(url, { signal });
   if (!response.ok) throw new Error(await responseErrorMessage(response, `读取发布信息失败（HTTP ${response.status}）`));
   return response.json();
 }
@@ -85,7 +86,7 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
     // 保留后端原始时间精度；不能转为 Date 再序列化，否则会丢失亚毫秒修订。
     const url = `/api/jobs/${encodeURIComponent(target.jobId)}/${path}?expectedUpdatedAt=${encodeURIComponent(review.job.updatedAt)}`;
     try {
-      const response = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      const response = await apiFetch(url, { method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       if (!current()) return;
       if (!response.ok) {
         const detail = await responseErrorMessage(response, `${action}失败（HTTP ${response.status}）`);

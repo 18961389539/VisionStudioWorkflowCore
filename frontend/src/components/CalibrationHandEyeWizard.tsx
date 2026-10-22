@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import type { CalibrationHandEyeResidual } from '../types';
+import { apiFetch } from '../apiClient';
 
 type Props = {
   canApplyToSelectedNode: boolean;
@@ -68,7 +69,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
   const solve = async () => {
     setBusy(true);
     try {
-      const response = await fetch('/api/calibration/wizard/handeye/solve', {
+      const response = await apiFetch('/api/calibration/wizard/handeye/solve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

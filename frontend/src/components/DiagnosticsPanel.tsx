@@ -3,6 +3,7 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 import { Alert, Button, Modal, Segmented, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary } from '../types';
 import { localizeStatus } from '../i18n';
+import { apiFetch } from '../apiClient';
 
 type Props = { open: boolean; onClose: () => void };
 type Filter = 'All' | AssetKind;
@@ -23,7 +24,7 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
   const refresh = useCallback(async () => {
     try {
       const [a, e, s] = await Promise.all([
-        fetch('/api/diagnostics/assets'), fetch('/api/diagnostics/events?take=250'), fetch('/api/diagnostics/summary')
+        apiFetch('/api/diagnostics/assets'), apiFetch('/api/diagnostics/events?take=250'), apiFetch('/api/diagnostics/summary')
       ]);
       if (!a.ok || !e.ok || !s.ok) throw new Error('Diagnostics API unavailable');
       setAssets(await a.json()); setEvents(await e.json()); setSummary(await s.json()); setError(undefined);

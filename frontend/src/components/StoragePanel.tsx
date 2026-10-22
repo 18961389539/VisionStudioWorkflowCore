@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Popconfirm, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
 import type { SchemaMigrationStatus, StorageBackupDescriptor, StorageCapacityStatus, StorageRestoreResult } from '../types';
 import { getInitialLang, localizeStatus, translate, type MessageKey, type MessageParams } from '../i18n';
+import { apiFetch } from '../apiClient';
 
 // i18n Provider 尚未接线：按已存储的语言偏好静态解析词条（默认中文）
 const t = (key: MessageKey, params?: MessageParams) => translate(getInitialLang(), key, params);
@@ -31,11 +32,11 @@ export default function StoragePanel({ open, onClose }: Props) {
 
   const refresh = async () => {
     setError(undefined);
-    const capacityResponse = await fetch('/api/storage/capacity');
+    const capacityResponse = await apiFetch('/api/storage/capacity');
     if (capacityResponse.ok) setCapacity(await capacityResponse.json());
 
     const [schemaResponse, backupResponse] = await Promise.all([
-      fetch('/api/storage/schema'), fetch('/api/storage/backups')
+      apiFetch('/api/storage/schema'), apiFetch('/api/storage/backups')
     ]);
     if (schemaResponse.ok) setSchema(await schemaResponse.json());
     if (backupResponse.ok) setBackups(await backupResponse.json());
@@ -48,7 +49,7 @@ export default function StoragePanel({ open, onClose }: Props) {
   const createBackup = async () => {
     setBusy('create');
     try {
-      const response = await fetch('/api/storage/backups', {
+      const response = await apiFetch('/api/storage/backups', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeArtifacts })
       });
       if (!response.ok) throw new Error(await readProblem(response));
@@ -62,7 +63,7 @@ export default function StoragePanel({ open, onClose }: Props) {
   const deleteBackup = async (backupId: string) => {
     setBusy(`delete:${backupId}`);
     try {
-      const response = await fetch(`/api/storage/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/storage/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
       if (!response.ok) throw new Error(await readProblem(response));
       messageApi.success(t('storage.backupDeleted'));
       await refresh();
@@ -78,7 +79,7 @@ export default function StoragePanel({ open, onClose }: Props) {
       onOk: async () => {
         setBusy(`restore:${backup.backupId}`);
         try {
-          const response = await fetch('/api/storage/restore', {
+          const response = await apiFetch('/api/storage/restore', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ backupId: backup.backupId, restoreArtifacts: backup.includesArtifacts })
           });

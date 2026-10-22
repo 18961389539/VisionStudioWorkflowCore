@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { NodeRunReport, OverlayPoint } from './types';
+import { apiFetch } from './apiClient';
 
 export type CaliperSpokeDiagnostic = {
   index: number; angleDeg: number; start: OverlayPoint; end: OverlayPoint; status: string;
@@ -30,7 +31,7 @@ export const caliperSpokeStatus: Record<string, string> = {
 };
 
 async function readDiagnostic<T>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+  const response = await apiFetch(url, { signal });
   if (!response.ok) {
     if (response.status === 404) throw new Error('诊断已过期或未捕获，请重新运行此节点。');
     if (response.status === 403) throw new Error('当前用户无权查看卡尺诊断。');

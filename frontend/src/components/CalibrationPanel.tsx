@@ -11,6 +11,7 @@ import type {
   CalibrationWorkspaceRequest,
   CalibrationWorkspaceResult
 } from '../types';
+import { apiFetch } from '../apiClient';
 
 type Props = {
   open: boolean;
@@ -69,7 +70,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
 
   const refreshAssets = useCallback(async () => {
     try {
-      const response = await fetch('/api/calibrations');
+      const response = await apiFetch('/api/calibrations');
       if (response.ok) setAssets(await response.json());
     } catch { setAssets([]); }
   }, []);
@@ -79,7 +80,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const solve = async () => {
     setBusy(true);
     try {
-      const response = await fetch('/api/calibration/solve', {
+      const response = await apiFetch('/api/calibration/solve', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workspace)
       });
       const data = await response.json();
@@ -93,7 +94,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const autoCapture = async () => {
     setBusy(true);
     try {
-      const response = await fetch('/api/calibration/capture-grid', {
+      const response = await apiFetch('/api/calibration/capture-grid', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: 'virtual', columns: 3, rows: 3, originX: 0, originY: 0, stepX: 22, stepY: 14 })
       });
@@ -115,7 +116,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
       const body = existing
         ? { workspace, note: `Workspace save ${new Date().toISOString()}` }
         : { id: assetId, name: assetName, description: 'VisionStudio calibration workspace asset', workspace, note: 'Initial workspace version' };
-      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '保存标定版本失败');
       await refreshAssets();
@@ -131,7 +132,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
     const url = rollback
       ? `/api/calibrations/${encodeURIComponent(id)}/rollback/${version}`
       : `/api/calibrations/${encodeURIComponent(id)}/versions/${version}/publish`;
-    const response = await fetch(url, { method: 'POST' });
+    const response = await apiFetch(url, { method: 'POST' });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.error ?? '发布失败');
     await refreshAssets();
@@ -139,7 +140,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   };
 
   const loadVersion = async (id: string, version: number) => {
-    const response = await fetch(`/api/calibrations/${encodeURIComponent(id)}/versions/${version}`);
+    const response = await apiFetch(`/api/calibrations/${encodeURIComponent(id)}/versions/${version}`);
     const data: CalibrationVersionSnapshot & { error?: string } = await response.json();
     if (!response.ok) return messageApi.error(data.error ?? '加载标定版本失败');
     setSourceFrame(data.workspace.sourceFrame);

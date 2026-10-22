@@ -3,6 +3,7 @@ import type { WorkflowPayload } from './types';
 import type { PrepareWorkflowChange, PreparedWorkflowChange, WorkflowApplyOptions } from './useWorkflowChanges';
 import { responseErrorMessage } from './apiErrors';
 import { isWorkflowDocument } from './workflowDocument';
+import { apiFetch } from './apiClient';
 
 type ImportRequest = {
   url?: string; workflow?: WorkflowPayload; label: string;
@@ -39,7 +40,7 @@ export function useWorkflowImport(params: Params) {
     const owns = () => active.current && operation.current === value && !controller.signal.aborted;
     const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = url ? await fetch(url, { signal: controller.signal }) : undefined;
+      const response = url ? await apiFetch(url, { signal: controller.signal }) : undefined;
       if (!owns()) return false;
       if (response && !response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
       const data: unknown = response ? await response.json() : preparedWorkflow;

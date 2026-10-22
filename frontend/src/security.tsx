@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Alert, Button, Card, Dropdown, Input, Space, Spin, Tag, Typography } from 'antd';
 import { localizeStatus } from './i18n';
+import { apiFetch } from './apiClient';
 
 type SecurityStatus = { enabled: boolean; bootstrapRequired: boolean; autoLogin: boolean };
 export type SecurityUser = { id: string; username: string; displayName: string; role: 'Operator' | 'Engineer' | 'Administrator' };
@@ -70,16 +71,16 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const statusResponse = await fetch('/api/auth/status');
+      const statusResponse = await apiFetch('/api/auth/status');
       if (!statusResponse.ok) throw new Error(await readError(statusResponse));
       const nextStatus: SecurityStatus = await statusResponse.json();
       setStatus(nextStatus);
       if (!nextStatus.enabled) { setUser(undefined); return; }
-      const me = await fetch('/api/auth/me');
+      const me = await apiFetch('/api/auth/me');
       if (me.ok) { setUser(await me.json()); return; }
       if (me.status !== 401) throw new Error(await readError(me));
       if (nextStatus.autoLogin && !autoLoginSkipped()) {
-        const auto = await fetch('/api/auth/auto-login', { method: 'POST' });
+        const auto = await apiFetch('/api/auth/auto-login', { method: 'POST' });
         if (auto.ok) { setUser((await auto.json()).user); return; }
         setError(await readError(auto));
       }
@@ -94,7 +95,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     if (!status?.enabled || !user) return;
-    const verify = () => { void fetch('/api/auth/me').then(async r => {
+    const verify = () => { void apiFetch('/api/auth/me').then(async r => {
       if (r.ok) setUser(await r.json());
       else if (r.status === 401) setUser(undefined);
     }).catch(() => undefined); };
@@ -106,7 +107,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
   const login = async (name = username, secret = password) => {
     setBusy(true); setError(undefined);
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await apiFetch('/api/auth/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: name, password: secret })
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -121,7 +122,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
   const bootstrap = async () => {
     setBusy(true); setError(undefined);
     try {
-      const response = await fetch('/api/auth/bootstrap', {
+      const response = await apiFetch('/api/auth/bootstrap', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, displayName, password })
       });
       if (!response.ok) throw new Error(await readError(response));
@@ -131,7 +132,7 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     setBusy(true);
-    try { await fetch('/api/auth/logout', { method: 'POST' }); }
+    try { await apiFetch('/api/auth/logout', { method: 'POST' }); }
     finally { markAutoLoginSkipped(); setUser(undefined); setBusy(false); }
   };
 

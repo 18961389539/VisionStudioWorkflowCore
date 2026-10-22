@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, message } from 'antd';
+import { apiFetch } from '../apiClient';
 
 type Props = {
   canApplyToSelectedNode: boolean;
@@ -101,7 +102,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
     catch (error) { messageApi.error(error instanceof Error ? error.message : '矩阵格式无效'); return; }
     setBusy(true);
     try {
-      const response = await fetch('/api/calibration/wizard/handeye3d/solve', {
+      const response = await apiFetch('/api/calibration/wizard/handeye3d/solve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ samplesJson, mode, method, maxTranslationError, maxRotationErrorDeg, rotationWeight, sourceFrame, targetFrame, unit })

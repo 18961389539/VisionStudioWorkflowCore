@@ -58,6 +58,7 @@ import { applyReferenceParameters } from './roiReference';
 import { withSwitchPorts } from './switchPorts';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
+import { apiFetch } from './apiClient';
 
 // R12（2026-10-12 复审）：低频重面板按需加载（dynamic import + Suspense）——首屏不下载其代码，
 // 首次打开时拉取并进入浏览器缓存。配对的渲染侧见 LazyPanel（条件挂载：关闭即卸载）。
@@ -310,7 +311,7 @@ function Editor() {
   const [designerWorkflowName, setDesignerWorkflowName] = useState('VisionStudio · 线性流程示例');
 
   useEffect(() => {
-    fetch('/api/host-mode').then(r => r.ok ? r.json() : undefined).then(data => setRuntimeOnly(Boolean(data?.runtimeOnly))).catch(() => undefined);
+    apiFetch('/api/host-mode').then(r => r.ok ? r.json() : undefined).then(data => setRuntimeOnly(Boolean(data?.runtimeOnly))).catch(() => undefined);
   }, []);
   useEffect(() => { persistNodeCompact(compactNodes); }, [compactNodes]);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -540,7 +541,7 @@ function Editor() {
 
   const refreshCatalog = useCallback(async () => {
     try {
-      const response = await fetch('/api/catalog');
+      const response = await apiFetch('/api/catalog');
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const data = localizeCatalog(validateCatalog(await response.json()));
       setCatalog(data);
@@ -555,11 +556,11 @@ function Editor() {
       messageApi.warning('后端 Catalog 不可用；保留当前 Catalog（首次启动时使用自动生成 fallback）');
     }
 
-    fetch('/api/plugins')
+    apiFetch('/api/plugins')
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setPlugins(data))
       .catch(() => setPlugins([]));
-    fetch('/api/plugins/sdk')
+    apiFetch('/api/plugins/sdk')
       .then((r) => (r.ok ? r.json() : undefined))
       .then((data) => setPluginSdk(data))
       .catch(() => setPluginSdk(undefined));
@@ -568,7 +569,7 @@ function Editor() {
   const rescanPlugins = useCallback(async () => {
     setPluginRescanning(true);
     try {
-      const response = await fetch('/api/plugins/rescan', { method: 'POST' });
+      const response = await apiFetch('/api/plugins/rescan', { method: 'POST' });
       const body = await response.json().catch(() => undefined);
       if (!response.ok) throw new Error(body?.detail ?? body?.error ?? `Plugin rescan failed (${response.status})`);
       setPlugins(body?.plugins ?? []);
@@ -1098,7 +1099,7 @@ function Editor() {
     setWorkflowListLoading(true);
     setWorkflowListError(undefined);
     try {
-      const response = await fetch('/api/workflows', { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
+      const response = await apiFetch('/api/workflows', { signal: AbortSignal.timeout(WORKFLOW_IO_TIMEOUT_MS) });
       if (!response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
       const items = await response.json() as WorkflowDocumentSummary[];
       setSavedWorkflows(items);

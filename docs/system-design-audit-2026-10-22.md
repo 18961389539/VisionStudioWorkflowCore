@@ -394,20 +394,20 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 不吞掉 `response`，需要读响应头（如 `X-Workflow-Revision`）的调用仍使用 `apiFetch`。
 - 超时统一用 `timeoutMs`，逐步替换各处自建 `setTimeout + AbortController` 的重复实现。
 
-## 已迁移（48 处）
+## 已全部迁移（198 处直接调用清零）
 
-| 文件 | 调用数 |
-| --- | --- |
-| `useRunController.ts` | 9 |
-| `components/JobPanel.tsx` | 13 |
-| `components/DatasetValidationPanel.tsx` | 14 |
-| `useTuningData.ts` / `useTraceQuery.ts` | 各 1 |
-| `useProductionActions.ts` / `useProductionMonitor.ts` / `useRunImages.ts` | 各 1 |
-| `useTuningCandidates.ts` / `useTuningPreview.ts` / `useWorkflowInspection.ts` | 各 1 |
-| `components/TracePanel.tsx` / `TraceAnalysisPanel.tsx` | 各 2 |
+| 批次 | 范围 | 调用数 |
+| --- | --- | --- |
+| 第一批 | run / production / tuning / trace hooks | 17 |
+| 第二批 | JobPanel、DatasetValidationPanel、TracePanel / TraceAnalysisPanel | 31 |
+| 第三批 | 其余 25 个文件（CameraPanel 38、PluginPackagePanel 19、CalibrationIntrinsicsWizard 18、InvestigationPanel 8、security 7、DevicePanel 7…） | 150 |
 
-全部相关测试通过（`useRunController` 38、`useProductionMonitor` 等 140、请求层 7）；
-前端全量 **1061 项通过**（71 文件，含请求层棘轮），生产构建通过。
+运行时代码中的直接 `fetch(` 已清零；`apiUsage.test.ts` 棘轮基线降为 **0**，
+新增直接调用会失败并列出文件。
+
+第三批以行为等价替换为主（`apiFetch` 在未指定 `timeoutMs` 时完全透传参数与 signal 身份），
+但 `CameraPanel` / `PluginPackagePanel` / `CalibrationIntrinsicsWizard` / `security.tsx`
+尚无独立测试，建议后续补最小冒烟：轮询停止、上传失败、登录过期各一条。
 
 ## 迁移配方
 
@@ -416,19 +416,7 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 3. 需要状态码分支（409/404/202）→ 保留 `apiFetch` + 原有分支。
 4. 轮询/取消仍由调用方控制器负责；`apiFetch` 只保证取消能到达底层请求。
 
-## 剩余（150 处，按收益排序）
+## 后续
 
-| 文件 | 调用数 | 备注 |
-| --- | --- | --- |
-| `CameraPanel.tsx` | 38 | 轮询 + 设备动作，需先补面板测试 |
-| `PluginPackagePanel.tsx` | 19 | 上传/签名/安装，需保留错误分支 |
-| `CalibrationIntrinsicsWizard.tsx` | 18 | 向导多步请求 |
-| `InvestigationPanel.tsx` | 8 | 已有一组面板测试 |
-| `security.tsx` | 7 | 登录/会话，需补测试 |
-| `DevicePanel.tsx` / `CalibrationPanel.tsx` / `RobotPanel.tsx` / `StoragePanel.tsx` | 各 6–7 | 轮询与设备动作 |
-| `App.tsx` | 6 | 文档/目录加载 |
-| 其余面板 | 约 34 | 按文件逐个迁移 |
-
-新增 `apiUsage.test.ts` 棘轮：直接 fetch 总数不得超过 150；每迁完一批同步下调基线，
-新增直接调用会失败并列出文件。下一批建议：`InvestigationPanel`（有测试）、
-`CameraPanel`（先补测试），再处理 `PluginPackagePanel` 的错误分支。
+- 304 处硬编码 `/api/` 尚未收敛到端点常量；可在统一请求层之上再加 `endpoints.ts`。
+- 160 处无 `AbortSignal` 的调用已随迁移保留原行为，轮询类可逐步改为显式控制器。

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Checkbox, Col, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, OfflineReplayContext, OfflineReplayResult, WorkflowPayload } from '../types';
+import { apiFetch } from '../apiClient';
 
 type Props = { open: boolean; runId?: string; initialNodeId?: string; onClose: () => void };
 type DebugMode = 'Full' | 'RunNode' | 'RunFromNode' | 'Breakpoints';
@@ -24,7 +25,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
 
   const load = async () => {
     if (!runId) return;
-    const response = await fetch(`/api/traces/${runId}/replay/context`);
+    const response = await apiFetch(`/api/traces/${runId}/replay/context`);
     const data = await response.json();
     if (!response.ok) {
       messageApi.error(data.detail ?? data.error ?? '加载回放上下文失败');
@@ -62,7 +63,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
     if (mode === 'Breakpoints' && breakpoints.length === 0) return messageApi.warning('请至少选择一个断点');
     setRunning(true);
     try {
-      const response = await fetch(`/api/traces/${runId}/replay`, {
+      const response = await apiFetch(`/api/traces/${runId}/replay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

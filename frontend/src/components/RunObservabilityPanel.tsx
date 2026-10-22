@@ -3,6 +3,7 @@ import { Alert, Spin, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import type { NodePerformanceBaseline, RunObservabilitySnapshot } from '../types';
 import { localizeStatus } from '../i18n';
 import { localizeNodeType } from '../i18n/catalog';
+import { apiFetch } from '../apiClient';
 
 type Props = { runId?: string; nodeLabels?: Record<string, string>; nodeTypeLabels?: Record<string, string> };
 
@@ -28,7 +29,7 @@ export default function RunObservabilityPanel({ runId, nodeLabels = {}, nodeType
     setData(undefined);
     setLoading(true);
     setError(undefined);
-    fetch(`/api/traces/${runId}/observability?days=7&history=100`, { signal: controller.signal })
+    apiFetch(`/api/traces/${runId}/observability?days=7&history=100`, { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail ?? payload.error ?? 'Failed to load run observability');
