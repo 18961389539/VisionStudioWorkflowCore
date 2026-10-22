@@ -423,7 +423,9 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 ## 端点常量
 
 新增 `frontend/src/endpoints.ts`：`API_BASE` + 按资源域组织的 builder（jobs/traces/validation/
-runs/cameras/auth/plugins/workflows/debug/production 等 10 个域）。新代码必须从这里取路径。
+runs/cameras/auth/plugins/workflows/debug/production/cameraSync/calibration/calibrations/
+cameraIntrinsics/cameraFeatureProfiles/devices/robots/investigations/media/storage/alarms/
+modelPackages/modules/diagnostics/hardwareProvenance 等 **22 个域**）。新代码必须从这里取路径。
 已全部迁移 **198 处**直接调用（36 个文件）。所有路径通过 `apiUrl()` 或资源域 builder 构建，
 `API_BASE` 只需改一处即可适配子路径部署。`apiUsage.test.ts` fetch 棘轮与 /api/ 硬编码检查双保险。
 `endpoints.ts` 的对应 builder，`API_BASE` 只需改一处即可适配子路径部署。
