@@ -230,3 +230,82 @@ Vite 的配置解析顺序 `.js` 先于 `.ts`，因此 `.ts` 里的 `/hubs` WebS
 - 前端：`npx tsc -b` 0 error；`npx vitest run` 1043/1044 通过——唯一失败为既有
   `propertyPanel` 120 顶点用例在满载下超 5s（单独运行 4.7s 通过，与本轮改动无关）；
   `npm run build` 通过，`configFile` 已指向 `vite.config.ts`。
+
+---
+
+# 第三轮：节点能力声明下沉（图像坐标帧）（2026-10-22）
+
+第一轮审计列出的 P1「运行时按节点类型字符串分派」在这轮落地了其中影响插件扩展的一项：
+**图像坐标帧语义改为目录声明**，调度器与编译器不再按节点类型字符串推断。
+
+## 原设计问题
+
+| 位置 | 原实现 | 后果 |
+| --- | --- | --- |
+| `VisionNodeDispatcher.AttachImageCoordinateFrames` | 13 处 `type.Equals("image.crop")` / `"jlvision.imageOp"` / `"image.warpAffine"` 等判断，推断输出帧与 transform 的源/目标帧 | 插件节点无法声明"我的输出在新坐标系"，只能被当作保持输入帧；内置新增空间节点必须改核心文件 |
+| `VisionWorkflowCompiler.ResolveImageFrame` | 10 个类型分支 + 条件读 `operator` 参数 | 与调度器两套推断，容易漂移（`image.undistort` 编译器认为新帧、调度器实际保持输入帧） |
+| `VisionWorkflowCompiler.ResolveTransformFrames` | 4 个类型分支（imageOp / register / crop / roi.transform） | 插件 transform 语义无法表达 |
+
+## 新契约
+
+`NodeCatalogItem.Frames`（`IReadOnlyList<NodeFrameRule>`）与 `NodeCatalogItem.DeclaresFrames`：
+
+```csharp
+new NodeFrameRule(
+    Policy: NodeImageFramePolicy.NewFixedFrame,
+    FrameSuffix: "crop",
+    FrameLabel: "crop frame",
+    Transform: NodeTransformFramePolicy.Spatial);
+```
+
+- 图像输出策略：`PreserveInput`、`NewSpatialFrame`、`NewFixedFrame`、`TransformTarget`、`InputFrame`。
+- transform 帧策略：`None`、`Spatial`、`RoiReference`、`ReferenceInput`。
+- 条件规则：`WhenParameter` + `WhenValues`，按节点有效参数值（节点值优先、目录默认值兜底）匹配，
+  规则按声明顺序取首条；无条件规则作为兜底。
+- 未声明（`Frames = null`）沿用旧默认：输出继承输入帧；没有输入时使用 `image:{id}:source`。
+
+## 内置声明（11 个节点）
+
+| 节点 | 帧策略 | transform |
+| --- | --- | --- |
+| `image.crop` | `NewFixedFrame` / `crop` | `Spatial` |
+| `image.resize` / `image.rotate` / `image.perspective` | `NewSpatialFrame` | 无 |
+| `image.warpAffine` | `TransformTarget`（缺 transform 时 `:spatial`） | 无 |
+| `image.undistort` | `NewFixedFrame` / `undistorted` | 无 |
+| `image.register` | `PreserveInput` | `ReferenceInput`（reference 口） |
+| `roi.transform` | `InputFrame`（`debugImage`，缺省 `CurrentImage`） | `RoiReference` |
+| `jlvision.worldPlane` | `NewFixedFrame` / `worldPlane` | 无 |
+| `jlvision.restoration` | `operator ∈ {psfMotion, psfDefocus}` 时 `:psf`，否则保持输入 | 无 |
+| `jlvision.imageOp` | 空间算子（cropPart/cropRectangle2/cropDomainRel/rotateImage/zoomImageFactor/addBorder/changeFormat）时 `:spatial`，否则保持输入 | 空间算子为 `Spatial` |
+
+`image.undistort` 的调度器行为随之与编译器对齐：输出帧确为 `:undistorted`（此前调度器保持输入帧，
+编译器却按新帧校验，属两套推断漂移）。
+
+## 插件路径
+
+插件只需在目录中声明，宿主无需认识其类型名：
+
+```csharp
+Frames: [new(NodeImageFramePolicy.NewSpatialFrame, FrameLabel: "plugin spatial",
+             Transform: NodeTransformFramePolicy.Spatial)]
+```
+
+新增测试直接驱动未注册类型名的 `plugin.spatial` 节点，断言输出帧为 `image:{id}:spatial`、
+transform 的 Source/Target 被补全；未声明帧的插件节点保持输入帧。
+
+## 边界与未完成
+
+- 只改帧语义来源，节点 ID、端口、参数、默认值、图像算法均未变化；旧流程无需迁移。
+- `ImageOperationGeometry.IsSpatial` 仍被 `JLVisionOperatorNodes` 用于选择空间执行路径，
+  那是执行器内部算子分派，不是帧语义，本轮保留。
+- 前端仍用 `cropMaskFrameChangingNodeTypes` 推断 ROI 沿革；目录已输出 `frames` 且 `types.ts`
+  已补齐类型，但 UI 读取声明留待下一轮（避免同时改动画布几何编辑的主链路）。
+- `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
+- 编译器其余类型字面量（约 90 处，含控制流、保存/导出、ROI 连线校验）尚未迁移。
+
+## 验证
+
+- 新增 `NodeFrameSemanticsTests` 10 项（内置声明、条件规则、插件空间帧、未声明保持、固定帧）；
+  `Catalog_FrameDeclarationsReferenceExistingPortsAndParameters` 校验声明的端口/参数/条件值均存在。
+- 后端全量 **2247 项通过**（Engine 1826 + Api 421）；前端 **1047 项通过**，`tsc -b` 与生产构建通过。
+- 目录 hash 变为 `33761bf0…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。

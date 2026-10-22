@@ -226,8 +226,63 @@ public sealed record NodeCatalogItem(
     /// </summary>
     IReadOnlyList<NodeActionDeclaration>? Actions = null,
     /// <summary>显式资源请求（声明承载资源 ID 的参数名）；null = 沿用参数名约定收集。</summary>
-    IReadOnlyList<NodeResourceDeclaration>? Resources = null)
+    IReadOnlyList<NodeResourceDeclaration>? Resources = null,
+    /// <summary>
+    /// 显式图像坐标帧语义。null = 未声明：输出沿输入帧（无输入时使用节点私有源帧）；
+    /// 非空 = 按首条匹配规则解释，插件因此无需让宿主按节点类型字符串猜测。
+    /// </summary>
+    IReadOnlyList<NodeFrameRule>? Frames = null)
 {
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;
+
+    /// <summary>该目录是否声明了图像坐标帧语义。</summary>
+    public bool DeclaresFrames => Frames is not null;
 }
+
+/// <summary>
+/// 图像输出帧策略：节点执行后其 image 输出落在哪个坐标帧。
+/// </summary>
+public enum NodeImageFramePolicy
+{
+    /// <summary>沿用输入图像帧；没有图像输入时使用 image:{nodeId}:source。</summary>
+    PreserveInput,
+    /// <summary>新建 image:{nodeId}:spatial（空间变换后无法再用输入像素坐标解释）。</summary>
+    NewSpatialFrame,
+    /// <summary>新建 image:{nodeId}:{FrameSuffix}，用于裁剪、去畸变、标定平面等有固定语义的帧。</summary>
+    NewFixedFrame,
+    /// <summary>使用 transform 输入的 TargetFrame；缺失时回退 image:{nodeId}:spatial。</summary>
+    TransformTarget,
+    /// <summary>沿用 InputPort 的输入帧；未连接时使用 FallbackFrame（可为 null）。</summary>
+    InputFrame
+}
+
+/// <summary>
+/// transform 输出的帧语义：声明 transform 端口的 SourceFrame/TargetFrame 如何补全。
+/// </summary>
+public enum NodeTransformFramePolicy
+{
+    None,
+    /// <summary>Source = 输入图像帧，Target = 本节点图像输出帧。</summary>
+    Spatial,
+    /// <summary>Source = roi:{nodeId}:reference，Target = InputPort 的图像帧。</summary>
+    RoiReference,
+    /// <summary>Source = 输入图像帧，Target = ReferencePort 的图像帧。</summary>
+    ReferenceInput
+}
+
+/// <summary>
+/// 一条图像帧语义规则。条件为空表示无条件匹配；否则按节点有效参数值（节点值优先、目录默认值兜底）
+/// 匹配 <see cref="WhenValues"/>，规则按声明顺序求值，首条匹配生效。
+/// </summary>
+public sealed record NodeFrameRule(
+    NodeImageFramePolicy Policy,
+    string InputPort = "image",
+    string? FrameSuffix = null,
+    string? FrameLabel = null,
+    string? FallbackFrame = null,
+    NodeTransformFramePolicy Transform = NodeTransformFramePolicy.None,
+    string? ReferencePort = null,
+    string? TransformPort = null,
+    string? WhenParameter = null,
+    IReadOnlyList<string>? WhenValues = null);

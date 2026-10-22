@@ -306,36 +306,39 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
-        if (ImageOperationGeometry.IsSpatial(node))
+        var catalog = registry.Require(type).Catalog;
+        var frameRule = NodeFrameSemantics.Resolve(node, catalog);
+        if (frameRule?.Transform is { } framePolicy && framePolicy != NodeTransformFramePolicy.None)
         {
-            var input = FindInputEdge(workflow.Edges, nodeId, "image");
-            var source = input is null ? null : ResolveImageFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            var target = new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (operator spatial frame)");
-            return new TransformFrames(source, target, [target]);
-        }
-        if (type.Equals("image.register", StringComparison.OrdinalIgnoreCase))
-        {
-            var imageInput = FindInputEdge(workflow.Edges, nodeId, "image");
-            var referenceInput = FindInputEdge(workflow.Edges, nodeId, "reference");
-            var source = imageInput is null ? null : ResolveImageFrame(imageInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            var target = referenceInput is null ? null : ResolveImageFrame(referenceInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            return new TransformFrames(source, target, target is null ? [] : [target]);
-        }
-        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
-        {
-            var input = FindInputEdge(workflow.Edges, nodeId, "image");
-            var source = input is null ? null : ResolveImageFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            var target = new CoordinateFrame($"image:{nodeId}:crop", $"{nodeId}.image (crop frame)");
-            return new TransformFrames(source, target, [target]);
-        }
-        if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
-        {
-            var input = FindInputEdge(workflow.Edges, nodeId, "debugImage");
-            var target = input is null ? null : ResolveImageFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            return new TransformFrames(
-                new CoordinateFrame($"roi:{nodeId}:reference", $"{nodeId} reference image", IsTraceable: false),
-                target,
-                target is null ? [] : [target]);
+            var source = ResolveImageInputFrame(nodeId, frameRule.InputPort, workflow, byId);
+            switch (framePolicy)
+            {
+                case NodeTransformFramePolicy.Spatial:
+                {
+                    var key = NodeFrameSemantics.ImageFrameKey(
+                        nodeId,
+                        frameRule,
+                        port => ResolveImageInputFrame(nodeId, port, workflow, byId)?.Key,
+                        port => ResolveTransformTargetFrame(nodeId, port, workflow, byId)?.Key);
+                    var target = key is null
+                        ? null
+                        : new CoordinateFrame(key, NodeFrameSemantics.FrameLabel(nodeId, frameRule, "spatial frame"));
+                    return new TransformFrames(source, target, target is null ? [] : [target]);
+                }
+                case NodeTransformFramePolicy.RoiReference:
+                {
+                    var target = ResolveImageInputFrame(nodeId, frameRule.InputPort, workflow, byId);
+                    return new TransformFrames(
+                        new CoordinateFrame($"roi:{nodeId}:reference", $"{nodeId} reference image", IsTraceable: false),
+                        target,
+                        target is null ? [] : [target]);
+                }
+                case NodeTransformFramePolicy.ReferenceInput:
+                {
+                    var target = ResolveImageInputFrame(nodeId, frameRule.ReferencePort ?? "reference", workflow, byId);
+                    return new TransformFrames(source, target, target is null ? [] : [target]);
+                }
+            }
         }
         if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
         {
@@ -736,34 +739,33 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
-        if (type.Equals("jlvision.restoration", StringComparison.OrdinalIgnoreCase) && node.GetString("operator", "harmonic") is "psfMotion" or "psfDefocus")
-            return new CoordinateFrame($"image:{nodeId}:psf", $"{nodeId}.image (PSF kernel)");
-        if (type.Equals("jlvision.worldPlane", StringComparison.OrdinalIgnoreCase))
-            return new CoordinateFrame($"image:{nodeId}:worldPlane", $"{nodeId}.image (calibrated plane)");
-        if (ImageOperationGeometry.IsSpatial(node))
-            return new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (operator spatial frame)");
-        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
-            return new CoordinateFrame($"image:{nodeId}:crop", $"{nodeId}.image (crop frame)");
-        if (type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase))
+        var catalog = registry.Require(type).Catalog;
+        var rule = NodeFrameSemantics.Resolve(node, catalog);
+        if (rule is not null)
         {
-            var transformInput = FindInputEdge(workflow.Edges, nodeId, "transform");
-            var targetFrame = transformInput is null ? null
-                : ResolveTransformFrames(transformInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
-            return targetFrame ?? new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (affine-warped frame)");
-        }
-        if (type.Equals("image.undistort", StringComparison.OrdinalIgnoreCase))
-            return new CoordinateFrame($"image:{nodeId}:undistorted", $"{nodeId}.image (undistorted frame)");
-        if (type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
-            return new CoordinateFrame($"image:{nodeId}:spatial", $"{nodeId}.image (spatially transformed frame)");
-        if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
-        {
-            var debugInput = FindInputEdge(workflow.Edges, nodeId, "debugImage");
-            return debugInput is null ? null : ResolveImageFrame(debugInput.SourceNodeId, workflow, byId, visited);
+            switch (rule.Policy)
+            {
+                case NodeImageFramePolicy.PreserveInput:
+                    return ResolveImageInputFrame(nodeId, rule.InputPort, workflow, byId)
+                        ?? new CoordinateFrame($"image:{nodeId}:source", $"{nodeId}.image");
+                case NodeImageFramePolicy.NewSpatialFrame:
+                    return new CoordinateFrame($"image:{nodeId}:spatial", NodeFrameSemantics.FrameLabel(nodeId, rule, "spatial frame"));
+                case NodeImageFramePolicy.NewFixedFrame:
+                    return new CoordinateFrame(
+                        $"image:{nodeId}:{rule.FrameSuffix ?? "output"}",
+                        NodeFrameSemantics.FrameLabel(nodeId, rule, rule.FrameSuffix ?? "output"));
+                case NodeImageFramePolicy.TransformTarget:
+                {
+                    var target = ResolveTransformTargetFrame(nodeId, rule.TransformPort ?? "transform", workflow, byId);
+                    return target ?? new CoordinateFrame($"image:{nodeId}:spatial", NodeFrameSemantics.FrameLabel(nodeId, rule, "spatial frame"));
+                }
+                case NodeImageFramePolicy.InputFrame:
+                    return ResolveImageInputFrame(nodeId, rule.InputPort, workflow, byId);
+            }
         }
 
-        var catalog = registry.Require(type).Catalog;
+        // Undeclared nodes (plugins that did not declare frames) keep the previous default:
+        // image outputs inherit the connected image input, or get a private source frame.
         if (!catalog.Outputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
                 && port.DataType == VisionDataType.Image))
             return null;
@@ -777,6 +779,18 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         }
 
         return new CoordinateFrame($"image:{nodeId}:source", $"{nodeId}.image");
+    }
+
+    private CoordinateFrame? ResolveTransformTargetFrame(
+        string nodeId,
+        string port,
+        WorkflowDefinition workflow,
+        IReadOnlyDictionary<string, NodeDefinition> byId)
+    {
+        var edge = FindInputEdge(workflow.Edges, nodeId, port);
+        return edge is null
+            ? null
+            : ResolveTransformFrames(edge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
     }
 
     private static EdgeDefinition? FindInputEdge(IReadOnlyList<EdgeDefinition> edges, string nodeId, string port)

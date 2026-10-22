@@ -102,7 +102,7 @@ describe('recipe workbench', () => {
     const baseWorkflow = { ...workflow, id: 'b-main-base', name: '基础版本' };
     fetchMock.mockImplementation(async (url, init) => url === '/api/jobs/b-main/versions/1'
       ? { ok: true, status: 200, json: async () => ({ jobId: 'b-main', version: 1, workflow, baseWorkflow }) } as Response : base(url, init));
-    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }));
+    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }, { timeout: 5_000 }));
     await waitFor(() => expect(apply).toHaveBeenCalledWith(baseWorkflow, undefined));
     expect(screen.queryByText(/已加载 b-main V1/)).toBeNull();
     await act(async () => { confirm(false); });
@@ -116,7 +116,7 @@ describe('recipe workbench', () => {
     const base = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url, init) => url === '/api/jobs/b-main/versions/1'
       ? { ok: true, status: 200, json: async () => ({ jobId: 'wrong-recipe', version: 1, workflow }) } as Response : base(url, init));
-    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }));
+    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }, { timeout: 5_000 }));
     await screen.findByText(/配方版本响应与所选版本不匹配/);
     expect(apply).not.toHaveBeenCalled();
   });
@@ -135,7 +135,7 @@ describe('recipe workbench', () => {
       }
       return base(url, init);
     });
-    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }));
+    fireEvent.click(await screen.findByRole('button', { name: '载入 V1 基础工作流' }, { timeout: 5_000 }));
     await waitFor(() => expect(release).toBeDefined());
     cleanup();
     expect(signal.aborted).toBe(true);

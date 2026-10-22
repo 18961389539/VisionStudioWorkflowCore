@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b7178b8b6674f72eaae10a9990e87234c800de79bc8219250e06cce4616e5289",
+  "hash": "33761bf0da4c4804f4936106a831ba33b83a94369631095bb10f36a6b8a570a7",
   "items": [
     {
       "type": "image.acquire",
@@ -197,7 +197,8 @@
           "parameter": "cameraId"
         }
       ],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "frameset.image",
@@ -284,7 +285,8 @@
           "parameter": "cameraId"
         }
       ],
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "camera.syncCapture",
@@ -459,7 +461,8 @@
           "parameter": "groupId"
         }
       ],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.synthetic",
@@ -739,7 +742,8 @@
       "description": "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "calibration.handEye2D",
@@ -940,7 +944,8 @@
       "description": "Planar SE(2) hand-eye (algorithmBackend=managed; not OpenCV/JLVision). Fill samplesJson with robot/vision pose pairs → pose/transform; eye-in-hand or eye-to-hand. Key params: angularWeight, translation/angle residual gates. Rotation coverage and translation spans are reported as metrics, and a minimum of 8 deg rotation span plus 0.001 translation spread is required to avoid ill-conditioned planar fits. Needs rotation and translation in both streams; rejects duplicate robot poses; not 3D (use handEye3D). Failures: poor diversity, residual gates, near-pure translation.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "calibration.handEye3D",
@@ -1133,7 +1138,8 @@
       "description": "Full SE(3) hand-eye (algorithmBackend=opencv, Cv2.CalibrateHandEye; no JLVision hand-eye API). Fill samplesJson with row-major 4×4 robotToBase and targetToCamera → Transform3D. Key params: mode, OpenCV method, residual gates, frame names/units. Requires ≥6 samples with two non-parallel rotation axes. Failures: non-rigid matrices, single-axis/translation-only motion, residual gates.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.worldPlane",
@@ -1404,7 +1410,17 @@
         }
       ],
       "description": "Projects an image or contour onto a calibrated world plane. applyMap must connect mapRows/mapColumns/mapInfo from the same generator node and use the same image source frame. At runtime the source size, map size/type and content fingerprint are verified; mixed or modified maps are rejected. Contour output uses the selected physical unit; the image remains plane-sampled pixels.",
-      "declaresActions": false
+      "frames": [
+        {
+          "policy": "NewFixedFrame",
+          "inputPort": "image",
+          "frameSuffix": "worldPlane",
+          "frameLabel": "calibrated plane",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": false,
+      "declaresFrames": true
     },
     {
       "type": "calibration.cameraIntrinsics",
@@ -1601,7 +1617,8 @@
       "description": "Calibrate intrinsics. Wire: calibrationDataJson (or views from detectBoard / Calibration Wizard) → calibrationJson/rms/viewStats for undistort, extrinsics, hand-eye. Key params: cameraModel pinhole (JLVision polynomial) / fisheye (OpenCV Kannala-Brandt) / telecentric (JLVision object-side); maxViewRms/maxPoseViewRms/maxRms gates. Need ≥3 varied views; telecentric needs magnification and pixel-pitch seeds. Failures: too few views, degenerate points, RMS gates.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "calibration.detectBoard",
@@ -1897,7 +1914,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "calibration.dualCameraExtrinsics",
@@ -2149,7 +2167,8 @@
       "description": "Solve Camera A→B rigid SE(3) extrinsics (algorithmBackend=opencv; no JLVision stereo extrinsics API). Wire: synchronized shared-board pairsJson → transform/matrixJson/baseline for transformPoint3D / frame tree. Key params: inputMode poses|points, method average|stereoCalibrate, residual gates, frame names. Honest limits: no N-camera bundle adjustment, no live multi-cam session, average mode does not refine distortion, no stereo rectification maps. Failures: too few pairs, missing intrinsics for stereoCalibrate, residual gates.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "calibration.planar",
@@ -2320,7 +2339,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "collection.detections.count",
@@ -2383,7 +2403,8 @@
       "description": "Return the number of items in a DetectionList, with an isEmpty flag and JSON diagnostics. The list is validated for finite geometry before counting.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "collection.detections.at",
@@ -2499,7 +2520,8 @@
       "description": "Extract one DetectionList item as typed scalar and geometry outputs, including optional confidence and classId; an out-of-range index returns found=false.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "collection.detections.filter",
@@ -2634,7 +2656,8 @@
       "description": "Filter DetectionList items by area, circularity, optional confidence and class ID with strict finite/ordered bound validation; missing optional values do not match configured filters. Emits kept count, rejected count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "collection.detections.sort",
@@ -2876,7 +2899,8 @@
       "description": "Sort a DetectionList by up to three fields and refresh result indices. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting. Emits count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "contour.extract",
@@ -3054,7 +3078,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "contour.filter",
@@ -3248,7 +3273,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "contour.fromPoints",
@@ -3330,7 +3356,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.contourOp",
@@ -4199,7 +4226,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "contour.properties",
@@ -4363,7 +4391,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.dxf",
@@ -4577,7 +4606,8 @@
         }
       ],
       "description": "Imports or exports floating-point contours with the native DXF operators. Import explicitly sets the coordinate unit, scale, Y direction and origin offset; an unspecified unit stays unknown. Export preserves coordinate values verbatim and requires matching contour units and frames; no CAD unit header is written. status keeps the native read report.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.featureExtract",
@@ -5034,7 +5064,8 @@
         }
       ],
       "description": "Extracts native subpixel edges, lines and corners; contours keep floating-point coordinates. Line/edge operators output contours; corner operators output a points JSON array and the selected point, and detections can feed collection or loop nodes. Förstner also outputs covariance details. Gray operators convert to gray automatically; color operators require three channels.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformCompose",
@@ -5111,7 +5142,8 @@
       "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformConstant",
@@ -5254,7 +5286,8 @@
       "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.distance",
@@ -5331,7 +5364,8 @@
       "description": "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.point",
@@ -5455,7 +5489,8 @@
       "description": "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.point3D",
@@ -5616,7 +5651,8 @@
       "description": "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants. Emits magnitude, XY magnitude, azimuth and elevation (deg) plus JSON diagnostics. Coordinates must be finite within +/-1e9; frame must be non-empty; unit is mm/cm/m.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.pose",
@@ -5760,7 +5796,8 @@
       "description": "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.frameTree",
@@ -5818,7 +5855,8 @@
       "description": "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformInverse",
@@ -5877,7 +5915,8 @@
       "description": "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.poseToTransform",
@@ -5950,7 +5989,8 @@
       "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.frameResolve",
@@ -6026,7 +6066,8 @@
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformPoint3D",
@@ -6095,7 +6136,8 @@
       "description": "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformCoordinatePoint",
@@ -6169,7 +6211,8 @@
       "description": "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformCoordinatePose",
@@ -6238,7 +6281,8 @@
       "description": "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformLine",
@@ -6318,7 +6362,8 @@
       "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformPoint",
@@ -6382,7 +6427,8 @@
       "description": "Map an image-space Point2D through a validated Transform2D into a frame/unit-aware point. Wire: point + transform → point + frame/unit/diagnostics. Rejects non-finite points and singular transforms. Typical after match/register.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "coordinate.transformPose",
@@ -6451,7 +6497,8 @@
       "description": "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.dynamicThreshold",
@@ -6638,7 +6685,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.flatFieldCorrect",
@@ -6903,7 +6951,8 @@
       "description": "Flat-field correction with gain+offset, gain-only or offset-only models. Optional dark reference follows darkPolicy. Percentile clipping precedes correction; finite/minimum-magnitude/positive/maximum gain guards protect division. Statistics describe the selected byte or real output.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.difference",
@@ -7090,7 +7139,8 @@
       "description": "Compare aligned grayscale images with JLVision arithmetic. Default output is float32; outputType=byte explicitly saturates to 0..255. Signed float mode preserves negative differences, normalized mode computes an illumination ratio in [-1,1] before scale and offset. Mean/stdDev/min/max and a global SSIM-style similarity (whole-image statistics, 1 = identical) are always reported; when threshold > 0 the thresholded change region and changed-pixel count are also emitted. No automatic alignment is performed (use defect.referenceCompare for registration and grading).",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "defect.referenceCompare",
@@ -7401,7 +7451,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.regionIntensity",
@@ -7668,7 +7719,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "device.readTag",
@@ -7830,7 +7882,8 @@
           "parameter": "deviceId"
         }
       ],
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "device.waitTag",
@@ -8106,7 +8159,8 @@
           "parameter": "deviceId"
         }
       ],
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "device.writeTag",
@@ -8273,7 +8327,8 @@
           "parameter": "deviceId"
         }
       ],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "device.writeVisionResult",
@@ -8465,7 +8520,8 @@
           "parameter": "deviceId"
         }
       ],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "feature.circle",
@@ -8659,7 +8715,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "feature.edge",
@@ -8784,7 +8841,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "feature.line",
@@ -8974,7 +9032,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "feature.edgeSubpixel",
@@ -9209,7 +9268,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "flow.ifBoolean",
@@ -9298,7 +9358,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "flow.delay",
@@ -9399,7 +9460,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "flow.merge",
@@ -9550,7 +9612,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "flow.forEach",
@@ -9668,7 +9731,8 @@
         "supportsParallel": false,
         "executionMode": "WorkflowCore"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.if",
@@ -9873,7 +9937,8 @@
       ],
       "description": "Compare a number and branch true or false. Threshold mode keeps the original operators, with a configurable equality tolerance. Inside-range mode checks a closed window. Hysteresis uses the optional previous condition and does not remember state across runs. Emits condition, echoed value, signed margin and JSON diagnostics.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.join",
@@ -9926,7 +9991,8 @@
       "parameters": [],
       "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.loopEnd",
@@ -9985,7 +10051,8 @@
         "supportsParallel": false,
         "executionMode": "WorkflowCore"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.parallel",
@@ -10038,7 +10105,8 @@
       "parameters": [],
       "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.result",
@@ -10101,7 +10169,8 @@
       ],
       "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
       "pluginId": "builtin",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "flow.switch",
@@ -10256,7 +10325,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "flow.try",
@@ -10404,7 +10474,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "geometry.intersections",
@@ -10536,7 +10607,8 @@
         }
       ],
       "description": "Line-circle uses line/circle (the line extends infinitely); circle-circle uses circle/circle2; segment intersection uses line/line2 (limited to the endpoints). points is a JSON list of every intersection; found=false when there are none. Use overlapping to detect coincident geometry.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.geometry",
@@ -11730,7 +11802,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.homMat",
@@ -12489,7 +12562,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "geometry.angle",
@@ -12556,7 +12630,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "geometry.intersection",
@@ -12648,7 +12723,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.matrixOp",
@@ -13723,7 +13799,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "geometry.distance",
@@ -13818,7 +13895,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "inference.anomaly",
@@ -14120,7 +14198,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.classification",
@@ -14420,7 +14499,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.detection",
@@ -14693,7 +14773,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.instanceSegmentation",
@@ -15021,7 +15102,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.obb",
@@ -15325,7 +15407,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.pose",
@@ -15646,7 +15729,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "inference.segmentation",
@@ -15890,7 +15974,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "logic.boolean",
@@ -15980,7 +16065,8 @@
       "description": "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.register",
@@ -16138,7 +16224,16 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "ReferenceInput",
+          "referencePort": "reference"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "match.shape",
@@ -17063,7 +17158,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "match.template",
@@ -17706,7 +17802,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.measure1d",
@@ -18084,7 +18181,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "measure.caliperArray",
@@ -18442,7 +18540,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.caliperCircle",
@@ -18827,7 +18926,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.caliper",
@@ -19083,7 +19183,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.caliperLine",
@@ -19397,7 +19498,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.caliperWidth",
@@ -19669,7 +19771,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.concentricity",
@@ -19747,7 +19850,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.circleSpacing",
@@ -19816,7 +19920,8 @@
       "description": "Return center distance and gap=centerDistance-radiusA-radiusB; overlapping means gap<0. The gap is not the minimum circumference distance when one circle contains the other. Classify separate/tangent/overlapping/contained, including internal tangency. contained includes internal tangency and coincident circles; classification uses an absolute 1e-9 px tolerance.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.wallThickness",
@@ -19972,7 +20077,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.colorDifference",
@@ -20092,7 +20198,8 @@
       "description": "Pixelwise CIE76 ΔE in sRGB/D65 Lab. Wire: aligned same-size reference image or a constant sRGB color; optional domain. deltaE is the mean of per-pixel distances, not the distance between mean colors. Empty regions omit scalars. For patch consistency, not semantic segmentation.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.contourFeature",
@@ -20606,7 +20713,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "measure.contourThickness",
@@ -20821,7 +20929,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.fitEllipse",
@@ -20950,7 +21059,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.fitCircle",
@@ -21090,7 +21200,8 @@
       "description": "Fit 3..12 Point2D inputs with JLVision. Emit circle/center/radius plus robust inlier RMS, maximum residual and actual support count. Refinement retains at least three supporting points and supports cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.fitLine",
@@ -21230,7 +21341,8 @@
       "description": "Fit 2..12 Point2D inputs with JLVision. Emit line/length/angle plus robust inlier RMS, maximum residual and actual support count. Candidate search and refinement support cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.grayHistogram",
@@ -21355,7 +21467,8 @@
       "description": "Native 256-bin histogram over selected pixels ∩ image domain. Connect exactly one of image or domainImage; optional region restricts further. 8-bit color converts to gray. An empty domain emits found=false, pixelCount=0 and zero bins/CDF; scalar statistics are omitted.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.blob",
@@ -21473,7 +21586,8 @@
       "description": "Largest blob with typed geometry and shape features; blobs JSON lists every blob ≥ minArea, largest first. No qualifying blob → found=false (does not throw). Multi-target: use measure.blobs.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.parallelism",
@@ -21556,7 +21670,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.perpendicularity",
@@ -21639,7 +21754,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.lineSpacing",
@@ -21791,7 +21907,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.metrology",
@@ -22079,7 +22196,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.blobs",
@@ -22390,7 +22508,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.pointLineDistance",
@@ -22482,7 +22601,8 @@
       "description": "distance/closestPoint follow the selected line or segment; projectedPoint, lineDistance and signedDistance always use the infinite line. For a horizontal line pointing along +X, points below the line have a negative signedDistance; reversing the line direction flips the sign. It is not an endpoint distance. rawProjectionT is the unclamped parameter, projectionT is the value actually used, and projectionClamped reports whether it was clamped to the endpoints.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.fitRectangle",
@@ -22633,7 +22753,8 @@
         }
       ],
       "description": "Fits each input contour with FitRectangle2ContourXld. Unlike the minimum-area rectangle, this fits edge geometry rather than bounding extent; the output position is the center, sizes are full width/height, and the angle follows the image coordinate system. Empty input returns found=false without error.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.regionFeature",
@@ -23315,7 +23436,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "roi.transform",
@@ -23536,7 +23658,16 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "frames": [
+        {
+          "policy": "InputFrame",
+          "inputPort": "debugImage",
+          "fallbackFrame": "CurrentImage",
+          "transform": "RoiReference"
+        }
+      ],
+      "declaresActions": false,
+      "declaresFrames": true
     },
     {
       "type": "measure.rotatedRect",
@@ -23644,7 +23775,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.contourDeviation",
@@ -23810,7 +23942,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.roundness",
@@ -23949,7 +24082,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.straightness",
@@ -24063,7 +24197,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "measure.metrologyResult",
@@ -24184,7 +24319,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "output.exportResult",
@@ -24435,7 +24571,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "output.httpRequest",
@@ -24738,7 +24875,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "output.saveImage",
@@ -25189,7 +25327,8 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.threshold.adaptive",
@@ -25299,7 +25438,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.bottomHat",
@@ -25401,7 +25541,8 @@
       "description": "Extract small dark features with rectangular grayscale closing minus gray. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.channel",
@@ -25509,7 +25650,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.colorConvert",
@@ -25602,7 +25744,8 @@
       "description": "Convert 8-bit sRGB/BGR(A) or replicated grayscale into three owned float32 channel images. RGB is 0..1; HSV is H=0..360 degrees and S/V=0..1; Lab uses D65 L*=0..100. Channels are scalar images, never packed pseudo-BGR.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.crop",
@@ -25731,7 +25874,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "NewFixedFrame",
+          "inputPort": "image",
+          "frameSuffix": "crop",
+          "frameLabel": "crop frame",
+          "transform": "Spatial"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.blur.gaussian",
@@ -25861,7 +26014,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.grayscale",
@@ -25966,7 +26120,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.filter",
@@ -26117,7 +26272,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.imageOp",
@@ -28320,7 +28476,31 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image",
+          "frameLabel": "operator spatial frame",
+          "transform": "Spatial",
+          "whenParameter": "operator",
+          "whenValues": [
+            "cropPart",
+            "cropRectangle2",
+            "cropDomainRel",
+            "rotateImage",
+            "zoomImageFactor",
+            "addBorder",
+            "changeFormat"
+          ]
+        },
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": false,
+      "declaresFrames": true
     },
     {
       "type": "jlvision.restoration",
@@ -28762,7 +28942,27 @@
         }
       ],
       "description": "Inpainting requires image and the region to restore; Wiener restoration requires a single-channel real PSF with the same size as the source. Blur-kernel generation may connect image to match its size automatically; otherwise the manual width/height are used. filteredImage must match the source size, channels and type. The output PSF is energy-normalized to 1 and width/height report the actual output size.",
-      "declaresActions": false
+      "frames": [
+        {
+          "policy": "NewFixedFrame",
+          "inputPort": "image",
+          "frameSuffix": "psf",
+          "frameLabel": "PSF kernel",
+          "transform": "None",
+          "whenParameter": "operator",
+          "whenValues": [
+            "psfMotion",
+            "psfDefocus"
+          ]
+        },
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": false,
+      "declaresFrames": true
     },
     {
       "type": "jlvision.surface",
@@ -28969,7 +29169,8 @@
         }
       ],
       "description": "Estimates relative height from a gray image or renders a real-valued height field. Reconstruction outputs heightField (resultKind=relativeHeight, unit=relative); rendering outputs shadingImage (resultKind=shading, unit=intensity); image remains a compatibility output. Gradient reconstruction requires same-size single-channel real row/column gradients. Height output is not an absolute 3D measurement in millimeters.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "image.blur.median",
@@ -29075,7 +29276,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.morphGradient",
@@ -29177,7 +29379,8 @@
       "description": "Local grayscale range: rectangular dilation minus erosion. Returns owned 8-bit gray; color is converted to gray. Kernel dimensions must be odd in 1..255. Gradient bands are kernel-dependent and are not subpixel edge positions.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.morphology",
@@ -29405,7 +29608,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.contrastNormalize",
@@ -29512,7 +29716,8 @@
       "description": "Convert 8-bit input to gray and linearly stretch the native min/max or percentile bounds into the requested gray range, clipping outliers to that range. Uniform images pass through unchanged. Returns an owned 8-bit grayscale image.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.illuminationNormalize",
@@ -29602,7 +29807,8 @@
       "description": "Estimate a local mean background on 8-bit grayscale, clamp it by minBackground, then output image/background*targetMean as clipped 8-bit gray. The window should exceed the feature size. This is local illumination normalization, not a substitute for calibrated flat-field references.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.threshold.otsu",
@@ -29675,7 +29881,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.perspective",
@@ -29893,7 +30100,16 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image",
+          "frameLabel": "spatially transformed frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.resize",
@@ -30000,7 +30216,16 @@
       "description": "Resize an image using an explicit interpolation method. Emits output dimensions, scale factors (in JSON diagnostics) and validates the size range deterministically.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image",
+          "frameLabel": "spatially transformed frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.rotate",
@@ -30078,7 +30303,16 @@
       "description": "Rotate around the image center; optionally expand the canvas to retain all pixels. Emits output dimensions, normalized angle (in JSON diagnostics) and rejects non-finite angles.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image",
+          "frameLabel": "spatially transformed frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.sharpen",
@@ -30158,7 +30392,8 @@
       "description": "JLVision mean-based unsharp masking on 8-bit grayscale: image + amount*(image-localMean), clipped to 0..255. May amplify noise; amount=0 passes gray pixels through. Color input is converted to gray.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.threshold",
@@ -30352,7 +30587,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.threshold",
@@ -30837,7 +31073,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "image.undistort",
@@ -30931,7 +31168,17 @@
       "description": "Correct lens distortion with JLVision native pinhole or object-side telecentric polynomial models, Brown-Conrady models, or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "NewFixedFrame",
+          "inputPort": "image",
+          "frameSuffix": "undistorted",
+          "frameLabel": "undistorted frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.warpAffine",
@@ -31028,7 +31275,16 @@
       "description": "Apply a nonsingular pixel-to-pixel affine transform with zero border. validRegion excludes unsupported border pixels; intersect it with inspection regions before reference comparison.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "frames": [
+        {
+          "policy": "TransformTarget",
+          "inputPort": "image",
+          "frameLabel": "affine-warped frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true
     },
     {
       "type": "image.topHat",
@@ -31130,7 +31386,8 @@
       "description": "Extract small bright features with gray minus rectangular grayscale opening. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "recognition.barcode",
@@ -31357,7 +31614,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "text.match",
@@ -31492,7 +31750,8 @@
       "description": "Ordinal text comparison for OCR/barcode results. Connected text/expected override their fallback parameters. Optional outer whitespace trimming and culture-independent case folding; empty actual or expected fails unless allowEmpty=true. Emits diagnostics. Maximum 65536 UTF-16 characters per input.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "recognition.ocr",
@@ -31739,7 +31998,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "text.validate",
@@ -31938,7 +32198,8 @@
       "description": "Compare text literally or validate it with a culture-invariant .NET regular expression. Connected values override their fallback parameters. Regex mode exposes matchedText and groupsJson; a bounded timeout prevents a slow pattern from blocking the workflow.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "text.regex",
@@ -32098,7 +32359,8 @@
       "description": "Culture-invariant .NET regex validation with a bounded timeout and diagnostics. Full-match mode anchors the entire input; otherwise return the first match. Named/numbered groups are JSON strings plus groupCount. Invalid expressions and timeouts fail execution; no match returns pass=false. Limits: 65536 input characters, 4096 pattern characters, 128 groups and 1 MiB group JSON.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.segmentation",
@@ -32314,7 +32576,8 @@
         }
       ],
       "description": "Watershed outputs basin regions and secondaryRegion holds the watershed boundary; count/found only count basin regions. For MSER, darkRegion/lightRegion hold dark/bright regions and remain available as region/secondaryRegion; darkCount/lightCount count each group and count/found count both. primaryCount/secondaryCount always refer to the two original ports.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "region.fromColorRange",
@@ -32497,7 +32760,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.connectedComponents",
@@ -32582,7 +32846,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.fillHoles",
@@ -32667,7 +32932,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.filter",
@@ -32788,7 +33054,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.fromRange",
@@ -33066,7 +33333,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.fromRoi",
@@ -33194,7 +33462,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "image.reduceDomain",
@@ -33281,7 +33550,8 @@
       "description": "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.boolean",
@@ -33379,7 +33649,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.boundary",
@@ -33491,7 +33762,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.convexHull",
@@ -33586,7 +33858,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.morphology",
@@ -33723,7 +33996,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.regionOp",
@@ -35407,7 +35681,8 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "region.properties",
@@ -35544,7 +35819,8 @@
       "description": "Measure each existing region object, preserving pixel area and holes. propertiesJson contains all objects; scalar ports select index or largest. Empty or out-of-range index returns found=false and omits scalar measurements. Orientation is degrees in image x-right/y-down coordinates. Emits diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "jlvision.regionAnalysis",
@@ -35780,7 +36056,8 @@
         }
       ],
       "description": "Relation operators require a same-size region2; relations JSON uses zero-based region object indices. Nearest-point transform also outputs distance and nearest row/column maps. Skeleton splitting requires a region already thinned to a skeleton and outputs open segment contours.",
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "region.skeleton",
@@ -35875,7 +36152,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.toDetections",
@@ -35973,7 +36251,8 @@
       "description": "Convert each existing region object to one detection, preserving pixel area, centroid and bounding geometry. Does not split or reorder objects. Optional maxCount truncates the list. Emits diagnostics. Connect to collection nodes or flow.forEach.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.fromThreshold",
@@ -36066,7 +36345,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "region.transform",
@@ -36159,7 +36439,8 @@
         "executionMode": "Auto"
       },
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "robot.executeTarget",
@@ -36379,7 +36660,8 @@
           "parameter": "robotId"
         }
       ],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "robot.j4TcpCompensation",
@@ -36583,7 +36865,8 @@
       "description": "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "robot.currentPose",
@@ -36751,7 +37034,8 @@
           "parameter": "robotId"
         }
       ],
-      "declaresActions": false
+      "declaresActions": false,
+      "declaresFrames": false
     },
     {
       "type": "robot.guidance2d",
@@ -36908,7 +37192,8 @@
       "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame). Validates frame, finite pose/offsets and guidance mode; pick offset is applied in pose-local coordinates. Emits frame, unit and JSON diagnostics. Does not send motion to hardware.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "value.arithmetic",
@@ -37085,7 +37370,8 @@
       "description": "Combine measurements. Add, subtract, multiply, divide, power, min, and max read a and b. Square root, absolute value, and clamp read a only. An unknown operation, division by zero, a negative square root, reversed clamp bounds, or a non-finite result fails instead of guessing. Emits JSON diagnostics with operands, operation and result.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "value.number",
@@ -37205,7 +37491,8 @@
       "description": "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     },
     {
       "type": "value.range",
@@ -37309,7 +37596,8 @@
       "description": "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
-      "declaresActions": true
+      "declaresActions": true,
+      "declaresFrames": false
     }
   ]
 }

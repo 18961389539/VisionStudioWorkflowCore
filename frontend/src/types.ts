@@ -50,6 +50,23 @@ export type VisionToolCapabilities = {
   executionMode?: 'Auto' | 'WorkflowCore' | 'Pipeline';
 };
 
+export type NodeImageFramePolicy = 'PreserveInput' | 'NewSpatialFrame' | 'NewFixedFrame' | 'TransformTarget' | 'InputFrame';
+export type NodeTransformFramePolicy = 'None' | 'Spatial' | 'RoiReference' | 'ReferenceInput';
+
+/** 目录声明的图像坐标帧语义（与后端 NodeFrameRule 一一对应）。 */
+export type NodeFrameRule = {
+  policy: NodeImageFramePolicy;
+  inputPort?: string;
+  frameSuffix?: string | null;
+  frameLabel?: string | null;
+  fallbackFrame?: string | null;
+  transform?: NodeTransformFramePolicy;
+  referencePort?: string | null;
+  transformPort?: string | null;
+  whenParameter?: string | null;
+  whenValues?: string[] | null;
+};
+
 export type NodeCatalogItem = {
   type: string;
   displayName: string;
@@ -60,6 +77,8 @@ export type NodeCatalogItem = {
   description?: string | null;
   pluginId?: string | null;
   capabilities?: VisionToolCapabilities | null;
+  /** 坐标帧声明；未声明时输出沿用输入帧。插件可据此参与帧跟踪。 */
+  frames?: NodeFrameRule[] | null;
 };
 
 export type VisionValueSnapshot = {

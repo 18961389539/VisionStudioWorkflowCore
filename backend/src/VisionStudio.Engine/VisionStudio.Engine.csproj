@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 帧语义与目录契约测试需要直接读取内部坐标帧，避免只通过错误消息间接断言。 -->
+    <InternalsVisibleTo Include="VisionStudio.Engine.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>

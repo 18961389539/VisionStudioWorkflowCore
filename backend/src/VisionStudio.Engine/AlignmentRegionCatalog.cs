@@ -21,14 +21,14 @@ public static class AlignmentRegionCatalog
 
 
                 ],
-            "JLVision NCC rigid registration at fixed scale (translation + rotation). Wire: current image + reference image; when found, connect transform to image.warpAffine or align before defect compare. Key params: distinctive reference patch x/y/width/height with search margin; angleRangeDeg/angleStepDeg; minScore; subpixelRefine (near 0 deg only). No continuous scale search. found=false omits transform — gate downstream on found.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+            "JLVision NCC rigid registration at fixed scale (translation + rotation). Wire: current image + reference image; when found, connect transform to image.warpAffine or align before defect compare. Key params: distinctive reference patch x/y/width/height with search margin; angleRangeDeg/angleStepDeg; minScore; subpixelRefine (near 0 deg only). No continuous scale search. found=false omits transform — gate downstream on found.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.PreserveInput, Transform: NodeTransformFramePolicy.ReferenceInput, ReferencePort: "reference")]),
         new("image.warpAffine", "Warp Affine Image", "Preprocess", [Exec, new("image", VisionDataType.Image), new("transform", VisionDataType.Transform2D)],
             [new("image", VisionDataType.Image), new("validRegion", VisionDataType.Region), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer), Next],
             [new("width", "Output Width (0=input)", "number", 0, 0, 16384, 1, Description: "Output width in pixels; 0 keeps the input width."), new("height", "Output Height (0=input)", "number", 0, 0, 16384, 1, Description: "Output height in pixels; 0 keeps the input height."),
              new("interpolation", "Interpolation", "select", "linear", Options: [new("Nearest", "nearest"), new("Linear", "linear")], Description: "Resampling: nearest for masks/labels, linear for gray images."),
 
                 ],
-            "Apply a nonsingular pixel-to-pixel affine transform with zero border. validRegion excludes unsupported border pixels; intersect it with inspection regions before reference comparison.", "builtin"),
+            "Apply a nonsingular pixel-to-pixel affine transform with zero border. validRegion excludes unsupported border pixels; intersect it with inspection regions before reference comparison.", "builtin", Frames: [new(NodeImageFramePolicy.TransformTarget, FrameLabel: "affine-warped frame")]),
         new("region.morphology", "Region Morphology", "Region", [Exec, Region], RegionOutputs,
             [new("operation", "Operation", "select", "open", Options: [new("Erode", "erode"), new("Dilate", "dilate"), new("Open", "open"), new("Close", "close")],
                 Description: "Rectangular morphology mode applied per object (or after unionFirst)."),

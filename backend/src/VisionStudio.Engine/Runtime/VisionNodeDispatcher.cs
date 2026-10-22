@@ -50,28 +50,17 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
         IReadOnlyDictionary<string, VisionValue> inputs,
         NodeExecutorResult result)
     {
-        var type = node.Type;
-        var imageInputPort = type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase) ? "debugImage" : "image";
+        // 帧语义来自目录声明（内置与插件同一路径）：宿主不再按节点类型字符串猜测。
+        var rule = NodeFrameSemantics.Resolve(node, catalog);
+        var imageInputPort = rule?.InputPort ?? "image";
         var inputFrame = TryGetImageFrame(inputs, imageInputPort);
-        var warpTargetFrame = type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)
-            && inputs.TryGetValue("transform", out var warpTransformValue)
-            ? warpTransformValue.Require<VisionTransform2D>("transform").TargetFrame
-            : null;
-        var outputFrame = type.Equals("jlvision.restoration", StringComparison.OrdinalIgnoreCase) && node.GetString("operator", "harmonic") is "psfMotion" or "psfDefocus"
-            ? $"image:{node.Id}:psf"
-            : type.Equals("jlvision.worldPlane", StringComparison.OrdinalIgnoreCase) ? $"image:{node.Id}:worldPlane"
-            : ImageOperationGeometry.IsSpatial(node) ? $"image:{node.Id}:spatial"
-            : type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
-            ? $"image:{node.Id}:crop"
-            : type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase)
-                ? warpTargetFrame ?? $"image:{node.Id}:spatial"
-            : type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
-                || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
-                || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase)
-                ? $"image:{node.Id}:spatial"
-                : type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
-                    ? inputFrame ?? "CurrentImage"
-                    : inputFrame ?? $"image:{node.Id}:source";
+        var outputFrame = NodeFrameSemantics.ImageFrameKey(
+            node.Id,
+            rule,
+            port => TryGetImageFrame(inputs, port),
+            port => inputs.TryGetValue(port, out var value) && value.Value is VisionTransform2D transform
+                ? transform.TargetFrame
+                : null) ?? inputFrame ?? $"image:{node.Id}:source";
 
         Dictionary<string, VisionValue>? rewrittenOutputs = null;
         foreach (var port in catalog.Outputs.Where(port => port.DataType == VisionDataType.Image))
@@ -83,22 +72,30 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
                 image.SetCoordinateFrame(outputFrame);
         }
 
-        if (result.Outputs.TryGetValue("transform", out var transformValue)
+        if (rule?.Transform is { } transformPolicy
+            && transformPolicy != NodeTransformFramePolicy.None
+            && result.Outputs.TryGetValue("transform", out var transformValue)
             && transformValue.Value is VisionTransform2D transform)
         {
-            VisionTransform2D? framedTransform = null;
-            if (ImageOperationGeometry.IsSpatial(node))
-                framedTransform = transform with { SourceFrame = inputFrame ?? "CurrentImage", TargetFrame = outputFrame };
-            else if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
-                framedTransform = transform with { SourceFrame = inputFrame ?? "CurrentImage", TargetFrame = outputFrame };
-            else if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase))
-                framedTransform = transform with { SourceFrame = $"roi:{node.Id}:reference", TargetFrame = inputFrame ?? "CurrentImage" };
-            else if (type.Equals("image.register", StringComparison.OrdinalIgnoreCase))
-                framedTransform = transform with
+            var framedTransform = transformPolicy switch
+            {
+                NodeTransformFramePolicy.Spatial => transform with
                 {
                     SourceFrame = inputFrame ?? "CurrentImage",
-                    TargetFrame = TryGetImageFrame(inputs, "reference") ?? "ReferenceImage"
-                };
+                    TargetFrame = outputFrame
+                },
+                NodeTransformFramePolicy.RoiReference => transform with
+                {
+                    SourceFrame = $"roi:{node.Id}:reference",
+                    TargetFrame = inputFrame ?? "CurrentImage"
+                },
+                NodeTransformFramePolicy.ReferenceInput => transform with
+                {
+                    SourceFrame = inputFrame ?? "CurrentImage",
+                    TargetFrame = TryGetImageFrame(inputs, rule.ReferencePort ?? "reference") ?? "ReferenceImage"
+                },
+                _ => null
+            };
 
             if (framedTransform is not null)
             {

@@ -38,7 +38,7 @@ internal static class JlVisionOperatorCatalog
             "gray erosion/dilation/opening/closing/top-hat/bottom-hat/skeleton/inside, channel compose/append/split and domain helpers, plus mean/deviation/equalisation/topographic/noise. " +
             "Gray morphology uses image2 as the structuring element image and, when image2 is absent, generates a flat size x size structuring element; operators that need a second image use the connected image2 or fall back to the image itself, and an empty connected image2 fails. " +
             "Pixel-type errors surface as a node error naming the operator and the parameters it consumes, never as a silent no-op.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: false), Frames: [new(NodeImageFramePolicy.NewSpatialFrame, FrameLabel: "operator spatial frame", Transform: NodeTransformFramePolicy.Spatial, WhenParameter: "operator", WhenValues: ["cropPart", "cropRectangle2", "cropDomainRel", "rotateImage", "zoomImageFactor", "addBorder", "changeFormat"]), new(NodeImageFramePolicy.PreserveInput)]),
 
         new("jlvision.regionFeature", "Region Feature Extraction", "Measurement",
             [new("exec", VisionDataType.Control), new("region", VisionDataType.Region), new("image", VisionDataType.Image, Required: false)],
