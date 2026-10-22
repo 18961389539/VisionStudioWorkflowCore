@@ -2,7 +2,7 @@ import MetrologyObjectEditor from './MetrologyObjectEditor';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
-import type { NodeCatalogItem, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi, VisionValueSnapshot } from '../types';
+import type { NodeCatalogItem, NodeFrameRule, ParameterDescriptor, PortDescriptor, RunResult, VisionOverlay, VisionRoi, VisionValueSnapshot } from '../types';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
 import PropertyPanel from './PropertyPanel';
@@ -25,20 +25,30 @@ import { legacyNodeReplacement } from '../legacyNodes';
 import { canonicalParameterGroup, portDisplayName } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
 import { effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
+import { catalogItemChangesImageFrame, declaredFrameChange, legacyFrameChangingNodeTypes } from '../frameSemantics';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
-const cropMaskFrameChangingNodeTypes = new Set([
-  'image.crop', 'image.resize', 'image.rotate', 'image.perspective', 'image.warpaffine', 'image.undistort', 'image.register'
-]);
-
 function imageFrameChanges(node: Node | undefined) {
-  const type = String(node?.data.typeKey ?? '').toLowerCase();
-  return cropMaskFrameChangingNodeTypes.has(type) || type === 'jlvision.worldplane'
-    || type === 'jlvision.restoration' && ['psfMotion', 'psfDefocus'].includes(String((node?.data.parameters as NodeParameters | undefined)?.operator))
+  const data = node?.data as {
+    typeKey?: unknown;
+    parameters?: NodeParameters;
+    frames?: NodeFrameRule[] | null;
+    parameterDescriptors?: ParameterDescriptor[];
+  } | undefined;
+  const type = String(data?.typeKey ?? '').toLowerCase();
+
+  // 目录声明优先：内置节点与插件走同一条路径，宿主不再按类型名猜测空间语义。
+  const declared = declaredFrameChange(data?.frames, data?.parameters, data?.parameterDescriptors);
+  if (declared !== undefined) return declared;
+
+  // 旧目录/旧节点数据没有 frames 时的兼容回退（迁移期保留）。
+  const parameters = data?.parameters;
+  return legacyFrameChangingNodeTypes.has(type) || type === 'jlvision.worldplane'
+    || type === 'jlvision.restoration' && ['psfMotion', 'psfDefocus'].includes(String(parameters?.operator))
     || type === 'jlvision.imageop'
     && ['cropPart', 'cropRectangle2', 'cropDomainRel', 'rotateImage', 'zoomImageFactor', 'addBorder', 'changeFormat']
-      .includes(String((node?.data.parameters as NodeParameters | undefined)?.operator ?? 'abs'));
+      .includes(String(parameters?.operator ?? 'abs'));
 }
 
 function inputEdge(edges: Edge[], nodeId: string, portName: string) {
@@ -131,7 +141,7 @@ function imageFramePreservingNodeTypes(catalogItems: NodeCatalogItem[]) {
   const imageTypes = new Set(['image', 'domainimage']);
   return new Set(catalogItems.filter((item) => {
     const type = item.type.toLowerCase();
-    if (cropMaskFrameChangingNodeTypes.has(type) || type === 'roi.transform') return false;
+    if (type === 'roi.transform' || catalogItemChangesImageFrame(item)) return false;
     return item.inputs.some((port) => port.name.toLowerCase() === 'image' && imageTypes.has(port.dataType.toLowerCase()))
       && item.outputs.some((port) => imageTypes.has(port.dataType.toLowerCase()));
   }).map((item) => item.type.toLowerCase()));

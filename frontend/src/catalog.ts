@@ -29,7 +29,9 @@ export const editableParameters = (item: NodeCatalogItem) => item.parameters.fil
 export const catalogNodeData = (item: NodeCatalogItem) => ({
   inputs: item.inputs,
   outputs: item.outputs,
-  parameterDescriptors: item.parameters
+  parameterDescriptors: item.parameters,
+  // 坐标帧声明随节点数据下发：画布的 ROI 沿革不再只靠类型集合猜测（插件也能声明）。
+  frames: item.frames ?? null
 });
 
 export const makeDefaultParameters = (item: NodeCatalogItem) =>

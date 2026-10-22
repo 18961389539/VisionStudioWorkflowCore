@@ -298,14 +298,18 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 只改帧语义来源，节点 ID、端口、参数、默认值、图像算法均未变化；旧流程无需迁移。
 - `ImageOperationGeometry.IsSpatial` 仍被 `JLVisionOperatorNodes` 用于选择空间执行路径，
   那是执行器内部算子分派，不是帧语义，本轮保留。
-- 前端仍用 `cropMaskFrameChangingNodeTypes` 推断 ROI 沿革；目录已输出 `frames` 且 `types.ts`
-  已补齐类型，但 UI 读取声明留待下一轮（避免同时改动画布几何编辑的主链路）。
+- 前端已接入声明：`catalogNodeData` 把 `frames` 放进节点数据，`frameSemantics.ts` 按同一套
+  条件规则求值；`NodeConfigurationDialog` 的 ROI 沿革优先读声明，旧目录/旧节点数据才回退到
+  类型集合。插件节点因此不再被当作"保持输入帧"。
+- 仍以类型分支保留：`match.shape` / `coordinate.transformCompose` 的 transform 帧语义。
 - `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
 - 编译器其余类型字面量（约 90 处，含控制流、保存/导出、ROI 连线校验）尚未迁移。
 
 ## 验证
 
+- 前端 `frameSemantics.test.ts` 6 项覆盖声明求值、条件规则、目录默认值与旧集合回退。
 - 新增 `NodeFrameSemanticsTests` 10 项（内置声明、条件规则、插件空间帧、未声明保持、固定帧）；
   `Catalog_FrameDeclarationsReferenceExistingPortsAndParameters` 校验声明的端口/参数/条件值均存在。
-- 后端全量 **2247 项通过**（Engine 1826 + Api 421）；前端 **1047 项通过**，`tsc -b` 与生产构建通过。
+- 后端全量 **2247 项通过**（Engine 1826 + Api 421）；前端 **1053 项通过**（69 文件，含新增
+  `frameSemantics` 6 项），`tsc -b` 与生产构建通过。
 - 目录 hash 变为 `33761bf0…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
