@@ -405,9 +405,10 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 运行时代码中的直接 `fetch(` 已清零；`apiUsage.test.ts` 棘轮基线降为 **0**，
 新增直接调用会失败并列出文件。
 
-第三批以行为等价替换为主（`apiFetch` 在未指定 `timeoutMs` 时完全透传参数与 signal 身份），
-但 `CameraPanel` / `PluginPackagePanel` / `CalibrationIntrinsicsWizard` / `security.tsx`
-尚无独立测试，建议后续补最小冒烟：轮询停止、上传失败、登录过期各一条。
+第三批以行为等价替换为主（`apiFetch` 在未指定 `timeoutMs` 时完全透传参数与 signal 身份）。
+迁移后补了 3 条冒烟：`CameraPanel` 打开才轮询、卸载后停止；`SecurityGate` 无会话显示登录、
+登录后进入应用；会话过期（focus 校验返回 401）回到登录页。
+`PluginPackagePanel` / `CalibrationIntrinsicsWizard` 仍待补上传失败与步骤 4xx 冒烟。
 
 ## 迁移配方
 
