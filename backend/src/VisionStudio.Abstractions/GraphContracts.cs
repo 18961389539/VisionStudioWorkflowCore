@@ -334,7 +334,11 @@ public enum NodeOutputFrameSource
     /// <summary>轮廓输入端口（InputPort，默认 contours）的帧。</summary>
     ContourInput,
     /// <summary>拟合点输入（point1..N）所在的帧。</summary>
-    FittedPoints
+    FittedPoints,
+    /// <summary>本节点图像输出的帧（区域输出跟随空间变换后的图像帧）。</summary>
+    ImageOutputFrame,
+    /// <summary>InputPort 的 transform TargetFrame（区域变换到目标帧）。</summary>
+    OutputTransformTarget
 }
 
 /// <summary>

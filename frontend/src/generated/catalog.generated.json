@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "91688bb762129184e8ba89014f4413dec536bed50bbca0b740876aa1bd78dba4",
+  "hash": "14cd9e6cb9c630f0a5c94a167f15c15b1d56f6adec44f27ac7568498f30c4fa4",
   "items": [
     {
       "type": "image.acquire",
@@ -2709,10 +2709,15 @@
       "description": "Filter DetectionList items by area, circularity, optional confidence and class ID with strict finite/ordered bound validation; missing optional values do not match configured filters. Emits kept count, rejected count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "DetectionInput"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -2955,10 +2960,15 @@
       "description": "Sort a DetectionList by up to three fields and refresh result indices. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting. Emits count and JSON diagnostics.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "DetectionInput"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -17513,10 +17523,16 @@
         "imagePort": "image",
         "templatePort": "template"
       },
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "inputPort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": true,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -23035,10 +23051,16 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "inputPort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -31976,10 +31998,15 @@
           "transform": "None"
         }
       ],
+      "outputFrames": [
+        {
+          "source": "ImageOutputFrame"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -34206,6 +34233,12 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "inputPort": "image"
+        }
+      ],
       "roiImageBindings": [
         {
           "roiPort": "roi",
@@ -34215,7 +34248,7 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": true
     },
     {
@@ -37031,10 +37064,16 @@
       "description": "Convert each existing region object to one detection, preserving pixel area, centroid and bounding geometry. Does not split or reorder objects. Optional maxCount truncates the list. Emits diagnostics. Connect to collection nodes or flow.forEach.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "RegionInput",
+          "inputPort": "region"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {
@@ -37225,10 +37264,16 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "OutputTransformTarget",
+          "inputPort": "transform"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
+      "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },
     {

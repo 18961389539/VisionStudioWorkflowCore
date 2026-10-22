@@ -596,19 +596,27 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
-        if (type.Equals("jlvision.featureExtract", StringComparison.OrdinalIgnoreCase))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("measure.blobs", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("collection.detections.filter", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("collection.detections.sort", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase))
-            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
-        if (type.Equals("region.toDetections", StringComparison.OrdinalIgnoreCase))
+        var catalog = registry.Require(type).Catalog;
+        var rule = NodeFrameSemantics.ResolveOutput(node, catalog, "detections");
+        if (rule is not null)
         {
-            var region = FindInputEdge(workflow.Edges, nodeId, "region");
-            return region is null ? null : ResolveRegionFrame(region.SourceNodeId, region.SourcePort, workflow, byId, visited);
+            switch (rule.Source)
+            {
+                case NodeOutputFrameSource.ImageInput:
+                    return ResolveImageInputFrame(nodeId, rule.InputPort ?? "image", workflow, byId);
+                case NodeOutputFrameSource.DetectionInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "detections");
+                    return edge is null ? null : ResolveDetectionFrame(edge.SourceNodeId, workflow, byId, visited);
+                }
+                case NodeOutputFrameSource.RegionInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "region");
+                    return edge is null
+                        ? null
+                        : ResolveRegionFrame(edge.SourceNodeId, edge.SourcePort, workflow, byId, visited);
+                }
+            }
         }
         return null;
     }
@@ -627,13 +635,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 && port.DataType == VisionDataType.Region))
             return null;
 
-        if (type.Equals("image.warpAffine", StringComparison.OrdinalIgnoreCase))
+        var rule = NodeFrameSemantics.ResolveOutput(node, catalog, outputPort);
+        if (rule?.Source == NodeOutputFrameSource.ImageOutputFrame)
             return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-        if (type.Equals("region.transform", StringComparison.OrdinalIgnoreCase))
+        if (rule?.Source == NodeOutputFrameSource.OutputTransformTarget)
         {
-            var transformEdge = FindInputEdge(workflow.Edges, nodeId, "transform");
-            return transformEdge is null ? null
-                : ResolveTransformFrames(transformEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
+            var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "transform");
+            return edge is null ? null
+                : ResolveTransformFrames(edge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase))?.Target;
         }
 
         var regionInputs = workflow.Edges.Where(edge => edge.TargetNodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)
@@ -657,8 +666,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             return distinctFrames[0];
         }
 
-        if (type.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
+        // region.fromRoi 由 OutputFrames 声明覆盖（ImageInput → image）。
 
         if (catalog.Outputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
                 && port.DataType == VisionDataType.Image)

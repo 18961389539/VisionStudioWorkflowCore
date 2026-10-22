@@ -359,8 +359,10 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端已接入声明：`catalogNodeData` 把 `frames` 放进节点数据，`frameSemantics.ts` 按同一套
   条件规则求值；`NodeConfigurationDialog` 的 ROI 沿革优先读声明，旧目录/旧节点数据才回退到
   类型集合。插件节点因此不再被当作"保持输入帧"。
-- 自定义校验（卡尺几何、regionIntensity、flatFieldCorrect、PSF、waitTag、flow.if range、
-  writeTag fallback）与结构化控制流仍按类型处理；`ImageSavePlan` 也仍是专用校验。
+编译器剩余类型字面量从 ~30 降至 **6 处**（全部为节点特定业务校验，非帧语义）：
+`measure.fitCircle` 最低有效卡尺数、`measure.regionIntensity` / `image.flatFieldCorrect` 参数校验、
+`jlvision.restoration` PSF 一致性、`device.waitTag` 参数验证、`flow.if` range 模式校验。
+`ResolveDetectionFrame` / `ResolveRegionFrame` 的类型分支已全部声明化。
 - `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
 
 

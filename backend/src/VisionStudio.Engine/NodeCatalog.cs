@@ -380,7 +380,7 @@ public static class BuiltInNodeCatalog
                 ],
             "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
             "match.template",
             "Template Match",
