@@ -100,3 +100,112 @@ export async function apiText(
   }
   return await response.text();
 }
+
+// ── 请求去重 ──────────────────────────────────────────────────────────────────
+
+/** 进行中的去重请求；key 为 `method url body` 拼接。 */
+const inFlightRequests = new Map<string, Promise<Response>>();
+
+/** 取消指定去重请求（例如面板关闭时）。 */
+export function cancelDedupedRequest(url: string, method = 'GET'): void {
+  const key = `${method.toUpperCase()} ${url}`;
+  inFlightRequests.delete(key);
+}
+
+/** 清空全部去重请求；仅测试用。 */
+export function clearDedupedRequests(): void {
+  inFlightRequests.clear();
+}
+
+/**
+ * 相同 `method url body` 的并发 GET 请求只发一次，后续调用共享同一 Promise。
+ * 仅对无 body 且 dedupe: true 的请求生效（默认 false，不影响现有调用）。
+ */
+export async function apiFetchDeduped(
+  input: RequestInfo | URL,
+  options: ApiFetchOptions & { dedupe?: boolean } = {}
+): Promise<Response> {
+  const { dedupe = false, ...rest } = options;
+  if (!dedupe || (rest.method && rest.method.toUpperCase() !== 'GET')) {
+    return apiFetch(input, rest);
+  }
+
+  const url = String(input);
+  const key = `GET ${url}`;
+  const existing = inFlightRequests.get(key);
+  if (existing) return existing;
+
+  const promise = apiFetch(url, rest).finally(() => { inFlightRequests.delete(key); });
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+// ── 响应缓存 ──────────────────────────────────────────────────────────────────
+
+interface CacheEntry { data: unknown; timestamp: number }
+
+/** URL → 缓存条目；仅在 cachedGet 显式使用时生效。 */
+const responseCache = new Map<string, CacheEntry>();
+
+/**
+ * 带缓存的 GET 请求：
+ * - 同一 URL 在 ttlMs 内直接返回缓存结果（不发请求）；
+ * - `forceRefresh: true` 绕过缓存；
+ * - `maxEntries` 超过时按插入顺序淘汰（简单 LRU）。
+ */
+export async function cachedGet<T>(
+  url: string,
+  options: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    ttlMs?: number;
+    forceRefresh?: boolean;
+    maxEntries?: number;
+    errorLabel?: string;
+  } = {}
+): Promise<T> {
+  const { ttlMs = 5_000, forceRefresh = false, maxEntries = 100, ...fetchOptions } = options;
+  if (!forceRefresh) {
+    const cached = responseCache.get(url);
+    if (cached && Date.now() - cached.timestamp < ttlMs) return cached.data as T;
+  }
+
+  const data = await apiJson<T>(url, { ...fetchOptions, errorLabel: options.errorLabel ?? 'Cached GET failed' });
+  responseCache.set(url, { data, timestamp: Date.now() });
+
+  if (responseCache.size > maxEntries) {
+    const firstKey = responseCache.keys().next().value;
+    if (firstKey !== undefined) responseCache.delete(firstKey);
+  }
+  return data;
+}
+
+/** 清空指定 URL 的缓存；不传则清空全部。 */
+export function invalidateCache(url?: string): void {
+  if (url) responseCache.delete(url);
+  else responseCache.clear();
+}
+
+// ── 取消令牌 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 面板/组件作用域的取消令牌。
+ * 组件挂载时创建、卸载时调用 `cancel()`，内部包装的请求随之中止。
+ * 典型用法：
+ * ```ts
+ * const token = new RequestToken();
+ * useEffect(() => () => token.cancel(), []);
+ * apiFetch(url, { signal: token.signal })
+ * ```
+ */
+export class RequestToken {
+  private readonly controller = new AbortController();
+
+  get signal(): AbortSignal { return this.controller.signal; }
+
+  get aborted(): boolean { return this.controller.signal.aborted; }
+
+  cancel(): void {
+    if (!this.controller.signal.aborted) this.controller.abort();
+  }
+}
