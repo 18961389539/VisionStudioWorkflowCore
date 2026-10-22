@@ -428,5 +428,12 @@ runs/cameras/auth/plugins/workflows/debug/production 等 10 个域）。新代�
 endpoints 3 项测试），剩余 **172 处**硬编码 `/api/`。
 `endpoints.ts` 的对应 builder，`API_BASE` 只需改一处即可适配子路径部署。
 
+## 组件拆分
+
+`NodeConfigurationDialog`（原 2042 行）拆分：21 个纯逻辑工具函数提取到
+`nodeConfigurationUtils.ts`（192 行），主组件降至 **1876 行**（−166 行）。
+`Dialog` 已有 10 个子面板组件（CaliperCircleQuickSettings、CaliperEdgeDiagnosticsPanel、
+MatchingAutoTunePanel 等）在独立文件中。
+
 ## 后续
 - 160 处无 `AbortSignal` 的调用已随迁移保留原行为，轮询类可逐步改为显式控制器。
