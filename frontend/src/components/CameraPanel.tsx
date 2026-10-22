@@ -4,7 +4,7 @@ import type { UploadFile } from 'antd/es/upload/interface';
 import type { CameraAdapterDescriptor, CameraCommissioningProfile, CameraCommissioningSnapshot, CameraDescriptor, CameraDiscoveredDevice, CameraFeatureDescriptor, CameraFeatureProfileRecord, CameraOutputPixelFormat, CameraSettings, CameraTriggerMode, CameraSynchronizationGroup, CameraSynchronizationGroupStatus, CameraSynchronizationCaptureResult, CameraSynchronizationRunRecord, CameraSynchronizationStatistics, CameraSynchronizationPtpDiagnostics, CameraSynchronizationCommissioningTest, GigENetworkDiagnostics, MediaCollectionDescriptor, MediaItemDescriptor, MediaLibraryStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
-import { apiFetch } from '../apiClient';
+import { apiFetch, cachedGet, RequestToken } from '../apiClient';
 import { API_BASE, apiUrl, cameras as cameraEndpoints } from '../endpoints';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
@@ -74,7 +74,7 @@ export default function CameraPanel({ open, onClose }: Props) {
 
   // R04：轮询代次 + 取消 + 超时——旧响应绝不覆盖新结果，挂起请求可被显式中断。
   const refreshGeneration = useRef(0);
-  const refreshAbort = useRef<AbortController | null>(null);
+  const refreshAbort = useRef<RequestToken | null>(null);
   const refreshInFlight = useRef(false);
 
   const refresh = async (quiet = false) => {
@@ -82,11 +82,11 @@ export default function CameraPanel({ open, onClose }: Props) {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     const generation = ++refreshGeneration.current;
-    const controller = new AbortController();
-    refreshAbort.current = controller;
-    const timeout = window.setTimeout(() => controller.abort(), CAMERA_POLL_TIMEOUT_MS);
+    const token = new RequestToken();
+    refreshAbort.current = token;
+    const timeout = window.setTimeout(() => token.cancel(), CAMERA_POLL_TIMEOUT_MS);
     try {
-      const response = await apiFetch(cameraEndpoints.list, { signal: controller.signal });
+      const response = await apiFetch(cameraEndpoints.list, { signal: token.signal });
       if (generation !== refreshGeneration.current) return; // 旧响应：丢弃
       if (!response.ok) throw new Error(await responseErrorMessage(response, '相机接口不可用'));
       const data: CameraDescriptor[] = await response.json();
@@ -99,16 +99,14 @@ export default function CameraPanel({ open, onClose }: Props) {
       if (!quiet) messageApi.error(error instanceof Error ? error.message : '相机接口不可用');
     } finally {
       window.clearTimeout(timeout);
-      if (refreshAbort.current === controller) refreshAbort.current = null;
+      if (refreshAbort.current === token) refreshAbort.current = null;
       refreshInFlight.current = false;
     }
   };
 
   const refreshAdapters = async (quiet = false) => {
     try {
-      const response = await apiFetch(cameraEndpoints.adapters);
-      if (!response.ok) throw new Error(await responseError(response, '相机适配器接口不可用'));
-      const data: CameraAdapterDescriptor[] = await response.json();
+      const data = await cachedGet<CameraAdapterDescriptor[]>(cameraEndpoints.adapters, { ttlMs: 60_000, errorLabel: '相机适配器接口不可用' });
       setAdapters(data);
       if (!data.some((x) => x.driver === discoverDriver) && data.length > 0) setDiscoverDriver(data[0].driver);
     } catch (error) {
