@@ -174,7 +174,7 @@ public static class Batch5PrecisionCatalog
                 ],
             "Subpixel edge location along a search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters to the current image, including sampling direction. ROI inputs are already in current image coordinates. No edge above the contrast threshold returns found=false.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
         new(
             "measure.caliperLine",
             "Caliper Line",
@@ -237,7 +237,7 @@ public static class Batch5PrecisionCatalog
                 ],
             "Caliper line measurement with orthogonal RMS fit error, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Out-of-image profiles are clipped without changing their direction and the visible profile lines are shown in the result. Green points were used for the fit; orange points were ignored. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and the parallel sampling layout into the current image. ROI inputs are already in current image coordinates. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
         new(
             "measure.caliperCircle",
             "Caliper Circle",
@@ -314,7 +314,7 @@ public static class Batch5PrecisionCatalog
             ],
             "Caliper circle measurement with selectable radial sampling, edge direction, bounded outlier rejection, and an optional maximum fit-error quality gate. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Each radial segment is clipped to the image while preserving its direction. Optional rigid px-to-px transform maps the reference circle input/nominal center and arc angles into the current image; do not also supply an already corrected circle. ROI inputs are already in current image coordinates. Without transform the optional circle input is used directly in the current image. The minimum valid caliper gate is checked after outlier rejection.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
         new(
             "measure.fitEllipse",
             "Ellipse Fit",
@@ -532,6 +532,6 @@ public static class Batch5PrecisionCatalog
                 ],
             "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Capture reference image + pose before drawing the ROI. Wire: currentPose (or currentX/Y/Theta) from matching; roi → measurement ROI ports; transform → measurement transform; debugImage for capture/overlay. Output transform maps ReferenceImage→CurrentImage; compose with image.crop transform (A=this, B=crop) for CropImage coordinates. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.InputFrame, InputPort: "debugImage", FallbackFrame: "CurrentImage", Transform: NodeTransformFramePolicy.RoiReference)], OutputFrames: [new(NodeOutputFrameSource.ImageInput, OutputPort: "roi", InputPort: "debugImage")])
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.InputFrame, InputPort: "debugImage", FallbackFrame: "CurrentImage", Transform: NodeTransformFramePolicy.RoiReference)], OutputFrames: [new(NodeOutputFrameSource.ImageInput, OutputPort: "roi", InputPort: "debugImage")], RoiImageBindings: [new("roi", "debugImage")])
     ];
 }

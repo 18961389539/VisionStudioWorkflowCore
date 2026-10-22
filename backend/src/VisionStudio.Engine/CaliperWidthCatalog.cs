@@ -35,7 +35,7 @@ internal static class CaliperWidthCatalog
                     Description: "Only used when Pair Selection is Closest to nominal width; must be greater than zero in that mode.")
             ],
             "Native subpixel edge-pair measurement of bright strips, dark gaps and line widths. Returns width along the search line, ordered endpoints and center; supports width filtering and nominal-width selection. Place the line perpendicular to the target boundaries for perpendicular width. Uses Gaussian sigma=1 and at least 8 contiguous profile samples. ROI holes split profiles and cannot be bridged. No qualifying pair returns found=false with no width or points. Supports rigid px-to-px localization transforms; outputs remain in image pixels.",
-            "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+            "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")]),
 
         // Product-depth PD-1: Cognex-style multi-station width array (卡尺阵列).
         // Honest limits: linear station layout only; no circular array; no interactive score-curve UI;
@@ -81,6 +81,6 @@ internal static class CaliperWidthCatalog
                     Description: "Maximum samples stored per station when includeProfiles is enabled.")
             ],
             "Multi-station edge-pair width array (Cognex Caliper Tool / HALCON measure_pairs style). Places caliperCount search profiles parallel to the authored search line, spaced along the edge-normal direction over edgeLength (or the search-line length when 0). Each station reuses native JLVision pair measurement with the same polarity, threshold, width filter and pair-selection rules as measure.caliperWidth. Outputs aggregate width mean/min/max/std/cv, validCount, mean center/strength, and calipersJson with per-station status, geometry and optional profile samples. found requires minValidCalipers and optional maxWidthStd. Linear layout only—circular arrays use measure.caliperCircle. No interactive score-curve editor. Supports ROI masks and rigid px-to-px transforms; results stay in image pixels.",
-            "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true))
+            "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), RoiImageBindings: [new("roi", "image")])
     ];
 }

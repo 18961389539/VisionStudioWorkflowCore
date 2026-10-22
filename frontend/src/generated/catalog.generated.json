@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "0b903e346d20a55863f9c28607ffe7f17423df1ff80cfb651c2f3d9af9d95c32",
+  "hash": "0c1ddb1f0ada668fa75935aaa66e205bf1c16c5aaa2ab8fbedb0f480c73a737d",
   "items": [
     {
       "type": "image.acquire",
@@ -200,7 +200,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "frameset.image",
@@ -290,7 +291,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "camera.syncCapture",
@@ -468,7 +470,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.synthetic",
@@ -751,7 +754,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.handEye2D",
@@ -955,7 +959,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.handEye3D",
@@ -1151,7 +1156,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.worldPlane",
@@ -1434,7 +1440,8 @@
       "declaresActions": false,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.cameraIntrinsics",
@@ -1634,7 +1641,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.detectBoard",
@@ -1933,7 +1941,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.dualCameraExtrinsics",
@@ -2188,7 +2197,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "calibration.planar",
@@ -2362,7 +2372,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "collection.detections.count",
@@ -2428,7 +2439,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "collection.detections.at",
@@ -2561,7 +2573,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "collection.detections.filter",
@@ -2699,7 +2712,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "collection.detections.sort",
@@ -2944,7 +2958,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "contour.extract",
@@ -3125,7 +3140,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "contour.filter",
@@ -3322,7 +3338,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "contour.fromPoints",
@@ -3407,7 +3424,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.contourOp",
@@ -4279,7 +4297,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "contour.properties",
@@ -4446,7 +4465,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.dxf",
@@ -4663,7 +4683,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.featureExtract",
@@ -5129,7 +5150,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformCompose",
@@ -5216,7 +5238,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": true,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformConstant",
@@ -5362,7 +5385,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.distance",
@@ -5442,7 +5466,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.point",
@@ -5569,7 +5594,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.point3D",
@@ -5733,7 +5759,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.pose",
@@ -5880,7 +5907,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.frameTree",
@@ -5941,7 +5969,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformInverse",
@@ -6009,7 +6038,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": true,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.poseToTransform",
@@ -6085,7 +6115,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.frameResolve",
@@ -6164,7 +6195,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformPoint3D",
@@ -6236,7 +6268,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformCoordinatePoint",
@@ -6313,7 +6346,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformCoordinatePose",
@@ -6385,7 +6419,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformLine",
@@ -6468,7 +6503,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformPoint",
@@ -6535,7 +6571,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "coordinate.transformPose",
@@ -6607,7 +6644,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.dynamicThreshold",
@@ -6797,7 +6835,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.flatFieldCorrect",
@@ -7065,7 +7104,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.difference",
@@ -7255,7 +7295,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "defect.referenceCompare",
@@ -7569,7 +7610,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.regionIntensity",
@@ -7839,7 +7881,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "device.readTag",
@@ -8004,7 +8047,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "device.waitTag",
@@ -8283,7 +8327,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "device.writeTag",
@@ -8453,7 +8498,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "device.writeVisionResult",
@@ -8648,7 +8694,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "feature.circle",
@@ -8845,7 +8892,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "feature.edge",
@@ -8973,7 +9021,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "feature.line",
@@ -9166,7 +9215,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "feature.edgeSubpixel",
@@ -9401,10 +9451,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "flow.ifBoolean",
@@ -9496,7 +9553,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.delay",
@@ -9600,7 +9658,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.merge",
@@ -9754,7 +9813,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.forEach",
@@ -9889,7 +9949,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.if",
@@ -10097,7 +10158,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.join",
@@ -10153,7 +10215,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.loopEnd",
@@ -10215,7 +10278,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.parallel",
@@ -10271,7 +10335,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.result",
@@ -10337,7 +10402,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.switch",
@@ -10495,7 +10561,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "flow.try",
@@ -10646,7 +10713,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "geometry.intersections",
@@ -10795,7 +10863,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.geometry",
@@ -11992,7 +12061,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.homMat",
@@ -12754,7 +12824,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "geometry.angle",
@@ -12824,7 +12895,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "geometry.intersection",
@@ -12919,7 +12991,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.matrixOp",
@@ -13997,7 +14070,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "geometry.distance",
@@ -14095,7 +14169,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.anomaly",
@@ -14400,7 +14475,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.classification",
@@ -14703,7 +14779,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.detection",
@@ -14979,7 +15056,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.instanceSegmentation",
@@ -15310,7 +15388,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.obb",
@@ -15617,7 +15696,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.pose",
@@ -15941,7 +16021,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "inference.segmentation",
@@ -16188,7 +16269,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "logic.boolean",
@@ -16281,7 +16363,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.register",
@@ -16450,7 +16533,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "match.shape",
@@ -17384,7 +17468,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": true,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "match.template",
@@ -18030,7 +18115,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.measure1d",
@@ -18411,7 +18497,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.caliperArray",
@@ -18769,10 +18856,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.caliperCircle",
@@ -19157,10 +19251,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.caliper",
@@ -19416,10 +19517,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.caliperLine",
@@ -19733,10 +19841,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.caliperWidth",
@@ -20008,10 +20123,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.concentricity",
@@ -20092,7 +20214,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.circleSpacing",
@@ -20164,7 +20287,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.wallThickness",
@@ -20323,7 +20447,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.colorDifference",
@@ -20446,7 +20571,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.contourFeature",
@@ -20963,7 +21089,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.contourThickness",
@@ -21181,7 +21308,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.fitEllipse",
@@ -21313,7 +21441,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.fitCircle",
@@ -21466,7 +21595,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.fitLine",
@@ -21615,7 +21745,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.grayHistogram",
@@ -21743,7 +21874,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.blob",
@@ -21864,7 +21996,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.parallelism",
@@ -21950,7 +22083,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.perpendicularity",
@@ -22036,7 +22170,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.lineSpacing",
@@ -22191,7 +22326,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.metrology",
@@ -22482,7 +22618,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.blobs",
@@ -22796,7 +22933,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.pointLineDistance",
@@ -22891,7 +23029,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.fitRectangle",
@@ -23051,7 +23190,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.regionFeature",
@@ -23736,7 +23876,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "roi.transform",
@@ -23972,10 +24113,17 @@
           "inputPort": "debugImage"
         }
       ],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "debugImage"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "measure.rotatedRect",
@@ -24086,7 +24234,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.contourDeviation",
@@ -24255,7 +24404,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.roundness",
@@ -24397,7 +24547,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.straightness",
@@ -24514,7 +24665,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "measure.metrologyResult",
@@ -24638,7 +24790,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "output.exportResult",
@@ -24892,7 +25045,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "output.httpRequest",
@@ -25198,7 +25352,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "output.saveImage",
@@ -25652,7 +25807,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.threshold.adaptive",
@@ -25765,7 +25921,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.bottomHat",
@@ -25870,7 +26027,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.channel",
@@ -25981,7 +26139,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.colorConvert",
@@ -26077,7 +26236,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.crop",
@@ -26226,10 +26386,17 @@
           "inputPort": "image"
         }
       ],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": true
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "image.blur.gaussian",
@@ -26362,7 +26529,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.grayscale",
@@ -26470,7 +26638,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.filter",
@@ -26624,7 +26793,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.imageOp",
@@ -28853,7 +29023,8 @@
       "declaresActions": false,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.restoration",
@@ -29317,7 +29488,8 @@
       "declaresActions": false,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.surface",
@@ -29527,7 +29699,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.blur.median",
@@ -29636,7 +29809,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.morphGradient",
@@ -29741,7 +29915,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.morphology",
@@ -29972,7 +30147,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.contrastNormalize",
@@ -30082,7 +30258,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.illuminationNormalize",
@@ -30175,7 +30352,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.threshold.otsu",
@@ -30251,7 +30429,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.perspective",
@@ -30480,7 +30659,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.resize",
@@ -30598,7 +30778,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.rotate",
@@ -30687,7 +30868,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.sharpen",
@@ -30770,7 +30952,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.threshold",
@@ -30967,7 +31150,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.threshold",
@@ -31455,7 +31639,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.undistort",
@@ -31561,7 +31746,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.warpAffine",
@@ -31669,7 +31855,8 @@
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.topHat",
@@ -31774,7 +31961,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "recognition.barcode",
@@ -32004,7 +32192,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "text.match",
@@ -32142,7 +32331,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "recognition.ocr",
@@ -32392,7 +32582,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "text.validate",
@@ -32594,7 +32785,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "text.regex",
@@ -32757,7 +32949,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.segmentation",
@@ -32976,7 +33169,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.fromColorRange",
@@ -33162,7 +33356,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.connectedComponents",
@@ -33250,7 +33445,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.fillHoles",
@@ -33338,7 +33534,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.filter",
@@ -33462,7 +33659,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.fromRange",
@@ -33743,7 +33941,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.fromRoi",
@@ -33871,10 +34070,17 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "image.reduceDomain",
@@ -33964,7 +34170,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.boolean",
@@ -34065,7 +34272,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.boundary",
@@ -34180,7 +34388,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.convexHull",
@@ -34278,7 +34487,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.morphology",
@@ -34418,7 +34628,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.regionOp",
@@ -36105,7 +36316,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.properties",
@@ -36245,7 +36457,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "jlvision.regionAnalysis",
@@ -36484,7 +36697,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.skeleton",
@@ -36582,7 +36796,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.toDetections",
@@ -36683,7 +36898,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.fromThreshold",
@@ -36779,7 +36995,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "region.transform",
@@ -36875,7 +37092,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "robot.executeTarget",
@@ -37098,7 +37316,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "robot.j4TcpCompensation",
@@ -37305,7 +37524,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "robot.currentPose",
@@ -37476,7 +37696,8 @@
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "robot.guidance2d",
@@ -37636,7 +37857,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "value.arithmetic",
@@ -37816,7 +38038,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "value.number",
@@ -37939,7 +38162,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "value.range",
@@ -38046,7 +38270,8 @@
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
-      "declaresOutputFrames": false
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     }
   ]
 }

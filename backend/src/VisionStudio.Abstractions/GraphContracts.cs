@@ -239,7 +239,11 @@ public sealed record NodeCatalogItem(
     /// <summary>
     /// ROI / 几何 / 检测等非图像输出的帧来源。null = 未声明：仅有图像输出的节点按自身图像帧推断。
     /// </summary>
-    IReadOnlyList<NodeOutputFrameRule>? OutputFrames = null)
+    IReadOnlyList<NodeOutputFrameRule>? OutputFrames = null,
+    /// <summary>
+    /// ROI 输入与图像输入的绑定（ROI 帧校验用）。null = 未声明：不校验该 ROI 输入。
+    /// </summary>
+    IReadOnlyList<NodeRoiImageBinding>? RoiImageBindings = null)
 {
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;
@@ -252,6 +256,9 @@ public sealed record NodeCatalogItem(
 
     /// <summary>该目录是否声明了非图像输出的帧来源。</summary>
     public bool DeclaresOutputFrames => OutputFrames is not null;
+
+    /// <summary>该目录是否声明了 ROI 与图像输入的绑定。</summary>
+    public bool DeclaresRoiImageBindings => RoiImageBindings is not null;
 }
 
 /// <summary>
@@ -333,6 +340,9 @@ public sealed record NodeOutputFrameRule(
     string? InputPort = null,
     string? WhenParameter = null,
     IReadOnlyList<string>? WhenValues = null);
+
+/// <summary>ROI 输入端口与图像输入端口的绑定；ROI 的帧必须与该图像一致。</summary>
+public sealed record NodeRoiImageBinding(string RoiPort, string ImagePort);
 
 /// <summary>
 /// 一条图像帧语义规则。条件为空表示无条件匹配；否则按节点有效参数值（节点值优先、目录默认值兜底）

@@ -469,7 +469,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                 port.Name.Equals(edge.TargetPort, StringComparison.OrdinalIgnoreCase));
             if (targetPort?.DataType != VisionDataType.Roi) continue;
 
-            var imagePort = RoiImageInputPort(targetNode.Type, targetPort.Name);
+            var imagePort = RoiImageInputPort(targetCatalog, targetPort.Name);
             if (imagePort is null) continue;
             var roiFrame = ResolveRoiFrame(edge.SourceNodeId, edge.SourcePort, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
             var imageFrame = ResolveImageInputFrame(targetNode.Id, imagePort, workflow, byId);
@@ -483,24 +483,10 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         }
     }
 
-    private static string? RoiImageInputPort(string nodeType, string roiPort)
-    {
-        if (nodeType.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("measure.caliperArray", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase)
-            || nodeType.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase))
-            return "image";
-        if (nodeType.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)) return "debugImage";
-        if (nodeType.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
-            return roiPort.Equals("searchRoi", StringComparison.OrdinalIgnoreCase) ? "image"
-                : roiPort.Equals("roi", StringComparison.OrdinalIgnoreCase) || roiPort.Equals("clutterRoi", StringComparison.OrdinalIgnoreCase)
-                    ? "template" : null;
-        return null;
-    }
+    private static string? RoiImageInputPort(NodeCatalogItem catalog, string roiPort)
+        => catalog.RoiImageBindings?
+            .FirstOrDefault(binding => binding.RoiPort.Equals(roiPort, StringComparison.OrdinalIgnoreCase))
+            ?.ImagePort;
 
     private CoordinateFrame? ResolveRoiFrame(
         string nodeId,

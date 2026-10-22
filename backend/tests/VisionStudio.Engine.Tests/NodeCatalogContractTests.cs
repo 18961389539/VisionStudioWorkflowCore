@@ -303,6 +303,30 @@ public sealed class NodeCatalogContractTests
     }
 
     [Fact]
+    public void Catalog_RoiImageBindingsReferenceExistingInputs()
+    {
+        var problems = new List<string>();
+
+        foreach (var item in BuiltInNodeCatalog.Items.Where(item => item.RoiImageBindings is not null))
+        {
+            var inputs = item.Inputs.ToDictionary(port => port.Name, StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var binding in item.RoiImageBindings!)
+            {
+                if (!seen.Add(binding.RoiPort))
+                    problems.Add($"{item.Type}: duplicate ROI binding for '{binding.RoiPort}'");
+                if (!inputs.TryGetValue(binding.RoiPort, out var roiPort) || roiPort.DataType != VisionDataType.Roi)
+                    problems.Add($"{item.Type}: ROI port '{binding.RoiPort}' does not exist or is not a Roi input");
+                if (!inputs.TryGetValue(binding.ImagePort, out var imagePort) || imagePort.DataType != VisionDataType.Image)
+                    problems.Add($"{item.Type}: image port '{binding.ImagePort}' does not exist or is not an Image input");
+            }
+        }
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
     public void Catalog_HasNoRetiredControls()
     {
         var retired = BuiltInNodeCatalog.Items

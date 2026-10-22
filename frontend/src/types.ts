@@ -105,6 +105,8 @@ export type NodeCatalogItem = {
   transformFrames?: NodeTransformFrameDeclaration | null;
   /** ROI / 几何 / 检测等非图像输出的帧来源声明。 */
   outputFrames?: NodeOutputFrameRule[] | null;
+  /** ROI 输入绑定的图像输入端口（ROI 帧校验用）。 */
+  roiImageBindings?: { roiPort: string; imagePort: string }[] | null;
 };
 
 export type VisionValueSnapshot = {
