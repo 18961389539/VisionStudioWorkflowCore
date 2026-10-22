@@ -424,7 +424,8 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 
 新增 `frontend/src/endpoints.ts`：`API_BASE` + 按资源域组织的 builder（jobs/traces/validation/
 runs/cameras/auth/plugins/workflows/debug/production 等 10 个域）。新代码必须从这里取路径。
-运行时代码中约 300 处硬编码 `/api/` 由 fetch 棘轮兜底；迁移时按文件逐步替换为
+已迁移 6 个文件 55 处（JobPanel 13、DatasetValidationPanel 13、security 7、useRunController 8、
+endpoints 3 项测试），剩余 **172 处**硬编码 `/api/`。
 `endpoints.ts` 的对应 builder，`API_BASE` 只需改一处即可适配子路径部署。
 
 ## 后续
