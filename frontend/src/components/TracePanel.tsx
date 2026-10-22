@@ -12,6 +12,7 @@ import ReplayDebuggerPanel from './ReplayDebuggerPanel';
 import RunObservabilityPanel from './RunObservabilityPanel';
 import TraceAnalysisPanel from './TraceAnalysisPanel';
 import InvestigationPanel from './InvestigationPanel';
+import { apiFetch } from '../apiClient';
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -79,7 +80,7 @@ export default function TracePanel({ open, onClose }: Props) {
   const resetFilters = () => applyFilters(DEFAULT_FILTER);
 
   const cleanup = async () => {
-    const response = await fetch('/api/storage/cleanup', { method: 'POST' });
+    const response = await apiFetch('/api/storage/cleanup', { method: 'POST' });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.error ?? '清理失败');
     messageApi.success(`保留策略清理了 ${data.changed ?? 0} 条记录 / 个文件`);
@@ -93,7 +94,7 @@ export default function TracePanel({ open, onClose }: Props) {
 
   const disposition = async (value: 'OK' | 'NG' | 'REVIEW') => {
     if (!selected) return;
-    const response = await fetch(`/api/traces/${selected.runId}/disposition`, {
+    const response = await apiFetch(`/api/traces/${selected.runId}/disposition`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disposition: value })
     });
     const data = await response.json();

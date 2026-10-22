@@ -6,6 +6,7 @@ import RecipePublicationDialog, { type PublicationTarget } from './RecipePublica
 import { responseErrorMessage } from '../apiErrors';
 import { useWorkflowImport } from '../useWorkflowImport';
 import type { PrepareWorkflowChange } from '../useWorkflowChanges';
+import { apiFetch } from '../apiClient';
 
 type Props = { open: boolean; onClose: () => void; workflow: WorkflowPayload; prepareWorkflowChange: PrepareWorkflowChange; onRunResult: (result: RunResult) => void; };
 
@@ -135,7 +136,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
     setLoading(true);
     setLoadError(undefined);
     try {
-      const jobsRes = await fetch('/api/jobs', { signal: controller.signal });
+      const jobsRes = await apiFetch('/api/jobs', { signal: controller.signal });
       if (!jobsRes.ok) throw new Error(await responseErrorMessage(jobsRes, '配方列表加载失败，请重试。'));
       const nextJobs: JobDescriptor[] = await jobsRes.json();
       if (!activeRef.current || generation !== listGenerationRef.current || controller.signal.aborted) return;
@@ -168,8 +169,8 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
     void (async () => {
       try {
         const requests = [
-          fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`, { signal: controller.signal }),
-          fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${selected.latestVersion}/parameterization`, { signal: controller.signal })
+          apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`, { signal: controller.signal }),
+          apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${selected.latestVersion}/parameterization`, { signal: controller.signal })
         ];
         const responses = await Promise.all(requests);
         if (responses.some((response) => !response.ok)) throw new Error('参数草稿加载失败，请重试。');
@@ -190,33 +191,33 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
     if (!selected) return;
     setCandidates([]); setCandidatesVersion(undefined); setDependency(undefined);
   }, [selected?.id]);
-  const saveRecipeParameters = () => selected && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(recipeParams)})}); const data=await response.json(); if(!response.ok) throw new Error(data.detail??'保存配方参数失败'); setRecipeParams(JSON.stringify(data.values,null,2)); messageApi.success('配方参数草稿已保存'); });
+  const saveRecipeParameters = () => selected && invoke(async()=>{ const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameters`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:parseValues(recipeParams)})}); const data=await response.json(); if(!response.ok) throw new Error(data.detail??'保存配方参数失败'); setRecipeParams(JSON.stringify(data.values,null,2)); messageApi.success('配方参数草稿已保存'); });
   const workflowMatchesSelectedRecipe = Boolean(selected
     && baseWorkflowRecipeId === selected.id
     && baseWorkflowVersion === selected.latestVersion
     && baseWorkflowId
     && workflow.id === baseWorkflowId);
   const canSaveSelectedVersion = workflowMatchesSelectedRecipe && !parameterLoading && !parameterError;
-  const resolveBindings = () => selected && workflowMatchesSelectedRecipe && invoke(async()=>{ const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameterization/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow,bindings})}); const data:ResolvedRecipeParameterization & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'解析参数绑定失败'); setResolved(data); messageApi.success(`已解析 ${data.bindingCount} 个绑定`); });
+  const resolveBindings = () => selected && workflowMatchesSelectedRecipe && invoke(async()=>{ const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/parameterization/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workflow,bindings})}); const data:ResolvedRecipeParameterization & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'解析参数绑定失败'); setResolved(data); messageApi.success(`已解析 ${data.bindingCount} 个绑定`); });
   const addBinding = () => { if(!bindingTarget || !bindingKey.trim()) return; setBindings(x=>({...x,[bindingTarget]:`recipe.${bindingKey.trim()}`})); };
 
   const createRecipe = () => invoke(async () => {
-    const response = await fetch('/api/recipes', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
+    const response = await apiFetch('/api/recipes', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name:name.trim(), description, workflow, changeNote:'Initial recipe version' }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '创建配方失败'); setSelectedId(data.id); setRecipeCreateOpen(false); setQuery(''); setStatusFilter('all'); setTab('versions'); messageApi.success('配方 V1 草稿已创建，验证通过后即可发布');
   });
   const saveVersion = () => selected && workflowMatchesSelectedRecipe && invoke(async () => {
-    const response = await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ workflow, note, parameterBindings:bindings }) });
+    const response = await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ workflow, note, parameterBindings:bindings }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '保存版本失败'); messageApi.success(`草稿 V${data.version} 已创建`);
   });
   const loadCandidates = (version:number) => selected && invoke(async () => {
-    const response = await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${version}/validation-candidates`);
+    const response = await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${version}/validation-candidates`);
     const data: ValidationCandidateInfo[] = await response.json();
     if (!response.ok) throw new Error('查询验证记录失败');
     setCandidates(data); setCandidatesVersion(version);
     if (!data.length) messageApi.info('没有与该版本工作流哈希匹配的已完成数据集验证记录');
   });
   const linkCandidate = (version:number, validationRunId:string) => selected && invoke(async () => {
-    const response = await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${version}/validation`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ validationRunId }) });
+    const response = await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${version}/validation`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ validationRunId }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.detail ?? data.error ?? '关联验证记录失败');
     if (!data.accepted) throw new Error(`验证策略未通过：${data.reason}`); messageApi.success(`V${version} 已通过验证 · ${validationRunId.slice(0,12)}`);
   });
@@ -243,14 +244,14 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
   };
   const loadVersion = (version: number) => importVersion(version, false);
   const loadBaseVersion = (version: number) => importVersion(version, true);
-  const validateDependencies = () => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/dependencies/validate`); const data:RuntimeDependencyValidation & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'依赖校验失败'); setDependency(data); if(!data.compatible) throw new Error(data.drifts[0]?.message??'运行时依赖发生变化'); messageApi.success('运行时依赖一致'); });
-  const runPublished = () => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/run`,{method:'POST'}); const data:RunResult=await response.json(); onRunResult(data); if(!response.ok) throw new Error(data.error??'已发布版本运行失败'); messageApi.success('当前生效配方已运行'); });
+  const validateDependencies = () => selected && invoke(async () => { const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/dependencies/validate`); const data:RuntimeDependencyValidation & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'依赖校验失败'); setDependency(data); if(!data.compatible) throw new Error(data.drifts[0]?.message??'运行时依赖发生变化'); messageApi.success('运行时依赖一致'); });
+  const runPublished = () => selected && invoke(async () => { const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/run`,{method:'POST'}); const data:RunResult=await response.json(); onRunResult(data); if(!response.ok) throw new Error(data.error??'已发布版本运行失败'); messageApi.success('当前生效配方已运行'); });
   const cloneRecipe = () => selected && invoke(async () => {
     const copyName = window.prompt('新配方名称', `${selected.name} 副本`); if (!copyName?.trim()) return;
-    const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/clone`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:copyName.trim()})});
+    const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/clone`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:copyName.trim()})});
     const data=await response.json(); if(!response.ok) throw new Error(data.detail??data.error??'复制配方失败'); setSelectedId(data.id); messageApi.success('配方已复制');
   });
-  const showDiff = (from:number,to:number) => selected && invoke(async () => { const response=await fetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${from}/diff/${to}`); const data:JobVersionDiff & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'版本差异比较失败'); Modal.info({title:`${selected.id} V${from} → V${to}`,width:900,content:<pre className="job-diff-pre">{data.changes.length?data.changes.map(x=>`${x.kind}  ${x.path}\n  ${x.before??'∅'} → ${x.after??'∅'}`).join('\n\n'):'没有影响执行语义的变更。'}</pre>}); });
+  const showDiff = (from:number,to:number) => selected && invoke(async () => { const response=await apiFetch(`/api/jobs/${encodeURIComponent(selected.id)}/versions/${from}/diff/${to}`); const data:JobVersionDiff & {detail?:string}=await response.json(); if(!response.ok) throw new Error(data.detail??'版本差异比较失败'); Modal.info({title:`${selected.id} V${from} → V${to}`,width:900,content:<pre className="job-diff-pre">{data.changes.length?data.changes.map(x=>`${x.kind}  ${x.path}\n  ${x.before??'∅'} → ${x.after??'∅'}`).join('\n\n'):'没有影响执行语义的变更。'}</pre>}); });
 
   const lifecycleTag = (job: JobDescriptor) => {
     const latest = job.versions.find((v) => v.version === job.latestVersion);

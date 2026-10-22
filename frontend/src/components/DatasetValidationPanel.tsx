@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Col, Divider, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, ValidationDatasetSummary, ValidationResultRecord, ValidationRunRecord, WorkflowPayload } from '../types';
 import { localizeStatus } from '../i18n';
+import { apiFetch } from '../apiClient';
 
 type Props = { open: boolean; onClose: () => void; currentWorkflow?: WorkflowPayload };
 const clsColor: Record<string, string> = { TRUE_OK: 'green', TRUE_NG: 'green', FALSE_OK: 'red', FALSE_NG: 'orange', ERROR: 'volcano' };
@@ -33,22 +34,22 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const candidate = runs.find((x) => x.runId === candidateRunId)?.summary;
 
   const loadDatasets = async () => {
-    const response = await fetch('/api/validation/datasets');
+    const response = await apiFetch('/api/validation/datasets');
     if (!response.ok) return;
     const data: ValidationDatasetSummary[] = await response.json();
     setDatasets(data);
     if (!datasetId && data.length) setDatasetId(data[0].id);
   };
   const loadTraces = async () => {
-    const response = await fetch('/api/traces?take=500');
+    const response = await apiFetch('/api/traces?take=500');
     if (response.ok) setTraces(await response.json());
   };
   const loadMedia = async () => {
-    const response = await fetch('/api/media/items?take=500');
+    const response = await apiFetch('/api/media/items?take=500');
     if (response.ok) setMediaItems(await response.json());
   };
   const loadDetail = async (id: string) => {
-    const [datasetResponse, runResponse] = await Promise.all([fetch(`/api/validation/datasets/${id}`), fetch(`/api/validation/datasets/${id}/runs`)]);
+    const [datasetResponse, runResponse] = await Promise.all([apiFetch(`/api/validation/datasets/${id}`), apiFetch(`/api/validation/datasets/${id}/runs`)]);
     if (datasetResponse.ok) {
       const data: ValidationDatasetDetail = await datasetResponse.json();
       setDetail(data);
@@ -64,7 +65,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     }
   };
   const loadRun = async (id: string) => {
-    const response = await fetch(`/api/validation/runs/${id}?includeResults=true`);
+    const response = await apiFetch(`/api/validation/runs/${id}?includeResults=true`);
     if (response.ok) setSelectedRun(await response.json());
   };
 
@@ -78,7 +79,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   }, [open, datasetId, selectedRunId, runs]);
 
   const createDataset = async () => {
-    const response = await fetch('/api/validation/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDescription }) });
+    const response = await apiFetch('/api/validation/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDescription }) });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.detail ?? '创建数据集失败');
     setCreateOpen(false); setDatasetId(data.dataset.id); await loadDatasets();
@@ -86,7 +87,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const addSelected = async () => {
     if (!datasetId || selectedTraceIds.length === 0) return;
     const items = selectedTraceIds.map((id) => { const t = traces.find((x) => x.runId === id); return { sourceKind: 'TRACE', sourceRef: id, expectedDisposition: t?.disposition === 'OK' ? 'OK' : 'NG' }; });
-    const response = await fetch(`/api/validation/datasets/${datasetId}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+    const response = await apiFetch(`/api/validation/datasets/${datasetId}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '添加样本失败');
     setSelectedTraceIds([]); setDetail(data); await loadDatasets();
@@ -98,24 +99,24 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
       const label = item?.label === 'NG' ? 'NG' : 'OK';
       return { sourceKind: 'MEDIA', sourceRef: ref, expectedDisposition: label };
     });
-    const response = await fetch(`/api/validation/datasets/${datasetId}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+    const response = await apiFetch(`/api/validation/datasets/${datasetId}/items`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
     const data = await response.json();
     if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '添加媒体样本失败');
     setSelectedMediaRefs([]); setDetail(data); await loadDatasets();
   };
   const updateLabel = async (itemId: string, expectedDisposition: 'OK' | 'NG') => {
     if (!datasetId) return;
-    const response = await fetch(`/api/validation/datasets/${datasetId}/items/${itemId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedDisposition }) });
+    const response = await apiFetch(`/api/validation/datasets/${datasetId}/items/${itemId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedDisposition }) });
     if (response.ok) setDetail(await response.json());
   };
   const removeItem = async (itemId: string) => {
     if (!datasetId) return;
-    const response = await fetch(`/api/validation/datasets/${datasetId}/items/${itemId}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/validation/datasets/${datasetId}/items/${itemId}`, { method: 'DELETE' });
     if (response.ok) await loadDetail(datasetId);
   };
   const loadCandidateWorkflow = async () => {
     if (!workflowSourceRunId) return;
-    const response = await fetch(`/api/traces/${workflowSourceRunId}/workflow`);
+    const response = await apiFetch(`/api/traces/${workflowSourceRunId}/workflow`);
     if (!response.ok) return messageApi.error('加载工作流失败');
     const workflow: WorkflowPayload = await response.json();
     setWorkflowText(JSON.stringify(workflow, null, 2));
@@ -129,14 +130,14 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     }
     setBusy(true);
     try {
-      const response = await fetch(`/api/validation/datasets/${datasetId}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: workflowSourceRunId ?? 'designer-current', workflow }) });
+      const response = await apiFetch(`/api/validation/datasets/${datasetId}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: workflowSourceRunId ?? 'designer-current', workflow }) });
       const data = await response.json();
       if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '启动验证失败');
       setSelectedRunId(data.runId); messageApi.success('批量验证已启动'); await loadDetail(datasetId);
     } finally { setBusy(false); }
   };
   const cancelRun = async (runId: string) => {
-    const response = await fetch(`/api/validation/runs/${runId}/cancel`, { method: 'POST' });
+    const response = await apiFetch(`/api/validation/runs/${runId}/cancel`, { method: 'POST' });
     if (response.ok) messageApi.success('已请求取消');
   };
 
