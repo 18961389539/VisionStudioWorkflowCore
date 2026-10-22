@@ -327,6 +327,27 @@ public sealed class NodeCatalogContractTests
     }
 
     [Fact]
+    public void Catalog_ParameterPortOverridesReferenceExistingInputs()
+    {
+        var problems = new List<string>();
+
+        foreach (var item in BuiltInNodeCatalog.Items)
+        {
+            var inputs = item.Inputs.Select(port => port.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var parameter in item.Parameters.Where(parameter => parameter.OverriddenByPorts is not null))
+            {
+                foreach (var port in parameter.OverriddenByPorts!)
+                {
+                    if (!inputs.Contains(port))
+                        problems.Add($"{item.Type}.{parameter.Name}: override port '{port}' does not exist");
+                }
+            }
+        }
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
     public void Catalog_HasNoRetiredControls()
     {
         var retired = BuiltInNodeCatalog.Items

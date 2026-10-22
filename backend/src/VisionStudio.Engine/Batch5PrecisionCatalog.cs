@@ -145,10 +145,10 @@ public static class Batch5PrecisionCatalog
                 new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels."),
-                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels."),
-                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in pixels."),
-                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in pixels."),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in pixels.") { OverriddenByPorts = ["searchLine"] },
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the expected edge; larger values smooth local noise but may merge nearby features."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling", Description: "Minimum contrast required for an edge."),
@@ -199,10 +199,10 @@ public static class Batch5PrecisionCatalog
                 new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)
             ],
             [
-                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in image pixels before the optional rigid transform."),
-                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in image pixels before the optional rigid transform."),
-                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in image pixels before the optional rigid transform."),
-                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in image pixels before the optional rigid transform."),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in image pixels before the optional rigid transform.") { OverriddenByPorts = ["searchLine"] },
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in image pixels before the optional rigid transform.") { OverriddenByPorts = ["searchLine"] },
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in image pixels before the optional rigid transform.") { OverriddenByPorts = ["searchLine"] },
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in image pixels before the optional rigid transform.") { OverriddenByPorts = ["searchLine"] },
                 new("sampleWidth", "Sample Width", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."),
                 new("minContrast", "Min Contrast", "number", 8, 0, 255, 1, Unit: "gray", Group: "Sampling", Description: "Minimum gray-level step along each profile for an edge to be accepted."),
@@ -266,9 +266,9 @@ public static class Batch5PrecisionCatalog
                 new("next", VisionDataType.Control)
             ],
             [
-                new("centerX", "Center X", "number", 320, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Nominal circle center X in image pixels before optional rigid transform."),
-                new("centerY", "Center Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Nominal circle center Y in image pixels before optional rigid transform."),
-                new("radius", "Nominal Radius", "number", 100, 1, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Expected circle radius in pixels used as the radial search mid-line."),
+                new("centerX", "Center X", "number", 320, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Nominal circle center X in image pixels before optional rigid transform.") { OverriddenByPorts = ["circle"] },
+                new("centerY", "Center Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Nominal circle center Y in image pixels before optional rigid transform.") { OverriddenByPorts = ["circle"] },
+                new("radius", "Nominal Radius", "number", 100, 1, 10000000, 1, Unit: "px", Group: "Nominal Circle", Description: "Expected circle radius in pixels used as the radial search mid-line.") { OverriddenByPorts = ["circle"] },
                 new("angleStartDeg", "Angle Start", "number", -180, -360, 360, 1, Unit: "deg", Group: "Arc", Description: "Arc start angle in degrees; full circles typically use -180..180."),
                 new("angleEndDeg", "Angle End", "number", 180, -360, 360, 1, Unit: "deg", Group: "Arc", Description: "Arc end angle in degrees; must differ from angleStartDeg for a measurable arc."),
                 new("samplingMode", "Sampling Mode", "select", "count", Options:

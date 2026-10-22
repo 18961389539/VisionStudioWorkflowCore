@@ -39,6 +39,8 @@ export type ParameterDescriptor = {
   internal?: boolean;
   variantParameter?: string;
   variants?: Record<string, { label?: string | null; description?: string | null; suggestions?: ParameterOption[] | null; min?: number | null; max?: number | null; step?: number | null; defaultValue?: unknown; unit?: string | null }>;
+  /** 连接这些输入端口时忽略本参数（端口优先）。 */
+  overriddenByPorts?: string[] | null;
 };
 
 export type VisionToolCapabilities = {

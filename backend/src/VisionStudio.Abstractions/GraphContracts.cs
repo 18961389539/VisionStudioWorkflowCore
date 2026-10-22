@@ -101,6 +101,13 @@ public sealed record ParameterDescriptor(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Integer { get; init; }
 
+    /// <summary>
+    /// 连接这些输入端口时忽略本参数（端口值优先）。用于 path/url/matrixA 等"参数或接线二选一"
+    /// 的字段，编译器不再按节点类型判断。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? OverriddenByPorts { get; init; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? VariantParameter { get; init; }
 

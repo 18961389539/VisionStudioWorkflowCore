@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "0c1ddb1f0ada668fa75935aaa66e205bf1c16c5aaa2ab8fbedb0f480c73a737d",
+  "hash": "91688bb762129184e8ba89014f4413dec536bed50bbca0b740876aa1bd78dba4",
   "items": [
     {
       "type": "image.acquire",
@@ -5543,7 +5543,10 @@
           "step": 0.001,
           "unit": "target",
           "group": "Point",
-          "description": "Used when the X input is not connected."
+          "description": "Used when the X input is not connected.",
+          "overriddenByPorts": [
+            "x"
+          ]
         },
         {
           "name": "y",
@@ -5555,7 +5558,10 @@
           "step": 0.001,
           "unit": "target",
           "group": "Point",
-          "description": "Used when the Y input is not connected."
+          "description": "Used when the Y input is not connected.",
+          "overriddenByPorts": [
+            "y"
+          ]
         },
         {
           "name": "frame",
@@ -5696,7 +5702,10 @@
           "step": 0.001,
           "unit": "target",
           "group": "Point",
-          "description": "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9."
+          "description": "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9.",
+          "overriddenByPorts": [
+            "x"
+          ]
         },
         {
           "name": "y",
@@ -5708,7 +5717,10 @@
           "step": 0.001,
           "unit": "target",
           "group": "Point",
-          "description": "Y in the named frame. Optional Y input overrides this constant; must be finite within +/-1e9."
+          "description": "Y in the named frame. Optional Y input overrides this constant; must be finite within +/-1e9.",
+          "overriddenByPorts": [
+            "y"
+          ]
         },
         {
           "name": "z",
@@ -5720,7 +5732,10 @@
           "step": 0.001,
           "unit": "target",
           "group": "Point",
-          "description": "Z in the named frame. Optional Z input overrides this constant; must be finite within +/-1e9."
+          "description": "Z in the named frame. Optional Z input overrides this constant; must be finite within +/-1e9.",
+          "overriddenByPorts": [
+            "z"
+          ]
         },
         {
           "name": "frame",
@@ -5845,7 +5860,10 @@
           "max": 1000000,
           "step": 0.001,
           "group": "Pose",
-          "description": "Used when the X input is not connected."
+          "description": "Used when the X input is not connected.",
+          "overriddenByPorts": [
+            "x"
+          ]
         },
         {
           "name": "y",
@@ -5856,7 +5874,10 @@
           "max": 1000000,
           "step": 0.001,
           "group": "Pose",
-          "description": "Used when the Y input is not connected."
+          "description": "Used when the Y input is not connected.",
+          "overriddenByPorts": [
+            "y"
+          ]
         },
         {
           "name": "thetaDeg",
@@ -5868,7 +5889,10 @@
           "step": 0.001,
           "unit": "deg",
           "group": "Pose",
-          "description": "Used when the theta input is not connected. The output angle is normalized to (-180, 180]."
+          "description": "Used when the theta input is not connected. The output angle is normalized to (-180, 180].",
+          "overriddenByPorts": [
+            "thetaDeg"
+          ]
         },
         {
           "name": "frame",
@@ -8454,7 +8478,10 @@
             }
           ],
           "group": "Fallback",
-          "description": "How the fallback value text is parsed when no value input is connected: boolean, integer, double or string."
+          "description": "How the fallback value text is parsed when no value input is connected: boolean, integer, double or string.",
+          "overriddenByPorts": [
+            "value"
+          ]
         },
         {
           "name": "fallbackValue",
@@ -8462,7 +8489,10 @@
           "type": "text",
           "defaultValue": "Vision OK",
           "group": "Fallback",
-          "description": "Used only when the optional Any input is not connected."
+          "description": "Used only when the optional Any input is not connected.",
+          "overriddenByPorts": [
+            "value"
+          ]
         },
         {
           "name": "autoConnect",
@@ -9307,7 +9337,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start X in pixels."
+          "description": "Search-line start X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "startY",
@@ -9319,7 +9352,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start Y in pixels."
+          "description": "Search-line start Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endX",
@@ -9331,7 +9367,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end X in pixels."
+          "description": "Search-line end X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endY",
@@ -9343,7 +9382,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end Y in pixels."
+          "description": "Search-line end Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "sampleWidth",
@@ -13447,6 +13489,9 @@
               "generalizedEigenvaluesSymmetric"
             ]
           },
+          "overriddenByPorts": [
+            "matrixA"
+          ],
           "variantParameter": "operator",
           "variants": {
             "transpose": {
@@ -13608,6 +13653,9 @@
               "generalizedEigenvaluesSymmetric"
             ]
           },
+          "overriddenByPorts": [
+            "matrixB"
+          ],
           "variantParameter": "operator",
           "variants": {
             "add": {
@@ -18619,7 +18667,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start X in pixels."
+          "description": "Search-line start X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "startY",
@@ -18631,7 +18682,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start Y in pixels."
+          "description": "Search-line start Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endX",
@@ -18643,7 +18697,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end X in pixels."
+          "description": "Search-line end X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endY",
@@ -18655,7 +18712,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end Y in pixels."
+          "description": "Search-line end Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "edgeLength",
@@ -18977,7 +19037,10 @@
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle",
-          "description": "Nominal circle center X in image pixels before optional rigid transform."
+          "description": "Nominal circle center X in image pixels before optional rigid transform.",
+          "overriddenByPorts": [
+            "circle"
+          ]
         },
         {
           "name": "centerY",
@@ -18989,7 +19052,10 @@
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle",
-          "description": "Nominal circle center Y in image pixels before optional rigid transform."
+          "description": "Nominal circle center Y in image pixels before optional rigid transform.",
+          "overriddenByPorts": [
+            "circle"
+          ]
         },
         {
           "name": "radius",
@@ -19001,7 +19067,10 @@
           "step": 1,
           "unit": "px",
           "group": "Nominal Circle",
-          "description": "Expected circle radius in pixels used as the radial search mid-line."
+          "description": "Expected circle radius in pixels used as the radial search mid-line.",
+          "overriddenByPorts": [
+            "circle"
+          ]
         },
         {
           "name": "angleStartDeg",
@@ -19352,7 +19421,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start X in pixels."
+          "description": "Search-line start X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "startY",
@@ -19364,7 +19436,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start Y in pixels."
+          "description": "Search-line start Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endX",
@@ -19376,7 +19451,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end X in pixels."
+          "description": "Search-line end X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endY",
@@ -19388,7 +19466,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end Y in pixels."
+          "description": "Search-line end Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "sampleWidth",
@@ -19628,7 +19709,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start X in image pixels before the optional rigid transform."
+          "description": "Search-line start X in image pixels before the optional rigid transform.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "startY",
@@ -19640,7 +19724,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start Y in image pixels before the optional rigid transform."
+          "description": "Search-line start Y in image pixels before the optional rigid transform.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endX",
@@ -19652,7 +19739,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end X in image pixels before the optional rigid transform."
+          "description": "Search-line end X in image pixels before the optional rigid transform.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endY",
@@ -19664,7 +19754,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end Y in image pixels before the optional rigid transform."
+          "description": "Search-line end Y in image pixels before the optional rigid transform.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "sampleWidth",
@@ -19957,7 +20050,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start X in pixels."
+          "description": "Search-line start X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "startY",
@@ -19969,7 +20065,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line start Y in pixels."
+          "description": "Search-line start Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endX",
@@ -19981,7 +20080,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end X in pixels."
+          "description": "Search-line end X in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "endY",
@@ -19993,7 +20095,10 @@
           "step": 1,
           "unit": "px",
           "group": "Search Line",
-          "description": "Search-line end Y in pixels."
+          "description": "Search-line end Y in pixels.",
+          "overriddenByPorts": [
+            "searchLine"
+          ]
         },
         {
           "name": "sampleWidth",
@@ -25138,7 +25243,10 @@
           "type": "text",
           "defaultValue": "",
           "group": "Request",
-          "description": "Absolute http/https address; a wired url input takes precedence over this parameter."
+          "description": "Absolute http/https address; a wired url input takes precedence over this parameter.",
+          "overriddenByPorts": [
+            "url"
+          ]
         },
         {
           "name": "method",
@@ -25184,7 +25292,11 @@
               "PUT",
               "DELETE"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "body",
+            "value"
+          ]
         },
         {
           "name": "contentType",
@@ -25200,7 +25312,10 @@
               "PUT",
               "DELETE"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "value"
+          ]
         },
         {
           "name": "maxRequestBytes",
@@ -25279,7 +25394,10 @@
           "type": "text",
           "defaultValue": "",
           "group": "Retry",
-          "description": "A wired idempotencyKey takes precedence; at most 256 printable ASCII characters without spaces. Use a stable unique id per product/business operation; reuse it for retries of the same operation and use a different key for a different operation."
+          "description": "A wired idempotencyKey takes precedence; at most 256 printable ASCII characters without spaces. Use a stable unique id per product/business operation; reuse it for retries of the same operation and use a different key for a different operation.",
+          "overriddenByPorts": [
+            "idempotencyKey"
+          ]
         },
         {
           "name": "retryDelayMs",
@@ -25469,6 +25587,9 @@
           "defaultValue": "artifacts/output.png",
           "group": "归档命名",
           "description": "Base file path; the extension selects the encoding. A wired path takes precedence. Timestamp and template modes replace the file-name part and use the directory as the archive root.",
+          "overriddenByPorts": [
+            "path"
+          ],
           "variantParameter": "namingMode",
           "variants": {
             "fixed": {
@@ -25533,7 +25654,10 @@
             "values": [
               "template"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "partId"
+          ]
         },
         {
           "name": "splitByDate",
@@ -32269,14 +32393,20 @@
           "label": "Text (fallback)",
           "type": "text",
           "defaultValue": "",
-          "description": "Fallback actual text used when the text input is disconnected."
+          "description": "Fallback actual text used when the text input is disconnected.",
+          "overriddenByPorts": [
+            "text"
+          ]
         },
         {
           "name": "expected",
           "label": "Expected Text",
           "type": "text",
           "defaultValue": "",
-          "description": "Fallback expected text used when the expected input is disconnected."
+          "description": "Fallback expected text used when the expected input is disconnected.",
+          "overriddenByPorts": [
+            "expected"
+          ]
         },
         {
           "name": "mode",
@@ -32660,7 +32790,10 @@
           "type": "text",
           "defaultValue": "",
           "group": "Comparison",
-          "description": "Fallback actual text used when the text input is disconnected."
+          "description": "Fallback actual text used when the text input is disconnected.",
+          "overriddenByPorts": [
+            "text"
+          ]
         },
         {
           "name": "expected",
@@ -32677,7 +32810,10 @@
               "startsWith",
               "endsWith"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "expected"
+          ]
         },
         {
           "name": "mode",

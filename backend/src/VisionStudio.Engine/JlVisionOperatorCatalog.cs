@@ -144,8 +144,8 @@ internal static class JlVisionOperatorCatalog
                     [.. JlMatrixOperations.All.Values.OrderBy(op => op.Key, StringComparer.Ordinal)
                         .Select(op => new ParameterOption($"{op.Label} ({op.Key})", op.Key))],
                     Description: "JLVision JlMatrix linear-algebra operator. Matrices are JSON arrays of rows."),
-                new("matrixA", "Matrix A", "textarea", "[[1,0],[0,1]]", Group: "Matrices", Description: "A wired matrixA takes precedence; otherwise the matrix below is used. Edit as a table or JSON."),
-                new("matrixB", "Matrix B", "textarea", "[[1,0],[0,1]]", Group: "Matrices", Description: "A wired matrixB takes precedence; otherwise the matrix below is used."),
+                new("matrixA", "Matrix A", "textarea", "[[1,0],[0,1]]", Group: "Matrices", Description: "A wired matrixA takes precedence; otherwise the matrix below is used. Edit as a table or JSON.") { OverriddenByPorts = ["matrixA"] },
+                new("matrixB", "Matrix B", "textarea", "[[1,0],[0,1]]", Group: "Matrices", Description: "A wired matrixB takes precedence; otherwise the matrix below is used.") { OverriddenByPorts = ["matrixB"] },
                 new("scalar", "Scalar", "number", 1, -1e9, 1e9, 0.01, Group: "Matrices", Description: "Scalar argument: scale factor, power, epsilon, or the fill value for create."),
                 new("row", "Row", "number", 0, 0, 100000, 1, Group: "Matrices", Description: "Row index for getValue/getSubMatrix."),
                 new("column", "Column", "number", 0, 0, 100000, 1, Group: "Matrices", Description: "Column index for getValue/getSubMatrix."),

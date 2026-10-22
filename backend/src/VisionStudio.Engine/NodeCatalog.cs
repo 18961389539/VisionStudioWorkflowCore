@@ -606,10 +606,10 @@ public static class BuiltInNodeCatalog
                 new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
             ],
             [
-                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels."),
-                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels."),
-                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in pixels."),
-                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in pixels."),
+                new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("endX", "End X", "number", 520, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end X in pixels.") { OverriddenByPorts = ["searchLine"] },
+                new("endY", "End Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line end Y in pixels.") { OverriddenByPorts = ["searchLine"] },
                 new("sampleWidth", "Projection Length", "number", 5, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5)."),
                 new("edgeThreshold", "Edge Threshold", "number", 12, 0, 255, 1, Unit: "gray", Group: "Sampling", Description: "Minimum edge strength to accept a caliper hit."),
@@ -781,8 +781,8 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
             [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
             [
-                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the X input is not connected."),
-                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the Y input is not connected."),
+                new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the X input is not connected.") { OverriddenByPorts = ["x"] },
+                new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the Y input is not connected.") { OverriddenByPorts = ["y"] },
                 new("frame", "Frame", "text", "Workpiece", Group: "Point", Description: "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."),
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point", Description: "Coordinate unit carried on the point, e.g. px or mm.")
             ,
@@ -799,9 +799,9 @@ public static class BuiltInNodeCatalog
              new("azimuthDeg", VisionDataType.Double), new("elevationDeg", VisionDataType.Double),
              new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
             [
-                new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9."),
-                new("y", "Y", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Y in the named frame. Optional Y input overrides this constant; must be finite within +/-1e9."),
-                new("z", "Z", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Z in the named frame. Optional Z input overrides this constant; must be finite within +/-1e9."),
+                new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["x"] },
+                new("y", "Y", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Y in the named frame. Optional Y input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["y"] },
+                new("z", "Z", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Z in the named frame. Optional Z input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["z"] },
                 new("frame", "Frame", "text", "Workpiece", Group: "Point", Description: "Non-empty frame name stamped on the CoordinatePoint3D. There is no global registry; downstream transforms must match this name."),
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Point", Description: "Length unit carried with the point. Downstream transforms must use the same unit.")
             ,
@@ -899,9 +899,9 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("thetaDeg", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
             [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
             [
-                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the X input is not connected."),
-                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the Y input is not connected."),
-                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose", Description: "Used when the theta input is not connected. The output angle is normalized to (-180, 180]."),
+                new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the X input is not connected.") { OverriddenByPorts = ["x"] },
+                new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the Y input is not connected.") { OverriddenByPorts = ["y"] },
+                new("thetaDeg", "Theta", "number", 0, -3600, 3600, 0.001, Unit: "deg", Group: "Pose", Description: "Used when the theta input is not connected. The output angle is normalized to (-180, 180].") { OverriddenByPorts = ["thetaDeg"] },
                 new("frame", "Frame", "text", "RobotBase", Group: "Pose", Description: "Must be non-empty. When a frame tree is connected, the name must exist on that tree. There is no global frame registry."),
                 new("unit", "Unit", "select", "mm", Options: [new("mm", "mm"), new("cm", "cm"), new("m", "m")], Group: "Pose", Description: "Length unit stamped on the pose; it does not convert the numeric X/Y values.")
             ,
@@ -1002,8 +1002,8 @@ public static class BuiltInNodeCatalog
             [
                 new("deviceId", "Device ID", "text", "virtual-modbus-1", Group: "Device", Description: "Non-empty device id registered in DeviceManager (max 128 chars)."),
                 new("tagId", "Tag ID", "text", "statusText", Group: "Tag", Description: "Non-empty tag id on that device (max 128 chars)."),
-                new("valueType", "Fallback Type", "select", "String", Options: [new("Boolean", "Boolean"), new("Integer", "Integer"), new("Double", "Double"), new("String", "String")], Group: "Fallback", Description: "How the fallback value text is parsed when no value input is connected: boolean, integer, double or string."),
-                new("fallbackValue", "Fallback Value", "text", "Vision OK", Group: "Fallback", Description: "Used only when the optional Any input is not connected."),
+                new("valueType", "Fallback Type", "select", "String", Options: [new("Boolean", "Boolean"), new("Integer", "Integer"), new("Double", "Double"), new("String", "String")], Group: "Fallback", Description: "How the fallback value text is parsed when no value input is connected: boolean, integer, double or string.") { OverriddenByPorts = ["value"] },
+                new("fallbackValue", "Fallback Value", "text", "Vision OK", Group: "Fallback", Description: "Used only when the optional Any input is not connected.") { OverriddenByPorts = ["value"] },
                 new("autoConnect", "Auto Connect", "boolean", true, Group: "Device", Description: "Connect the device first when it is disconnected.")
             ,
 

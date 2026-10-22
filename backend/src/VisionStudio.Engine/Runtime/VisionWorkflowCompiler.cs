@@ -883,39 +883,10 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         string parameterName,
         IReadOnlySet<string> connectedInputPorts)
     {
-        if (catalog.Type == "device.writeTag" && parameterName is "valueType" or "fallbackValue"
-            && connectedInputPorts.Contains("value")) return true;
-        if (catalog.Type is "coordinate.point" or "coordinate.point3D" or "coordinate.pose"
-            && parameterName is "x" or "y" or "z" or "thetaDeg"
-            && connectedInputPorts.Contains(parameterName)
-            && catalog.Inputs.Any(input => input.Name.Equals(parameterName, StringComparison.OrdinalIgnoreCase)
-                && input.DataType == VisionDataType.Double)) return true;
-        if (catalog.Type is "text.match" or "text.validate" && parameterName is "text" or "expected"
-            && connectedInputPorts.Contains(parameterName)) return true;
-        if (catalog.Type == "jlvision.matrixOp" && parameterName is "matrixA" or "matrixB" && connectedInputPorts.Contains(parameterName))
-            return true;
-        if (catalog.Type == "output.saveImage" && parameterName is "path" or "partId" && connectedInputPorts.Contains(parameterName)) return true;
-        if (catalog.Type == "output.httpRequest" &&
-            (parameterName is "url" or "body" or "idempotencyKey" && connectedInputPorts.Contains(parameterName)
-                || parameterName is "body" or "contentType" && connectedInputPorts.Contains("value"))) return true;
-        var hasConnectedSearchLine = connectedInputPorts.Contains("searchLine")
-            && catalog.Inputs.Any(input => input.Name.Equals("searchLine", StringComparison.OrdinalIgnoreCase)
-                && input.DataType == VisionDataType.Line2D);
-        if (hasConnectedSearchLine
-            && (catalog.Type.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
-                || catalog.Type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
-                || catalog.Type.Equals("measure.caliperWidth", StringComparison.OrdinalIgnoreCase)
-                || catalog.Type.Equals("measure.caliperArray", StringComparison.OrdinalIgnoreCase)
-                || catalog.Type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase))
-            && parameterName is "startX" or "startY" or "endX" or "endY")
-            return true;
-
-        var hasConnectedCircle = connectedInputPorts.Contains("circle")
-            && catalog.Inputs.Any(input => input.Name.Equals("circle", StringComparison.OrdinalIgnoreCase)
-                && input.DataType == VisionDataType.Circle);
-        return hasConnectedCircle
-            && catalog.Type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
-            && parameterName is "centerX" or "centerY" or "radius";
+        var parameter = catalog.Parameters.FirstOrDefault(candidate =>
+            candidate.Name.Equals(parameterName, StringComparison.OrdinalIgnoreCase));
+        return parameter?.OverriddenByPorts is { Count: > 0 } ports
+            && ports.Any(port => connectedInputPorts.Contains(port));
     }
 
     private static void ValidateMeasurementGeometry(

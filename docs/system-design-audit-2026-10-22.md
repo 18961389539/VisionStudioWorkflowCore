@@ -328,6 +328,17 @@ ROI 帧与该图像不一致时在编译期报错。已声明 9 个节点：`ima
 编译器 `RoiImageInputPort` 的类型映射已删除；未声明绑定的 ROI 输入不做帧校验，
 插件声明后即参与同一校验。
 
+### 参数与端口二选一
+
+`ParameterDescriptor.OverriddenByPorts` 声明“连接这些输入端口时忽略本参数（端口值优先）”。
+编译器 `IsParameterOverriddenByConnectedInput` 的 6 类节点判断已删除，改为读参数声明。
+
+已标注 15 个节点、44 个参数：`jlvision.matrixOp`（matrixA/B）、`output.saveImage`（path/partId）、
+`output.httpRequest`（url/body/contentType/idempotencyKey）、`device.writeTag`（valueType/fallbackValue
+被 value 覆盖）、`coordinate.point` / `point3D` / `pose`（x/y/z/thetaDeg）、`text.match` / `text.validate`
+（text/expected）、`feature.edgeSubpixel` 与 `measure.caliper*`（几何参数被 searchLine 覆盖）、
+`measure.caliperCircle`（center/radius 被 circle 覆盖）。
+
 ## 插件路径
 
 插件只需在目录中声明，宿主无需认识其类型名：
@@ -348,7 +359,8 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端已接入声明：`catalogNodeData` 把 `frames` 放进节点数据，`frameSemantics.ts` 按同一套
   条件规则求值；`NodeConfigurationDialog` 的 ROI 沿革优先读声明，旧目录/旧节点数据才回退到
   类型集合。插件节点因此不再被当作"保持输入帧"。
-- 编译器剩余约 90 处类型字面量（控制流、保存/导出、ROI 连线校验）。
+- 自定义校验（卡尺几何、regionIntensity、flatFieldCorrect、PSF、waitTag、flow.if range、
+  writeTag fallback）与结构化控制流仍按类型处理；`ImageSavePlan` 也仍是专用校验。
 - `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
 
 
@@ -357,6 +369,6 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端 `frameSemantics.test.ts` 6 项覆盖声明求值、条件规则、目录默认值与旧集合回退。
 - 新增 `NodeFrameSemanticsTests` 10 项（内置声明、条件规则、插件空间帧、未声明保持、固定帧）；
   `Catalog_FrameDeclarationsReferenceExistingPortsAndParameters` 校验声明的端口/参数/条件值均存在。
-- 后端全量 **2254 项通过**（Engine 1833 + Api 421）；前端 **1053 项通过**（69 文件，含新增
+- 后端全量 **2255 项通过**（Engine 1834 + Api 421）；前端 **1053 项通过**（69 文件，含新增
   `frameSemantics` 6 项），`tsc -b` 与生产构建通过。
-- 目录 hash 变为 `0c1ddb1f…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
+- 目录 hash 变为 `91688bb7…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
