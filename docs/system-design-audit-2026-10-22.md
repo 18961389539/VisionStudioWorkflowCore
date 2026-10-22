@@ -294,6 +294,30 @@ new NodeFrameRule(
 
 编译器原有的三个类型分支已删除；插件声明同名策略即可获得相同的 transform 帧校验。
 
+### ROI / 几何输出帧声明
+
+非图像输出（ROI、直线、圆、检测框）的帧来源此前由 `ResolveGeometryFrame` / `ResolveRoiFrame`
+里的类型分支决定。新增 `NodeCatalogItem.OutputFrames`（`NodeOutputFrameRule`）：
+
+| 来源 | 含义 |
+| --- | --- |
+| `ImageInput` | 指定图像输入端口（默认 `image`）的帧 |
+| `ImageOutput` | 本节点图像输出的帧 |
+| `GeometryInput` | 指定几何输入端口的帧（递归解析） |
+| `DetectionInput` | 指定 detections 输入端的帧 |
+| `RegionInput` | 指定区域输入端的帧 |
+| `ContourInput` | 指定轮廓输入端的帧 |
+| `FittedPoints` | point1..N 拟合点所在帧 |
+
+已声明 9 个节点：`image.crop`（`croppedRoi`→ImageOutput、`cropOrigin`→ImageInput）、
+`roi.transform`（`roi`→debugImage）、`jlvision.featureExtract`（全部输出→image）、
+`measure.fitRectangle`（contours）、`geometry.intersections`（按 operator 选 circle/line）、
+`collection.detections.at` / `flow.forEach`（三个框输出→detections）、
+`measure.fitLine` / `measure.fitCircle`（拟合点）。
+
+编译器两条解析函数里的类型分支已删除；仍有图像输出的节点沿用通用兜底（几何输出跟随自身图像帧），
+行为不变。`RoiImageInputPort` 的"ROI 输入绑定哪个图像端口"仍是类型映射，留待后续。
+
 ## 插件路径
 
 插件只需在目录中声明，宿主无需认识其类型名：
@@ -314,8 +338,7 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端已接入声明：`catalogNodeData` 把 `frames` 放进节点数据，`frameSemantics.ts` 按同一套
   条件规则求值；`NodeConfigurationDialog` 的 ROI 沿革优先读声明，旧目录/旧节点数据才回退到
   类型集合。插件节点因此不再被当作"保持输入帧"。
-- `RoiImageInputPort` / `ResolveRoiFrame` / `ResolveGeometryFrame` 仍按类型映射 ROI/几何输出的帧，
-  可在下一轮继续声明化。
+- `RoiImageInputPort`（ROI 输入绑定哪个图像端口）仍是类型映射，可继续声明化。
 - `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
 - 编译器其余类型字面量（约 90 处，含控制流、保存/导出、ROI 连线校验）尚未迁移。
 
@@ -324,6 +347,6 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端 `frameSemantics.test.ts` 6 项覆盖声明求值、条件规则、目录默认值与旧集合回退。
 - 新增 `NodeFrameSemanticsTests` 10 项（内置声明、条件规则、插件空间帧、未声明保持、固定帧）；
   `Catalog_FrameDeclarationsReferenceExistingPortsAndParameters` 校验声明的端口/参数/条件值均存在。
-- 后端全量 **2251 项通过**（Engine 1830 + Api 421）；前端 **1053 项通过**（69 文件，含新增
+- 后端全量 **2253 项通过**（Engine 1832 + Api 421）；前端 **1053 项通过**（69 文件，含新增
   `frameSemantics` 6 项），`tsc -b` 与生产构建通过。
-- 目录 hash 变为 `13c274a0…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
+- 目录 hash 变为 `0b903e34…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。

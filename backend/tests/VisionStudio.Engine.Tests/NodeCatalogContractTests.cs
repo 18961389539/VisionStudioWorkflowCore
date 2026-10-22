@@ -257,6 +257,52 @@ public sealed class NodeCatalogContractTests
     }
 
     [Fact]
+    public void Catalog_OutputFrameDeclarationsReferenceExistingPortsAndParameters()
+    {
+        var problems = new List<string>();
+
+        foreach (var item in BuiltInNodeCatalog.Items.Where(item => item.OutputFrames is not null))
+        {
+            var inputs = item.Inputs.Select(port => port.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var outputs = item.Outputs.Select(port => port.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var parameters = item.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var rule in item.OutputFrames!)
+            {
+                var id = $"{item.Type} output frames {rule.Source}";
+                if (rule.OutputPort is { } outputPort && !outputs.Contains(outputPort))
+                    problems.Add($"{id}: output port '{outputPort}' does not exist");
+                if (rule.Source is NodeOutputFrameSource.ImageInput or NodeOutputFrameSource.GeometryInput
+                        or NodeOutputFrameSource.DetectionInput or NodeOutputFrameSource.RegionInput
+                        or NodeOutputFrameSource.ContourInput
+                    && rule.InputPort is { } inputPort
+                    && !inputs.Contains(inputPort))
+                    problems.Add($"{id}: input port '{inputPort}' does not exist");
+
+                if (string.IsNullOrWhiteSpace(rule.WhenParameter)) continue;
+                if (!parameters.TryGetValue(rule.WhenParameter, out var condition))
+                {
+                    problems.Add($"{id}: condition parameter '{rule.WhenParameter}' does not exist");
+                    continue;
+                }
+                if (rule.WhenValues is not { Count: > 0 })
+                {
+                    problems.Add($"{id}: conditional rule without WhenValues");
+                    continue;
+                }
+                var options = condition.Options?.Select(option => option.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (options is not null)
+                {
+                    foreach (var value in rule.WhenValues.Where(value => !options.Contains(value)))
+                        problems.Add($"{id}: condition value '{value}' is not an option of '{rule.WhenParameter}'");
+                }
+            }
+        }
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
     public void Catalog_HasNoRetiredControls()
     {
         var retired = BuiltInNodeCatalog.Items

@@ -27,6 +27,26 @@ internal static class NodeFrameSemantics
         return null;
     }
 
+    /// <summary>第一条匹配该输出端口与参数条件的输出帧规则。</summary>
+    internal static NodeOutputFrameRule? ResolveOutput(NodeDefinition node, NodeCatalogItem catalog, string outputPort)
+    {
+        if (catalog.OutputFrames is not { Count: > 0 } rules) return null;
+
+        foreach (var rule in rules)
+        {
+            if (rule.OutputPort is { } declaredPort
+                && !declaredPort.Equals(outputPort, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.IsNullOrWhiteSpace(rule.WhenParameter)) return rule;
+            var actual = ParameterValue(node, catalog, rule.WhenParameter);
+            if (rule.WhenValues is { Count: > 0 } expected
+                && expected.Any(value => string.Equals(value, actual, StringComparison.OrdinalIgnoreCase)))
+                return rule;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Image output frame key for the resolved rule. Returns null only when the declaration resolves
     /// to "no frame" (an unconnected <see cref="NodeImageFramePolicy.InputFrame"/> without a fallback).

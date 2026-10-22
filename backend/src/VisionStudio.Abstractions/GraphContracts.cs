@@ -235,7 +235,11 @@ public sealed record NodeCatalogItem(
     /// <summary>
     /// 只输出 transform（不输出图像）的节点的帧语义。null = 未声明（宿主不再推断它的 Source/Target）。
     /// </summary>
-    NodeTransformFrameDeclaration? TransformFrames = null)
+    NodeTransformFrameDeclaration? TransformFrames = null,
+    /// <summary>
+    /// ROI / 几何 / 检测等非图像输出的帧来源。null = 未声明：仅有图像输出的节点按自身图像帧推断。
+    /// </summary>
+    IReadOnlyList<NodeOutputFrameRule>? OutputFrames = null)
 {
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;
@@ -245,6 +249,9 @@ public sealed record NodeCatalogItem(
 
     /// <summary>该目录是否声明了 transform 帧语义。</summary>
     public bool DeclaresTransformFrames => TransformFrames is not null;
+
+    /// <summary>该目录是否声明了非图像输出的帧来源。</summary>
+    public bool DeclaresOutputFrames => OutputFrames is not null;
 }
 
 /// <summary>
@@ -294,6 +301,38 @@ public sealed record NodeTransformFrameDeclaration(
     string? SecondaryPort = null,
     string ImagePort = "image",
     string TemplatePort = "template");
+
+/// <summary>
+/// 非图像输出（ROI / 直线 / 圆 / 检测框 / 区域 / 轮廓）的帧来源。
+/// </summary>
+public enum NodeOutputFrameSource
+{
+    /// <summary>输入图像端口（InputPort，默认 image）的帧。</summary>
+    ImageInput,
+    /// <summary>本节点图像输出的帧（经图像帧声明解析）。</summary>
+    ImageOutput,
+    /// <summary>几何输入端口（InputPort）的帧，递归解析。</summary>
+    GeometryInput,
+    /// <summary>detections 输入端口（InputPort，默认 detections）的帧。</summary>
+    DetectionInput,
+    /// <summary>区域输入端口（InputPort，默认 region）的帧。</summary>
+    RegionInput,
+    /// <summary>轮廓输入端口（InputPort，默认 contours）的帧。</summary>
+    ContourInput,
+    /// <summary>拟合点输入（point1..N）所在的帧。</summary>
+    FittedPoints
+}
+
+/// <summary>
+/// 一条非图像输出帧规则。OutputPort 为 null 表示该节点的所有非图像输出；
+/// 条件为空表示无条件匹配，否则按节点有效参数值匹配，规则按声明顺序取首条。
+/// </summary>
+public sealed record NodeOutputFrameRule(
+    NodeOutputFrameSource Source,
+    string? OutputPort = null,
+    string? InputPort = null,
+    string? WhenParameter = null,
+    IReadOnlyList<string>? WhenValues = null);
 
 /// <summary>
 /// 一条图像帧语义规则。条件为空表示无条件匹配；否则按节点有效参数值（节点值优先、目录默认值兜底）

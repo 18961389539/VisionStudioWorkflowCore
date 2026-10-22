@@ -63,6 +63,27 @@ public sealed class NodeFrameSemanticsTests
     }
 
     [Fact]
+    public void BuiltInNodes_DeclareOutputFrameSources()
+    {
+        var crop = BuiltInNodeCatalog.Require("image.crop");
+        var croppedRoi = NodeFrameSemantics.ResolveOutput(Node("image.crop"), crop, "croppedRoi");
+        var cropOrigin = NodeFrameSemantics.ResolveOutput(Node("image.crop"), crop, "cropOrigin");
+        Assert.Equal(NodeOutputFrameSource.ImageOutput, croppedRoi!.Source);
+        Assert.Equal(NodeOutputFrameSource.ImageInput, cropOrigin!.Source);
+
+        var roi = NodeFrameSemantics.ResolveOutput(Node("roi.transform"), BuiltInNodeCatalog.Require("roi.transform"), "roi");
+        Assert.Equal(NodeOutputFrameSource.ImageInput, roi!.Source);
+        Assert.Equal("debugImage", roi.InputPort);
+
+        var feature = NodeFrameSemantics.ResolveOutput(Node("jlvision.featureExtract"), BuiltInNodeCatalog.Require("jlvision.featureExtract"), "contours");
+        Assert.Equal(NodeOutputFrameSource.ImageInput, feature!.Source);
+
+        var intersections = BuiltInNodeCatalog.Require("geometry.intersections");
+        Assert.Equal("circle", NodeFrameSemantics.ResolveOutput(Node("geometry.intersections", """{"operator":"circles"}"""), intersections, "point")!.InputPort);
+        Assert.Equal("line", NodeFrameSemantics.ResolveOutput(Node("geometry.intersections", """{"operator":"lineCircle"}"""), intersections, "point")!.InputPort);
+    }
+
+    [Fact]
     public async Task DeclaredPlugin_GetsSpatialFramesWithoutTypeKnowledge()
     {
         var catalog = SpatialCatalog("plugin.spatial",

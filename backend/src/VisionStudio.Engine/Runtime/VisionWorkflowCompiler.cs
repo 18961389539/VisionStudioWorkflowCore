@@ -510,12 +510,12 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         HashSet<string> visited)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
-        if (node.Type.Equals("image.crop", StringComparison.OrdinalIgnoreCase)
-            && outputPort.Equals("croppedRoi", StringComparison.OrdinalIgnoreCase))
+        var catalog = registry.Require(node.Type).Catalog;
+        var rule = NodeFrameSemantics.ResolveOutput(node, catalog, outputPort);
+        if (rule?.Source == NodeOutputFrameSource.ImageOutput)
             return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-        if (node.Type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
-            && outputPort.Equals("roi", StringComparison.OrdinalIgnoreCase))
-            return ResolveImageInputFrame(nodeId, "debugImage", workflow, byId);
+        if (rule?.Source == NodeOutputFrameSource.ImageInput)
+            return ResolveImageInputFrame(nodeId, rule.InputPort ?? "image", workflow, byId);
         return null;
     }
 
@@ -528,68 +528,47 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     {
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
-        if (type.Equals("image.crop", StringComparison.OrdinalIgnoreCase))
-            return outputPort.Equals("cropOrigin", StringComparison.OrdinalIgnoreCase)
-                ? ResolveImageInputFrame(nodeId, "image", workflow, byId)
-                : null;
-        if (type.Equals("image.resize", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase)
-            || type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        if (type.Equals("roi.transform", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "roi", "rectangle", "circle", "center", "pose"))
-            return ResolveImageInputFrame(nodeId, "debugImage", workflow, byId);
-
-        if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "center", "rectangle", "pose"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-
-        if (type.Equals("jlvision.featureExtract", StringComparison.OrdinalIgnoreCase))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-
-        if (type.Equals("measure.fitRectangle", StringComparison.OrdinalIgnoreCase))
-        {
-            var input = FindInputEdge(workflow.Edges, nodeId, "contours");
-            return input is null ? null : ResolveContourFrame(input.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-        }
-        if (type.Equals("geometry.intersections", StringComparison.OrdinalIgnoreCase))
-        {
-            var first = node.GetString("operator", "lineCircle") == "circles" ? "circle" : "line";
-            var input = FindInputEdge(workflow.Edges, nodeId, first);
-            return input is null ? null : ResolveGeometryFrame(input.SourceNodeId, input.SourcePort, workflow, byId, visited);
-        }
-
-        if (type.Equals("feature.line", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "line"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("feature.circle", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "circle", "center"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-
-        if (type.Equals("feature.edgeSubpixel", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "point", "searchLine"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("measure.caliper", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "point", "searchLine"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("measure.caliperLine", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "point", "line", "searchLine"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-        if (type.Equals("measure.caliperCircle", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "circle", "center"))
-            return ResolveImageInputFrame(nodeId, "image", workflow, byId);
-
-        if (type.Equals("collection.detections.at", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "center", "circle", "rectangle"))
-            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
-        if (type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase)
-            && IsOneOf(outputPort, "center", "circle", "rectangle"))
-            return ResolveDetectionInputFrame(nodeId, workflow, byId, visited);
-
-        if (type.Equals("measure.fitLine", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "line")
-            || type.Equals("measure.fitCircle", StringComparison.OrdinalIgnoreCase) && IsOneOf(outputPort, "circle", "center"))
-            return ResolveFittedPointFrame(nodeId, workflow, byId, visited);
-
         var catalog = registry.Require(type).Catalog;
+        var rule = NodeFrameSemantics.ResolveOutput(node, catalog, outputPort);
+        if (rule is not null)
+        {
+            switch (rule.Source)
+            {
+                case NodeOutputFrameSource.ImageInput:
+                    return ResolveImageInputFrame(nodeId, rule.InputPort ?? "image", workflow, byId);
+                case NodeOutputFrameSource.ImageOutput:
+                    return ResolveImageFrame(nodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+                case NodeOutputFrameSource.GeometryInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "line");
+                    return edge is null
+                        ? null
+                        : ResolveGeometryFrame(edge.SourceNodeId, edge.SourcePort, workflow, byId, visited);
+                }
+                case NodeOutputFrameSource.DetectionInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "detections");
+                    return edge is null ? null : ResolveDetectionFrame(edge.SourceNodeId, workflow, byId, visited);
+                }
+                case NodeOutputFrameSource.RegionInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "region");
+                    return edge is null
+                        ? null
+                        : ResolveRegionFrame(edge.SourceNodeId, edge.SourcePort, workflow, byId, visited);
+                }
+                case NodeOutputFrameSource.ContourInput:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, rule.InputPort ?? "contours");
+                    return edge is null
+                        ? null
+                        : ResolveContourFrame(edge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+                }
+                case NodeOutputFrameSource.FittedPoints:
+                    return ResolveFittedPointFrame(nodeId, workflow, byId, visited);
+            }
+        }
+
         var output = catalog.Outputs.FirstOrDefault(port => port.Name.Equals(outputPort, StringComparison.OrdinalIgnoreCase));
         // Image-producing measurement nodes emit geometry in the same frame as their image
         // output. Resolve that output path so detections and blob circles are checked too.

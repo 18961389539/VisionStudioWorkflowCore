@@ -67,6 +67,19 @@ export type NodeFrameRule = {
   whenValues?: string[] | null;
 };
 
+export type NodeOutputFrameSource =
+  | 'ImageInput' | 'ImageOutput' | 'GeometryInput' | 'DetectionInput'
+  | 'RegionInput' | 'ContourInput' | 'FittedPoints';
+
+/** 非图像输出（ROI/几何/检测框）的帧来源声明。 */
+export type NodeOutputFrameRule = {
+  source: NodeOutputFrameSource;
+  outputPort?: string | null;
+  inputPort?: string | null;
+  whenParameter?: string | null;
+  whenValues?: string[] | null;
+};
+
 /** 只输出 transform 的节点的帧声明（模板→图像、组合、求逆）。 */
 export type NodeTransformFrameDeclaration = {
   policy: NodeTransformFramePolicy;
@@ -90,6 +103,8 @@ export type NodeCatalogItem = {
   frames?: NodeFrameRule[] | null;
   /** 纯 transform 节点的帧声明（match.shape / compose / inverse）。 */
   transformFrames?: NodeTransformFrameDeclaration | null;
+  /** ROI / 几何 / 检测等非图像输出的帧来源声明。 */
+  outputFrames?: NodeOutputFrameRule[] | null;
 };
 
 export type VisionValueSnapshot = {

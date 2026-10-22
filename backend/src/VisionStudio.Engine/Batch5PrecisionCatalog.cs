@@ -532,6 +532,6 @@ public static class Batch5PrecisionCatalog
                 ],
             "Rigid ROI follow after locate: p' = R(dTheta)(p − base) + current. Capture reference image + pose before drawing the ROI. Wire: currentPose (or currentX/Y/Theta) from matching; roi → measurement ROI ports; transform → measurement transform; debugImage for capture/overlay. Output transform maps ReferenceImage→CurrentImage; compose with image.crop transform (A=this, B=crop) for CropImage coordinates. anglePeriodDeg 180 for half-turn-symmetric models, 360 when orientation is unique. Rotated rectangles become polygons. Do not transform already-corrected geometry twice.",
             "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.InputFrame, InputPort: "debugImage", FallbackFrame: "CurrentImage", Transform: NodeTransformFramePolicy.RoiReference)])
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.InputFrame, InputPort: "debugImage", FallbackFrame: "CurrentImage", Transform: NodeTransformFramePolicy.RoiReference)], OutputFrames: [new(NodeOutputFrameSource.ImageInput, OutputPort: "roi", InputPort: "debugImage")])
     ];
 }

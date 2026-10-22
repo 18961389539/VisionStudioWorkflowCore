@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "13c274a0f5e1d5c148d7583a53affd3c8d01d458bcfa23d4387ba07c4a4b9a36",
+  "hash": "0b903e346d20a55863f9c28607ffe7f17423df1ff80cfb651c2f3d9af9d95c32",
   "items": [
     {
       "type": "image.acquire",
@@ -199,7 +199,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "frameset.image",
@@ -288,7 +289,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "camera.syncCapture",
@@ -465,7 +467,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.synthetic",
@@ -747,7 +750,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.handEye2D",
@@ -950,7 +954,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.handEye3D",
@@ -1145,7 +1150,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.worldPlane",
@@ -1427,7 +1433,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.cameraIntrinsics",
@@ -1626,7 +1633,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.detectBoard",
@@ -1924,7 +1932,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.dualCameraExtrinsics",
@@ -2178,7 +2187,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "calibration.planar",
@@ -2351,7 +2361,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "collection.detections.count",
@@ -2416,7 +2427,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "collection.detections.at",
@@ -2532,9 +2544,24 @@
       "description": "Extract one DetectionList item as typed scalar and geometry outputs, including optional confidence and classId; an out-of-range index returns found=false.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "DetectionInput",
+          "outputPort": "center"
+        },
+        {
+          "source": "DetectionInput",
+          "outputPort": "circle"
+        },
+        {
+          "source": "DetectionInput",
+          "outputPort": "rectangle"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "collection.detections.filter",
@@ -2671,7 +2698,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "collection.detections.sort",
@@ -2915,7 +2943,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "contour.extract",
@@ -3095,7 +3124,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "contour.filter",
@@ -3291,7 +3321,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "contour.fromPoints",
@@ -3375,7 +3406,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.contourOp",
@@ -4246,7 +4278,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "contour.properties",
@@ -4412,7 +4445,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.dxf",
@@ -4628,7 +4662,8 @@
       "description": "Imports or exports floating-point contours with the native DXF operators. Import explicitly sets the coordinate unit, scale, Y direction and origin offset; an unspecified unit stays unknown. Export preserves coordinate values verbatim and requires matching contour units and frames; no CAD unit header is written. status keeps the native read report.",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.featureExtract",
@@ -5085,9 +5120,16 @@
         }
       ],
       "description": "Extracts native subpixel edges, lines and corners; contours keep floating-point coordinates. Line/edge operators output contours; corner operators output a points JSON array and the selected point, and detections can feed collection or loop nodes. Förstner also outputs covariance details. Gray operators convert to gray automatically; color operators require three channels.",
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "inputPort": "image"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "coordinate.transformCompose",
@@ -5173,7 +5215,8 @@
       },
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": true
+      "declaresTransformFrames": true,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformConstant",
@@ -5318,7 +5361,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.distance",
@@ -5397,7 +5441,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.point",
@@ -5523,7 +5568,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.point3D",
@@ -5686,7 +5732,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.pose",
@@ -5832,7 +5879,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.frameTree",
@@ -5892,7 +5940,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformInverse",
@@ -5959,7 +6008,8 @@
       },
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": true
+      "declaresTransformFrames": true,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.poseToTransform",
@@ -6034,7 +6084,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.frameResolve",
@@ -6112,7 +6163,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformPoint3D",
@@ -6183,7 +6235,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformCoordinatePoint",
@@ -6259,7 +6312,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformCoordinatePose",
@@ -6330,7 +6384,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformLine",
@@ -6412,7 +6467,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformPoint",
@@ -6478,7 +6534,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "coordinate.transformPose",
@@ -6549,7 +6606,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.dynamicThreshold",
@@ -6738,7 +6796,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.flatFieldCorrect",
@@ -7005,7 +7064,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.difference",
@@ -7194,7 +7254,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "defect.referenceCompare",
@@ -7507,7 +7568,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.regionIntensity",
@@ -7776,7 +7838,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "device.readTag",
@@ -7940,7 +8003,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "device.waitTag",
@@ -8218,7 +8282,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "device.writeTag",
@@ -8387,7 +8452,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "device.writeVisionResult",
@@ -8581,7 +8647,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "feature.circle",
@@ -8777,7 +8844,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "feature.edge",
@@ -8904,7 +8972,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "feature.line",
@@ -9096,7 +9165,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "feature.edgeSubpixel",
@@ -9333,7 +9403,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.ifBoolean",
@@ -9424,7 +9495,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.delay",
@@ -9527,7 +9599,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.merge",
@@ -9680,7 +9753,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.forEach",
@@ -9798,9 +9872,24 @@
         "supportsParallel": false,
         "executionMode": "WorkflowCore"
       },
+      "outputFrames": [
+        {
+          "source": "DetectionInput",
+          "outputPort": "center"
+        },
+        {
+          "source": "DetectionInput",
+          "outputPort": "circle"
+        },
+        {
+          "source": "DetectionInput",
+          "outputPort": "rectangle"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "flow.if",
@@ -10007,7 +10096,8 @@
       "pluginId": "builtin",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.join",
@@ -10062,7 +10152,8 @@
       "pluginId": "builtin",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.loopEnd",
@@ -10123,7 +10214,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.parallel",
@@ -10178,7 +10270,8 @@
       "pluginId": "builtin",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.result",
@@ -10243,7 +10336,8 @@
       "pluginId": "builtin",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.switch",
@@ -10400,7 +10494,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "flow.try",
@@ -10550,7 +10645,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "geometry.intersections",
@@ -10682,9 +10778,24 @@
         }
       ],
       "description": "Line-circle uses line/circle (the line extends infinitely); circle-circle uses circle/circle2; segment intersection uses line/line2 (limited to the endpoints). points is a JSON list of every intersection; found=false when there are none. Use overlapping to detect coincident geometry.",
+      "outputFrames": [
+        {
+          "source": "GeometryInput",
+          "inputPort": "circle",
+          "whenParameter": "operator",
+          "whenValues": [
+            "circles"
+          ]
+        },
+        {
+          "source": "GeometryInput",
+          "inputPort": "line"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "jlvision.geometry",
@@ -11880,7 +11991,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.homMat",
@@ -12641,7 +12753,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "geometry.angle",
@@ -12710,7 +12823,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "geometry.intersection",
@@ -12804,7 +12918,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.matrixOp",
@@ -13881,7 +13996,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "geometry.distance",
@@ -13978,7 +14094,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.anomaly",
@@ -14282,7 +14399,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.classification",
@@ -14584,7 +14702,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.detection",
@@ -14859,7 +14978,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.instanceSegmentation",
@@ -15189,7 +15309,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.obb",
@@ -15495,7 +15616,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.pose",
@@ -15818,7 +15940,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "inference.segmentation",
@@ -16064,7 +16187,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "logic.boolean",
@@ -16156,7 +16280,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.register",
@@ -16324,7 +16449,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "match.shape",
@@ -17257,7 +17383,8 @@
       },
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": true
+      "declaresTransformFrames": true,
+      "declaresOutputFrames": false
     },
     {
       "type": "match.template",
@@ -17902,7 +18029,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.measure1d",
@@ -18282,7 +18410,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.caliperArray",
@@ -18642,7 +18771,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.caliperCircle",
@@ -19029,7 +19159,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.caliper",
@@ -19287,7 +19418,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.caliperLine",
@@ -19603,7 +19735,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.caliperWidth",
@@ -19877,7 +20010,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.concentricity",
@@ -19957,7 +20091,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.circleSpacing",
@@ -20028,7 +20163,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.wallThickness",
@@ -20186,7 +20322,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.colorDifference",
@@ -20308,7 +20445,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.contourFeature",
@@ -20824,7 +20962,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.contourThickness",
@@ -21041,7 +21180,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.fitEllipse",
@@ -21172,7 +21312,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.fitCircle",
@@ -21312,9 +21453,20 @@
       "description": "Fit 3..12 Point2D inputs with JLVision. Emit circle/center/radius plus robust inlier RMS, maximum residual and actual support count. Refinement retains at least three supporting points and supports cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "FittedPoints",
+          "outputPort": "circle"
+        },
+        {
+          "source": "FittedPoints",
+          "outputPort": "center"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "measure.fitLine",
@@ -21454,9 +21606,16 @@
       "description": "Fit 2..12 Point2D inputs with JLVision. Emit line/length/angle plus robust inlier RMS, maximum residual and actual support count. Candidate search and refinement support cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
       "actions": [],
+      "outputFrames": [
+        {
+          "source": "FittedPoints",
+          "outputPort": "line"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "measure.grayHistogram",
@@ -21583,7 +21742,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.blob",
@@ -21703,7 +21863,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.parallelism",
@@ -21788,7 +21949,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.perpendicularity",
@@ -21873,7 +22035,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.lineSpacing",
@@ -22027,7 +22190,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.metrology",
@@ -22317,7 +22481,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.blobs",
@@ -22630,7 +22795,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.pointLineDistance",
@@ -22724,7 +22890,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.fitRectangle",
@@ -22875,9 +23042,16 @@
         }
       ],
       "description": "Fits each input contour with FitRectangle2ContourXld. Unlike the minimum-area rectangle, this fits edge geometry rather than bounding extent; the output position is the center, sizes are full width/height, and the angle follows the image coordinate system. Empty input returns found=false without error.",
+      "outputFrames": [
+        {
+          "source": "ContourInput",
+          "inputPort": "contours"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "jlvision.regionFeature",
@@ -23561,7 +23735,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "roi.transform",
@@ -23790,9 +23965,17 @@
           "transform": "RoiReference"
         }
       ],
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "outputPort": "roi",
+          "inputPort": "debugImage"
+        }
+      ],
       "declaresActions": false,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "measure.rotatedRect",
@@ -23902,7 +24085,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.contourDeviation",
@@ -24070,7 +24254,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.roundness",
@@ -24211,7 +24396,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.straightness",
@@ -24327,7 +24513,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "measure.metrologyResult",
@@ -24450,7 +24637,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "output.exportResult",
@@ -24703,7 +24891,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "output.httpRequest",
@@ -25008,7 +25197,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "output.saveImage",
@@ -25461,7 +25651,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.threshold.adaptive",
@@ -25573,7 +25764,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.bottomHat",
@@ -25677,7 +25869,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.channel",
@@ -25787,7 +25980,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.colorConvert",
@@ -25882,7 +26076,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.crop",
@@ -26020,9 +26215,21 @@
           "transform": "Spatial"
         }
       ],
+      "outputFrames": [
+        {
+          "source": "ImageOutput",
+          "outputPort": "croppedRoi"
+        },
+        {
+          "source": "ImageInput",
+          "outputPort": "cropOrigin",
+          "inputPort": "image"
+        }
+      ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true
     },
     {
       "type": "image.blur.gaussian",
@@ -26154,7 +26361,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.grayscale",
@@ -26261,7 +26469,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.filter",
@@ -26414,7 +26623,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.imageOp",
@@ -28642,7 +28852,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.restoration",
@@ -29105,7 +29316,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.surface",
@@ -29314,7 +29526,8 @@
       "description": "Estimates relative height from a gray image or renders a real-valued height field. Reconstruction outputs heightField (resultKind=relativeHeight, unit=relative); rendering outputs shadingImage (resultKind=shading, unit=intensity); image remains a compatibility output. Gradient reconstruction requires same-size single-channel real row/column gradients. Height output is not an absolute 3D measurement in millimeters.",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.blur.median",
@@ -29422,7 +29635,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.morphGradient",
@@ -29526,7 +29740,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.morphology",
@@ -29756,7 +29971,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.contrastNormalize",
@@ -29865,7 +30081,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.illuminationNormalize",
@@ -29957,7 +30174,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.threshold.otsu",
@@ -30032,7 +30250,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.perspective",
@@ -30260,7 +30479,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.resize",
@@ -30377,7 +30597,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.rotate",
@@ -30465,7 +30686,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.sharpen",
@@ -30547,7 +30769,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.threshold",
@@ -30743,7 +30966,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.threshold",
@@ -31230,7 +31454,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.undistort",
@@ -31335,7 +31560,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.warpAffine",
@@ -31442,7 +31668,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.topHat",
@@ -31546,7 +31773,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "recognition.barcode",
@@ -31775,7 +32003,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "text.match",
@@ -31912,7 +32141,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "recognition.ocr",
@@ -32161,7 +32391,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "text.validate",
@@ -32362,7 +32593,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "text.regex",
@@ -32524,7 +32756,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.segmentation",
@@ -32742,7 +32975,8 @@
       "description": "Watershed outputs basin regions and secondaryRegion holds the watershed boundary; count/found only count basin regions. For MSER, darkRegion/lightRegion hold dark/bright regions and remain available as region/secondaryRegion; darkCount/lightCount count each group and count/found count both. primaryCount/secondaryCount always refer to the two original ports.",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.fromColorRange",
@@ -32927,7 +33161,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.connectedComponents",
@@ -33014,7 +33249,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.fillHoles",
@@ -33101,7 +33337,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.filter",
@@ -33224,7 +33461,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.fromRange",
@@ -33504,7 +33742,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.fromRoi",
@@ -33634,7 +33873,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "image.reduceDomain",
@@ -33723,7 +33963,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.boolean",
@@ -33823,7 +34064,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.boundary",
@@ -33937,7 +34179,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.convexHull",
@@ -34034,7 +34277,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.morphology",
@@ -34173,7 +34417,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.regionOp",
@@ -35859,7 +36104,8 @@
       },
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.properties",
@@ -35998,7 +36244,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "jlvision.regionAnalysis",
@@ -36236,7 +36483,8 @@
       "description": "Relation operators require a same-size region2; relations JSON uses zero-based region object indices. Nearest-point transform also outputs distance and nearest row/column maps. Skeleton splitting requires a region already thinned to a skeleton and outputs open segment contours.",
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.skeleton",
@@ -36333,7 +36581,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.toDetections",
@@ -36433,7 +36682,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.fromThreshold",
@@ -36528,7 +36778,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "region.transform",
@@ -36623,7 +36874,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "robot.executeTarget",
@@ -36845,7 +37097,8 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "robot.j4TcpCompensation",
@@ -37051,7 +37304,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "robot.currentPose",
@@ -37221,7 +37475,8 @@
       ],
       "declaresActions": false,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "robot.guidance2d",
@@ -37380,7 +37635,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "value.arithmetic",
@@ -37559,7 +37815,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "value.number",
@@ -37681,7 +37938,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     },
     {
       "type": "value.range",
@@ -37787,7 +38045,8 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": false
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false
     }
   ]
 }
