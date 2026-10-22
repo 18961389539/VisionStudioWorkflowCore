@@ -1,0 +1,112 @@
+{
+  "id": "text-validation",
+  "name": "Text and Batch Code Validation",
+  "nodes": [
+    {
+      "id": "match",
+      "type": "text.match",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {
+        "text": "LOT-20261015-A42",
+        "expected": "LOT-",
+        "mode": "startsWith"
+      }
+    },
+    {
+      "id": "regex",
+      "type": "text.regex",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "pattern": "LOT-(?<date>[0-9]{8})-(?<batch>[A-Z][0-9]{2})"
+      }
+    },
+    {
+      "id": "combine",
+      "type": "logic.boolean",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {
+        "op": "and"
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "match",
+      "sourcePort": "next",
+      "targetNodeId": "regex",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "regex",
+      "sourcePort": "next",
+      "targetNodeId": "combine",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "combine",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "match",
+      "sourcePort": "text",
+      "targetNodeId": "regex",
+      "targetPort": "text",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "match",
+      "sourcePort": "pass",
+      "targetNodeId": "combine",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "regex",
+      "sourcePort": "pass",
+      "targetNodeId": "combine",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "combine",
+      "sourcePort": "result",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

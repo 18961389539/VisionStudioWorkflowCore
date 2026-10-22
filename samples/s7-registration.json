@@ -1,0 +1,21 @@
+{
+  "id": "s7-1500-1",
+  "name": "Siemens S7-1500",
+  "host": "192.168.0.20",
+  "port": 102,
+  "cpuType": "S71500",
+  "rack": 0,
+  "slot": 0,
+  "timeoutMs": 3000,
+  "tags": [
+    { "id": "ready", "name": "PLC Ready", "address": "DB10.DBX0.0", "dataType": "Boolean", "writable": false },
+    { "id": "trigger", "name": "Vision Trigger", "address": "DB10.DBX0.1", "dataType": "Boolean", "writable": false },
+    { "id": "resultReady", "name": "Result Ready", "address": "DB10.DBX0.2", "dataType": "Boolean", "writable": true },
+    { "id": "resultOk", "name": "Result OK", "address": "DB10.DBX0.3", "dataType": "Boolean", "writable": true },
+    { "id": "hostHeartbeat", "name": "Host Heartbeat", "address": "DB10.DBX0.4", "dataType": "Boolean", "writable": true },
+    { "id": "deviceHeartbeat", "name": "PLC Heartbeat", "address": "DB10.DBX0.5", "dataType": "Boolean", "writable": false },
+    { "id": "resultX", "name": "Result X", "address": "DB10.DBD4", "dataType": "Double", "writable": true, "unit": "mm" },
+    { "id": "resultY", "name": "Result Y", "address": "DB10.DBD8", "dataType": "Double", "writable": true, "unit": "mm" },
+    { "id": "resultR", "name": "Result R", "address": "DB10.DBD12", "dataType": "Double", "writable": true, "unit": "deg" }
+  ]
+}

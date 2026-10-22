@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>VisionStudio.Plugin.Worker</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="McMaster.NETCore.Plugins" Version="2.0.0" />
+  </ItemGroup>
+</Project>

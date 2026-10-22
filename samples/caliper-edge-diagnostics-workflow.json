@@ -1,0 +1,36 @@
+{
+  "id": "caliper-edge-diagnostics",
+  "name": "Caliper Edge · 边缘剖面诊断",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": "合成图像",
+      "position": { "x": 80, "y": 180 },
+      "parameters": { "width": 1280, "height": 960, "centerX": 640, "centerY": 480, "radius": 80, "placementMode": "fixed" }
+    },
+    {
+      "id": "caliper",
+      "type": "measure.caliper",
+      "name": "Caliper Edge",
+      "position": { "x": 400, "y": 180 },
+      "parameters": {
+        "startX": 480, "startY": 480, "endX": 800, "endY": 480,
+        "sampleWidth": 7, "edgeThreshold": 12, "polarity": "Any", "direction": "firstfromstart", "refine": "parabolic"
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": "边缘检出判定",
+      "position": { "x": 720, "y": 180 },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    { "id": "c1", "sourceNodeId": "source", "sourcePort": "next", "targetNodeId": "caliper", "targetPort": "exec", "kind": "control" },
+    { "id": "d1", "sourceNodeId": "source", "sourcePort": "image", "targetNodeId": "caliper", "targetPort": "image", "kind": "data" },
+    { "id": "c2", "sourceNodeId": "caliper", "sourcePort": "next", "targetNodeId": "result", "targetPort": "exec", "kind": "control" },
+    { "id": "d2", "sourceNodeId": "caliper", "sourcePort": "found", "targetNodeId": "result", "targetPort": "pass", "kind": "data" }
+  ]
+}

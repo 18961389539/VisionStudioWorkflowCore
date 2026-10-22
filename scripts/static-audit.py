@@ -1,0 +1,1515 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import json, pathlib, re, sys, xml.etree.ElementTree as ET
+
+# Guarantee UTF-8 output: the default GBK console encoding on Windows raises UnicodeEncodeError
+# and makes the audit fail for the wrong reason.
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+errors: list[str] = []
+notes: list[str] = []
+
+def fail(msg: str): errors.append(msg)
+def ok(msg: str): notes.append(msg)
+
+# Read required sources/documents: a missing file is recorded once and returns an empty string so
+# the audit completes and reports, instead of crashing with FileNotFoundError mid-run.
+_missing_files: set[str] = set()
+def read_safe(rel: str) -> str:
+    path = ROOT / rel
+    if not path.exists():
+        if rel not in _missing_files:
+            _missing_files.add(rel)
+            fail(f'Required file missing: {rel}')
+        return ''
+    return path.read_text(encoding='utf-8')
+
+
+# Root-level process documents (architecture notes / migration guides) are no longer kept in the
+# repository. Document checks are advisory: when a document is present its content is still
+# validated; when absent the check is skipped with a note instead of failing the gate.
+# Source/code files always keep the hard read_safe() contract.
+_missing_docs: set[str] = set()
+def doc_present(rel: str) -> bool:
+    if (ROOT / rel).exists():
+        return True
+    if rel not in _missing_docs:
+        _missing_docs.add(rel)
+        ok(f'documentation absent (check skipped): {rel}')
+    return False
+
+def doc_has(rel: str, token: str) -> bool:
+    """Missing document -> exempt; present -> content must contain the token (case-insensitive)."""
+    if not doc_present(rel):
+        return True
+    return token.lower() in (ROOT / rel).read_text(encoding='utf-8').lower()
+
+# JSON
+json_files = [p for p in ROOT.rglob('*.json')
+              if 'node_modules' not in p.parts
+              # 产物/测试沙箱目录不属于仓库源码：其中的 JSON 由测试注入（含故意的损坏样本），
+              # 参与解析校验只会把沙箱残留当成源码问题。
+              and not any(part in ('bin', 'obj', '.artifacts', 'artifacts') for part in p.parts)]
+for p in json_files:
+    try: json.loads(p.read_text(encoding='utf-8'))
+    except Exception as e: fail(f'JSON {p.relative_to(ROOT)}: {e}')
+ok(f'JSON parsed: {len(json_files)}')
+
+# XML-ish project/runsettings/solution files
+xml_files = list(ROOT.rglob('*.csproj')) + list(ROOT.rglob('*.slnx')) + list(ROOT.rglob('*.runsettings'))
+for p in xml_files:
+    try: ET.parse(p)
+    except Exception as e: fail(f'XML {p.relative_to(ROOT)}: {e}')
+ok(f'XML parsed: {len(xml_files)}')
+
+# Executor/catalog/DI closure
+node_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'))
+executor_classes = sorted(set(re.findall(r'public sealed class\s+(\w+)(?:\([^\n]*\))?\s*:\s*IVisionNodeExecutor', node_sources)))
+executor_types = sorted(set(re.findall(r'public string Type\s*=>\s*"([^"]+)";', node_sources)))
+if len(executor_classes) != len(executor_types): fail(f'Executor class/type count mismatch: {len(executor_classes)} vs {len(executor_types)}')
+program = read_safe('backend/src/VisionStudio.Api/Program.cs')
+api_source_files = list((ROOT/'backend/src/VisionStudio.Api').rglob('*.cs'))
+api_sources = '\n'.join(p.read_text(encoding='utf-8') for p in api_source_files)
+host_registration = read_safe('backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs')
+host_bootstrap = read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs')
+endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Api/Endpoints').glob('*.cs'))
+catalog = read_safe('backend/src/VisionStudio.Engine/NodeCatalog.cs')
+# NodeCatalog composes batch catalogs; inspect only helpers actually referenced by Items.
+for helper in sorted(set(re.findall(r'\b(\w+Catalog)\.Items\b', catalog))):
+    catalog += '\n' + read_safe(f'backend/src/VisionStudio.Engine/{helper}.cs')
+frontend_catalog_source = read_safe('frontend/src/catalog.ts')
+generated_catalog_doc = json.loads(read_safe('frontend/src/generated/catalog.generated.json'))
+generated_catalog_items = generated_catalog_doc.get('items', [])
+generated_catalog_types = {x.get('type') for x in generated_catalog_items}
+for cls in executor_classes:
+    if f'AddSingleton<{cls}>()' not in host_registration: fail(f'Missing DI registration: {cls}')
+    if f'GetRequiredService<{cls}>()' not in host_bootstrap: fail(f'Missing builtIns registry entry: {cls}')
+for typ in executor_types:
+    if f'"{typ}"' not in catalog: fail(f'Missing backend catalog type: {typ}')
+    if typ not in generated_catalog_types: fail(f'Missing generated frontend fallback catalog type: {typ}')
+ok(f'Built-in executors closed: {len(executor_types)}')
+
+# 参数契约：执行器读取的每个参数键都必须在目录里声明（含 internal 隐藏参数）。
+# 这是"目录里没有、运行时却在读"这类漂移的唯一自动闸门——新增读取必须同步目录声明。
+declared_parameters = {
+    item.get('type'): {p.get('name') for p in item.get('parameters', [])}
+    for item in generated_catalog_items
+}
+param_drift = []
+for source_path in sorted((ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs')):
+    blocks = re.split(r'(?:^|\n)(?=(?:public|internal)\s+(?:sealed\s+|static\s+|abstract\s+)*class\s)',
+                      source_path.read_text(encoding='utf-8'))
+    for block in blocks:
+        node_type = re.search(r'public string Type => "([a-z][\w.]+)"', block)
+        if not node_type:
+            continue
+        type_name = node_type.group(1)
+        reads = set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', block))
+        undeclared = sorted(reads - declared_parameters.get(type_name, set()))
+        if undeclared:
+            param_drift.append(f'{type_name} reads undeclared parameter(s): {", ".join(undeclared)}')
+for problem in param_drift:
+    fail(f'Catalog parameter drift: {problem}')
+ok(f'Catalog parameter contract: {len(declared_parameters)} nodes, no undeclared reads')
+
+# Control-surface policy: remove parameters that only existed to inflate completion scores,
+# and keep cross-cutting diagnostics/retry options only on nodes that actually implement them.
+retired_parameters = {
+    'strictMode', 'bufferPolicy', 'strictId', 'defaultPolicy',
+    'missingAPolicy', 'strictMissingB', 'directionPolicy', 'reportMode',
+    'requireFiniteScores', 'outOfRangePolicy',
+}
+diagnostics_level_allowed = {
+    'image.dynamicThreshold', 'image.difference', 'measure.regionIntensity', 'image.flatFieldCorrect',
+    'measure.caliper', 'output.saveImage', 'output.exportResult', 'output.httpRequest',
+    'match.template', 'match.shape',
+}
+retry_policy_allowed = {'output.saveImage', 'output.exportResult', 'output.httpRequest'}
+for item in generated_catalog_items:
+    item_type = item.get('type')
+    names = {p.get('name') for p in item.get('parameters', [])}
+    for name in sorted(names & retired_parameters):
+        fail(f'Retired control parameter: {item_type}.{name}')
+    if 'diagnosticsLevel' in names and item_type not in diagnostics_level_allowed:
+        fail(f'diagnosticsLevel is not implemented by {item_type}')
+    if 'retryPolicy' in names and item_type not in retry_policy_allowed:
+        fail(f'retryPolicy is not implemented by {item_type}')
+    if 'failOnWarning' in names and item_type != 'flow.try':
+        fail(f'failOnWarning is runtime-backed only on flow.try, found on {item_type}')
+    for parameter in item.get('parameters', []):
+        description = (parameter.get('description') or '').strip()
+        if not parameter.get('internal') and not description:
+            fail(f'Undocumented user parameter: {item_type}.{parameter.get("name")}')
+        if not parameter.get('internal') and re.search(r'\bparameter for [a-z0-9_.]+\.', description, re.IGNORECASE):
+            fail(f'Generated placeholder help: {item_type}.{parameter.get("name")}')
+    user_parameters = [p for p in item.get('parameters', []) if not p.get('internal')]
+    groups = {p.get('group') for p in user_parameters if p.get('group')}
+    if len(user_parameters) >= 8 and len(groups) < 2:
+        fail(f'Parameter-heavy node needs at least two groups: {item_type} ({len(user_parameters)} parameters)')
+ok('Catalog controls: no retired controls, no unbacked diagnostics/retry options, all user parameters documented and grouped')
+
+# Completion-score scaffolding must not return: it produced no-op reads, fake validation and
+# runtime throws that were unrelated to the node algorithm.
+filler_markers = ('r90-gate', 'r85-gate', 'AnchorSharedValidators', 'RequireTimeoutBudget',
+                  'completion floor', '__r90', '__r85')
+for source_path in sorted((ROOT/'backend/src/VisionStudio.Engine').rglob('*.cs')):
+    text = source_path.read_text(encoding='utf-8')
+    for marker in filler_markers:
+        if marker in text:
+            fail(f'Scoring filler in {source_path.relative_to(ROOT)}: {marker}')
+    if '_ = "' in text:
+        fail(f'Discarded string literal (coverage padding) in {source_path.relative_to(ROOT)}')
+for test_path in sorted((ROOT/'backend/tests').rglob('*.cs')):
+    text = test_path.read_text(encoding='utf-8')
+    lowered = text.lower()
+    if '_ = nameof(' in text or 'raise score' in lowered or 'type-string density' in lowered or 'audit d (testhits)' in lowered:
+        fail(f'Scoring-oriented test assertion in {test_path.relative_to(ROOT)}')
+    if '_ = "' in text:
+        fail(f'Discarded string literal (coverage padding) in {test_path.relative_to(ROOT)}')
+ok('Executor/test sources: no completion-score filler')
+
+
+# Workflow sample graph references and known node types
+sample_files = sorted((ROOT/'samples').glob('*-workflow.json'))
+known_types = set(executor_types) | {'math.offset'}
+for p in sample_files:
+    data = json.loads(p.read_text(encoding='utf-8'))
+    nodes = data.get('nodes', [])
+    ids = {n['id'] for n in nodes}
+    if len(ids) != len(nodes): fail(f'{p.name}: duplicate node ids')
+    for n in nodes:
+        if n.get('type') not in known_types: fail(f'{p.name}: unknown node type {n.get("type")}')
+    for e in data.get('edges', []):
+        if e.get('sourceNodeId') not in ids or e.get('targetNodeId') not in ids:
+            fail(f'{p.name}: edge {e.get("id")} references missing node')
+ok(f'Workflow sample references: {len(sample_files)}')
+
+# V0.28 storage migration/backup/capacity + retained catalog/diagnostics/dependency/security/modular/plugin/hybrid hardening artifacts
+required = [
+    'backend/tests/VisionStudio.Engine.Tests/FaultInjectionTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/WorkflowPropertyTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/SoakStabilityTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/PersistenceConcurrencyTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/OpenApiContractTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/ProductionRuntimeTests.cs',
+    'backend/coverage.runsettings',
+    'contracts/api-required-endpoints.json',
+    'scripts/check-coverage.py',
+    'scripts/soak-test.ps1',
+    'scripts/soak-test.sh',
+    '.github/workflows/soak-gate.yml',
+    'backend/src/VisionStudio.Api/ProductionRuntime.cs',
+    'backend/src/VisionStudio.Api/AlarmStore.cs',
+    'backend/src/VisionStudio.Engine/WorkflowFingerprint.cs',
+    'backend/tests/VisionStudio.Engine.Tests/WorkflowFingerprintTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/ParallelCapabilityTests.cs',
+    'frontend/src/components/ProductionPanel.tsx',
+    'scripts/publish-runtime.ps1',
+    'scripts/publish-runtime.sh',
+    'backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs',
+    'backend/src/VisionStudio.Api/LegacyStorageMigration.cs',
+    'backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs',
+    'backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs',
+    'backend/src/VisionStudio.Engine/Runtime/VisionPipelineExecutor.cs',
+    'backend/src/VisionStudio.Engine/Runtime/VisionPipelineStep.cs',
+    'backend/src/VisionStudio.Engine/Runtime/VisionExecutionPolicy.cs',
+    'backend/tests/VisionStudio.Engine.Tests/HybridRuntimeTests.cs',
+    'backend/src/VisionStudio.Abstractions/VisionStudio.Abstractions.csproj',
+    'backend/src/VisionStudio.Abstractions/PluginContracts.cs',
+    'backend/src/VisionStudio.Abstractions/ExecutionContracts.cs',
+    'backend/tests/VisionStudio.Engine.Tests/PluginLifetimeTests.cs',
+    'PLUGIN_ARCHITECTURE.md',
+    'backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs',
+    'backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs',
+    'backend/src/VisionStudio.Api/Infrastructure/ApiExceptionHandler.cs',
+    'backend/src/VisionStudio.Api/Infrastructure/RuntimeOnlyMiddleware.cs',
+    'backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs',
+    'MIGRATION_V022_TO_V023.md',
+    'HOST_ARCHITECTURE.md',
+    'backend/src/VisionStudio.Api/Security/SecurityModels.cs',
+    'backend/src/VisionStudio.Api/Security/SecurityStore.cs',
+    'backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs',
+    'backend/src/VisionStudio.Api/Security/Audit.cs',
+    'backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/SecurityTests.cs',
+    'frontend/src/security.tsx',
+    'SECURITY_ARCHITECTURE.md',
+    'MIGRATION_V023_TO_V024.md',
+    'backend/src/VisionStudio.Api/RuntimeDependencies.cs',
+    'backend/tests/VisionStudio.Api.Tests/RuntimeDependencyManifestTests.cs',
+    'RUNTIME_DEPENDENCIES.md',
+    'MIGRATION_V024_TO_V025.md',
+    'backend/src/VisionStudio.Engine/Diagnostics/AssetHealth.cs',
+    'backend/src/VisionStudio.Api/Diagnostics/AssetHealthProviders.cs',
+    'backend/src/VisionStudio.Api/Diagnostics/DiagnosticsCenterService.cs',
+    'backend/src/VisionStudio.Api/Diagnostics/DiagnosticsHub.cs',
+    'backend/src/VisionStudio.Api/Endpoints/DiagnosticsEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/DiagnosticsTests.cs',
+    'frontend/src/components/DiagnosticsPanel.tsx',
+    'DIAGNOSTICS_ARCHITECTURE.md',
+    'MIGRATION_V025_TO_V026.md',
+    'backend/src/VisionStudio.Engine/CatalogSnapshot.cs',
+    'backend/src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj',
+    'backend/src/VisionStudio.CatalogExporter/Program.cs',
+    'backend/tests/VisionStudio.Engine.Tests/CatalogSnapshotTests.cs',
+    'frontend/src/generated/catalog.generated.json',
+    'scripts/generate-frontend-catalog.ps1',
+    'scripts/generate-frontend-catalog.sh',
+    'CATALOG_ARCHITECTURE.md',
+    'MIGRATION_V026_TO_V027.md',
+    'backend/src/VisionStudio.Api/SchemaMigrations.cs',
+    'backend/src/VisionStudio.Api/StorageMaintenance.cs',
+    'backend/src/VisionStudio.Api/StorageBackupService.cs',
+    'backend/tests/VisionStudio.Api.Tests/StorageMaintenanceTests.cs',
+    'frontend/src/components/StoragePanel.tsx',
+    'STORAGE_MAINTENANCE.md',
+    'MIGRATION_V027_TO_V028.md',
+    'backend/src/VisionStudio.Engine/Runtime/StructuredWorkflowIr.cs',
+    'backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs',
+    'samples/nested-structured-workflow.json',
+    'STRUCTURED_WORKFLOW_IR.md',
+    'MIGRATION_V028_TO_V029.md',
+    'backend/src/VisionStudio.Api/Media/MediaLibraryService.cs',
+    'backend/src/VisionStudio.Api/Endpoints/MediaEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/MediaLibraryTests.cs',
+    'MEDIA_LIBRARY.md',
+    'MIGRATION_V029_TO_V030.md',
+    'backend/src/VisionStudio.Engine/Provenance/HardwareProvenance.cs',
+    'backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs',
+    'backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs',
+    'backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/HardwareProvenanceTests.cs',
+    'frontend/src/components/HardwareProvenancePanel.tsx',
+    'HARDWARE_PROVENANCE.md',
+    'MIGRATION_V030_TO_V031.md',
+    'backend/src/VisionStudio.Api/Provenance/VendorProvenance.cs',
+    'backend/src/VisionStudio.Api/Provenance/VendorProbeBase.cs',
+    'backend/src/VisionStudio.Api/Provenance/BaslerPylonProvenanceProbe.cs',
+    'backend/src/VisionStudio.Api/Provenance/HikrobotMvsProvenanceProbe.cs',
+    'backend/src/VisionStudio.Api/Provenance/AbbRwsProvenanceProbe.cs',
+    'VENDOR_PROVENANCE.md',
+    'MIGRATION_V031_TO_V032.md',
+    'backend/src/VisionStudio.Camera.Basler/VisionStudio.Camera.Basler.csproj',
+    'backend/src/VisionStudio.Camera.Basler/BaslerSdkReflection.cs',
+    'backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs',
+    'backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs',
+    'backend/src/VisionStudio.Camera.Hikrobot/VisionStudio.Camera.Hikrobot.csproj',
+    'backend/src/VisionStudio.Camera.Hikrobot/HikrobotSdkReflection.cs',
+    'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs',
+    'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs',
+    'backend/src/VisionStudio.Api/CameraAdapterOptions.cs',
+    'backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs',
+    'CAMERA_VENDOR_ADAPTERS.md',
+    'MIGRATION_V032_TO_V033.md',
+    'backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs',
+    'backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs',
+    'backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs',
+    'backend/src/VisionStudio.Api/CameraFeatureProfileStore.cs',
+    'backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs',
+    'backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs',
+    'backend/tests/VisionStudio.Api.Tests/CameraFeatureProfileStoreTests.cs',
+    'CAMERA_COMMISSIONING.md',
+    'MIGRATION_V033_TO_V034.md',
+    'CAMERA_SYNCHRONIZATION.md',
+    'MIGRATION_V034_TO_V035.md',
+    'backend/src/VisionStudio.Api/CameraSynchronization.cs',
+    'backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/CameraSynchronizationTests.cs',
+    'backend/src/VisionStudio.Api/OfflineReplay.cs',
+    'backend/src/VisionStudio.Api/Endpoints/ReplayEndpoints.cs',
+    'frontend/src/components/ReplayDebuggerPanel.tsx',
+    'OFFLINE_REPLAY_DEBUGGER.md',
+    'MIGRATION_V046_TO_V047.md',
+    'backend/src/VisionStudio.Api/DatasetValidation.cs',
+    'backend/src/VisionStudio.Api/Endpoints/DatasetValidationEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/DatasetValidationTests.cs',
+    'frontend/src/components/DatasetValidationPanel.tsx',
+    'DATASET_BATCH_VALIDATION.md',
+    'MIGRATION_V047_TO_V048.md',
+    'backend/src/VisionStudio.Api/ParameterTuning.cs',
+    'backend/src/VisionStudio.Api/Endpoints/ParameterTuningEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/ParameterTuningTests.cs',
+    'frontend/src/components/ParameterTuningPanel.tsx',
+    'PARAMETER_TUNING.md',
+    'MIGRATION_V048_TO_V049.md',
+    'backend/src/VisionStudio.Api/ProductRecipeStore.cs',
+    'backend/src/VisionStudio.Api/Endpoints/ProductRecipeEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/ProductRecipeLifecycleTests.cs',
+    'PRODUCT_RECIPE_LIFECYCLE.md',
+    'MIGRATION_V049_TO_V050.md',
+    'backend/src/VisionStudio.Api/RecipeParameterization.cs',
+    'backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/RecipeParameterBindingTests.cs',
+    'RECIPE_PARAMETER_BINDING.md',
+    'MIGRATION_V050_TO_V051.md',
+    'backend/src/VisionStudio.Api/WorkflowModules.cs',
+    'backend/src/VisionStudio.Api/Endpoints/WorkflowModuleEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs',
+    'frontend/src/components/WorkflowModulePanel.tsx',
+    'REUSABLE_WORKFLOW_MODULES.md',
+    'MIGRATION_V051_TO_V052.md',
+    'backend/src/VisionStudio.Api/Endpoints/PluginEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/PluginSdkV2Tests.cs',
+    'backend/src/VisionStudio.Plugin.Sample/plugin.json',
+    'PLUGIN_SDK_2.md',
+    'MIGRATION_V052_TO_V053.md',
+    'PLUGIN_WORKER.md',
+    'MIGRATION_V054_TO_V055.md',
+    'backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs',
+    'MIGRATION_V055_TO_V056.md',
+    'backend/src/VisionStudio.Api/PluginWorkerPerformance.cs',
+    'PLUGIN_WORKER_PROFILING.md',
+    'MIGRATION_V056_TO_V057.md',
+    'backend/src/VisionStudio.Api/PluginPerformanceBenchmark.cs',
+    'backend/src/VisionStudio.Api/Endpoints/PluginBenchmarkEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/PluginPerformanceBenchmarkTests.cs',
+    'PLUGIN_PERFORMANCE_BENCHMARK.md',
+    'MIGRATION_V057_TO_V058.md',
+    'backend/src/VisionStudio.Api/PluginBenchmarkCi.cs',
+    'backend/src/VisionStudio.Benchmark.Cli/VisionStudio.Benchmark.Cli.csproj',
+    'backend/src/VisionStudio.Benchmark.Cli/Program.cs',
+    'backend/tests/VisionStudio.Api.Tests/PluginBenchmarkCiTests.cs',
+    'PLUGIN_BENCHMARK_CI.md',
+    'MIGRATION_V058_TO_V059.md',
+    'scripts/plugin-benchmark-gate.ps1',
+    'scripts/plugin-benchmark-gate.sh',
+    '.github/workflows/plugin-performance-gate.yml',
+    'backend/src/VisionStudio.Api/InvestigationCases.cs',
+    'backend/src/VisionStudio.Api/Endpoints/InvestigationEndpoints.cs',
+    'backend/tests/VisionStudio.Api.Tests/InvestigationCaseTests.cs',
+    'frontend/src/components/InvestigationPanel.tsx',
+    'INVESTIGATION_CASES.md',
+    'MIGRATION_V061_TO_V062.md',
+    'CASE_VERIFICATION_GATE.md',
+    'MIGRATION_V062_TO_V063.md',
+]
+
+for rel in required:
+    if rel.endswith('.md'):
+        doc_present(rel)  # documents: absence is a note (root process docs are no longer kept)
+    elif not (ROOT/rel).exists():
+        fail(f'Missing required architecture artifact: {rel}')
+
+api_csproj=read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj')
+if 'Microsoft.AspNetCore.OpenApi' not in api_csproj: fail('OpenAPI package missing from API csproj')
+if 'Microsoft.Data.Sqlite' not in api_csproj or '10.0.12' not in api_csproj: fail('Microsoft.Data.Sqlite 10.0.12 missing from API csproj')
+if 'services.AddOpenApi();' not in host_registration or 'app.MapOpenApi()' not in program: fail('OpenAPI service/endpoint not wired')
+if 'V0.63' not in endpoint_sources: fail('API health version not V0.63')
+api_smoke=read_safe('backend/tests/VisionStudio.Api.Tests/ApiSmokeTests.cs')
+if 'v0.63' not in api_smoke.lower(): fail('API smoke test does not assert V0.63 health surface')
+if 'RuntimeOnlyPolicy.IsMutationAllowed' not in api_sources: fail('Runtime-only explicit mutation allowlist is missing')
+compiler=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.cs')
+if 'WorkflowFingerprint.Compute' not in compiler: fail('Compiler does not use semantic WorkflowFingerprint')
+if 'ValidateParallelCapabilities' not in compiler: fail('Compiler does not enforce SupportsParallel capability')
+if 'CreatePipelineStep' not in compiler or 'PipelineSegments' not in compiler or 'VisionExecutionPolicy.IsPipelineEligible' not in compiler:
+    fail('Hybrid compiler does not fuse/register VisionPipeline segments')
+runner=read_safe('backend/src/VisionStudio.Engine/Runtime/WorkflowCoreVisionRunner.cs')
+pipeline=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionPipelineExecutor.cs')
+node_runtime=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs')
+for token in ['AddSingleton<VisionNodeRuntime>()','AddSingleton<VisionPipelineExecutor>()','AddTransient<VisionPipelineStep>()']:
+    if token not in host_registration: fail(f'Hybrid runtime DI missing: {token}')
+if 'data.PipelineSegments = compiled.PipelineSegments' not in runner: fail('Runner does not attach compiled pipeline segments to run data')
+if 'VisionNodeRuntime' not in pipeline or 'foreach (var nodeId in nodeIds)' not in pipeline: fail('VisionPipelineExecutor does not execute node-level runtime semantics')
+if 'data.AddReport' not in node_runtime or 'data.AddOverlays' not in node_runtime or 'data.BeforeNode' not in node_runtime:
+    fail('VisionNodeRuntime is missing report/overlay/debug semantics')
+ok('V0.21 hybrid Workflow Core + VisionPipelineExecutor semantics retained')
+
+# V0.29 recursive structured workflow IR
+structured_ir=read_safe('backend/src/VisionStudio.Engine/Runtime/StructuredWorkflowIr.cs')
+workflow_data=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
+recursive_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs')
+frontend_app=read_safe('frontend/src/App.tsx')
+for token in ['StructuredWorkflowIrBuilder','FindNearestCommonJoin','excludedBoundaryJoinId','StructuredControlRegion','ValidateNoCrossBranchData']:
+    if token not in structured_ir: fail(f'V0.29 structured IR token missing: {token}')
+for token in ['new StructuredWorkflowIrBuilder','CompileSequence','BranchConditions','ControlRegions']:
+    if token not in compiler: fail(f'V0.29 recursive compiler token missing: {token}')
+if 'data.BranchCondition == false' in compiler or '["Condition"] = "data.BranchCondition"' in compiler:
+    fail('V0.29 compiler still consumes global BranchCondition')
+for token in ['SetBranchCondition','GetBranchCondition','SnapshotControlFlowDecisions','MarkParallelBranches']:
+    if token not in workflow_data: fail(f'V0.29 keyed branch-state token missing: {token}')
+for token in ['Compiler_CompilesNestedIfWithDistinctControlRegionsAndKeyedConditions','Compiler_CompilesParallelNestedInsideIf','WorkflowData_KeepsNestedBranchDecisionsIndependent']:
+    if token not in recursive_tests: fail(f'V0.29 recursive regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.29 recursive structured IR + keyed branch state + branch visualization present')
+
+
+# V0.30 sandboxed File Camera + Media Library
+media_service=read_safe('backend/src/VisionStudio.Api/Media/MediaLibraryService.cs')
+media_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/MediaEndpoints.cs')
+file_camera=read_safe('backend/src/VisionStudio.Engine/Camera/FileCameraDevice.cs')
+media_tests=read_safe('backend/tests/VisionStudio.Api.Tests/MediaLibraryTests.cs')
+camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
+frontend_camera=read_safe('frontend/src/components/CameraPanel.tsx')
+for token in ['media://','ResolveSource','NormalizeRelative','EnsureNoReparseTraversal','MaxImportBytes','MaxBatchBytes','MaxLibraryBytes','EnsureImportCapacity','ValidateImageSignature','ImportAsync','ListCollections','ListItems']:
+    if token not in media_service: fail(f'V0.30 media sandbox token missing: {token}')
+for token in ['/api/media/status','/api/media/collections','/api/media/items','/api/media/import','/api/media/preview']:
+    if token not in media_endpoints: fail(f'V0.30 media endpoint missing: {token}')
+for token in ['RequireRateLimiting("media-import")','MaxBatchBytes']:
+    if token not in media_endpoints: fail(f'V0.30 bounded media import endpoint token missing: {token}')
+for token in ['MultipartBodyLengthLimit','KestrelServerOptions','media-import']:
+    if token not in host_registration: fail(f'V0.30 media host upload guard missing: {token}')
+if 'request.Path.Trim()' in camera_endpoints or 'new FileCameraDevice(request' in camera_endpoints:
+    fail('V0.30 File Camera endpoint still forwards arbitrary request filesystem paths')
+for token in ['ICameraSourceProvenanceProvider','GetSourceProvenance','IncrementalHash','SearchOption.AllDirectories']:
+    if token not in file_camera: fail(f'V0.30 File Camera provenance/collection token missing: {token}')
+for token in ['SourceFingerprint','sourceProvenance?.ContentSha256']:
+    if token not in api_sources: fail(f'V0.30 dependency provenance token missing: {token}')
+for token in ['ResolveSource_RejectsAbsoluteAndTraversalPaths','Import_StoresOnlyLogicalMediaReferenceInsideRoot','FileCameraSourceFingerprint_ChangesWhenMediaBytesChange','RuntimeManifest_ReportsFileCameraMediaContentDrift','Import_RejectsContentThatDoesNotMatchImageExtension']:
+    if token not in media_tests: fail(f'V0.30 media regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.30 File Camera sandbox + Media Library + content provenance present')
+
+
+# V0.31 adapter/manual hardware provenance + physical dependency lock
+hardware_contracts=read_safe('backend/src/VisionStudio.Engine/Provenance/HardwareProvenance.cs')
+hardware_store=read_safe('backend/src/VisionStudio.Api/Provenance/HardwareProvenanceStore.cs')
+hardware_service=read_safe('backend/src/VisionStudio.Api/Provenance/HardwareProvenanceService.cs')
+hardware_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/HardwareProvenanceEndpoints.cs')
+hardware_tests=read_safe('backend/tests/VisionStudio.Api.Tests/HardwareProvenanceTests.cs')
+hardware_frontend=read_safe('frontend/src/components/HardwareProvenancePanel.tsx')
+for token in ['HardwareProvenanceData','IHardwareProvenanceProvider','SerialNumber','FirmwareVersion','ControllerVersion','ProgramHash']:
+    if token not in hardware_contracts: fail(f'V0.31 hardware contract token missing: {token}')
+for token in ['hardware-provenance.json','UpsertAsync','DeleteAsync']:
+    if token not in hardware_store: fail(f'V0.31 hardware store token missing: {token}')
+for token in ['adapter:','+declared','MissingRecommended','Fingerprint','fixtureRevision']:
+    if token not in hardware_service and token not in hardware_frontend: fail(f'V0.31 hardware provenance token missing: {token}')
+for token in ['/api/hardware-provenance','EnsureDependencyMutationAllowed','RequireEngineer']:
+    if token not in hardware_endpoints: fail(f'V0.31 hardware endpoint token missing: {token}')
+for token in ['manifestSchemaVersion','CameraHardware','DeviceHardware','RobotHardware','hardwareFingerprint']:
+    if token not in api_sources: fail(f'V0.31 RuntimeDependencyManifest hardware token missing: {token}')
+for token in ['VirtualCamera_ProvidesAdapterHardwareProvenance','PlantDeclaration_MergesExternalLensAndFirmwareAndChangesFingerprint','RuntimeManifest_DetectsHardwareDeclarationDrift','LegacyManifestSchema_IsRejectedUntilRepublishedWithHardwareIdentity']:
+    if token not in hardware_tests: fail(f'V0.31 hardware regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.31 adapter + declared hardware provenance and physical dependency drift guard present')
+
+
+# V0.32 live vendor provenance probes (Basler pylon / Hikrobot MVS / ABB RWS)
+vendor_contracts=read_safe('backend/src/VisionStudio.Api/Provenance/VendorProvenance.cs')
+vendor_base=read_safe('backend/src/VisionStudio.Api/Provenance/VendorProbeBase.cs')
+basler_probe=read_safe('backend/src/VisionStudio.Api/Provenance/BaslerPylonProvenanceProbe.cs')
+hik_probe=read_safe('backend/src/VisionStudio.Api/Provenance/HikrobotMvsProvenanceProbe.cs')
+abb_probe=read_safe('backend/src/VisionStudio.Api/Provenance/AbbRwsProvenanceProbe.cs')
+for token in ['IAsyncHardwareProvenanceProvider']:
+    if token not in hardware_contracts: fail(f'V0.32 async hardware contract missing: {token}')
+for token in ['IVendorHardwareProvenanceProbe','VendorProvenanceProbeRegistry','RequiredForProduction','BaslerPylonProbeOptions','HikrobotMvsProbeOptions','AbbRwsProbeOptions']:
+    if token not in vendor_contracts: fail(f'V0.32 vendor probe contract missing: {token}')
+for token in ['CachedVendorProvenanceProbe','liveProbeState','SemaphoreSlim']:
+    if token not in vendor_base: fail(f'V0.32 cached vendor probe behavior missing: {token}')
+for token in ['Basler.Pylon.CameraFinder','DeviceFirmwareVersion','SerialNumber','ModelName']:
+    if token not in basler_probe: fail(f'V0.32 Basler pylon probe token missing: {token}')
+for token in ['MvCamCtrl.NET.MyCamera','MV_CC_EnumDevices_NET','MV_GIGE_DEVICE_INFO','MV_USB3_DEVICE_INFO','DeviceFirmwareVersion']:
+    if token not in hik_probe: fail(f'V0.32 Hikrobot MVS probe token missing: {token}')
+for token in ['ctrl/identity','rw/system','rw/rapid/modules','HashRapidProgramAsync','PasswordEnvironmentVariable']:
+    if token not in abb_probe: fail(f'V0.32 ABB RWS probe token missing: {token}')
+for token in ['CaptureForProductionAsync','LiveProbeConfigured','LiveProbeRequired','live:']:
+    if token not in hardware_service: fail(f'V0.32 live hardware service integration missing: {token}')
+for token in ['VendorProvenanceBootstrapHostedService','BaslerPylonProvenanceProbe','HikrobotMvsProvenanceProbe','AbbRwsProvenanceProbe','AssetExists','Required ']:
+    if token not in host_bootstrap: fail(f'V0.32 vendor probe bootstrap missing: {token}')
+if 'AddHostedService<VendorProvenanceBootstrapHostedService>()' not in host_registration:
+    fail('V0.32 vendor provenance bootstrap is not ordered before Production AutoStart')
+if 'CaptureForProductionAsync' not in read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs'):
+    fail('V0.32 required live probes do not guard RuntimeDependencyManifest capture')
+for token in ['RequiredLiveProbe_Unavailable_BlocksProductionCapture','OptionalLiveProbe_Unavailable_AllowsProductionCaptureWithDescriptorFallback','LiveProbeData_IsMergedIntoAutomaticChannel_AndCannotBeMaskedByDescriptor','AbbRwsProbe_ReadsControllerRobotWareAndHashesRapidProgram','RequiredVendorProbe_WithUnknownAsset_FailsBootstrap']:
+    if token not in hardware_tests: fail(f'V0.32 vendor provenance regression test missing: {token}')
+frontend_package = json.loads(read_safe('frontend/package.json'))
+vendor_appsettings = json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
+if 'VendorProvenance' not in vendor_appsettings or not all(k in vendor_appsettings['VendorProvenance'] for k in ['CacheSeconds','Basler','Hikrobot','AbbRws']):
+    fail('V0.32 VendorProvenance configuration section missing')
+ok('V0.32 live Basler/Hikrobot/ABB provenance probes + required-production guard present')
+
+
+# V0.33 real Basler + Hikrobot acquisition adapters
+camera_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
+camera_worker=read_safe('backend/src/VisionStudio.Engine/Camera/CameraAcquisitionWorker.cs')
+basler_adapter=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs')
+basler_provider=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs')
+hik_adapter=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs')
+hik_provider=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs')
+camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
+camera_options=read_safe('backend/src/VisionStudio.Api/CameraAdapterOptions.cs')
+camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
+camera_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs')
+for token in ['CameraOutputPixelFormat','ICameraTelemetryProvider','CameraDiscoveredDevice','ICameraAdapterProvider','ExternalTriggerSource']:
+    if token not in camera_contracts: fail(f'V0.33 camera contract missing: {token}')
+for token in ['CameraFrameTimeoutException','FrameTimeouts','DriverDroppedFrames','ReconnectAsync']:
+    if token not in camera_worker and token not in camera_contracts: fail(f'V0.33 acquisition worker telemetry/reconnect token missing: {token}')
+for token in ['RetrieveResult','PixelDataConverter','SkippedImageCount','IDisposable disposable','TriggerSource','ExternalTriggerSource']:
+    if token not in basler_adapter: fail(f'V0.33 Basler acquisition token missing: {token}')
+for token in ['CameraFinder','DiscoverAsync','BaslerPylonCameraDevice']:
+    if token not in basler_provider and token not in read_safe('backend/src/VisionStudio.Camera.Basler/BaslerSdkReflection.cs'):
+        fail(f'V0.33 Basler discovery/provider token missing: {token}')
+for token in ['MV_CC_StartGrabbing_NET','MV_CC_GetImageForBGR_NET','nFrameNum','DriverDroppedFrames','TriggerSoftware','ExternalTriggerSource']:
+    if token not in hik_adapter and token != 'DriverDroppedFrames': fail(f'V0.33 Hikrobot acquisition token missing: {token}')
+for token in ['MV_CC_EnumDevices_NET','DiscoverAsync','HikrobotMvsCameraDevice']:
+    if token not in hik_provider and token not in read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotSdkReflection.cs'):
+        fail(f'V0.33 Hikrobot discovery/provider token missing: {token}')
+for token in ['/api/cameras/adapters','/api/cameras/discover','/api/cameras/vendor','ICameraAdapterProvider']:
+    if token not in camera_endpoints: fail(f'V0.33 camera endpoint missing: {token}')
+for token in ['CameraAdapters','Configured vendor camera requires Driver and Id','requires unavailable adapter']:
+    if token not in host_bootstrap and token != 'CameraAdapters': fail(f'V0.33 fail-closed camera bootstrap missing: {token}')
+if 'CameraAdapters' not in host_registration or 'BaslerPylonCameraAdapterProvider' not in host_registration or 'HikrobotMvsCameraAdapterProvider' not in host_registration:
+    fail('V0.33 camera adapter DI/configuration missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['FrameTimeout_IsCountedWithoutReconnect','AdapterTelemetry_IsSurfacedSeparatelyFromRingOverwrite','SoftwareTrigger_InvokesAdapterBeforePublishingFrame','ExternalHardwareTrigger_CannotBeSynthesizedByHost']:
+    if token not in camera_tests: fail(f'V0.33 camera acquisition regression test missing: {token}')
+camera_appsettings = json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
+if 'CameraAdapters' not in camera_appsettings or not all(k in camera_appsettings['CameraAdapters'] for k in ['BaslerAssemblyPath','HikrobotAssemblyPath','Cameras']):
+    fail('V0.33 CameraAdapters configuration section missing')
+# Vendor binaries are site-installed; source/runtime package must not include them.
+# A08（2026-10-12 第三轮）：白名单**项目自有的适配器程序集**（API 直接项目引用），规则只拒绝
+# 厂商 SDK；并排除构建/发布产物区（artifacts/runtime-publish 等）——干净 checkout 与有合法
+# 发布产物的工作区结果必须一致（靠删除产物让门禁偶然通过是不可接受的）。
+_self_adapters = {'visionstudio.camera.basler.dll', 'visionstudio.camera.hikrobot.dll'}
+vendor_dlls=[x for x in ROOT.rglob('*.dll')
+             if any(k in x.name.lower() for k in ['basler','pylon','mvcam','hikrobot','mvs'])
+             and x.name.lower() not in _self_adapters
+             and not any(part.lower() in ('bin','obj','.artifacts','artifacts') for part in x.parts)]
+if vendor_dlls: fail(f'V0.33 package contains vendor camera DLLs: {[str(x.relative_to(ROOT)) for x in vendor_dlls]}')
+ok('V0.33 runtime-loaded Basler/Hikrobot acquisition + trigger/buffer/telemetry path present')
+
+
+# V0.34 camera commissioning profiles + normalized feature browser
+camera_profile_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
+camera_profile_hash=read_safe('backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs')
+basler_features=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraFeatures.cs')
+hik_features=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs')
+profile_store=read_safe('backend/src/VisionStudio.Api/CameraFeatureProfileStore.cs')
+profile_schema=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+profile_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs')
+profile_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs')
+profile_store_tests=read_safe('backend/tests/VisionStudio.Api.Tests/CameraFeatureProfileStoreTests.cs')
+for token in ['CameraFeatureDescriptor','CameraCommissioningProfile','CameraCommissioningCapabilities','ICameraFeatureProvider','CommissioningProfileHash']:
+    if token not in camera_profile_contracts: fail(f'V0.34 commissioning contract missing: {token}')
+for token in ['SHA256.HashData','AdvancedFeatures','SchemaVersion != 1','PacketSizeBytes']:
+    if token not in camera_profile_hash: fail(f'V0.34 profile canonicalization token missing: {token}')
+for token in ['GevSCPSPacketSize','GevSCPD','TriggerDelay','LineDebouncerTime','LineSource','PtpEnable','ActionDeviceKey']:
+    if token not in basler_features: fail(f'V0.34 Basler commissioning feature missing: {token}')
+for token in ['GevSCPSPacketSize','GevSCPD','TriggerDelay','LineDebouncerTime','StrobeEnable','StrobeLineDuration','GevIEEE1588','ActionDeviceKey']:
+    if token not in hik_features: fail(f'V0.34 Hikrobot commissioning feature missing: {token}')
+for token in ['camera_feature_profiles','profile_hash','UpsertAsync','DeleteAsync']:
+    if token not in profile_store and token not in profile_schema: fail(f'V0.34 camera profile store/schema token missing: {token}')
+for token in ['/api/cameras/{id}/commissioning','/api/cameras/{id}/features','/api/camera-feature-profiles/capture','/api/camera-feature-profiles/import','apply/{cameraId}','EnsureDependencyMutationAllowed']:
+    if token not in profile_endpoints: fail(f'V0.34 commissioning endpoint missing: {token}')
+for token in ['commissioningProfileHash','GetCommissioningProfileHash']:
+    if token not in read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs'): fail(f'V0.34 dependency profile hash missing: {token}')
+for token in ['FeatureProfileId','ApplyCommissioningProfileAsync','CameraFeatureProfileStore']:
+    if token not in host_bootstrap and token not in camera_options: fail(f'V0.34 startup profile application missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['CameraFeatureProfileHash_IsStableAcrossAdvancedFeatureOrdering','CameraFeatureProfileNormalize_ClampsTransportAndTimingValues']:
+    if token not in profile_tests: fail(f'V0.34 profile regression test missing: {token}')
+for token in ['SchemaV5_CreatesCameraFeatureProfilesTable','CameraFeatureProfileStore_RoundTripsPortableProfileAndHash']:
+    if token not in profile_store_tests: fail(f'V0.34 profile store regression test missing: {token}')
+if frontend_package.get('version') != '0.63.0' or 'v63' not in frontend_package.get('name',''):
+    fail('Frontend package identity is not V0.63')
+ok('V0.34 normalized camera commissioning profile + feature browser + SQLite profile persistence present')
+
+# V0.22 Abstractions-only plugin SDK + runtime lifetime/thread-safety enforcement
+abstractions_csproj=read_safe('backend/src/VisionStudio.Abstractions/VisionStudio.Abstractions.csproj')
+engine_csproj=read_safe('backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj')
+sample_csproj=read_safe('backend/src/VisionStudio.Plugin.Sample/VisionStudio.Plugin.Sample.csproj')
+plugin_contracts=read_safe('backend/src/VisionStudio.Abstractions/PluginContracts.cs')
+execution_contracts=read_safe('backend/src/VisionStudio.Abstractions/ExecutionContracts.cs')
+plugin_registry=read_safe('backend/src/VisionStudio.Engine/PluginSdk.cs')
+plugin_manager=read_safe('backend/src/VisionStudio.Api/PluginManager.cs')
+node_dispatcher=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeDispatcher.cs')
+if '<PackageReference' in abstractions_csproj: fail('VisionStudio.Abstractions must not have third-party package references')
+if 'VisionStudio.Abstractions' not in engine_csproj: fail('Engine does not reference VisionStudio.Abstractions')
+if 'VisionStudio.Abstractions' not in sample_csproj or 'VisionStudio.Engine' in sample_csproj:
+    fail('Sample plugin must reference Abstractions only, not Engine')
+for token in ['VisionExecutorLifetime','VisionExecutorConcurrency','Func<IVisionNodeExecutor> Factory','IVisionPlugin']:
+    if token not in plugin_contracts: fail(f'Missing plugin contract token: {token}')
+for token in ['IVisionNodeExecutor','NodeExecutionContext','NodeExecutorResult']:
+    if token not in execution_contracts: fail(f'Missing executor abstraction token: {token}')
+for token in ['RegisterFactory','VisionExecutorConcurrency.Serialized','SemaphoreSlim','SupportsParallel == false']:
+    if token not in plugin_registry: fail(f'Missing runtime plugin enforcement token: {token}')
+if 'Transient' not in plugin_contracts or 'Singleton' not in plugin_contracts: fail('Plugin lifetime enum is incomplete')
+if 'registration.ExecuteAsync' not in node_dispatcher: fail('VisionNodeDispatcher bypasses host-managed registration execution')
+if 'typeof(VisionNodeRegistry)' in plugin_manager or 'VisionStudio.Engine.Runtime' in plugin_manager:
+    fail('Plugin loader shares Engine/runtime types with plugins')
+if 'typeof(IVisionPlugin)' not in plugin_manager or 'typeof(VisionPluginNode)' not in plugin_manager:
+    fail('Plugin loader does not share Abstractions contract types')
+sample_source=read_safe('backend/src/VisionStudio.Plugin.Sample/SampleMathPlugin.cs')
+if 'using VisionStudio.Engine' in sample_source: fail('Sample plugin source still imports Engine')
+if 'VisionPluginNode.PerNode' not in sample_source: fail('Sample plugin does not demonstrate SDK 2.0 PerNode lifetime')
+for p in (ROOT/'backend/src/VisionStudio.Abstractions').glob('*.cs'):
+    txt=p.read_text(encoding='utf-8')
+    for forbidden in ['using OpenCvSharp', 'using WorkflowCore', 'using NModbus', 'using S7.Net', 'using VisionStudio.Engine']:
+        if forbidden in txt: fail(f'Abstractions leaks implementation dependency {forbidden}: {p.name}')
+ok('V0.22 Abstractions-only plugin boundary + factory/lifetime/concurrency semantics present')
+contract = json.loads(read_safe('contracts/api-required-endpoints.json'))
+if contract.get('version') != 'v0.63': fail(f"API contract version is not v0.63: {contract.get('version')}")
+# manifest have no constraints, while endpoint templates do - normalize before comparing.
+# Route constraints ({id:int}) are implementation details: OpenAPI documents and the contract
+endpoint_sources_normalized=re.sub(r'\{([A-Za-z0-9_]+):[A-Za-z0-9_]+\}', r'{\1}', endpoint_sources)
+seen_contract=set()
+for item in contract.get('required', []):
+    pair=(item.get('method','').lower(), item.get('path',''))
+    if pair in seen_contract: fail(f'Duplicate API contract entry: {pair}')
+    seen_contract.add(pair)
+    method=pair[0].capitalize()
+    if f'app.Map{method}(\"{pair[1]}\"' not in endpoint_sources_normalized:
+        fail(f'Contract endpoint is not mapped in endpoint modules: {pair[0].upper()} {pair[1]}')
+ok(f'API contract endpoints: {len(seen_contract)}')
+
+# Full public route inventory. This protects auxiliary endpoints that are not part of the minimum production contract.
+route_pairs = re.findall(r'\.Map(Get|Post|Put|Delete|Patch)\(\"([^\"]+)\"', endpoint_sources)
+normalized_routes = [(method.lower(), path) for method, path in route_pairs]
+if len(normalized_routes) != len(set(normalized_routes)):
+    duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
+    fail(f'Duplicate endpoint mappings: {duplicates}')
+expected_routes = 266  # Prior 258 + 8 versioned calibration asset routes (versions/publish/rollback).
+if len(set(normalized_routes)) != expected_routes:
+    fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
+ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
+
+# V0.23 host architecture checks retained
+if len(program.splitlines()) > 80:
+    fail(f'Program.cs remains a God file: {len(program.splitlines())} lines')
+for token in ['AddProblemDetails()', 'AddExceptionHandler<ApiExceptionHandler>()']:
+    if token not in host_registration: fail(f'ProblemDetails infrastructure missing: {token}')
+if 'app.UseExceptionHandler();' not in program: fail('Global exception handler middleware is not enabled')
+exception_handler=read_safe('backend/src/VisionStudio.Api/Infrastructure/ApiExceptionHandler.cs')
+for status in ['Status400BadRequest','Status404NotFound','Status409Conflict','Status503ServiceUnavailable','Status500InternalServerError']:
+    if status not in exception_handler: fail(f'ProblemDetails mapper missing {status}')
+for token in ['correlationId','X-Correlation-ID']:
+    if token not in exception_handler: fail(f'ProblemDetails correlation token missing: {token}')
+if 'catch (Exception ex) { return Results.BadRequest' in endpoint_sources:
+    fail('Endpoint modules still contain catch-all Exception -> 400 mapping')
+for token in ['StorageMigrationHostedService','RuntimeBootstrapHostedService','ProductionRuntimeHostedService','TraceRetentionHostedService']:
+    if f'AddHostedService<{token}>()' not in host_registration: fail(f'Hosted service registration missing: {token}')
+order=[host_registration.find(f'AddHostedService<{x}>()') for x in ['StorageMigrationHostedService','RuntimeBootstrapHostedService','ProductionRuntimeHostedService','TraceRetentionHostedService']]
+if any(x < 0 for x in order) or order != sorted(order): fail('Hosted startup order is not migrate -> bootstrap -> production -> retention')
+if 'Cors:AllowedOrigins' not in host_registration: fail('CORS origins are not configuration-backed')
+if 'app.MapVisionStudioApi();' not in program: fail('Modular endpoint root mapping is missing')
+ok(f'V0.23 modular host retained: Program.cs={len(program.splitlines())} lines, endpoint modules={len(list((ROOT/"backend/src/VisionStudio.Api/Endpoints").glob("*.cs")))}')
+
+# V0.24 RBAC / sessions / audit
+security_models=read_safe('backend/src/VisionStudio.Api/Security/SecurityModels.cs')
+security_store=read_safe('backend/src/VisionStudio.Api/Security/SecurityStore.cs')
+auth_handler=read_safe('backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs')
+audit_source=read_safe('backend/src/VisionStudio.Api/Security/Audit.cs')
+security_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs')
+frontend_security=read_safe('frontend/src/security.tsx')
+for token in ['SecurityRoles.Operator','SecurityRoles.Engineer','SecurityRoles.Administrator','SetFallbackPolicy','AddAuthentication','AddRateLimiter','RateLimitPartition.GetFixedWindowLimiter']:
+    if token not in host_registration: fail(f'V0.24 security registration missing: {token}')
+# V0.28 moved DDL into an explicit ordered migration source.
+schema_migration_source=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+# "Current schema version" assertions read the live implementation instead of a frozen literal.
+_current_schema_match = re.search(r'CurrentVersion\s*=\s*(\d+)', schema_migration_source)
+CURRENT_SCHEMA_TOKEN = f'CurrentVersion = {_current_schema_match.group(1)}' if _current_schema_match else 'CurrentVersion = 0'
+security_schema=read_safe('backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs') + '\n' + schema_migration_source
+for token in ['security_users','security_sessions','audit_events',CURRENT_SCHEMA_TOKEN]:
+    if token not in security_schema: fail(f'V0.24 security schema missing: {token}')
+for token in ['Rfc2898DeriveBytes.Pbkdf2','CryptographicOperations.FixedTimeEquals','SHA256.HashData','At least one enabled Administrator must remain']:
+    if token not in security_store: fail(f'Credential/session hardening missing: {token}')
+if 'password TEXT' in security_schema.lower() or 'password TEXT' in security_store:
+    fail('Plaintext password persistence detected')
+if 'CookieName' not in security_models or 'vs_session' not in security_models: fail('HttpOnly session cookie option is missing')
+for token in ['Request.Cookies[_security.CookieName]','Bearer ','HandleChallengeAsync','HandleForbiddenAsync']:
+    if token not in auth_handler: fail(f'Authentication handler missing: {token}')
+for token in ['AuditActionMetadata','audit_events','FindFirstValue','RouteTarget']:
+    if token not in audit_source: fail(f'Audit implementation missing: {token}')
+for token in ['/api/auth/bootstrap','/api/auth/login','/api/auth/me','/api/security/users','/api/audit']:
+    if token not in security_endpoints: fail(f'Security endpoint missing: {token}')
+if security_endpoints.count('RequireRateLimiting("auth")') < 2: fail('Bootstrap/login rate limiting is not applied')
+for token in ['RequireOperator(','RequireEngineer(','RequireAdministrator(']:
+    if token not in endpoint_sources: fail(f'Role-protected mutation mappings missing: {token}')
+if 'app.UseAuthentication();' not in program or 'app.UseAuthorization();' not in program or 'app.UseMiddleware<AuditMiddleware>();' not in program:
+    fail('Authentication/authorization/audit middleware pipeline is incomplete')
+if '/api/auth/' not in read_safe('backend/src/VisionStudio.Api/Infrastructure/RuntimeOnlyMiddleware.cs'):
+    fail('Runtime-only host blocks security/session administration')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+security_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
+if not security_settings.get('Security', {}).get('Enabled', False): fail('Security is not enabled by default')
+ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
+
+# V0.25 RuntimeDependencyManifest / production provenance
+trace_store_dependency=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+dependency_source=read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs')
+job_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
+trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
+production_source=read_safe('backend/src/VisionStudio.Api/ProductionRuntime.cs')
+job_store_source=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
+for token in ['RuntimeDependencyManifest','EngineRuntimeDependency','PluginRuntimeDependency','CameraRuntimeDependency','DeviceRuntimeDependency','RobotRuntimeDependency','CalibrationRuntimeDependency','ManifestHash','CaptureAsync','ValidateAsync','ValidateOrThrowAsync']:
+    if token not in dependency_source: fail(f'Runtime dependency manifest implementation missing: {token}')
+for token in ['registration.Source','AssemblySha256','cameraId','deviceId','robotId','assetId','assetVersion','ConfigurationHash']:
+    if token not in dependency_source + plugin_manager: fail(f'Runtime dependency capture token missing: {token}')
+for token in ['runtime_dependency_manifests','published_dependency_manifest_hash','dependency_manifest_hash',CURRENT_SCHEMA_TOKEN]:
+    if token not in security_schema: fail(f'V0.25 dependency schema missing: {token}')
+for token in ['StoreManifestAsync','GetPublishedSnapshotAsync','dependency_manifest_hash','PublishedDependencyManifestHash']:
+    if token not in job_store_source: fail(f'Job publication dependency persistence missing: {token}')
+for token in ['GetPublishedSnapshotAsync','ValidateOrThrowAsync','PROD-DEPENDENCY-DRIFT','EnsureDependencyMutationAllowed','LockedDependencyManifestHash']:
+    if token not in production_source: fail(f'Production dependency drift guard missing: {token}')
+for token in ['/api/jobs/{id}/dependencies','/api/jobs/{id}/dependencies/validate']:
+    if token not in job_endpoints: fail(f'Job dependency endpoint missing: {token}')
+if '/api/traces/{runId}/dependencies' not in trace_endpoints: fail('Trace dependency provenance endpoint missing')
+if 'GetDependencyManifestAsync' not in trace_store_dependency: fail('TraceabilityStore cannot resolve dependency manifest')
+if 'AddSingleton<RuntimeDependencyManifestService>()' not in host_registration: fail('RuntimeDependencyManifestService is not registered')
+for rel in ['backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs','backend/src/VisionStudio.Api/Endpoints/DeviceEndpoints.cs','backend/src/VisionStudio.Api/Endpoints/RobotEndpoints.cs']:
+    if 'EnsureDependencyMutationAllowed' not in read_safe(rel): fail(f'Production dependency mutation guard missing from {rel}')
+frontend_types=read_safe('frontend/src/types.ts')
+production_panel=read_safe('frontend/src/components/ProductionPanel.tsx')
+job_panel=read_safe('frontend/src/components/JobPanel.tsx')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.25 RuntimeDependencyManifest + publication/trace provenance + production drift guard present')
+
+
+# Retained V0.35 multi-camera PTP + Action Command synchronization runtime
+sync_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
+sync_runtime=read_safe('backend/src/VisionStudio.Api/CameraSynchronization.cs')
+sync_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraSynchronizationEndpoints.cs')
+basler_sync=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerCameraSynchronization.cs')
+hik_sync=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraSynchronization.cs')
+basler_adapter=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraAdapterProvider.cs')
+hik_adapter=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs')
+sync_tests=read_safe('backend/tests/VisionStudio.Api.Tests/CameraSynchronizationTests.cs')
+for token in ['ICameraSynchronizationProvider','ICameraActionCommandProvider','CameraTimeSynchronizationStatus','CameraActionCommandRequest','DeviceTimestampNs','DeviceTickFrequencyHz','ScheduledRequiresTickFrequency']:
+    if token not in sync_contracts: fail(f'V0.35 camera synchronization contract missing: {token}')
+for token in ['camera_sync_groups','CameraSynchronizationGroupStore','CameraSynchronizationService','MaxTriggerSkewUs','ScheduledDeviceTimeNs','device-ptp']:
+    if token not in sync_runtime and token not in schema_migration_source: fail(f'V0.35 sync runtime/schema token missing: {token}')
+for token in ['/api/camera-sync/groups','/status','/trigger','/schedule','EnsureDependencyMutationAllowed']:
+    if token not in sync_endpoints: fail(f'V0.35 sync endpoint token missing: {token}')
+for token in ['GevIEEE1588DataSetLatch','GevIEEE1588OffsetFromMaster','PtpServoStatus']:
+    if token not in basler_sync: fail(f'V0.35 Basler PTP diagnostic token missing: {token}')
+for token in ['ActionCommandTrigger','Schedule','Issue']:
+    if token not in basler_adapter: fail(f'V0.35 Basler Action Command token missing: {token}')
+for token in ['MV_GIGE_IssueActionCommand_NET','MV_ACTION_CMD_INFO','bActionTimeEnable','nActionTime','DeviceTickFrequencyHz']:
+    if token not in hik_adapter: fail(f'V0.35 Hikrobot Action Command token missing: {token}')
+for token in ['GevIEEE1588','CameraPtpClockState']:
+    if token not in hik_sync: fail(f'V0.35 Hikrobot PTP token missing: {token}')
+for token in ['synchronizationGroupHashes','manifestSchemaVersion']:
+    if token not in dependency_source: fail(f'V0.35 RuntimeDependencyManifest synchronization provenance missing: {token}')
+for token in ['SchemaV10_CreatesCameraSynchronizationCommissioningPtpAndTransportEvidence','SynchronizationGroupHash_IsStableAcrossCameraOrdering','CaptureResult_ComputesDeviceTimestampSkew']:
+    if token not in sync_tests: fail(f'V0.35 synchronization regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.35 multi-camera PTP diagnostics + Action Command runtime + skew measurement retained')
+
+
+# V0.36 synchronized FrameSet workflow primitive
+frameset_contract=read_safe('backend/src/VisionStudio.Abstractions/VisionData.cs')
+frameset_runtime=read_safe('backend/src/VisionStudio.Engine/Camera/VisionFrameSet.cs')
+camera_nodes=read_safe('backend/src/VisionStudio.Engine/Nodes/CameraNodes.cs')
+frameset_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/FrameSetWorkflowTests.cs')
+frameset_sample=json.loads(read_safe('samples/synchronized-frameset-workflow.json'))
+for token in ['FrameSet','IVisionFrameSet','VisionFrameSetFrameInfo','VisionValue FrameSet']:
+    if token not in frameset_contract: fail(f'V0.36 FrameSet contract missing: {token}')
+for token in ['VisionFrameSet','ISynchronizedFrameSetService','SynchronizedFrameSetCaptureRequest','IDisposable']:
+    if token not in frameset_runtime: fail(f'V0.36 FrameSet runtime ownership token missing: {token}')
+for token in ['camera.syncCapture','frameset.image','SynchronizedCaptureNode','FrameSetImageNode','TriggerSkewUs','timestampBasis']:
+    if token not in camera_nodes: fail(f'V0.36 FrameSet node token missing: {token}')
+if 'WaitForFrameLeaseAsync' not in read_safe('backend/src/VisionStudio.Engine/Camera/CameraManager.cs'):
+    fail('V0.36 CameraManager cannot retain exact synchronized frame leases')
+for token in ['ISynchronizedFrameSetService','Task<VisionFrameSet> CaptureAsync','WaitForFrameLeaseAsync']:
+    if token not in sync_runtime: fail(f'V0.36 synchronization-to-FrameSet bridge missing: {token}')
+# R04 (2026-10-11 review): the groupId->member-camera expansion moved into CollectNodeResources
+# (declared Resources path) plus the post-loop expansion; assert the current implementation tokens.
+# The behavioural contract is covered by RuntimeDependencyManifestTests.SynchronizedGroupId_ExpandsToMemberCameras.
+if 'CollectNodeResources(node, registration.Catalog, cameraIds, synchronizationGroupIds, deviceIds, robotIds)' not in dependency_source \
+        or 'foreach (var cameraId in group.CameraIds) cameraIds.Add(cameraId)' not in dependency_source \
+        or 'case "camerasyncgroup": synchronizationGroupIds.Add(value); break;' not in dependency_source:
+    fail('V0.36 dependency manifest does not expand synchronization groupId to member cameras')
+for token in ['VisionDataType.FrameSet','FrameSetImageNode_selects_requested_camera_without_clone','VisionFrameSet_disposes_every_owned_image','SynchronizedCaptureNode_emits_FrameSet_and_skew_metadata']:
+    if token not in frameset_tests: fail(f'V0.36 FrameSet regression test missing: {token}')
+if not any(n.get('type') == 'camera.syncCapture' for n in frameset_sample.get('nodes', [])) or not any(n.get('type') == 'frameset.image' for n in frameset_sample.get('nodes', [])):
+    fail('V0.36 synchronized FrameSet sample does not exercise both built-in nodes')
+for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
+    doc_present(rel)
+# R09 (2026-10-12 review): the template picker was regrouped into a modal backed by
+# DEMO_GROUPS/DEMO_LABELS (App.tsx) — the old hard-coded `value: 'frameSet'` literal no longer
+# exists, so the previous assertion failed while the feature was intact. Assert the current
+# representation instead (behaviour-test migration tracked in STATIC_AUDIT_TRIAGE.md).
+if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or "'frameSet'" not in frontend_app:
+    fail('V0.36 frontend synchronized FrameSet demo is missing')
+ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
+
+# V0.40 automatic synchronization commissioning test
+commissioning_source=read_safe('backend/src/VisionStudio.Api/CameraSynchronizationCommissioning.cs')
+for token in ['camera_sync_commissioning_tests','CameraSynchronizationCommissioningService','RequestedIterations','CompletedIterations','commissioning:{current.TestId}','ApplicationStopping','CancelAsync','CameraSynchronizationCommissioningReport']:
+    if token not in commissioning_source and token not in schema_migration_source: fail(f'V0.40 commissioning token missing: {token}')
+for route in ['/api/camera-sync/groups/{id}/commissioning-tests','/api/camera-sync/commissioning-tests/{testId}/cancel','/api/camera-sync/commissioning-tests/{testId}/report']:
+    if route not in endpoint_sources: fail(f'V0.40 commissioning endpoint missing: {route}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if 'new(8, "V0.39 camera synchronization commissioning tests"' not in schema_migration_source: fail('V0.40 schema migration v8 missing')
+if 'CommissioningStore_PersistsProgressAndReportMetadata' not in sync_tests: fail('V0.40 commissioning store regression test missing')
+doc_present('MIGRATION_V038_TO_V039.md')
+ok('V0.40 automatic synchronization commissioning test + persisted report workflow present')
+
+# V0.40 commissioning evidence report
+for token in ['ReportSchemaVersion','HardwareFingerprint','EvidenceHash','WorstRuns','GetReportHtmlAsync']:
+    if token not in commissioning_source: fail(f'V0.40 report evidence token missing: {token}')
+if '/api/camera-sync/commissioning-tests/{testId}/report.html' not in endpoint_sources: fail('V0.40 HTML report endpoint missing')
+if 'exportSyncTestHtml' not in camera_ui: fail('V0.40 HTML report UI export missing')
+doc_present('CAMERA_COMMISSIONING_REPORT.md')
+doc_present('MIGRATION_V039_TO_V040.md')
+ok('V0.40 commissioning evidence report + HTML export present')
+
+
+# V0.41 visual commissioning evidence and worst-run drill-down
+for token in ['CameraSynchronizationCommissioningFrameEvidence','DeltaFromFirstUs','SvgPolyline','SvgPtpOffsets','Worst Samples & Timestamp Drill-down']:
+    if token not in commissioning_source: fail(f'V0.41 visual report token missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+doc_present('MIGRATION_V040_TO_V041.md')
+if not doc_has('CAMERA_COMMISSIONING_REPORT.md', 'schema **v4**'): fail('Commissioning report guide does not describe current schema v4')
+ok('V0.41 visual commissioning report + per-camera worst-run timestamp drill-down present')
+
+
+# V0.42 persisted PTP timing evidence + diagnostics
+for token in ['PtpSnapshots','CameraSynchronizationPtpDiagnostics','ComputePtpDiagnostics','OffsetSkewPearsonCorrelation','CapturePtpSnapshotsAsync']:
+    if token not in sync_runtime: fail(f'V0.42 PTP timing evidence token missing: {token}')
+if 'new(9, "V0.42 camera synchronization PTP timing evidence"' not in schema_migration_source or 'ptp_json' not in schema_migration_source:
+    fail('V0.42 schema migration v9 / ptp_json missing')
+if '/api/camera-sync/groups/{id}/ptp-diagnostics' not in endpoint_sources:
+    fail('V0.42 PTP diagnostics endpoint missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['SvgPtpTrend','PtpDiagnostics','"v4"']:
+    if token not in commissioning_source: fail(f'V0.42 report v4 PTP trend token missing: {token}')
+if 'PtpDiagnostics_ComputesReadyRateOffsetPercentileAndCorrelation' not in sync_tests:
+    fail('V0.42 PTP diagnostics regression test missing')
+doc_present('MIGRATION_V041_TO_V042.md')
+ok('V0.42 per-run PTP evidence + timing diagnostics + report v4 trend present')
+
+# V0.43 Production PTP drift guard
+ptp_guard=read_safe('backend/src/VisionStudio.Api/ProductionPtpDriftGuard.cs')
+production_runtime=read_safe('backend/src/VisionStudio.Api/ProductionRuntime.cs')
+production_ui=read_safe('frontend/src/components/ProductionPanel.tsx')
+ptp_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductionPtpDriftGuardTests.cs')
+for token in ['PtpDriftGuardEnabled','PtpGuardWindowRuns','PtpGuardMinimumEvidenceRuns','PtpGuardMinimumReadyRate','PtpGuardCheckEveryCycles']:
+    if token not in production_runtime: fail(f'V0.43 production PTP guard config missing: {token}')
+for token in ['PROD-PTP-NOT-READY','PROD-PTP-DRIFT','PROD-PTP-MASTER-CLOCK','ComputePtpDiagnostics','ResolveRequirements']:
+    if token not in ptp_guard + production_runtime: fail(f'V0.43 production PTP guard token missing: {token}')
+if '/api/production/ptp-guard' not in endpoint_sources: fail('V0.43 production PTP guard endpoint missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['ResolveRequirements_FindsScheduledSynchronizedCapture','ResolveRequirements_MergesDuplicateGroupAndKeepsStrictestPolicy']:
+    if token not in ptp_guard_tests: fail(f'V0.43 PTP guard regression test missing: {token}')
+doc_present('MIGRATION_V042_TO_V043.md')
+ok('V0.43 Production PTP start gate + sliding-window drift/master-clock guard present')
+
+# V0.44 Production synchronization health guard
+sync_guard=read_safe('backend/src/VisionStudio.Api/ProductionSynchronizationHealthGuard.cs')
+sync_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductionSynchronizationHealthGuardTests.cs')
+for token in ['SynchronizationHealthGuardEnabled','SynchronizationGuardWindowRuns','SynchronizationGuardMaximumFailureRate','SynchronizationGuardMaximumFrameTimeoutRate','SynchronizationGuardMaxConsecutiveSkewViolations','SynchronizationGuardUnhealthyChecksToFault','SynchronizationGuardHealthyChecksToRecover']:
+    if token not in production_runtime: fail(f'V0.44 synchronization guard config missing: {token}')
+for token in ['PROD-SYNC-CAMERA-NOT-READY','PROD-SYNC-ACTION','PROD-SYNC-ACTION-ACK','PROD-SYNC-FRAME-TIMEOUT','PROD-SYNC-SKEW','PROD-SYNC-FRAME-LOSS','LiveRecoverableOnly','EstimateSequenceGaps']:
+    if token not in sync_guard + production_runtime: fail(f'V0.44 synchronization guard token missing: {token}')
+if 'ProductionSynchronizationHealthGuardService' not in host_registration: fail('V0.44 synchronization guard DI registration missing')
+if '/api/production/synchronization-guard' not in endpoint_sources: fail('V0.44 synchronization guard endpoint missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['ResolveGroupIds_FindsImmediateAndScheduledSynchronizationGroups','Evaluate_MissingLiveCameras_IsRecoverableTransportFault','Evaluate_DisabledGuard_DoesNotInspectSynchronizationDependencies']:
+    if token not in sync_guard_tests: fail(f'V0.44 synchronization guard regression test missing: {token}')
+if 'synchronizationHealthGuardEnabled' not in read_safe('frontend/src/types.ts'): fail('V0.44 frontend sync guard type surface missing')
+doc_present('MIGRATION_V043_TO_V044.md')
+ok('V0.44 Production synchronization Action/frame/skew/sequence health guard + reconnect hysteresis present')
+
+# V0.45 vendor-native transport telemetry + persisted evidence
+camera_contracts=read_safe('backend/src/VisionStudio.Engine/Camera/CameraContracts.cs')
+basler_transport=read_safe('backend/src/VisionStudio.Camera.Basler/BaslerTransportTelemetry.cs')
+hik_transport=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotTransportTelemetry.cs')
+camera_sync=read_safe('backend/src/VisionStudio.Api/CameraSynchronization.cs')
+camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
+camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
+frontend_types=read_safe('frontend/src/types.ts')
+for token in ['CameraTransportTelemetry','HasNativeCounters','Transport = null']:
+    if token not in camera_contracts: fail(f'V0.45 normalized camera transport contract missing: {token}')
+for token in ['Statistic_Buffer_Underrun_Count','Statistic_Failed_Packet_Count','Statistic_Resend_Request_Count','Statistic_Total_Packet_Count','basler-pylon-stream']:
+    if token not in basler_transport: fail(f'V0.45 Basler transport telemetry token missing: {token}')
+for token in ['MV_CC_GetAllMatchInfo_NET','MV_MATCH_INFO_NET_DETECT','nLostPacketCount','nRequestResendPacketCount','hikrobot-mvs-net-detect']:
+    if token not in hik_transport: fail(f'V0.45 Hikrobot transport telemetry token missing: {token}')
+for token in ['transport_json','TransportSnapshots','CaptureTransportSnapshots']:
+    if token not in camera_sync: fail(f'V0.45 synchronization transport evidence missing: {token}')
+for token in ['ApplyCameraTransportTelemetryEvidenceAsync','camera_sync_runs.transport_json']:
+    if token not in schema_migration_source: fail(f'V0.45 schema v10 transport evidence migration missing: {token}')
+for token in ['SynchronizationGuardMaximumNativeFrameLossRate','SynchronizationGuardMaximumBufferUnderruns','SynchronizationGuardMaximumResynchronizations']:
+    if token not in production_runtime: fail(f'V0.45 native transport guard config missing: {token}')
+for token in ['PROD-SYNC-TRANSPORT','ComputeNativeTransport','vendor-native','mixed-native+sequence']:
+    if token not in sync_guard: fail(f'V0.45 vendor transport production guard missing: {token}')
+if '/api/cameras/{id}/transport-telemetry' not in camera_endpoints: fail('V0.45 camera transport telemetry endpoint missing')
+camera_health=read_safe('backend/src/VisionStudio.Api/Diagnostics/AssetHealthProviders.cs')
+for token in ['transportLostFrames','transportBufferUnderruns','transportResendRequests','transportThroughputMbps']:
+    if token not in camera_health: fail(f'V0.45 Diagnostics Center camera transport metric missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['CameraTransportTelemetry','transportSnapshots']:
+    if token not in frontend_types: fail(f'V0.45 frontend transport telemetry type missing: {token}')
+if 'ComputeNativeTransport_PrefersVendorCountersAndCalculatesWindowDeltas' not in sync_guard_tests:
+    fail('V0.45 vendor transport delta regression test missing')
+if 'V044RuntimeConfig_UpgradesMissingNativeTransportGuardFieldsToV045Defaults' not in read_safe('backend/tests/VisionStudio.Api.Tests/ProductionRuntimeTests.cs'):
+    fail('V0.45 V0.44 runtime config compatibility regression test missing')
+doc_present('MIGRATION_V044_TO_V045.md')
+ok('V0.45 Basler/Hikrobot vendor transport telemetry + persisted run evidence + native-first Production Guard present')
+
+# V0.46 GigE network commissioning + host NIC capacity diagnostics
+gige_source=read_safe('backend/src/VisionStudio.Api/GigENetworkCommissioning.cs')
+gige_tests=read_safe('backend/tests/VisionStudio.Api.Tests/GigENetworkDiagnosticsTests.cs')
+for token in ['NetworkInterface.GetAllNetworkInterfaces','GetIPStatistics','SpeedMbps','MtuBytes','SameSubnet','BuildTransportTrend','PeakNicUtilization','PacketSizeBytes','InterPacketDelayTicks']:
+    if token not in gige_source: fail(f'V0.46 GigE network diagnostics token missing: {token}')
+for token in ['gige-network-diagnostics','gige-network-tests']:
+    if token not in endpoint_sources: fail(f'V0.46 GigE endpoint missing: {token}')
+if 'GigENetworkDiagnosticsService' not in host_registration: fail('V0.46 GigE diagnostics DI registration missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['GigENetworkDiagnostics','GigENetworkAssessment','GigENetworkTrendPoint']:
+    if token not in frontend_types: fail(f'V0.46 frontend GigE type missing: {token}')
+for token in ['SameSubnet_UsesHostMaskAndConservativeSlash24Fallback','BuildTransportTrend_ComputesVendorCounterDeltasAndResendRate','BuildTransportTrend_TreatsCounterResetAsNewCounterEpoch']:
+    if token not in gige_tests: fail(f'V0.46 GigE regression test missing: {token}')
+if 'new(10, "V0.45 camera vendor transport telemetry evidence"' not in schema_migration_source: fail('V0.46 must retain the schema v10 transport migration')
+doc_present('MIGRATION_V045_TO_V046.md')
+ok('V0.46 host NIC mapping + bandwidth/resend diagnostics + one-click GigE commissioning test present')
+
+# V0.47 Offline Replay + Workflow Debugger
+replay_source=read_safe('backend/src/VisionStudio.Api/OfflineReplay.cs')
+replay_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ReplayEndpoints.cs')
+replay_ui=read_safe('frontend/src/components/ReplayDebuggerPanel.tsx')
+models_source=read_safe('backend/src/VisionStudio.Engine/Models.cs')
+workflow_data_source=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
+for token in ['OfflineReplayService','EnsureReplayCompatible','PrepareExecutableWorkflow','__replayInputPath','Deterministic re-execution']:
+    if token not in replay_source: fail(f'V0.47 replay service token missing: {token}')
+for token in ['/api/traces/{runId}/replay/context','/api/traces/{runId}/replay/input','/api/traces/{runId}/replay']:
+    if token not in replay_endpoints: fail(f'V0.47 replay endpoint missing: {token}')
+for token in ['HasReplayInput','FindReplayInputPath','OkReplaySampleEvery','replay-input.png']:
+    if token not in trace_store_dependency: fail(f'V0.47 trace replay artifact token missing: {token}')
+for token in ['VisionValueSnapshot','Inputs = null','Outputs = null','ReplayInputArtifact']:
+    if token not in models_source: fail(f'V0.47 node value snapshot model missing: {token}')
+if 'BuildReplayInput' not in workflow_data_source: fail('V0.47 runtime does not capture replay input evidence')
+for token in ['new(11, "V0.47 offline replay artifacts"','ApplyOfflineReplayArtifactsAsync','has_replay_input','replay_relative_path']:
+    if token not in schema_migration_source: fail(f'V0.47 schema v11 replay migration missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if 'OfflineReplay_ReexecutesSoftwareWorkflow_AndReturnsNodeSnapshots' not in api_smoke: fail('V0.47 replay API regression test missing')
+sqlite_tests=read_safe('backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs')
+if 'V047ReplayInput_IsPersistedAsDedicatedPngArtifact_AndSchemaIsV11' not in sqlite_tests: fail('V0.47 replay artifact persistence regression test missing')
+v47_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
+if 'OkReplaySampleEvery' not in v47_settings.get('TraceRetention', {}): fail('V0.47 replay sampling configuration missing')
+ok('V0.47 persisted replay inputs + deterministic offline debugger + node input/output snapshots present')
+
+
+# V0.48 Dataset / Batch Validation
+dataset_source=read_safe('backend/src/VisionStudio.Api/DatasetValidation.cs')
+dataset_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/DatasetValidationEndpoints.cs')
+dataset_ui=read_safe('frontend/src/components/DatasetValidationPanel.tsx')
+dataset_tests=read_safe('backend/tests/VisionStudio.Api.Tests/DatasetValidationTests.cs')
+for token in ['DatasetValidationStore','DatasetValidationService','ValidationRunSummary','FALSE_OK','FALSE_NG','P95DurationMs','TopologyHash','SourceKind','MEDIA','TRACE']:
+    if token not in dataset_source: fail(f'V0.48 dataset validation token missing: {token}')
+for token in ['/api/validation/datasets','/api/validation/datasets/{datasetId}/items','/api/validation/datasets/{datasetId}/runs','/api/validation/runs/{runId}','/api/validation/runs/{runId}/cancel']:
+    if token not in dataset_endpoints: fail(f'V0.48 validation endpoint missing: {token}')
+for token in [CURRENT_SCHEMA_TOKEN,'V0.48 dataset and batch validation','validation_datasets','validation_dataset_items','validation_runs','validation_results']:
+    if token not in schema_migration_source: fail(f'V0.48 schema v12 dataset migration missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['ExecuteImageAsync','dataset-image-replay']:
+    if token not in replay_source: fail(f'V0.48 Media Library replay integration missing: {token}')
+for token in ['V048Summary_ComputesFalseOkFalseNgErrorsAndTiming','V048Schema12_CreatesDatasetBatchValidationTables']:
+    if token not in dataset_tests: fail(f'V0.48 dataset regression test missing: {token}')
+if 'DatasetValidation_DatasetCrudSurface_IsExposed' not in api_smoke: fail('V0.48 dataset API smoke test missing')
+ok('V0.48 persistent labeled datasets + Trace/Media batch validation + false OK/NG + A/B comparison present')
+
+
+# V0.49 Parameter Tuning Workspace
+tuning_source=read_safe('backend/src/VisionStudio.Api/ParameterTuning.cs')
+tuning_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ParameterTuningEndpoints.cs')
+tuning_ui=read_safe('frontend/src/components/ParameterTuningPanel.tsx')
+tuning_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ParameterTuningTests.cs')
+for token in ['ParameterTuningService','ParameterTuningPreviewRequest','persistTrace: false','RunNode','FALSE_OK','FALSE_NG']:
+    if token not in tuning_source: fail(f'V0.49 tuning service token missing: {token}')
+for token in ['/api/tuning/preview']:
+    if token not in tuning_endpoints: fail(f'V0.49 tuning endpoint missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if '/api/validation/runs/{runId}/workflow' not in dataset_endpoints: fail('V0.49 validation candidate workflow endpoint missing')
+if 'V049Classification_UsesIndustrialFalseOkFalseNgSemantics' not in tuning_tests: fail('V0.49 tuning regression test missing')
+if 'ParameterTuning_TransientPreview_AndCandidateWorkflow_AreExposed' not in api_smoke: fail('V0.49 tuning API smoke test missing')
+if 'persistTrace = true' not in replay_source or 'if (persistTrace)' not in replay_source: fail('V0.49 transient replay persistence guard missing')
+ok('V0.49 transient single-image tuning + catalog-driven controls + ROI + persisted Dataset validation candidates present')
+
+# V0.50 Product / Recipe lifecycle
+product_recipe_source=read_safe('backend/src/VisionStudio.Api/ProductRecipeStore.cs')
+product_recipe_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/ProductRecipeEndpoints.cs')
+product_recipe_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductRecipeLifecycleTests.cs')
+for token in ['ProductDescriptor','ValidationAcceptancePolicy','LinkValidationAsync','CloneRecipeAsync','DiffAsync','False OK']:
+    if token not in product_recipe_source: fail(f'V0.50 product recipe token missing: {token}')
+for token in ['/api/recipes','/api/jobs/{id}/clone','/validation-candidates','/validation']:
+    if token not in product_recipe_endpoints: fail(f'V0.50 product recipe endpoint missing: {token}')
+for token in ['V050ProductRecipe_PublishRequiresAcceptedValidationForExactWorkflowHash','V050ValidationPolicy_RejectsFalseOkEvenWhenAccuracyLooksHigh','V050CloneAndDiff_KeepRecipeTopologyTraceable']:
+    if token not in product_recipe_tests: fail(f'V0.50 product recipe regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['V0.50 product recipe lifecycle','products','job_version_validations','jobs.product_id','jobs.recipe_code',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source and token not in endpoint_sources: fail(f'V0.50 product recipe schema/version token missing: {token}')
+ok('V0.50 Product → Recipe → validated immutable version → publish lifecycle present')
+
+
+
+# V0.51 Recipe Parameter Binding
+parameter_source=read_safe('backend/src/VisionStudio.Api/RecipeParameterization.cs')
+parameter_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/RecipeParameterEndpoints.cs')
+parameter_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RecipeParameterBindingTests.cs')
+for token in ['RecipeParameterStore','ResolvedRecipeParameterization','ResolveForJobAsync','product_parameter_values','recipe_parameter_values','IsCompatible']:
+    if token not in parameter_source: fail(f'V0.51 parameter binding token missing: {token}')
+for token in ['/api/jobs/{id}/parameters','/api/jobs/{id}/parameterization/resolve','/api/jobs/{id}/versions/{version:int}/parameterization']:
+    if token not in parameter_endpoints: fail(f'V0.51 parameter endpoint missing: {token}')
+for token in ['base_workflow_hash','base_workflow_json','parameter_bindings_json','parameter_snapshot_json','V0.51 recipe parameter binding',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source: fail(f'V0.51 parameter schema token missing: {token}')
+for token in ['V051Resolve_BindsProductAndRecipeValues_AndFreezesSnapshotIntoVersion','V051ImmutableVersion_DoesNotHotChangeWhenRecipeParameterDraftChanges','V051Resolver_RejectsMissingSourceAndTypeMismatch']:
+    if token not in parameter_tests: fail(f'V0.51 parameter regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if 'snapshot.Workflow' not in read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs'):
+    fail('V0.51 Production/Publish path no longer consumes immutable effective Workflow snapshot')
+ok('V0.51 Product/Recipe parameter drafts → frozen binding snapshot → effective immutable Workflow present')
+
+
+# V0.52 Reusable Workflow Modules / Subflow
+module_source=read_safe('backend/src/VisionStudio.Api/WorkflowModules.cs')
+module_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/WorkflowModuleEndpoints.cs')
+module_tests=read_safe('backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs')
+module_ui=read_safe('frontend/src/components/WorkflowModulePanel.tsx')
+for token in ['WorkflowModuleStore','WorkflowModuleExpander','WorkflowModuleAuthoringService','ModuleAwareVisionWorkflowRunner','module.call','ModuleHash','ExpandAsync','DeleteAuthoringRollbackAsync']:
+    if token not in module_source: fail(f'V0.52 reusable module token missing: {token}')
+for token in ['/api/modules','/api/modules/extract','/api/modules/{id}/versions/{version:int}','/api/modules/{id}/versions','/api/modules/expand','/api/modules/validate']:
+    if token not in module_endpoints: fail(f'V0.52 reusable module endpoint missing: {token}')
+for token in ['workflow_modules','workflow_module_versions','V0.52 reusable workflow modules',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source: fail(f'V0.52 module schema token missing: {token}')
+for token in ['V052Extract_ProducesTypedPinnedCall_AndExpansionRestoresExecutableGraph','V052CallParameter_OverridesInternalParameter_ButKeepsPinnedModuleVersion','V052NewVersion_IsImmutable_AndBreakingInterfaceParameterRemovalIsRejected','V052SchemaV15_CreatesImmutableWorkflowModuleTables']:
+    if token not in module_tests: fail(f'V0.52 reusable module regression test missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['WorkflowModuleRuntimeDependency','moduleExpander','WorkflowModule']:
+    if token not in dependency_source: fail(f'V0.52 module runtime provenance missing: {token}')
+if 'ModuleAwareVisionWorkflowRunner' not in host_registration or 'AddSingleton<WorkflowModuleStore>()' not in host_registration:
+    fail('V0.52 module-aware runtime DI is incomplete')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.52 immutable typed Subflow/Reusable Module extraction + expansion + version pinning present')
+
+
+# V0.53 Software Plugin SDK 2.0
+plugin_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginEndpoints.cs')
+plugin_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginSdkV2Tests.cs')
+plugin_lifetime_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/PluginLifetimeTests.cs')
+plugin_manifest=json.loads(read_safe('backend/src/VisionStudio.Plugin.Sample/plugin.json'))
+for token in ['VisionPluginSdk','IVisionPluginV2','VisionPluginCompatibility','VisionPluginToolIdentity','PerNode','WithToolIdentity']:
+    if token not in plugin_contracts: fail(f'V0.53 SDK 2.0 contract token missing: {token}')
+for token in ['ConcurrentDictionary<string, Lazy<IVisionNodeExecutor>>','VisionExecutorLifetime.PerNode','UnregisterSource','ToolIdentity']:
+    if token not in plugin_registry: fail(f'V0.53 PerNode/registry token missing: {token}')
+for token in ['PluginPackageManifest','plugin.json','PackageManifestSha256','RestartRequired','Rescan','manifest-v2','ValidateNodeSchema','Assembly SHA-256 mismatch']:
+    if token not in plugin_manager: fail(f'V0.53 package loader token missing: {token}')
+for route in ['/api/plugins','/api/plugins/sdk','/api/plugins/rescan']:
+    if route not in plugin_endpoints: fail(f'V0.53 plugin endpoint missing: {route}')
+for token in ['V053ManifestPackage_LoadsWithSdk2ToolIdentityAndPerNodeLifetime','V053ManifestDescriptorMismatch_FailsBeforeNodeActivation','V053Rescan_ChangedActiveManifestRequiresRestartInsteadOfHotReplacement']:
+    if token not in plugin_tests: fail(f'V0.53 plugin package regression test missing: {token}')
+for token in ['PerNodeFactory_ReusesOneExecutorPerConfiguredNodeId','SamplePlugin_DeclaresSdk2PerNodeToolIdentityWithoutEngineTypes']:
+    if token not in plugin_lifetime_tests: fail(f'V0.53 plugin lifetime regression test missing: {token}')
+if plugin_manifest.get('schemaVersion') != 2 or plugin_manifest.get('minimumSdkApiVersion') != 2 or plugin_manifest.get('maximumSdkApiVersion') != 2:
+    fail('V0.53 sample plugin manifest is not SDK API/package schema v2')
+for token in ['PluginToolRuntimeDependency','SchemaVersion < 5','PackageManifestHash','PluginFingerprint','sdkApiVersion = x.SdkApiVersion']:
+    if token not in dependency_source: fail(f'V0.53 plugin production provenance token missing: {token}')
+plugin_package_ui=read_safe('frontend/src/components/PluginPackagePanel.tsx')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if not doc_has('MIGRATION_V052_TO_V053.md', 'schema v15'):
+    fail('V0.53 migration does not explicitly preserve SQLite schema v15')
+ok('V0.53 manifest-based SDK 2.0 + PerNode lifetime + safe runtime discovery + tool-version provenance present')
+
+
+# V0.54 signed plugin packaging / install / rollback
+plugin_package_source=read_safe('backend/src/VisionStudio.Api/PluginPackageManagement.cs')
+plugin_package_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginPackageEndpoints.cs')
+plugin_package_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginPackageManagementTests.cs')
+plugin_packager=read_safe('backend/src/VisionStudio.Plugin.Packager/Program.cs')
+plugin_package_ui=read_safe('frontend/src/components/PluginPackagePanel.tsx')
+for token in ['PluginPackageSignatureManifest','TrustedPluginPublisher','RequireTrustedSignature','ComputeContentHash','VerifySignature','PrepareRuntimePluginRoot','active-pointers.json','Pending','publisher.cer','signature.json']:
+    if token not in plugin_package_source: fail(f'V0.54 package lifecycle token missing: {token}')
+for route in ['/api/plugin-packages','/api/plugin-packages/preflight','/api/plugin-packages/install','/api/plugin-packages/{id}/versions/{version}/select','/api/plugin-packages/{id}/rollback','/api/plugin-publishers','/api/plugin-publishers/trust','/api/plugin-publishers/{thumbprint}']:
+    if route not in plugin_package_endpoints: fail(f'V0.54 plugin package endpoint missing: {route}')
+for token in ['V054SignedPackage_PreflightValidatesTrustedPublisherWithoutExecutingPluginCode','V054Install_KeepsMultipleVersionsAndStagesUpgradeUntilRestart','V054Install_RejectsUnsignedPackageWhenTrustedSignaturePolicyIsEnabled']:
+    if token not in plugin_package_tests: fail(f'V0.54 plugin package regression test missing: {token}')
+for token in ['RSA-SHA256','ECDSA-SHA256','publisher.cer','signature.json','SignHash']:
+    if token not in plugin_packager: fail(f'V0.54 plugin packager token missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if 'AddSingleton<PluginPackageService>()' not in host_registration or 'Configure<PluginPackageOptions>' not in host_registration:
+    fail('V0.54 plugin package service/configuration is not registered')
+if 'PrepareRuntimePluginRoot' not in host_bootstrap:
+    fail('V0.54 pending plugin version is not applied before runtime PluginManager loading')
+if not doc_has('MIGRATION_V053_TO_V054.md', 'schema v15'):
+    fail('V0.54 migration does not explicitly preserve SQLite schema v15')
+ok('V0.54 signed .vspkg preflight + trusted publisher + version repository + pending-restart rollback present')
+
+
+# V0.55 out-of-process plugin worker
+worker_contracts=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerContracts.cs')
+worker_wire=read_safe('backend/src/VisionStudio.Abstractions/PluginWorkerWire.cs')
+worker_supervisor=read_safe('backend/src/VisionStudio.Api/PluginWorkerSupervisor.cs')
+worker_program=read_safe('backend/src/VisionStudio.Plugin.Worker/Program.cs')
+worker_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginWorkerEndpoints.cs')
+worker_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginWorkerTests.cs')
+for token in ['VisionPluginIsolationMode','WorkerProcess','PluginWorkerDiscovery','PluginWorkerExecutionResult','ProtocolVersion']:
+    if token not in worker_contracts: fail(f'V0.55 worker contract token missing: {token}')
+for token in ['NamedPipeServerStream','ExecutionTimeoutMs','MaxWorkingSetMb','MaxRestartsPerMinute','Kill(entireProcessTree: true)','CircuitOpen']:
+    if token not in worker_supervisor: fail(f'V0.55 worker supervisor token missing: {token}')
+for token in ['NamedPipeClientStream','PluginWorkerWire.ReadAsync','registry.Register','PluginWorkerValueCodec']:
+    if token not in worker_program: fail(f'V0.55 worker host token missing: {token}')
+for route in ['/api/plugin-workers','/api/plugin-workers/{pluginId}/restart']:
+    if route not in worker_endpoints: fail(f'V0.55 plugin worker endpoint missing: {route}')
+for token in ['Worker_codec_round_trips_scalar_values','Sdk_surface_advertises_worker_process_isolation','Plugin_manifest_accepts_string_worker_isolation_mode']:
+    if token not in worker_tests: fail(f'V0.55 plugin worker regression test missing: {token}')
+for token in ['isolationMode = x.IsolationMode','SchemaVersion < 6','plugin-worker']:
+    if token not in dependency_source: fail(f'V0.55 worker dependency provenance token missing: {token}')
+if 'VisionStudio.Plugin.Worker' not in read_safe('backend/VisionStudio.slnx'):
+    fail('V0.55 worker project missing from solution')
+if 'AddSingleton<PluginWorkerSupervisor>()' not in host_registration or 'Configure<PluginWorkerOptions>' not in host_registration:
+    fail('V0.55 worker supervisor/configuration is not registered')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if not doc_has('MIGRATION_V054_TO_V055.md', 'schema v15'):
+    fail('V0.55 migration does not explicitly preserve SQLite schema v15')
+ok('V0.55 out-of-process plugin worker + timeout/crash/memory isolation + runtime provenance present')
+
+
+# V0.56 worker pool + shared-memory image transport
+worker_store=read_safe('backend/src/VisionStudio.Engine/PluginWorkerSharedMemoryStore.cs')
+worker_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json')).get('PluginWorkers', {})
+for token in ['PluginWorkerSharedImage','FileBackedSharedMemory','SupportedImageTransports']:
+    if token not in worker_contracts: fail(f'V0.56 worker protocol/shared-image token missing: {token}')
+for token in ['MemoryMappedFile.CreateFromFile','Marshal.Copy','CleanupStaleFiles','Path.GetFileName(fileName)','8UC1','16UC1','32FC1']:
+    if token not in worker_store: fail(f'V0.56 shared-memory transport token missing: {token}')
+for token in ['WorkerPool','DefaultPoolSize','MaxPoolSize','ConcurrentQueue<WorkerClient>','SharedMemoryThresholdBytes','SharedMemoryTransfers','PoolSize']:
+    if token not in worker_supervisor: fail(f'V0.56 worker-pool supervisor token missing: {token}')
+for token in ['--shared-memory-root','PluginWorkerSharedMemoryStore','FileBackedSharedMemory']:
+    if token not in worker_program and token not in worker_contracts: fail(f'V0.56 worker shared-memory host token missing: {token}')
+for token in ['WorkerPoolSize','WorkerSharedMemoryThresholdBytes','WorkerProtocolVersion','WorkerImageTransport']:
+    if token not in plugin_manager: fail(f'V0.56 plugin manifest/load metadata missing: {token}')
+for token in ['Worker_protocol_v3_advertises_shared_memory_transport_and_timings','Plugin_manifest_accepts_pool_and_shared_memory_threshold','Shared_memory_image_codec_round_trips_raw_pixels_without_png_payload']:
+    if token not in worker_tests: fail(f'V0.56 worker regression test missing: {token}')
+for token in ['schemaVersion = 7','workerProtocolVersion = x.WorkerProtocolVersion','workerPoolSize = x.WorkerPoolSize','workerImageTransport = x.WorkerImageTransport','workerSharedMemoryThresholdBytes = x.WorkerSharedMemoryThresholdBytes','plugin-worker-runtime']:
+    if token not in dependency_source: fail(f'V0.56 worker runtime provenance token missing: {token}')
+for key in ['DefaultPoolSize','MaxPoolSize','SharedMemoryEnabled','SharedMemoryThresholdBytes','SharedMemoryRootPath','SharedMemoryStaleMinutes']:
+    if key not in worker_settings: fail(f'V0.56 PluginWorkers configuration missing: {key}')
+if worker_settings.get('MaxPoolSize') != 4 or worker_settings.get('SharedMemoryThresholdBytes') != 1048576:
+    fail('V0.56 default pool/shared-memory thresholds drifted')
+if plugin_manifest.get('workerPoolSize') != 2 or plugin_manifest.get('workerSharedMemoryThresholdBytes') != 262144:
+    fail('V0.56 sample worker plugin does not demonstrate pool/shared-memory configuration')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if not doc_has('MIGRATION_V055_TO_V056.md', 'schema v15'):
+    fail('V0.56 migration does not explicitly preserve SQLite schema v15')
+ok('V0.56 pooled worker execution + file-backed shared-memory image transport + schema-v7 worker runtime provenance present')
+
+
+# V0.57 Worker performance profiler + advisory adaptive pool recommendation
+worker_performance=read_safe('backend/src/VisionStudio.Api/PluginWorkerPerformance.cs')
+worker_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginWorkerEndpoints.cs')
+for token in ['Version = 3','PluginWorkerTiming','Timing { get; init; }']:
+    if token not in worker_contracts: fail(f'V0.57 worker timing protocol token missing: {token}')
+for token in ['QueueWaitMs','IpcRoundTripMs','PluginExecuteMs','P50Ms','P95Ms','P99Ms','RecommendedPoolSize','RecommendationReady','PluginWorkerPerformanceProfiler']:
+    if token not in worker_performance: fail(f'V0.57 profiler token missing: {token}')
+for token in ['PerformanceWindowSize','PerformanceMinimumSamples','AdaptiveTargetUtilization','AdaptiveQueuePressureRatio','RecordPerformance','ResetPerformance']:
+    if token not in worker_supervisor: fail(f'V0.57 supervisor profiling token missing: {token}')
+for token in ['/api/plugin-workers/performance','/api/plugin-workers/{pluginId}/performance/reset']:
+    if token not in worker_endpoints: fail(f'V0.57 profiler endpoint missing: {token}')
+for token in ['Performance_profiler_separates_stages_and_recommends_more_workers_under_queue_pressure','Performance_profiler_reset_clears_rolling_window','Worker_timing_contract_carries_decode_execute_and_encode_segments']:
+    if token not in worker_tests: fail(f'V0.57 profiler regression test missing: {token}')
+for key in ['PerformanceWindowSize','PerformanceMinimumSamples','AdaptiveTargetUtilization','AdaptiveQueuePressureRatio']:
+    if key not in worker_settings: fail(f'V0.57 PluginWorkers profiling configuration missing: {key}')
+if worker_settings.get('PerformanceWindowSize') != 512 or worker_settings.get('PerformanceMinimumSamples') != 30:
+    fail('V0.57 performance-window defaults drifted')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if not doc_has('MIGRATION_V056_TO_V057.md', 'schema v15'):
+    fail('V0.57 migration does not explicitly preserve SQLite schema v15')
+if not doc_has('MIGRATION_V056_TO_V057.md', '**v2 to v3**'):
+    fail('V0.57 migration does not document worker protocol v3')
+ok('V0.57 stage-level worker performance profiler + advisory 1/2/4 pool recommendation present')
+
+
+# V0.58 repeatable Dataset-backed worker benchmark + regression gate
+benchmark_source=read_safe('backend/src/VisionStudio.Api/PluginPerformanceBenchmark.cs')
+benchmark_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/PluginBenchmarkEndpoints.cs')
+benchmark_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginPerformanceBenchmarkTests.cs')
+for token in ['PluginBenchmarkRegressionPolicy','PluginBenchmarkPoolResult','PluginBenchmarkRecommendation','PluginBenchmarkRegressionGate','RunBenchmarkAsync','DatasetId','ValidationRunId','BaselineRunId','ThroughputPerSecond','ObservedWorkingSetBytes','MaximumP95RegressionPercent','MinimumThroughputRatio']:
+    if token not in benchmark_source and token not in worker_supervisor: fail(f'V0.58 benchmark token missing: {token}')
+for route in ['/api/plugin-benchmarks','/api/plugin-benchmarks/{runId}','/api/plugin-benchmarks/{runId}/cancel']:
+    if route not in benchmark_endpoints: fail(f'V0.58 benchmark endpoint missing: {route}')
+for token in ['Recommend_PrefersSmallestPoolWithinFivePercentOfMaximumThroughput','RegressionGate_FailsWhenP95BudgetIsExceeded','RegressionGate_UsesBaselineRecommendedPoolInsteadOfHidingRegressionWithLargerPool']:
+    if token not in benchmark_tests: fail(f'V0.58 benchmark regression test missing: {token}')
+for token in ['plugin_benchmark_runs','plugin_benchmark_pool_results','V0.58 plugin performance benchmark history',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source: fail(f'V0.58 benchmark schema token missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if not doc_has('MIGRATION_V057_TO_V058.md', 'schema v16'):
+    fail('V0.58 migration does not document SQLite schema v16')
+if not doc_has('PLUGIN_PERFORMANCE_BENCHMARK.md', 'temporary benchmark'):
+    fail('V0.58 benchmark documentation does not describe temporary benchmark pools')
+ok('V0.58 repeatable Dataset benchmark + temporary 1/2/4 pools + persisted regression gate present')
+
+
+# V0.59 portable CI benchmark spec + headless runner + deterministic exit codes
+benchmark_ci=read_safe('backend/src/VisionStudio.Api/PluginBenchmarkCi.cs')
+benchmark_cli=read_safe('backend/src/VisionStudio.Benchmark.Cli/Program.cs')
+benchmark_ci_tests=read_safe('backend/tests/VisionStudio.Api.Tests/PluginBenchmarkCiTests.cs')
+benchmark_ci_doc=(ROOT/'PLUGIN_BENCHMARK_CI.md').read_text(encoding='utf-8') if doc_present('PLUGIN_BENCHMARK_CI.md') else ''
+for token in ['PluginBenchmarkBaselineSnapshot','BaselineSnapshot','portableBaseline','BaselinePluginVersion','BaselinePluginAssemblySha256']:
+    if token not in benchmark_source: fail(f'V0.59 portable baseline token missing: {token}')
+for token in ['PluginBenchmarkCiSpec','CurrentSchemaVersion = 1','FromBaseline','RequireRegressionPass']:
+    if token not in benchmark_ci: fail(f'V0.59 CI spec token missing: {token}')
+if '/api/plugin-benchmarks/{runId}/ci-spec' not in benchmark_endpoints:
+    fail('V0.59 CI spec export endpoint missing')
+for token in ['ExitRegressionGateFailed = 10','ExitBenchmarkFailed = 11','ExitInfrastructureError = 12','ExitTimedOut = 13','GITHUB_STEP_SUMMARY','plugin-benchmark-junit.xml','VISIONSTUDIO_BENCH_TOKEN','api/plugin-benchmarks']:
+    if token not in benchmark_cli: fail(f'V0.59 headless runner token missing: {token}')
+for token in ['CiSpec_EmbedsPortableBaselineAndRemovesDatabaseRunDependency','RegressionGate_AcceptsPortableBaselineSnapshot']:
+    if token not in (benchmark_ci_tests + benchmark_tests): fail(f'V0.59 CI regression test missing: {token}')
+for rel in ['scripts/plugin-benchmark-gate.ps1','scripts/plugin-benchmark-gate.sh','.github/workflows/plugin-performance-gate.yml']:
+    if not (ROOT/rel).exists(): fail(f'V0.59 CI wrapper missing: {rel}')
+for token in ['Portable CI specification','Headless runner','Exit codes','JUnit','same-pool comparison']:
+    if benchmark_ci_doc and token.lower() not in benchmark_ci_doc.lower(): fail(f'V0.59 CI documentation token missing: {token}')
+if not doc_has('MIGRATION_V058_TO_V059.md', 'schema v16'):
+    fail('V0.59 migration does not explicitly preserve SQLite schema v16')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+ok('V0.59 portable baseline CI spec + headless benchmark runner + deterministic regression exit codes present')
+
+
+# V0.60 exact run timeline + node latency baseline observability
+observability_source=read_safe('backend/src/VisionStudio.Api/RunObservability.cs')
+trace_store=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+models=read_safe('backend/src/VisionStudio.Engine/Models.cs')
+workflow_data=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
+node_runtime=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeRuntime.cs')
+schema=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
+observability_ui=read_safe('frontend/src/components/RunObservabilityPanel.tsx')
+observability_tests=read_safe('backend/tests/VisionStudio.Api.Tests/RunObservabilityTests.cs')
+for token in ['ExecutionSequence','StartOffsetMs','EndOffsetMs']:
+    if token not in models: fail(f'V0.60 node timeline field missing: {token}')
+for token in ['BeginExecutionTimeline','BeginNodeObservation','CurrentExecutionOffsetMs']:
+    if token not in workflow_data: fail(f'V0.60 monotonic timeline primitive missing: {token}')
+if 'run_node_observations' not in schema or CURRENT_SCHEMA_TOKEN not in schema:
+    fail('V0.60 SQLite schema v17 run_node_observations migration missing')
+if 'InsertNodeObservationsAsync' not in trace_store:
+    fail('V0.60 trace persistence does not write node observations')
+for token in ['NodeTimelineObservation','NodePerformanceBaseline','PeakConcurrency','Percentile','VerySlow']:
+    if token not in observability_source: fail(f'V0.60 observability read model missing: {token}')
+if '/api/traces/{runId}/observability' not in trace_endpoints:
+    fail('V0.60 observability endpoint missing')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['V060Trace_PersistsExactNodeTimeline_InSchemaV17','V060Observability_UsesPriorSameWorkflowRuns_ForLatencyBaseline']:
+    if token not in observability_tests: fail(f'V0.60 observability regression test missing: {token}')
+if not doc_has('MIGRATION_V059_TO_V060.md', 'schema v17'):
+    fail('V0.60 migration does not document SQLite schema v17')
+ok('V0.60 exact run timeline + historical node-latency observability present')
+
+
+# V0.61 trace comparison + deterministic failure signatures
+trace_analysis_source=read_safe('backend/src/VisionStudio.Api/TraceAnalysis.cs')
+trace_analysis_ui=read_safe('frontend/src/components/TraceAnalysisPanel.tsx')
+trace_analysis_tests=read_safe('backend/tests/VisionStudio.Api.Tests/TraceAnalysisTests.cs')
+replay_debugger_ui=read_safe('frontend/src/components/ReplayDebuggerPanel.tsx')
+for token in ['RunTraceComparison','TraceNodeDelta','FailureSignatureAnalysis','AutoPreviousOk','ExecutionFailure','QualityNG','PerformanceRegression','HashFingerprint']:
+    if token not in trace_analysis_source: fail(f'V0.61 trace analysis token missing: {token}')
+for route in ['/api/traces/{runId}/compare','/api/traces/{runId}/failure-signature']:
+    if route not in trace_endpoints: fail(f'V0.61 trace analysis endpoint missing: {route}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+if 'initialNodeId' not in replay_debugger_ui:
+    fail('V0.61 Replay/Debugger suspect-node handoff missing')
+for token in ['V061Compare_AutoSelectsNearestPriorOkRun_AndReportsNodeDiff','V061FailureSignature_ClustersSameExecutionError_WhenVolatileNumbersDiffer']:
+    if token not in trace_analysis_tests: fail(f'V0.61 trace analysis regression test missing: {token}')
+if not doc_has('MIGRATION_V060_TO_V061.md', 'schema v17'):
+    fail('V0.61 migration does not explicitly preserve SQLite schema v17')
+doc_present('TRACE_ANALYSIS.md')
+ok('V0.61 nearest-OK trace comparison + deterministic recurring failure signatures present')
+
+
+# V0.62 persistent investigation cases + signature trend dashboard
+investigation_source=read_safe('backend/src/VisionStudio.Api/InvestigationCases.cs')
+investigation_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/InvestigationEndpoints.cs')
+investigation_ui=read_safe('frontend/src/components/InvestigationPanel.tsx')
+investigation_tests=read_safe('backend/tests/VisionStudio.Api.Tests/InvestigationCaseTests.cs')
+for token in ['InvestigationCaseService','Open", "Investigating", "Resolved", "Verified", "Closed','CaseKey','reopenCount','Resolution note is required','Verification note is required','InvestigationTrendDashboard']:
+    if token not in investigation_source: fail(f'V0.62 investigation domain token missing: {token}')
+for route in ['/api/investigations','/api/investigations/trends','/api/investigations/for-trace/{runId}','/api/investigations/from-trace/{runId}','/api/investigations/{id}']:
+    if route not in investigation_endpoints: fail(f'V0.62 investigation endpoint missing: {route}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['new(18, "V0.62 investigation cases and signature evidence"','investigation_cases','investigation_case_runs',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source: fail(f'V0.62 schema v18 token missing: {token}')
+for token in ['V063TrackFromTrace_DeduplicatesSignatureAndPersistsSchemaV19','V063TrendDashboard_AggregatesTrackedSignatureEvidence']:
+    if token not in investigation_tests: fail(f'V0.62 investigation regression test missing: {token}')
+if 'InvestigationCaseService' not in host_registration or 'MapInvestigationEndpoints' not in read_safe('backend/src/VisionStudio.Api/Endpoints/EndpointMapping.cs'):
+    fail('V0.62 investigation DI/endpoint mapping missing')
+doc_present('INVESTIGATION_CASES.md')
+doc_present('MIGRATION_V061_TO_V062.md')
+ok('V0.62 deduplicated investigation lifecycle + linked trace evidence + signature trend dashboard present')
+
+
+# V0.63 resolved-case verification gate + dataset A/B regression evidence
+for token in ['InvestigationVerificationEvidence','EvaluateVerificationAsync','GetLatestPassedVerificationEvidenceAsync','BaselineSignatureHits','CandidateSignatureHits','fresh Passed dataset regression gate']:
+    if token not in investigation_source: fail(f'V0.63 verification gate token missing: {token}')
+for route in ['/api/investigations/{id}/verification-evidence']:
+    if route not in investigation_endpoints: fail(f'V0.63 verification endpoint missing: {route}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+for token in ['new(19, "V0.63 case verification gate and dataset regression evidence"','investigation_case_verifications','gate_status','baseline_validation_run_id','candidate_validation_run_id',CURRENT_SCHEMA_TOKEN]:
+    if token not in schema_migration_source: fail(f'V0.63 schema v19 token missing: {token}')
+for token in ['V063Verified_RequiresFreshPassedDatasetRegressionGate','EvaluateVerificationAsync','Assert.Equal("Passed", gate.GateStatus)']:
+    if token not in investigation_tests: fail(f'V0.63 verification regression test missing: {token}')
+doc_present('CASE_VERIFICATION_GATE.md')
+doc_present('MIGRATION_V062_TO_V063.md')
+ok('V0.63 resolved-case A/B dataset regression gate + signature disappearance evidence present')
+
+
+qsh=read_safe('scripts/quality-gate.sh')
+if 'Category!=Soak' not in qsh or 'check-coverage.py' not in qsh: fail('Quality gate missing fast/coverage split')
+
+
+# Retained V0.20 storage semantics
+trace_store=read_safe('backend/src/VisionStudio.Api/TraceabilityStore.cs')
+job_store=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
+cal_store=read_safe('backend/src/VisionStudio.Api/CalibrationWorkspace.cs')
+sqlite_db=read_safe('backend/src/VisionStudio.Api/SqliteMetadataDatabase.cs')
+if 'SearchOption.AllDirectories' in trace_store: fail('TraceabilityStore still performs recursive directory scans')
+for token in ['run_traces','job_versions','calibration_versions','journal_mode=WAL','foreign_keys=ON']:
+    if token not in (sqlite_db + trace_store + job_store + cal_store): fail(f'Missing SQLite storage token: {token}')
+if 'OkPreviewSampleEvery' not in trace_store or 'TraceRetentionHostedService' not in trace_store: fail('Trace retention/sampling not wired')
+if 'workflow_json TEXT NULL' not in schema_migration_source or 'COALESCE(t.workflow_json, j.workflow_json)' not in trace_store or 'embeddedWorkflow' not in trace_store:
+    fail('Production trace workflow de-duplication / immutable Job snapshot resolution is not wired')
+if 'StorageMigrationHostedService' not in host_registration or 'LegacyStorageMigrationService' not in host_bootstrap:
+    fail('Legacy file migration is not wired through hosted startup')
+appsettings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
+if 'TraceRetention' not in appsettings: fail('TraceRetention configuration missing')
+ok('V0.20 SQLite storage semantics retained')
+
+
+
+# V0.28 explicit schema migrations + local backup/restore + capacity guard
+schema_migrations=read_safe('backend/src/VisionStudio.Api/SchemaMigrations.cs')
+storage_maintenance=read_safe('backend/src/VisionStudio.Api/StorageMaintenance.cs')
+storage_backup=read_safe('backend/src/VisionStudio.Api/StorageBackupService.cs')
+storage_panel=read_safe('frontend/src/components/StoragePanel.tsx')
+for token in [CURRENT_SCHEMA_TOKEN,'schema_migration_history','BaselineHistoryAsync','VerifyHistoryChecksumsAsync','SHA256.HashData','BeginTransaction(deferred: false)']:
+    if token not in schema_migrations: fail(f'V0.28 migration runner missing: {token}')
+if 'EnsureColumnAsync' in sqlite_db: fail('SqliteMetadataDatabase still owns ad-hoc EnsureColumn migration logic')
+for token in ['CreateSnapshotAsync','RestoreSnapshotAsync','BackupDatabase','ValidateSnapshotAsync']:
+    if token not in sqlite_db: fail(f'V0.28 SQLite online backup/restore primitive missing: {token}')
+for token in ['StorageMaintenanceCoordinator','BeginExclusiveAsync','StorageCapacityService','WarningFreeBytes','CriticalFreeBytes','STORAGE-DISK-CRITICAL','AutoCleanupOnCritical']:
+    if token not in storage_maintenance: fail(f'V0.28 storage guard missing: {token}')
+for token in ['BackupFormatVersion','DatabaseSha256','CreateAsync','RestoreAsync','ProductionRuntimeState.Stopped','pre-restore.db','RestartRecommended','SafeChildPath']:
+    if token not in storage_backup: fail(f'V0.28 backup/restore safety missing: {token}')
+for token in ['/api/storage/schema','/api/storage/capacity','/api/storage/backups','/api/storage/restore']:
+    if token not in trace_endpoints: fail(f'V0.28 storage endpoint missing: {token}')
+if 'EnsureProductionStartAllowedAsync' not in production_source: fail('Production start is not protected by the storage capacity guard')
+if 'CanPersistArtifact' not in trace_store: fail('Trace artifact persistence is not protected by the storage capacity guard')
+for token in ['StorageMaintenanceMiddleware','StorageCapacityHostedService','StorageBackupService','StorageCapacityService']:
+    if token not in (program + host_registration): fail(f'V0.28 storage service/middleware wiring missing: {token}')
+# UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
+# Storage maintenance endpoints (behaviour: StorageMaintenanceTests.BackupAndRestore_RoundTripDatabaseAndPreviewArtifacts)
+for token in ['/api/storage/backups','/api/storage/restore']:
+    if token not in storage_panel: fail(f'V0.28 storage maintenance endpoints missing: {token}')
+storage_settings=appsettings.get('Storage', {})
+for key in ['WarningFreeBytes','CriticalFreeBytes','MaxArtifactBytes','MaxBackupBytes','BackupRetentionCount']:
+    if key not in storage_settings: fail(f'V0.28 Storage configuration missing: {key}')
+ok('V0.28 schema migration runner + online backup/restore + disk capacity guard present')
+
+# V0.26 shared Asset Health + SignalR diagnostics center
+asset_health=read_safe('backend/src/VisionStudio.Engine/Diagnostics/AssetHealth.cs')
+diagnostics_service=read_safe('backend/src/VisionStudio.Api/Diagnostics/DiagnosticsCenterService.cs')
+diagnostics_providers=read_safe('backend/src/VisionStudio.Api/Diagnostics/AssetHealthProviders.cs')
+diagnostics_panel=read_safe('frontend/src/components/DiagnosticsPanel.tsx')
+for token in ['IAssetHealthProvider','AssetHealthSnapshot','AssetEventEnvelope','Healthy','Degraded','Faulted','Offline']:
+    if token not in asset_health: fail(f'V0.26 Asset Health contract missing: {token}')
+for token in ['CameraAssetHealthProvider','DeviceAssetHealthProvider','RobotAssetHealthProvider']:
+    if token not in diagnostics_providers: fail(f'V0.26 normalized provider missing: {token}')
+for token in ['assetEvent','assetHealth','diagnosticsSummary','PeriodicTimer']:
+    if token not in diagnostics_service: fail(f'V0.26 Diagnostics Center missing: {token}')
+if 'services.AddSignalR();' not in host_registration or 'MapHub<DiagnosticsHub>' not in program:
+    fail('V0.26 SignalR hub is not fully wired')
+if '@microsoft/signalr' not in read_safe('frontend/package.json') or 'HubConnectionBuilder' not in diagnostics_panel:
+    fail('V0.26 frontend SignalR client is missing')
+ok('V0.26 unified Asset Health/Event model + SignalR Diagnostics Center present')
+
+# V0.27 backend-authoritative Catalog + generated frontend fallback
+catalog_snapshot=read_safe('backend/src/VisionStudio.Engine/CatalogSnapshot.cs')
+catalog_exporter=read_safe('backend/src/VisionStudio.CatalogExporter/Program.cs')
+demos_source=read_safe('frontend/src/demos.ts')
+system_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs')
+if generated_catalog_doc.get('schemaVersion') != 1: fail('Generated catalog schemaVersion must be 1')
+generated_hash=generated_catalog_doc.get('hash','')
+if not re.fullmatch(r'[0-9a-f]{64}', generated_hash): fail('Generated catalog hash is not a lowercase SHA-256')
+if len(generated_catalog_items) != len(executor_types):
+    fail(f'Generated catalog node count drift: expected {len(executor_types)}, got {len(generated_catalog_items)}')
+if len(generated_catalog_types) != len(generated_catalog_items): fail('Generated catalog contains duplicate node types')
+if generated_catalog_types != set(executor_types):
+    fail(f'Generated catalog type set differs from built-ins: missing={sorted(set(executor_types)-generated_catalog_types)}, extra={sorted(generated_catalog_types-set(executor_types))}')
+for token in ['ComputeHash','SchemaVersion = 1','DisplayOrder','CanonicalOrder','SHA256.HashData']:
+    if token not in catalog_snapshot: fail(f'Catalog snapshot implementation missing: {token}')
+for token in ['BuiltInNodeCatalog.Items','--check','VisionCatalogSnapshot.Create','VisionCatalogSnapshot.ComputeHash(actual.Items)']:
+    if token not in catalog_exporter: fail(f'Catalog exporter/check missing: {token}')
+if "generated/catalog.generated.json" not in frontend_catalog_source or 'fallbackCatalogRaw: NodeCatalogItem[] = document.items' not in frontend_catalog_source:
+    fail('Frontend fallback is not loaded from generated backend catalog artifact')
+if "fallbackCatalog" in demos_source or "./catalog" in demos_source:
+    fail('Demo definitions still depend on frontend fallback catalog instead of being vendor-neutral graph specs')
+if 'X-VisionStudio-Catalog-Hash' not in system_endpoints or 'X-VisionStudio-Catalog-Schema' not in system_endpoints or '/api/catalog/meta' not in system_endpoints:
+    fail('Runtime catalog authority metadata/headers are missing')
+if 'validateCatalog(await response.json())' not in read_safe('frontend/src/App.tsx'):
+    fail('Frontend does not validate/hydrate the authoritative runtime catalog')
+if '--check' not in qsh or 'VisionStudio.CatalogExporter' not in qsh:
+    fail('Quality gate does not reject stale generated frontend catalog')
+publish_sh=read_safe('scripts/publish-runtime.sh')
+publish_ps=read_safe('scripts/publish-runtime.ps1')
+if '--check' not in publish_sh or 'VisionStudio.CatalogExporter' not in publish_sh or '--check' not in publish_ps or 'VisionStudio.CatalogExporter' not in publish_ps:
+    fail('Runtime publish path can bypass generated catalog staleness check')
+ok('V0.27 backend-authoritative runtime Catalog + generated offline fallback present')
+
+# PowerShell 5.1 契约（2026-10-12 复核 F07 教训）：含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM——
+# 无 BOM 时 PS 5.1 按 ANSI 解析，中文字节会吞掉相邻语法行（publish-runtime.ps1 实测：
+# 默认数据根赋值行被吞，GetFullPath("") 崩溃——发布链直到运行时才暴露）。
+for _ps1 in (ROOT/'scripts').rglob('*.ps1'):
+    _raw = _ps1.read_bytes()
+    try:
+        _text = _raw.decode('utf-8')
+    except UnicodeDecodeError:
+        _text = ''
+    if any(ord(_ch) > 127 for _ch in _text) and not _raw.startswith(b'\xef\xbb\xbf'):
+        fail(f'non-ASCII PowerShell script must carry a UTF-8 BOM: {_ps1.relative_to(ROOT).as_posix()}')
+ok('PowerShell scripts keep the PS 5.1 encoding contract (non-ASCII => UTF-8 BOM)')
+
+# Test inventory
+cs_tests = list((ROOT/'backend/tests').rglob('*.cs'))
+text='\n'.join(p.read_text(encoding='utf-8') for p in cs_tests)
+facts=len(re.findall(r'\[Fact\]',text)); theories=len(re.findall(r'\[Theory\]',text)); soaks=len(re.findall(r'Trait\("Category",\s*"Soak"\)',text))
+ok(f'Test source: Fact={facts}, Theory={theories}, SoakTraits={soaks}')
+
+# Traditional image processing must use JLVision; OpenCV is retained only at IO,
+# synthetic-image drawing and legacy camera/plugin buffer boundaries. Two explicit
+# exceptions cover the 3D pose solver and OBB visualization; image algorithms stay native.
+allowed_cv_node_calls = {'ImRead', 'ImEncode', 'ImWrite', 'Circle', 'Rectangle', 'Line', 'Polylines'}
+allowed_cv_node_exceptions = {
+    # The added 3D pose solver deliberately uses OpenCV's hand-eye methods.
+    ('HandEye3DCalibrationNode.cs', 'HandEye3DCalibrationNode', 'CalibrateHandEye'),
+    # Stereo/pair extrinsics have no JLVision equivalent in this package; the node labels the backend.
+    ('DualCameraExtrinsicsNode.cs', 'DualCameraExtrinsicsNode', 'StereoCalibrate'),
+    ('DualCameraExtrinsicsNode.cs', 'DualCameraExtrinsicsNode', 'SolvePnP'),
+    ('DualCameraExtrinsicsNode.cs', 'DualCameraExtrinsicsNode', 'Rodrigues'),
+    # Managed chamfer is an explicit opt-in lab engine, never a silent JLVision fallback.
+    ('ManagedShapeMatch.cs', 'ManagedShapeMatch', 'Sobel'),
+    # Constant/replicate padding feeds JLVision blur kernels; it is an aperture boundary policy, not analysis.
+    ('PreprocessNodes.cs', 'GaussianBlurNode', 'CopyMakeBorder'),
+    ('PreprocessNodes.cs', 'MedianBlurNode', 'CopyMakeBorder'),
+    # Preview/overlay normalization and gray-to-BGR canvas conversion are visualization only.
+    ('JLVisionNodeSupport.cs', 'JLVisionNodeSupport', 'Normalize'),
+    ('JLVisionNodeSupport.cs', 'JLVisionNodeSupport', 'CvtColor'),
+    # Drawing a text label on an inference preview is visualization, not image analysis.
+    ('InferenceNodes.cs', 'OnnxOrientedDetectionNode', 'PutText'),
+}
+for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
+    body = source.read_text(encoding='utf-8-sig')
+    # Ignore comments: several docstrings mention Cv2.* while describing an explicit exception.
+    scan_body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
+    scan_body = re.sub(r'//[^\n]*', '', scan_body)
+    for match in re.finditer(r'\bCv2\.(\w+)', scan_body):
+        call = match.group(1)
+        enclosing_classes = re.findall(r'\bclass\s+(\w+)', scan_body[:match.start()])
+        synthetic_polygon_drawing = (source.name == 'OpenCvNodes.cs' and call == 'FillConvexPoly'
+                                     and enclosing_classes and enclosing_classes[-1] == 'SyntheticImageNode')
+        exception = (source.name, enclosing_classes[-1] if enclosing_classes else '', call)
+        if call not in allowed_cv_node_calls and not synthetic_polygon_drawing and exception not in allowed_cv_node_exceptions:
+            fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call}')
+    if 'OpenCvSharp.Dnn' in body:
+        fail(f'OpenCV DNN dependency remains in node: {source.name}')
+algorithm_project = read_safe('backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj')
+for package in ['JLVisionLib', 'Microsoft.ML.OnnxRuntime']:
+    if f'Include="{package}"' not in algorithm_project:
+        fail(f'Missing algorithm backend dependency: {package}')
+ok('JLVision traditional algorithms + ONNX Runtime; explicit 3D hand-eye/preview exceptions, no OpenCV DNN fallback')
+
+if errors:
+    print('STATIC AUDIT FAILED')
+    for e in errors: print(' -',e)
+    sys.exit(1)
+print('STATIC AUDIT PASSED')
+for n in notes: print(' -',n)

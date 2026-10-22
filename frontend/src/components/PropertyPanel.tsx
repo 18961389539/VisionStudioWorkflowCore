@@ -1,0 +1,401 @@
+import { useEffect, useMemo, useState } from 'react';
+import { AutoComplete, Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
+import type { Node } from '@xyflow/react';
+import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
+import { isParameterVisible, parameterPresentation, validateParameterValues } from '../validation';
+import { MAX_ROI_POLYGON_POINTS, roiConfigurationIssue } from '../nodeConfigurationState';
+import MatrixEditor from './MatrixEditor';
+import JsonTextarea from './JsonTextarea';
+import { isJsonParameter, jsonExampleFor } from '../jsonExamples';
+
+type Props = {
+  node?: Node;
+  catalogItem?: NodeCatalogItem;
+  onChange: (key: string, value: unknown) => void;
+  /** 运行/调试在飞时冻结参数编辑：结果对应提交时的流程，边跑边改会让人误以为新参数已被验证 */
+  disabled?: boolean;
+  /** 在图像查看器中居中显示当前节点的 ROI */
+  onLocateRoi?: (key?: string) => void;
+  roiFields?: { key: string; label: string; emptyText?: string; showEmpty?: boolean }[];
+  /** Hide controls rendered in a specialized editor while keeping validation and reset behavior. */
+  hiddenParameterNames?: readonly string[];
+};
+
+/** 参数表格超过这个数量才提供筛选框，短表单直接浏览更快。 */
+const PARAMETER_FILTER_THRESHOLD = 8;
+/** 选项达到这个数量时下拉框支持输入筛选；JLVision 算子表最多有 100+ 项。 */
+const SEARCHABLE_SELECT_THRESHOLD = 6;
+
+const polygonVertexPageSize = 50;
+
+function sameValue(a: unknown, b: unknown) {
+  if (typeof a === 'number' && typeof b === 'number') return a === b;
+  return String(a) === String(b);
+}
+
+function isVisionRoi(value: unknown): value is VisionRoi {
+  if (!value || typeof value !== 'object') return false;
+  const type = (value as { type?: unknown }).type;
+  return type === 'Rectangle' || type === 'Circle' || type === 'Polygon' || type === 'Brush';
+}
+
+/** ROI 结构化编辑：形状 + 位置/尺寸数值；数值与图像查看器中的拖动互为镜像 */
+function RoiEditor({ roi, disabled, onChange }: { roi: VisionRoi; disabled?: boolean; onChange: (roi: VisionRoi) => void }) {
+  const [polygonPage, setPolygonPage] = useState(0);
+  const polygonPointCount = roi.type === 'Polygon' ? roi.points.length : 0;
+  const polygonPageCount = Math.max(1, Math.ceil(polygonPointCount / polygonVertexPageSize));
+  const currentPolygonPage = Math.min(polygonPage, polygonPageCount - 1);
+  const polygonPageStart = currentPolygonPage * polygonVertexPageSize;
+  const visiblePolygonPoints = roi.type === 'Polygon'
+    ? roi.points.slice(polygonPageStart, polygonPageStart + polygonVertexPageSize) : [];
+  useEffect(() => { setPolygonPage(0); }, [roi.type]);
+  useEffect(() => {
+    if (polygonPage >= polygonPageCount) setPolygonPage(polygonPageCount - 1);
+  }, [polygonPage, polygonPageCount]);
+  const changePolygonPoint = (index: number, axis: 'x' | 'y', value: number | null) => {
+    if (roi.type !== 'Polygon') return;
+    const points = roi.points.slice();
+    const point = { ...points[index] };
+    if (axis === 'x') point.x = Number(value ?? 0); else point.y = Number(value ?? 0);
+    points[index] = point;
+    onChange({ ...roi, points });
+  };
+  const insertPolygonMidpoint = (index: number) => {
+    if (roi.type !== 'Polygon' || roi.points.length >= MAX_ROI_POLYGON_POINTS) return;
+    const current = roi.points[index];
+    const next = roi.points[(index + 1) % roi.points.length];
+    const midpoint = { x: (current.x + next.x) / 2, y: (current.y + next.y) / 2 };
+    onChange({ ...roi, points: [...roi.points.slice(0, index + 1), midpoint, ...roi.points.slice(index + 1)] });
+  };
+  const field = (label: string, value: number, apply: (next: number) => void) => (
+    <label className="roi-field" key={label}>
+      <span>{label}</span>
+      <InputNumber size="small" aria-label={label} disabled={disabled} value={Number(value.toFixed(2))} onChange={(next) => apply(Number(next ?? 0))} />
+    </label>
+  );
+  if (roi.type === 'Rectangle') {
+    return (
+      <div className="roi-grid">
+        <Tag color="red">矩形</Tag>
+        {field('X', roi.x, (v) => onChange({ ...roi, x: v }))}
+        {field('Y', roi.y, (v) => onChange({ ...roi, y: v }))}
+        {field('宽', roi.width, (v) => onChange({ ...roi, width: Math.max(0, v) }))}
+        {field('高', roi.height, (v) => onChange({ ...roi, height: Math.max(0, v) }))}
+      </div>
+    );
+  }
+  if (roi.type === 'Circle') {
+    return (
+      <div className="roi-grid">
+        <Tag color="red">圆形</Tag>
+        {field('X', roi.x, (v) => onChange({ ...roi, x: v }))}
+        {field('Y', roi.y, (v) => onChange({ ...roi, y: v }))}
+        {field('半径', roi.radius, (v) => onChange({ ...roi, radius: Math.max(0, v) }))}
+      </div>
+    );
+  }
+  if (roi.type === 'Brush') {
+    let addCount = 0;
+    let eraseCount = 0;
+    let lastBrushWidth: number | undefined;
+    for (const stroke of roi.strokes) {
+      if (stroke.mode === 'Add') { addCount++; lastBrushWidth = stroke.width; }
+      else eraseCount++;
+    }
+    return <div className="roi-grid">
+      <Tag color="red">笔刷</Tag>
+      <span className="roi-polygon-note">{addCount} 笔 · {eraseCount} 次擦除{lastBrushWidth !== undefined ? ` · 笔宽 ${lastBrushWidth}px` : ''}</span>
+    </div>;
+  }
+  return (
+    <div>
+      <div className="roi-grid">
+        <Tag color="red">多边形</Tag>
+        <span className="roi-polygon-note">{roi.points.length} 个顶点 · {roi.points.length > polygonVertexPageSize
+          ? `当前编辑 ${polygonPageStart + 1}–${Math.min(polygonPageStart + polygonVertexPageSize, roi.points.length)} · 可拖动控制点、插入顶点或输入坐标`
+          : '拖动图像控制点、插入顶点或输入坐标'}</span>
+      </div>
+      {roi.points.length > polygonVertexPageSize && <div className="roi-polygon-pagination">
+        <Button size="small" disabled={disabled || currentPolygonPage <= 0} onClick={() => setPolygonPage(currentPolygonPage - 1)}>上一组</Button>
+        <InputNumber size="small" aria-label="顶点组" min={1} max={polygonPageCount} step={1} precision={0}
+          disabled={disabled} value={currentPolygonPage + 1}
+          onChange={(value) => {
+            if (value !== null && Number.isFinite(Number(value)))
+              setPolygonPage(Math.max(0, Math.min(polygonPageCount - 1, Math.round(Number(value)) - 1)));
+          }} />
+        <span className="roi-polygon-note">/ {polygonPageCount} 组</span>
+        <Button size="small" disabled={disabled || currentPolygonPage >= polygonPageCount - 1}
+          onClick={() => setPolygonPage(currentPolygonPage + 1)}>下一组</Button>
+      </div>}
+      <div className="roi-polygon-vertices">
+        {visiblePolygonPoints.map((point, localIndex) => {
+          const index = polygonPageStart + localIndex;
+          return (
+            <div className="roi-vertex-row" key={index}>
+              <span>点 {index + 1}</span>
+              <InputNumber size="small" aria-label={`点 ${index + 1} X`} value={Number(point.x.toFixed(2))}
+                disabled={disabled} onChange={(value) => changePolygonPoint(index, 'x', value)} />
+              <InputNumber size="small" aria-label={`点 ${index + 1} Y`} value={Number(point.y.toFixed(2))}
+                disabled={disabled} onChange={(value) => changePolygonPoint(index, 'y', value)} />
+              <Button type="text" size="small" aria-label={`在点 ${index + 1} 后插入顶点`}
+                title={`在点 ${index + 1} 与点 ${(index + 1) % roi.points.length + 1} 之间插入中点`}
+                disabled={disabled || roi.points.length >= MAX_ROI_POLYGON_POINTS}
+                onClick={() => insertPolygonMidpoint(index)}>+</Button>
+              <Button type="text" size="small" danger aria-label={`删除点 ${index + 1}`} title="删除此顶点" disabled={disabled || roi.points.length <= 3}
+                onClick={() => onChange({ ...roi, points: roi.points.filter((_, i) => i !== index) })}>×</Button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type Section = { title?: string; parameters: ParameterDescriptor[] };
+
+/** 只有出现 ≥2 个分组时才分区展示；组名沿用目录（已本地化），未分组参数归入“通用”。 */
+function buildSections(catalogItem?: NodeCatalogItem): Section[] {
+  const parameters = catalogItem?.parameters ?? [];
+  const groups = Array.from(new Set(parameters.map((p) => p.group).filter((group): group is string => Boolean(group))));
+  if (groups.length < 2) return [{ parameters }];
+  const sections: Section[] = groups.map((title) => ({ title, parameters: parameters.filter((p) => p.group === title) }));
+  const ungrouped = parameters.filter((p) => !p.group);
+  if (ungrouped.length > 0) sections.push({ title: '通用', parameters: ungrouped });
+  return sections;
+}
+
+export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields, hiddenParameterNames }: Props) {
+  const sections = useMemo(() => buildSections(catalogItem ? { ...catalogItem,
+    parameters: catalogItem.parameters.map(parameter => parameterPresentation(parameter, catalogItem.parameters,
+      (node?.data.parameters ?? {}) as Record<string, unknown>)) } : undefined), [catalogItem, node?.data.parameters]);
+  const [parameterFilter, setParameterFilter] = useState('');
+  useEffect(() => { setParameterFilter(''); }, [node?.id, catalogItem?.type]);
+
+  if (!node || !catalogItem) {
+    return (
+      <div className="property-panel" title={disabled ? '运行/调试进行中，参数编辑已冻结（结果对应提交时的流程）' : undefined}>
+      <div className="panel-title">属性{disabled ? ' · 运行中已冻结' : ''}</div>
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个节点" />
+      </div>
+    );
+  }
+
+  const parameters = (node.data.parameters ?? {}) as Record<string, unknown>;
+  const filterKeyword = parameterFilter.trim().toLowerCase();
+  const matchesParameterFilter = (parameter: ParameterDescriptor) => !filterKeyword
+    || [parameter.label, parameter.name, parameter.group, parameter.description]
+      .some((value) => String(value ?? '').toLowerCase().includes(filterKeyword));
+  /** 可见且未被专用编辑器接管的参数；筛选计数与分组渲染共用这一口径。 */
+  const visibleSections = sections.map((section) => ({
+    ...section,
+    parameters: section.parameters.filter((parameter) => !hiddenParameterNames?.includes(parameter.name)
+      && isParameterVisible(parameter, catalogItem.parameters, parameters)
+      && matchesParameterFilter(parameter)),
+  })).filter((section) => section.parameters.length > 0);
+  const visibleParameterCount = visibleSections.reduce((total, section) => total + section.parameters.length, 0);
+  const filterableParameterCount = sections.reduce((total, section) => total + section.parameters.filter((parameter) =>
+    !hiddenParameterNames?.includes(parameter.name) && isParameterVisible(parameter, catalogItem.parameters, parameters)).length, 0);
+  const showParameterFilter = filterableParameterCount > PARAMETER_FILTER_THRESHOLD;
+  const configuredRoiFields = roiFields ?? [{ key: 'roi', label: '感兴趣区域' }];
+  const modified = catalogItem.parameters.filter((parameter) => parameters[parameter.name] !== undefined
+    && parameter.defaultValue !== undefined
+    && !sameValue(parameters[parameter.name], parameter.defaultValue));
+
+  // 参数值预检（与“校验”问题列表共用同一套判定）：数字缺失/非法/越界、选择项越界
+  const paramIssues = new Map(validateParameterValues(catalogItem.parameters, parameters).map((issue) => [issue.name, issue.message]));
+
+  const resetAll = () => modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
+
+  const renderControl = (parameter: ParameterDescriptor) => {
+    if (catalogItem.type === 'jlvision.matrixOp' && ['matrixA', 'matrixB'].includes(parameter.name))
+      return <MatrixEditor label={parameter.label} disabled={disabled} value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
+        onChange={value => onChange(parameter.name, value)} />;
+    const issue = paramIssues.get(parameter.name);
+    const status = issue ? ('error' as const) : undefined;
+    if (parameter.type === 'number') {
+      return (
+        <InputNumber
+          size="small"
+          aria-label={parameter.label}
+          placeholder={parameter.optional ? '留空自动' : undefined}
+          status={status}
+          disabled={disabled}
+          value={parameters[parameter.name] === null || parameter.optional && parameters[parameter.name] === undefined && parameter.defaultValue == null
+            ? null : Number(parameters[parameter.name] ?? parameter.defaultValue ?? 0)}
+          min={parameter.min}
+          max={parameter.max}
+          step={parameter.step}
+          onChange={(value) => onChange(parameter.name, value)}
+        />
+      );
+    }
+    if (parameter.type === 'text') {
+      if (parameter.options?.length) return <AutoComplete aria-label={parameter.label} disabled={disabled} status={status}
+        value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')} options={parameter.options.map(option => ({ label: option.label, value: option.value }))}
+        onChange={value => onChange(parameter.name, value)} />;
+      return (
+        <Input
+          size="small"
+          aria-label={parameter.label}
+          status={status}
+          disabled={disabled}
+          value={String(parameters[parameter.name] ?? '')}
+          onChange={(event) => onChange(parameter.name, event.target.value)}
+        />
+      );
+    }
+    if (parameter.type === 'textarea') {
+      const value = String(parameters[parameter.name] ?? parameter.defaultValue ?? '');
+      if (isJsonParameter(catalogItem.type, parameter.name))
+        return <JsonTextarea label={parameter.label} value={value} description={parameter.description}
+          example={jsonExampleFor(catalogItem.type, parameter.name)}
+          status={status} disabled={disabled} onChange={(next) => onChange(parameter.name, next)} />;
+      return (
+        <Input.TextArea
+          size="small"
+          aria-label={parameter.label}
+          status={status}
+          disabled={disabled}
+          autoSize={{ minRows: 3, maxRows: 12 }}
+          value={value}
+          onChange={(event) => onChange(parameter.name, event.target.value)}
+        />
+      );
+    }
+    if (parameter.type === 'boolean') {
+      return (
+        <Switch
+          size="small"
+          aria-label={parameter.label}
+          disabled={disabled}
+          checked={Boolean(parameters[parameter.name])}
+          onChange={(value) => onChange(parameter.name, value)}
+        />
+      );
+    }
+    return (
+      <Select
+        size="small"
+        aria-label={parameter.label}
+        status={status}
+        disabled={disabled}
+        showSearch={Boolean(parameter.options && parameter.options.length >= SEARCHABLE_SELECT_THRESHOLD)}
+        optionFilterProp="label"
+        filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+          || String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())}
+        value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
+        options={parameter.options}
+        onChange={(value) => {
+          onChange(parameter.name, value);
+          if (parameter.variantParameter !== parameter.name) return;
+          const nextValues = { ...parameters, [parameter.name]: value };
+          for (const original of catalogItem.parameters) {
+            if (original.name === parameter.name || !isParameterVisible(original, catalogItem.parameters, nextValues)) continue;
+            const next = parameterPresentation(original, catalogItem.parameters, nextValues);
+            const before = parameterPresentation(original, catalogItem.parameters, parameters);
+            if (next.defaultValue !== undefined && (!isParameterVisible(original, catalogItem.parameters, parameters)
+              || parameters[original.name] === undefined || sameValue(parameters[original.name], before.defaultValue)))
+              onChange(original.name, next.defaultValue);
+          }
+        }}
+      />
+    );
+  };
+
+  const renderRow = (parameter: ParameterDescriptor) => {
+    const wide = parameter.type === 'textarea' || parameter.type === 'text';
+    const isModified = parameters[parameter.name] !== undefined
+      && parameter.defaultValue !== undefined
+      && !sameValue(parameters[parameter.name], parameter.defaultValue);
+    const issue = paramIssues.get(parameter.name);
+    return (
+      <div className={`property-row${wide ? ' wide' : ''}`} key={parameter.name}>
+        <label>
+          <span className="property-label-text">
+            <span className="property-label-name">
+              {parameter.label}{parameter.unit ? ` (${parameter.unit})` : ''}
+            </span>
+            {parameter.description && <Tooltip title={parameter.description} trigger={['hover', 'focus']}>
+              <button type="button" className="property-help" aria-label={`${parameter.label}说明`}>?</button>
+            </Tooltip>}
+            {isModified && (
+              <span className="property-label-actions">
+                <em className="property-modified">已改</em>
+                <button
+                  type="button"
+                  className="property-reset"
+                  title={`恢复默认值 ${String(parameter.defaultValue)}`}
+                  aria-label={`恢复 ${parameter.label} 的默认值`}
+                  disabled={disabled}
+                  onClick={() => onChange(parameter.name, parameter.defaultValue)}
+                >↺</button>
+              </span>
+            )}
+          </span>
+        </label>
+        <div className="property-control">
+          {renderControl(parameter)}
+          {parameter.variantParameter === parameter.name && parameter.description && <p className="roi-polygon-note">{parameter.description}</p>}
+          {issue && <div style={{ color: '#ff4d4f', fontSize: 11, lineHeight: 1.45 }}>{issue}</div>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="property-panel">
+      {disabled && (
+        <div className="property-frozen-note">运行/调试进行中：参数编辑已冻结，结果对应提交时的流程；结束后可继续编辑。</div>
+      )}
+      {catalogItem.parameters.length > 0 && <div className="property-subtitle property-actions">
+        {/* 单条操作不再藏在“更多参数操作 ···”菜单里：直接可见、一次点击（与“还原为打开时”互补：
+            本按钮回到节点出厂默认值，弹窗标题栏的“还原为打开时”回到打开弹窗那一刻的值） */}
+        <Button size="small" type="text" disabled={disabled || modified.length === 0}
+          title="把已改参数恢复为节点出厂默认值；如需恢复为打开弹窗时的值，用标题栏的“还原为打开时”"
+          onClick={resetAll}>恢复出厂默认（{modified.length}）</Button>
+      </div>}
+      {showParameterFilter && <div className="property-filter">
+        <Input size="small" allowClear value={parameterFilter} disabled={disabled}
+          aria-label="筛选参数" placeholder="筛选参数：名称、分组或说明"
+          prefix={<span aria-hidden="true">⌕</span>}
+          onChange={(event) => setParameterFilter(event.target.value)} />
+        <span className="property-filter-count" role="status">
+          {filterKeyword ? `${visibleParameterCount}/${filterableParameterCount} 个参数` : `共 ${filterableParameterCount} 个参数`}
+        </span>
+      </div>}
+
+      <div className="property-list">
+        {configuredRoiFields.map((field) => {
+          const value = parameters[field.key];
+          if (value === undefined && !field.showEmpty) return null;
+          const roi = isVisionRoi(value) ? value : undefined;
+          const roiIssue = value === undefined ? undefined : roiConfigurationIssue(value, field.label, 1024);
+          return <div className="roi-property" key={field.key}>
+            <div className="roi-property-title">
+              <span>{field.label}</span>
+              {onLocateRoi && <button type="button" className="text-button" disabled={disabled}
+                onClick={() => onLocateRoi(field.key)} title="在图像查看器中编辑此选区">在图像中编辑</button>}
+            </div>
+            {roiIssue ? <div role="alert" className="roi-invalid-state" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="roi-polygon-note" style={{ color: '#ff4d4f', flex: 1 }}>{roiIssue}</span>
+              <Button size="small" danger disabled={disabled} onClick={() => onChange(field.key, undefined)}>清除无效区域</Button>
+            </div> : roi ? <RoiEditor roi={roi} disabled={disabled} onChange={(next) => onChange(field.key, next)} />
+              : value !== undefined ? <code>{JSON.stringify(value)}</code>
+                : <span className="roi-polygon-note">{field.emptyText ?? '未设置'}</span>}
+          </div>;
+        })}
+        {catalogItem.parameters.length === 0 && !parameters.roi && !roiFields && <div className="property-empty">无可配置参数</div>}
+        {visibleSections.map((section, index) => (
+          <div key={section.title ?? `section-${index}`}>
+            {section.title && <div className="property-group">{section.title}</div>}
+            {section.parameters.map(renderRow)}
+          </div>
+        ))}
+        {showParameterFilter && filterKeyword && visibleSections.length === 0 && <div className="property-empty">
+          没有匹配“{parameterFilter.trim()}”的参数
+          <Button size="small" type="link" onClick={() => setParameterFilter('')}>清除筛选</Button>
+        </div>}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,110 @@
+{
+  "id": "robot-runtime-demo",
+  "name": "V0.20 Robot Runtime industrial handshake",
+  "nodes": [
+    {
+      "id": "pose-1",
+      "type": "coordinate.pose",
+      "name": "pose-1",
+      "position": {
+        "x": 40,
+        "y": 180
+      },
+      "parameters": {
+        "x": 580,
+        "y": 280,
+        "thetaDeg": 35,
+        "frame": "RobotBase",
+        "unit": "mm"
+      }
+    },
+    {
+      "id": "guidance-1",
+      "type": "robot.guidance2d",
+      "name": "guidance-1",
+      "position": {
+        "x": 330,
+        "y": 180
+      },
+      "parameters": {
+        "robot": "ABB",
+        "guidanceMode": "Manual",
+        "expectedFrame": "RobotBase"
+      }
+    },
+    {
+      "id": "execute-1",
+      "type": "robot.executeTarget",
+      "name": "execute-1",
+      "position": {
+        "x": 640,
+        "y": 180
+      },
+      "parameters": {
+        "robotId": "virtual-abb-1",
+        "action": "Handshake",
+        "autoConnect": true,
+        "waitForInPosition": true,
+        "timeoutMs": 10000,
+        "maxRetries": 1,
+        "retryDelayMs": 100,
+        "autoAck": true
+      }
+    },
+    {
+      "id": "readback-1",
+      "type": "robot.currentPose",
+      "name": "readback-1",
+      "position": {
+        "x": 950,
+        "y": 180
+      },
+      "parameters": {
+        "robotId": "virtual-abb-1",
+        "autoConnect": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "pose-1",
+      "sourcePort": "next",
+      "targetNodeId": "guidance-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "pose-1",
+      "sourcePort": "pose",
+      "targetNodeId": "guidance-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "next",
+      "targetNodeId": "execute-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "target",
+      "targetNodeId": "execute-1",
+      "targetPort": "target",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "execute-1",
+      "sourcePort": "next",
+      "targetNodeId": "readback-1",
+      "targetPort": "exec",
+      "kind": "control"
+    }
+  ]
+}

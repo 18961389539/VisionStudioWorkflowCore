@@ -1,0 +1,232 @@
+# 系统设计审计与改进（2026-10-22）
+
+本轮不再逐个节点修 UI/契约，而是从**系统层**审查"需要几处同步修改才能完成一件事"。
+节点级设计已迭代 35 轮，剩余问题集中在扩展点、持久化契约与前端组织方式。
+
+## 结论速览
+
+| 级别 | 问题 | 状态 |
+| --- | --- | --- |
+| P0 | 源码中文注释被 UTF-8/GBK 双重转码破坏（2 个文件、40 行，含不可逆私用区字符） | ✅ 已修复 |
+| P0 | 内置节点需在 3 份手写清单中同步（DI 175 行 + Bootstrap 178 行 + 目录 171 条），漏一处只在运行到该节点时失败 | ✅ 已修复 |
+| P1 | 工作流文档没有 schema 版本，旧宿主可打开并覆盖新宿主写出的文档 | ✅ 已修复 |
+| P1 | 前端没有统一请求层：186 处 `fetch`、304 处硬编码 `/api/`、160 处无取消信号 | ⚠️ 建议排期 |
+| P1 | 巨型组件：`App.tsx` 1998 行、`NodeConfigurationDialog.tsx` 2032 行、`ImageViewer.tsx` 1772 行 | ⚠️ 建议排期 |
+| P1 | 运行时按节点类型字符串分派（编译器 92 处、执行策略 40 行白名单、调度器 13 处），插件无法声明空间语义 | ⚠️ 建议排期 |
+| P2 | i18n 以英文原文为键（`i18n/catalog.ts` 2258 行），改文案即静默丢翻译 | ℹ️ 观察 |
+| P2 | 组合根仍有约 180 个手工注册；目录文件 1474 行 | ℹ️ 观察 |
+
+## P0-1 源码编码损坏
+
+`VisionStudioServiceRegistration.cs` 与 `BootstrapHostedServices.cs` 的部分注释是 UTF-8 字节被按 GBK
+解码后再次存为 UTF-8 的结果（`鐢熶骇鐜锛?026...`）。这些字符含私用区码位，`encode(gbk).decode(utf-8)`
+无法还原——不是显示问题，而是源文件内容已损坏。
+
+影响：这两处恰好是组合根与启动编排，是排查"节点为什么没注册""监听边界怎么判定"的第一入口；
+注释不可读会直接推高误改风险。
+
+处理：按原意重写这两个文件中的全部 40 行注释，并在改动后重新扫描，确认无残留私用区/典型乱码字符。
+
+## P0-2 内置节点三份清单
+
+原设计新增一个节点需要同步：
+
+1. `BuiltInNodeCatalog` 目录条目（类型、端口、参数、动作/资源声明）；
+2. `VisionStudioServiceRegistration.AddBuiltInNodes` 的 `services.AddSingleton<TNode>()`；
+3. `RuntimeBootstrapHostedService.RegisterBuiltInNodes` 的 `services.GetRequiredService<TNode>()`。
+
+第 2、3 步各 171~175 行，靠人工保持与目录一致。漏加第 3 步的后果最严重：宿主正常启动、`/api/catalog`
+也正常返回，直到产线第一次执行该节点才抛 `Node type '...' is not registered`。
+
+处理：
+
+- 新增 `Hosting/BuiltInNodeExecutors.cs`：扫描引擎程序集中可公开构造的 `IVisionNodeExecutor` 实现，
+  以 `IVisionNodeExecutor` 单例注册（`TryAddEnumerable`，每个实现类型仍只有一个实例）。
+- 启动时用 `FindDrift(executors, catalog)` 做双向核对：目录有、执行器无；执行器有、目录无；
+  任一侧重复类型。任一项成立即**拒绝启动**并列出全部问题，不再等到运行期。
+- 删除两份手写清单：组合根 556 → 380 行，启动编排 402 → 241 行，新增发现/校验 74 行。
+
+行为边界：
+
+- 节点实例数量、生命周期（DI 单例）、构造方式（构造注入）不变；`HttpRequestNode` 的可选
+  `HttpClient` 参数仍由容器按原规则解析。
+- 发现顺序不影响目录（`VisionNodeRegistry.Catalog` 仍按分类/名称排序）。
+- 今后若引擎程序集中出现"不应暴露为节点"的执行器实现，启动会失败并点名该类型——这是有意的：
+  要么在目录声明它，要么把它移出该程序集。
+
+## P1-3 工作流文档 schema 版本
+
+`WorkflowDefinition` 之前没有版本字段，`data/workflows/*.json` 也不记录版本。典型现场场景：
+新版本新增/改变了字段 → 现场回滚到旧版本 → 旧宿主读取文档时丢弃不认识的字段 → 再次保存即永久丢失。
+
+处理：
+
+- `WorkflowDefinition` 增加 `SchemaVersion`（`init`，默认当前版本 1）；旧文档缺字段时按 1 读取，
+  布局未变，不需要迁移。
+- 保存时由宿主盖章为当前版本，调用方传入的版本号不能把文档"降级标记"。
+- 读取（`LoadAsync` / `LoadWithRevisionAsync`）遇到高于当前版本的文档返回 409，并在消息中给出
+  双方版本与处理建议；不再"尽力打开后覆盖"。
+- 列表接口保持宽松：仍可看到文档摘要，点开时才明确拒绝，避免一份未来版本文档让整个列表 500。
+
+行为边界：文档格式只增加字段，不改变既有字段含义；前端当前不读写该字段，保存时由后端盖章，
+因此前端无需同步发版。真正出现 schema 2 时，前端需要保留并回传该字段（届时由版本门禁强制暴露）。
+
+## 未实施：建议排期项
+
+### 1. 前端统一请求层（P1）
+
+证据：`frontend/src` 下 186 处 `fetch(`，304 处硬编码 `/api/`，其中 160 处没有 `AbortSignal`。
+现状靠约定维持：`apiErrors.ts` 已统一 ProblemDetails 解析（75 处使用），但超时、取消、重复请求、
+路径拼接仍由每个面板各写一遍。`CameraPanel.tsx` 单文件 36 处，是最集中的风险点。
+
+建议：新增 `apiClient.ts`（`requestJson<T>(path, {signal, timeoutMs})`：相对路径拼接、ProblemDetails
+转 `ApiError`、可选超时、统一 `credentials`），先迁移 `CameraPanel` 与 `useWorkflow*` 系列，
+其余面板按"改动时才迁移"推进；不追求一次性替换 186 处，避免大面积回归。
+
+### 2. 巨型组件拆分（P1）
+
+证据：`App.tsx` 1998 行（数十个 `useState`、模板浏览/快捷键/搜索/布局/运行结果都在同一组件）、
+`NodeConfigurationDialog.tsx` 2032 行（66 处节点类型判断）、`ImageViewer.tsx` 1772 行。
+现有 `useRunController`、`useWorkflowSave` 等 hooks 已证明拆分路径可行，但 UI 层尚未跟上。
+
+建议从无状态块开始：模板浏览弹窗、快捷键说明、搜索结果列表可先抽为纯展示组件（props 进出），
+再处理依赖画布状态的交互，避免一次性改动运行/保存主链路。
+
+### 3. 节点能力声明下沉（P1）
+
+证据：`VisionWorkflowCompiler.cs` 有 92 处节点类型字符串字面量；`VisionExecutionPolicy.Resolve`
+用 40 行类型白名单决定是否融合执行；`VisionNodeDispatcher.AttachImageCoordinateFrames` 用 13 处
+类型判断推断输出坐标帧。目录已声明 `Actions` / `Resources` / `ExecutionMode`，但空间语义仍靠类型猜。
+
+影响：插件节点即使正确声明 `ExecutionMode=Pipeline`，也无法声明"我的输出图像在新坐标系"，
+调度器会按输入帧推断；第三方图像节点存在坐标帧错误风险，且每加一个内置节点都要改核心文件。
+
+建议：在 `NodeCatalogItem` 增加 `SpatialOutput`（`None` / `PreserveInput` / `NewFrame(参数名或固定后缀)`）
+与 `FrameRule` 声明；调度器优先读声明，内置类型表仅作回退。先迁移 `image.crop` / `image.resize` /
+`image.rotate` / `image.perspective` / `image.warpAffine` 五个高频节点验证，再逐步替换类型判断。
+
+### 4. i18n 键设计（P2）
+
+`i18n/catalog.ts` 以英文显示文本为键（节点名除外，按 type 键）。后端把 `Exposure (us, 0=leave)`
+改成 `Exposure (µs)`，中文翻译即静默消失并回退英文——没有报错、没有测试。
+建议后续把参数/选项翻译键改为 `type.parameter` / `type.parameter.option`，并用
+`catalog.generated.json` 做覆盖率测试（允许显式白名单），让缺翻译在 CI 暴露。
+
+### 5. 组合根规模（P2）
+
+`AddVisionStudioHost` 仍有约 180 个 `AddSingleton`（380 行）。当前可读性尚可、顺序敏感，
+不建议为拆而拆；若继续增长，可按 Security / Hardware / Runtime / Stores / HostedServices 拆为
+扩展方法，保持调用顺序集中在一处。
+
+## 验证
+
+- 后端构建：`dotnet build VisionStudio.slnx`，0 error；warning 全部来自改动前既有文件，
+  本轮改动文件（`BuiltInNodeExecutors.cs`、两个 Hosting 文件、`WorkflowStore.cs`、`GraphContracts.cs`）
+  无新增警告。
+- 全量测试：Engine 1813 项 + Api 418 项，共 **2231 项全部通过**（含新增 6 项：
+  节点目录/执行器一致性 4 项、文档版本 2 项）。
+- 新增测试：`BuiltInNodeRegistrationTests`（宿主执行器与目录 1:1、缺执行器/多余执行器/重复类型
+  三类漂移均可检出）、`WorkflowStoreTests` 新增"保存盖章当前版本""拒绝更高版本文档"。
+- 未运行前端构建：本轮未改前端文件。
+
+---
+
+# 第二轮：运行归属、面板隔离与配置遮蔽（2026-10-22 下午）
+
+第一轮解决的是"同一件事要改多处"；第二轮继续找"失败后没人收尾"和"配置看起来生效、实际没生效"两类问题。
+
+## 结论速览（第二轮）
+
+| 级别 | 问题 | 状态 |
+| --- | --- | --- |
+| P1 | 异步运行只存在进程内存里；宿主崩溃后 `Running` 行永久残留，界面永远轮询，数据集永远无法删除 | ✅ 已修复 |
+| P1 | 全站只有一层错误边界；任一 Drawer 面板渲染异常就把整个设计器（含未保存修改）打成恢复页 | ✅ 已修复 |
+| P1 | 仓库中的 `vite.config.js`（旧编译产物）优先于 `vite.config.ts` 被加载，开发代理与测试配置从未生效 | ✅ 已修复 |
+| P2 | `AlarmStore` 每次读写整个 JSON、历史无上限，`/api/alarms` 无分页 | ⚠️ 建议排期 |
+| P2 | 主包 2.1 MB（gzip 604 kB）：面板已拆分，主包仍偏大 | ℹ️ 观察 |
+| P2 | `ps1` / `sh` 两套发布脚本各自实现同一流程；`types.ts` 仍是手写后端镜像 | ⚠️ 建议排期 |
+| P1 | 第一轮列出的请求层、巨型组件、类型分派三项仍未动 | ⚠️ 待排期 |
+
+## P1-1 异步运行没有"主人"
+
+证据：
+
+- `DatasetValidation.StartAsync` 用 `Task.Run` 启动后台循环，唯一的所有权记录是进程内
+  `ConcurrentDictionary _active`；`validation_runs` 行只有 `Running` 状态。
+  `PluginPerformanceBenchmarkService` 与 `CameraSynchronizationCommissioningService` 结构相同
+  （后者还多一个 `Queued`）。
+- 宿主崩溃/断电后这些行永久停在 `Running`/`Queued`：
+  - `DatasetValidationPanel` 每 1 秒轮询，只要还有 `Running` 就永不停止；
+  - `DeleteDatasetAsync` 以 `status='Running'` 判断"验证中"，该数据集从此**永久无法删除**，
+    需人工改数据库才能解锁；
+  - 取消接口只写 `cancel_requested=1`，没有 runner 会再消费它。
+
+处理：新增 `InterruptedRunRecovery` 与对应 HostedService，在存储迁移之后、任何请求或运行开始之前执行：
+
+- 三张表统一收尾：`validation_runs`（`Running`）、`camera_sync_commissioning_tests`
+  （`Queued`/`Running`）、`plugin_benchmark_runs`（`Running`）→ `Interrupted`，
+  写 `completed_at` 与明确原因（"宿主在完成前重启，结果不完整"）。
+- 不做时间阈值猜测：本产品已在 `WorkflowStore` 约定单宿主部署，启动时不可能存在属于本进程的运行，
+  因此"未完成即为无主"是确定事实；重复执行幂等（第二次返回 0）。
+- 保留 `started_at` 与已有 `error`，只补空缺字段，便于追溯时区分"失败"与"未完成"。
+
+行为边界：不改变运行互斥与取消语义；未完成结果仍按 partial 对待；前端新增 `Interrupted: 已中断`
+文案，数据集面板的橙色状态即可识别，轮询随 `Running` 消失自动停止。
+
+## P1-2 单一错误边界
+
+证据：`main.tsx` 只有一层 `<ErrorBoundary>`；`App.tsx` 中 15 个 Drawer 面板（相机、机器人、设备、
+作业、追溯、标定、验证、调优、模块、生产、诊断、插件、溯源…）都在同一渲染子树内。任一面板在渲染期
+抛错（例如后端返回了结构不符的列表、某条记录缺字段），React 会卸载整棵树，操作员看到整页恢复面，
+画布、当前选中节点与未保存修改的上下文全部消失——为一个次要面板付整机代价。
+
+处理：`ErrorBoundary` 增加 `variant`（`page` / `panel`）、`scope`、`onDismiss`：
+
+- `panel` 模式只渲染一个 560px 卡片（导出诊断 / 重试 / 关闭面板），画布与其它面板继续工作；
+- `App.tsx` 的 `LazyPanel` 统一包裹，三个常驻面板（相机/机器人/设备）与操作员 `runtimeOnly`
+  页面（嵌入式生产面板、诊断）单独包裹；
+- 关闭按钮把对应 `open` 置 false，不必刷新；重试只重建出错子树。
+
+注意边界：错误边界只能捕获渲染/生命周期异常；事件回调与异步请求异常仍由各面板既有 `try/catch`
+与消息提示处理，两者互补，不能互相替代。
+
+## P1-3 Vite 配置被旧产物遮蔽
+
+证据：`frontend/` 下同时存在 `vite.config.ts` 与 `vite.config.js` / `vite.config.d.ts`。
+`npx vite build --debug` 实测：
+
+```
+configFile: '.../frontend/vite.config.js'
+```
+
+Vite 的配置解析顺序 `.js` 先于 `.ts`，因此 `.ts` 里的 `/hubs` WebSocket 代理、`test`（jsdom）
+配置、以及历次排查写下的注释**全部没有生效**；`npm run dev` 下诊断面板的 SignalR 连接没有代理，
+开发者改 `.ts` 也看不到任何变化。`.js` 是早期 `tsc` 输出遗留（`tsconfig.node.json` 现已 `noEmit`，
+不会再生）。
+
+处理：删除 `vite.config.js` 与 `vite.config.d.ts`；实测 `configFile` 指向 `vite.config.ts`，
+`npm run build` 通过。同一命令下前端测试从"8 项失败"变为"仅 1 项既有慢测试超时"——失败项正是
+用错配置（缺少 jsdom/test 段）造成的假失败。
+
+## 未实施（第二轮新增）
+
+### AlarmStore 全量读写（P2）
+
+`AlarmStore` 把全部历史放在一个 `alarms.json`：`RaiseAsync`/`RecoverAsync`/`AcknowledgeAsync`
+每次都"读全量 → 改一条 → 写全量"，且没有保留上限、`/api/alarms` 也没有分页。告警历史随故障次数
+线性增长，一次故障恢复的写放大与接口响应都会随之变大。建议按 `TraceabilityStore` 的做法迁到 SQLite
+（索引 `code+source` 与 `raised_at`，保留策略按天数/条数），或至少引入条数上限 + 追加式存储。
+
+### 主包体积（P2）
+
+`npm run build` 实测：面板 chunk 已拆分，但主包仍为 `index-*.js` 2,157 kB（gzip 604 kB）。
+对局域网操作站可接受，但首次加载与弱网更新偏慢。建议优先检查 antd 的按需引入与图标/日期库的整包
+导入，再考虑把画布与运行面板做成路由级拆分。
+
+## 第二轮验证
+
+- 后端：`dotnet build` 0 error；新增 `InterruptedRunRecoveryTests` 3 项通过
+  （三表收尾、已完成行不动、幂等）；全量回归 **2234 项通过**（Engine 1813 + Api 421）。
+- 前端：`npx tsc -b` 0 error；`npx vitest run` 1043/1044 通过——唯一失败为既有
+  `propertyPanel` 120 顶点用例在满载下超 5s（单独运行 4.7s 通过，与本轮改动无关）；
+  `npm run build` 通过，`configFile` 已指向 `vite.config.ts`。

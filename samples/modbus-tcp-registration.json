@@ -1,0 +1,20 @@
+{
+  "id": "modbus-tcp-1",
+  "name": "Modbus TCP PLC",
+  "host": "192.168.0.10",
+  "port": 502,
+  "unitId": 1,
+  "timeoutMs": 3000,
+  "registerOrder": "ABCD",
+  "tags": [
+    { "id": "ready", "name": "PLC Ready", "address": "C:0", "dataType": "Boolean", "writable": false },
+    { "id": "trigger", "name": "Vision Trigger", "address": "C:1", "dataType": "Boolean", "writable": false },
+    { "id": "resultReady", "name": "Result Ready", "address": "C:2", "dataType": "Boolean", "writable": true },
+    { "id": "resultOk", "name": "Result OK", "address": "C:3", "dataType": "Boolean", "writable": true },
+    { "id": "hostHeartbeat", "name": "Host Heartbeat", "address": "C:4", "dataType": "Boolean", "writable": true },
+    { "id": "deviceHeartbeat", "name": "PLC Heartbeat", "address": "C:5", "dataType": "Boolean", "writable": false },
+    { "id": "resultX", "name": "Result X", "address": "HR:0", "dataType": "Double", "writable": true, "unit": "mm" },
+    { "id": "resultY", "name": "Result Y", "address": "HR:2", "dataType": "Double", "writable": true, "unit": "mm" },
+    { "id": "resultR", "name": "Result R", "address": "HR:4", "dataType": "Double", "writable": true, "unit": "deg" }
+  ]
+}

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 程序版本单一来源：备份清单（StorageBackupService.VisionStudioVersion）、/api/health 与前端 version.ts 对齐 -->
+    <Version>0.63.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VisionStudio.Engine\VisionStudio.Engine.csproj" />
+    <ProjectReference Include="..\VisionStudio.Camera.Basler\VisionStudio.Camera.Basler.csproj" />
+    <ProjectReference Include="..\VisionStudio.Camera.Hikrobot\VisionStudio.Camera.Hikrobot.csproj" />
+    <ProjectReference Include="..\VisionStudio.Plugin.Worker\VisionStudio.Plugin.Worker.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- 测试需要直接驱动内部采样/释放等生命周期路径（并发与故障注入场景无法经 HTTP 制造） -->
+    <InternalsVisibleTo Include="VisionStudio.Api.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- F07（2026-10-12 复核）：插件是**运行时**资产（现场经插件包管理器或手动安装到运行目录），
+         不随仓库/发布包分发。Web SDK 默认把 plugins 下的 *.json（plugin.json）作为 Content 复制到
+         输出——形成"有清单无 DLL"的孤儿插件目录，宿主启动时报加载失败（2026-10-12 发布演练实测；
+         本地 dotnet run 不受影响，它直接读项目目录）。显式排除，保证构建/发布输出干净。 -->
+    <Content Remove="plugins\**" />
+    <None Remove="plugins\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="McMaster.NETCore.Plugins" Version="2.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+  <Target Name="CopyPluginWorkerForBuild" AfterTargets="Build">
+    <ItemGroup>
+      <_PluginWorkerBuildFiles Include="..\VisionStudio.Plugin.Worker\bin\$(Configuration)\net10.0\VisionStudio.Plugin.Worker.dll" />
+      <_PluginWorkerBuildFiles Include="..\VisionStudio.Plugin.Worker\bin\$(Configuration)\net10.0\VisionStudio.Plugin.Worker.deps.json" />
+      <_PluginWorkerBuildFiles Include="..\VisionStudio.Plugin.Worker\bin\$(Configuration)\net10.0\VisionStudio.Plugin.Worker.runtimeconfig.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginWorkerBuildFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+  </Target>
+  <Target Name="PublishPluginWorker" AfterTargets="Publish">
+    <MSBuild Projects="..\VisionStudio.Plugin.Worker\VisionStudio.Plugin.Worker.csproj" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$(PublishDir)" />
+  </Target>
+</Project>

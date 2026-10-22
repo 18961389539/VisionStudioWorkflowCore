@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "id": "sample.math",
+  "name": "Sample Math Plugin",
+  "version": "0.59.0",
+  "entryAssembly": "VisionStudio.Plugin.Sample.dll",
+  "enabled": true,
+  "minimumSdkApiVersion": 2,
+  "maximumSdkApiVersion": 2,
+  "vendor": "VisionStudio SDK Sample",
+  "description": "SDK 2.0 sample package configured for V0.59 benchmark-ready pooled WorkerProcess isolation, shared-memory image transport, signed .vspkg lifecycle, explicit tool identity and PerNode lifetime.",
+  "isolationMode": "WorkerProcess",
+  "workerPoolSize": 2,
+  "workerSharedMemoryThresholdBytes": 262144
+}

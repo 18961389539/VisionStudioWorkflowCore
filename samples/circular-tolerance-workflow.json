@@ -1,0 +1,411 @@
+{
+  "id": "circular-tolerance",
+  "name": "Circular Wall and Centre Offset",
+  "nodes": [
+    {
+      "id": "outerPoints",
+      "type": "contour.fromPoints",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 180
+      },
+      "parameters": {
+        "pointsJson": "[[400.0,240.0],[399.561752,248.362277],[398.251808,256.632935],[396.084521,264.72136],[393.083637,272.538931],[389.282032,280.0],[384.72136,287.02282],[379.451586,293.530449],[373.530449,299.451586],[367.02282,304.72136],[360.0,309.282032],[352.538931,313.083637],[344.72136,316.084521],[336.632935,318.251808],[328.362277,319.561752],[320.0,320.0],[311.637723,319.561752],[303.367065,318.251808],[295.27864,316.084521],[287.461069,313.083637],[280.0,309.282032],[272.97718,304.72136],[266.469551,299.451586],[260.548414,293.530449],[255.27864,287.02282],[250.717968,280.0],[246.916363,272.538931],[243.915479,264.72136],[241.748192,256.632935],[240.438248,248.362277],[240.0,240.0],[240.438248,231.637723],[241.748192,223.367065],[243.915479,215.27864],[246.916363,207.461069],[250.717968,200.0],[255.27864,192.97718],[260.548414,186.469551],[266.469551,180.548414],[272.97718,175.27864],[280.0,170.717968],[287.461069,166.916363],[295.27864,163.915479],[303.367065,161.748192],[311.637723,160.438248],[320.0,160.0],[328.362277,160.438248],[336.632935,161.748192],[344.72136,163.915479],[352.538931,166.916363],[360.0,170.717968],[367.02282,175.27864],[373.530449,180.548414],[379.451586,186.469551],[384.72136,192.97718],[389.282032,200.0],[393.083637,207.461069],[396.084521,215.27864],[398.251808,223.367065],[399.561752,231.637723]]",
+        "closed": true
+      }
+    },
+    {
+      "id": "innerPoints",
+      "type": "contour.fromPoints",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "pointsJson": "[[382.0,240.0],[381.671314,246.271708],[380.688856,252.474701],[379.063391,258.54102],[376.812727,264.404199],[373.961524,270.0],[370.54102,275.267115],[366.58869,280.147836],[362.147836,284.58869],[357.267115,288.54102],[352.0,291.961524],[346.404199,294.812727],[340.54102,297.063391],[334.474701,298.688856],[328.271708,299.671314],[322.0,300.0],[315.728292,299.671314],[309.525299,298.688856],[303.45898,297.063391],[297.595801,294.812727],[292.0,291.961524],[286.732885,288.54102],[281.852164,284.58869],[277.41131,280.147836],[273.45898,275.267115],[270.038476,270.0],[267.187273,264.404199],[264.936609,258.54102],[263.311144,252.474701],[262.328686,246.271708],[262.0,240.0],[262.328686,233.728292],[263.311144,227.525299],[264.936609,221.45898],[267.187273,215.595801],[270.038476,210.0],[273.45898,204.732885],[277.41131,199.852164],[281.852164,195.41131],[286.732885,191.45898],[292.0,188.038476],[297.595801,185.187273],[303.45898,182.936609],[309.525299,181.311144],[315.728292,180.328686],[322.0,180.0],[328.271708,180.328686],[334.474701,181.311144],[340.54102,182.936609],[346.404199,185.187273],[352.0,188.038476],[357.267115,191.45898],[362.147836,195.41131],[366.58869,199.852164],[370.54102,204.732885],[373.961524,210.0],[376.812727,215.595801],[379.063391,221.45898],[380.688856,227.525299],[381.671314,233.728292]]",
+        "closed": true
+      }
+    },
+    {
+      "id": "outerFit",
+      "type": "measure.roundness",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "innerFit",
+      "type": "measure.roundness",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "fits",
+      "type": "logic.boolean",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 180
+      },
+      "parameters": {
+        "op": "and"
+      }
+    },
+    {
+      "id": "gateFit",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "wall",
+      "type": "measure.wallThickness",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 20
+      },
+      "parameters": {
+        "sampleCount": 72
+      }
+    },
+    {
+      "id": "gateWall",
+      "type": "flow.ifBoolean",
+      "name": null,
+      "position": {
+        "x": 1980,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "offset",
+      "type": "measure.concentricity",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": -140
+      },
+      "parameters": {}
+    },
+    {
+      "id": "tolerance",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 2540,
+        "y": -140
+      },
+      "parameters": {
+        "min": 17,
+        "max": 23
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2820,
+        "y": -140
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missingWall",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 2260,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "joinWall",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 3100,
+        "y": 20
+      },
+      "parameters": {}
+    },
+    {
+      "id": "missingFit",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 1700,
+        "y": 500
+      },
+      "parameters": {}
+    },
+    {
+      "id": "joinFit",
+      "type": "flow.join",
+      "name": null,
+      "position": {
+        "x": 3380,
+        "y": 180
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "outerPoints",
+      "sourcePort": "next",
+      "targetNodeId": "innerPoints",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "innerPoints",
+      "sourcePort": "next",
+      "targetNodeId": "outerFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "outerFit",
+      "sourcePort": "next",
+      "targetNodeId": "innerFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "innerFit",
+      "sourcePort": "next",
+      "targetNodeId": "fits",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "fits",
+      "sourcePort": "next",
+      "targetNodeId": "gateFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "true",
+      "targetNodeId": "wall",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "wall",
+      "sourcePort": "next",
+      "targetNodeId": "gateWall",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "gateWall",
+      "sourcePort": "true",
+      "targetNodeId": "offset",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "offset",
+      "sourcePort": "next",
+      "targetNodeId": "tolerance",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "joinWall",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c11",
+      "sourceNodeId": "gateWall",
+      "sourcePort": "false",
+      "targetNodeId": "missingWall",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c12",
+      "sourceNodeId": "missingWall",
+      "sourcePort": "next",
+      "targetNodeId": "joinWall",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "c13",
+      "sourceNodeId": "joinWall",
+      "sourcePort": "next",
+      "targetNodeId": "joinFit",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c14",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "false",
+      "targetNodeId": "missingFit",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c15",
+      "sourceNodeId": "missingFit",
+      "sourcePort": "next",
+      "targetNodeId": "joinFit",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "outerPoints",
+      "sourcePort": "contours",
+      "targetNodeId": "outerFit",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "innerPoints",
+      "sourcePort": "contours",
+      "targetNodeId": "innerFit",
+      "targetPort": "contours",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "outerFit",
+      "sourcePort": "found",
+      "targetNodeId": "fits",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "innerFit",
+      "sourcePort": "found",
+      "targetNodeId": "fits",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "fits",
+      "sourcePort": "result",
+      "targetNodeId": "gateFit",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "innerFit",
+      "sourcePort": "circle",
+      "targetNodeId": "wall",
+      "targetPort": "inner",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "outerFit",
+      "sourcePort": "circle",
+      "targetNodeId": "wall",
+      "targetPort": "outer",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "wall",
+      "sourcePort": "found",
+      "targetNodeId": "gateWall",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "outerFit",
+      "sourcePort": "circle",
+      "targetNodeId": "offset",
+      "targetPort": "circleA",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "innerFit",
+      "sourcePort": "circle",
+      "targetNodeId": "offset",
+      "targetPort": "circleB",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "wall",
+      "sourcePort": "minThickness",
+      "targetNodeId": "tolerance",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d11",
+      "sourceNodeId": "tolerance",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "gateWall",
+      "sourcePort": "condition",
+      "targetNodeId": "missingWall",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d13",
+      "sourceNodeId": "gateFit",
+      "sourcePort": "condition",
+      "targetNodeId": "missingFit",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

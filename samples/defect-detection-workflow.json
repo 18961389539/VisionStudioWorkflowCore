@@ -1,0 +1,345 @@
+{
+  "id": "defect-detection",
+  "name": "Defect Reference Comparison + Gray Statistics",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 160
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "reference",
+      "type": "image.morphology",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 160
+      },
+      "parameters": {
+        "operation": "erode",
+        "kernelSize": 9,
+        "iterations": 1
+      }
+    },
+    {
+      "id": "dark",
+      "type": "image.threshold",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 160
+      },
+      "parameters": {
+        "threshold": 250
+      }
+    },
+    {
+      "id": "bright",
+      "type": "image.threshold",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 160
+      },
+      "parameters": {
+        "threshold": 0
+      }
+    },
+    {
+      "id": "corrected",
+      "type": "image.flatFieldCorrect",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 160
+      },
+      "parameters": {}
+    },
+    {
+      "id": "difference",
+      "type": "image.difference",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 160
+      },
+      "parameters": {
+        "mode": "absolute"
+      }
+    },
+    {
+      "id": "dynamic",
+      "type": "image.dynamicThreshold",
+      "name": null,
+      "position": {
+        "x": 1420,
+        "y": 480
+      },
+      "parameters": {
+        "polarity": "both",
+        "offset": 10,
+        "windowSize": 31
+      }
+    },
+    {
+      "id": "compare",
+      "type": "defect.referenceCompare",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 480
+      },
+      "parameters": {
+        "polarity": "both",
+        "threshold": 20,
+        "minArea": 10
+      }
+    },
+    {
+      "id": "stats",
+      "type": "measure.regionIntensity",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 480
+      },
+      "parameters": {}
+    },
+    {
+      "id": "range",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 480
+      },
+      "parameters": {
+        "min": 0,
+        "max": 0
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 480
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c9",
+      "sourceNodeId": "range",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "stats",
+      "sourcePort": "next",
+      "targetNodeId": "range",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "compare",
+      "sourcePort": "next",
+      "targetNodeId": "stats",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "dynamic",
+      "sourcePort": "next",
+      "targetNodeId": "compare",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "difference",
+      "sourcePort": "next",
+      "targetNodeId": "dynamic",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "corrected",
+      "sourcePort": "next",
+      "targetNodeId": "difference",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "bright",
+      "sourcePort": "next",
+      "targetNodeId": "corrected",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "dark",
+      "sourcePort": "next",
+      "targetNodeId": "bright",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "reference",
+      "sourcePort": "next",
+      "targetNodeId": "dark",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "reference",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "reference",
+      "sourcePort": "image",
+      "targetNodeId": "dark",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "reference",
+      "sourcePort": "image",
+      "targetNodeId": "bright",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "corrected",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "dark",
+      "sourcePort": "image",
+      "targetNodeId": "corrected",
+      "targetPort": "dark",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "bright",
+      "sourcePort": "image",
+      "targetNodeId": "corrected",
+      "targetPort": "bright",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "corrected",
+      "sourcePort": "image",
+      "targetNodeId": "difference",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "reference",
+      "sourcePort": "image",
+      "targetNodeId": "difference",
+      "targetPort": "reference",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "difference",
+      "sourcePort": "image",
+      "targetNodeId": "dynamic",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "corrected",
+      "sourcePort": "image",
+      "targetNodeId": "compare",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "reference",
+      "sourcePort": "image",
+      "targetNodeId": "compare",
+      "targetPort": "reference",
+      "kind": "data"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "difference",
+      "sourcePort": "image",
+      "targetNodeId": "stats",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d11",
+      "sourceNodeId": "compare",
+      "sourcePort": "region",
+      "targetNodeId": "stats",
+      "targetPort": "region",
+      "kind": "data"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "compare",
+      "sourcePort": "count",
+      "targetNodeId": "range",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d13",
+      "sourceNodeId": "range",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "d14",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "reference",
+      "targetPort": "image",
+      "kind": "data"
+    }
+  ]
+}

@@ -1,0 +1,210 @@
+{
+  "id": "expanded-inspection",
+  "name": "Expanded Inspection",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": "image.synthetic",
+      "position": {
+        "x": 30,
+        "y": 150
+      },
+      "parameters": {}
+    },
+    {
+      "id": "gray",
+      "type": "image.grayscale",
+      "name": "image.grayscale",
+      "position": {
+        "x": 300,
+        "y": 150
+      },
+      "parameters": {}
+    },
+    {
+      "id": "blur",
+      "type": "image.blur.gaussian",
+      "name": "image.blur.gaussian",
+      "position": {
+        "x": 570,
+        "y": 150
+      },
+      "parameters": {
+        "kernelSize": 5
+      }
+    },
+    {
+      "id": "binary",
+      "type": "image.threshold.otsu",
+      "name": "image.threshold.otsu",
+      "position": {
+        "x": 840,
+        "y": 150
+      },
+      "parameters": {}
+    },
+    {
+      "id": "clean",
+      "type": "image.morphology",
+      "name": "image.morphology",
+      "position": {
+        "x": 1110,
+        "y": 150
+      },
+      "parameters": {
+        "operation": "open",
+        "kernelSize": 3
+      }
+    },
+    {
+      "id": "objects",
+      "type": "measure.blobs",
+      "name": "measure.blobs",
+      "position": {
+        "x": 1380,
+        "y": 150
+      },
+      "parameters": {
+        "minArea": 1000
+      }
+    },
+    {
+      "id": "check",
+      "type": "value.range",
+      "name": "value.range",
+      "position": {
+        "x": 1650,
+        "y": 150
+      },
+      "parameters": {
+        "min": 1,
+        "max": 5
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": "flow.result",
+      "position": {
+        "x": 1920,
+        "y": 150
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "gray",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "gray",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "gray",
+      "sourcePort": "next",
+      "targetNodeId": "blur",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "gray",
+      "sourcePort": "image",
+      "targetNodeId": "blur",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "blur",
+      "sourcePort": "next",
+      "targetNodeId": "binary",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "blur",
+      "sourcePort": "image",
+      "targetNodeId": "binary",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "binary",
+      "sourcePort": "next",
+      "targetNodeId": "clean",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "binary",
+      "sourcePort": "image",
+      "targetNodeId": "clean",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "clean",
+      "sourcePort": "next",
+      "targetNodeId": "objects",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "clean",
+      "sourcePort": "image",
+      "targetNodeId": "objects",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "objects",
+      "sourcePort": "next",
+      "targetNodeId": "check",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "objects",
+      "sourcePort": "count",
+      "targetNodeId": "check",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "check",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "check",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    }
+  ]
+}

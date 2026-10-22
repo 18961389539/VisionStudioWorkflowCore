@@ -1,0 +1,42 @@
+{
+  "id": "demo-synchronized-frameset",
+  "name": "VisionStudio V0.36 Synchronized FrameSet Demo",
+  "nodes": [
+    {
+      "id": "sync-capture",
+      "type": "camera.syncCapture",
+      "name": "Sync Capture",
+      "position": { "x": 40, "y": 180 },
+      "parameters": { "groupId": "sync-group-1", "scheduled": false, "leadTimeMs": 100, "frameTimeoutMs": 3000 }
+    },
+    {
+      "id": "take-top",
+      "type": "frameset.image",
+      "name": "Top Camera",
+      "position": { "x": 360, "y": 90 },
+      "parameters": { "cameraId": "camera-top" }
+    },
+    {
+      "id": "take-side",
+      "type": "frameset.image",
+      "name": "Side Camera",
+      "position": { "x": 650, "y": 270 },
+      "parameters": { "cameraId": "camera-side" }
+    },
+    {
+      "id": "threshold-side",
+      "type": "image.threshold",
+      "name": "Side Threshold",
+      "position": { "x": 960, "y": 270 },
+      "parameters": { "threshold": 128 }
+    }
+  ],
+  "edges": [
+    { "id": "c1", "sourceNodeId": "sync-capture", "sourcePort": "next", "targetNodeId": "take-top", "targetPort": "exec", "kind": "control" },
+    { "id": "c2", "sourceNodeId": "take-top", "sourcePort": "next", "targetNodeId": "take-side", "targetPort": "exec", "kind": "control" },
+    { "id": "c3", "sourceNodeId": "take-side", "sourcePort": "next", "targetNodeId": "threshold-side", "targetPort": "exec", "kind": "control" },
+    { "id": "d1", "sourceNodeId": "sync-capture", "sourcePort": "frameSet", "targetNodeId": "take-top", "targetPort": "frameSet", "kind": "data" },
+    { "id": "d2", "sourceNodeId": "sync-capture", "sourcePort": "frameSet", "targetNodeId": "take-side", "targetPort": "frameSet", "kind": "data" },
+    { "id": "d3", "sourceNodeId": "take-side", "sourcePort": "image", "targetNodeId": "threshold-side", "targetPort": "image", "kind": "data" }
+  ]
+}

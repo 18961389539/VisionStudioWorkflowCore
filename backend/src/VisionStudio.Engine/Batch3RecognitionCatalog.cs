@@ -1,0 +1,183 @@
+using VisionStudio.Abstractions;
+
+namespace VisionStudio.Engine;
+
+/// <summary>Catalog entries for barcode/OCR and ONNX inference recognition nodes.</summary>
+public static class Batch3RecognitionCatalog
+{
+    private static readonly PortDescriptor Exec = new("exec", VisionDataType.Control);
+    private static readonly PortDescriptor Next = new("next", VisionDataType.Control);
+    private static readonly PortDescriptor Image = new("image", VisionDataType.Image);
+
+    private static readonly ParameterDescriptor[] OnnxParameters =
+    [
+        new("modelPath", "ONNX Model File", "text", string.Empty, Group: "Model", Description: "Path to the ONNX detector weights file."),
+        new("outputName", "Output Name", "text", string.Empty, Group: "Model", Description: "Optional ONNX output/layer name; leave empty for the model's default output."),
+        new("inputWidth", "Input Width", "number", 224, 1, 4096, 1, Unit: "px", Group: "Preprocessing", Description: "Network input width used for letterbox/resize mapping."),
+        new("inputHeight", "Input Height", "number", 224, 1, 4096, 1, Unit: "px", Group: "Preprocessing", Description: "Network input height used for letterbox/resize mapping."),
+        new("scale", "Normalization Scale", "number", 0.00392156862745, -100, 100, 0.0001, Group: "Preprocessing", Description: "Per-pixel scale applied before mean subtraction (1/255 default)."),
+        new("meanB", "Mean B", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Blue-channel mean subtracted after scaling."),
+        new("meanG", "Mean G", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Green-channel mean subtracted after scaling."),
+        new("meanR", "Mean R", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Red-channel mean subtracted after scaling."),
+        new("swapRB", "Swap Red and Blue", "boolean", false, Group: "Preprocessing", Description: "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."),
+        new("crop", "Center Crop After Resize", "boolean", false, Group: "Preprocessing", Description: "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.")
+    ];
+
+
+    private static readonly ParameterDescriptor TensorOrder = new(
+        "tensorOrder", "Raw Tensor Order", "select", "auto", Group: "Decoding",
+        Options: [new("Automatic (smaller dimension is channels)", "auto"), new("Channels First [1,C,N]", "channelsFirst"), new("Channels Last [1,N,C]", "channelsLast")],
+        Description: "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes.");
+
+    /// <summary>ONNX preprocess defaults tuned for Ultralytics YOLO exports (imgsz=640).</summary>
+    private static readonly ParameterDescriptor[] OnnxYoloParameters =
+    [
+        new("modelPath", "ONNX Model File", "text", string.Empty, Group: "Model", Description: "Path to the ONNX detector weights file."),
+        new("outputName", "Output Name", "text", string.Empty, Group: "Model", Description: "Optional ONNX output/layer name; leave empty for the model's default output."),
+        new("inputWidth", "Input Width", "number", 640, 1, 4096, 1, Unit: "px", Group: "Preprocessing", Description: "Network input width used for letterbox/resize mapping."),
+        new("inputHeight", "Input Height", "number", 640, 1, 4096, 1, Unit: "px", Group: "Preprocessing", Description: "Network input height used for letterbox/resize mapping."),
+        new("scale", "Normalization Scale", "number", 0.00392156862745, -100, 100, 0.0001, Group: "Preprocessing", Description: "Per-pixel scale applied before mean subtraction (1/255 default)."),
+        new("meanB", "Mean B", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Blue-channel mean subtracted after scaling."),
+        new("meanG", "Mean G", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Green-channel mean subtracted after scaling."),
+        new("meanR", "Mean R", "number", 0, -255, 255, 1, Group: "Preprocessing", Description: "Red-channel mean subtracted after scaling."),
+        new("swapRB", "Swap Red and Blue", "boolean", true, Group: "Preprocessing", Description: "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."),
+        new("crop", "Center Crop After Resize", "boolean", false, Group: "Preprocessing", Description: "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.")
+    ];
+
+    public static IReadOnlyList<NodeCatalogItem> Items { get; } =
+    [
+        new("recognition.barcode", "Barcode / QR Decode", "Recognition", [Exec, Image],
+            [new("found", VisionDataType.Boolean), new("count", VisionDataType.Integer), new("results", VisionDataType.String), new("text", VisionDataType.String, Required: false), new("format", VisionDataType.String, Required: false), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [
+                new("mode", "Formats", "select", "all", Group: "Formats", Options: [new("All Supported", "all"), new("QR Code", "qr"), new("1D Barcodes", "1d"), new("2D Codes (DataMatrix/PDF417/Aztec)", "2d")], Description: "Symbologies to decode. all scans every supported 1D/2D format and is slower; restrict it when the line carries a known symbology."),
+                new("tryHarder", "Try Harder", "boolean", true, Group: "Formats", Description: "Spend more time on difficult reads (blur, low contrast, small modules). Keep on while commissioning; turn off when cycle time matters and codes are clean."),
+                new("multiple", "Decode Multiple", "boolean", true, Group: "Formats", Description: "Return every readable symbol in the image. Turn off when exactly one code per image is expected, so repeated reads of the same symbol are not reported."),
+                new("preprocess", "Preprocessing", "select", "auto", Group: "Preprocessing", Options: [new("Automatic fallback", "auto"), new("Original only", "none"), new("Otsu threshold", "otsu"), new("Adaptive threshold", "adaptive")], Description: "Automatic tries original grayscale, Otsu, and adaptive threshold images."),
+                new("tryInverted", "Try Inverted Polarity", "boolean", true, Group: "Preprocessing", Description: "Retries with inverted pixels when no normal-polarity code is found; multi-code mode also searches inverted pixels."),
+                new("adaptiveBlockSize", "Adaptive Window Size", "number", 31, 3, 101, 2, Group: "Preprocessing", VisibleWhen: new("preprocess", ["auto", "adaptive"]), Description: "Odd local window size; reduced automatically for small images."),
+                new("adaptiveConstant", "Adaptive Threshold Offset", "number", 10, -100, 100, 1, Group: "Preprocessing", VisibleWhen: new("preprocess", ["auto", "adaptive"]), Description: "Constant subtracted from the local adaptive threshold during fallback preprocessing. Larger values keep only stronger contrast; negative values keep more low-contrast modules."),
+                new("maxResults", "Maximum Results", "number", 100, 1, 1000, 1, Group: "Decoding", Description: "Upper limit on decoded symbols returned for this image. Extra symbols are dropped after duplicate merging."),
+                new("dedupRadiusPx", "Duplicate Merge Radius (px)", "number", 8, 0, 512, 1, Group: "Decoding", Description: "Two reads with the same format and text merge only when their centres are within this distance. Identical payloads in different places stay separate so duplicate labels are counted twice; the same symbol re-read by another preprocessing pass or polarity merges."),
+                new("tileSearch", "Tiled Multi-Code Recovery", "select", "auto", Group: "Decoding", Options: [new("Automatic", "auto"), new("Off", "off")], Description: "Retry empty or partial DataMatrix multi-code reads on bounded two-level 2D tiles and exact quadrants. Every tile uses the enabled preprocessing and inverted-polarity passes. Source coordinates and duplicate suppression are preserved; Off disables all tiled recovery.")
+            ,
+                ],
+            "Industrial barcode/QR decode (algorithmBackend=zxing): QR, DataMatrix, PDF417, Aztec and common 1D. Wire: image → text/format/count/points; optional ROI; preview draws locators. Key params: symbology filter, multi-symbol, preprocessing (gray/Otsu/adaptive/invert), polarity retries. Same symbol across passes merges; identical payloads at different places count separately. Failures: low contrast, blur, ROI clips quiet zone, disabled symbology, strong perspective.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
+        new("recognition.ocr", "OCR", "Recognition", [Exec, Image],
+            [new("text", VisionDataType.String), new("confidence", VisionDataType.Double), new("wordCount", VisionDataType.Integer), new("words", VisionDataType.String), new("chars", VisionDataType.String), new("result", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [
+                new("packagePath", "OCR Package Path", "text", string.Empty, Group: "Engine", Description: "Optional external-train OCR package path; resolves tessdata and languages. Takes precedence over the Tessdata Directory."),
+                new("dataPath", "Tessdata Directory", "text", string.Empty, Group: "Engine", Description: "Directory containing language .traineddata files."),
+                new("language", "Language(s)", "text", "eng", Group: "Engine", Description: "Tesseract language codes, e.g. eng or eng+chi_sim."),
+                new("psm", "Page Segmentation Mode", "select", "auto", Group: "Engine", Options: [new("Automatic", "auto"), new("Auto with OSD", "autoOsd"), new("Single Block", "singleblock"), new("Single Line", "singleline"), new("Single Word", "singleword"), new("Single Character", "singlechar"), new("Sparse Text", "sparsetext")], Description: "Tesseract page-layout hint. Use single line for one-line labels, single character or word for a single code, and automatic for mixed pages."),
+                new("oem", "OCR Engine Mode", "select", "default", Group: "Engine", Options: [new("Default (LSTM)", "default"), new("LSTM Only", "lstm"), new("Legacy Only", "legacy"), new("Legacy + LSTM", "combined")], Description: "Tesseract engine: default/LSTM for best accuracy, legacy for old traineddata, combined tries both."),
+                new("whitelist", "Character Whitelist", "text", string.Empty, Group: "Preprocessing", Description: "Optional allowed characters, e.g. 0123456789 for numeric fields. Control characters are rejected."),
+                new("blacklist", "Character Blacklist", "text", string.Empty, Group: "Preprocessing", Description: "Optional forbidden characters (tessedit_char_blacklist). A character cannot be in both whitelist and blacklist."),
+                new("dpi", "Image DPI (0=auto)", "number", 0, 0, 1200, 1, Group: "Preprocessing", Description: "DPI hint passed to Tesseract. 0 lets Tesseract estimate it; set 300 when small text is misread."),
+                new("upscale", "Upscale Factor", "number", 1, 0.5, 4, 0.25, Group: "Preprocessing", Description: "Resize before OCR; small print often reads better at 2x. Word boxes are mapped back to source pixels."),
+                new("binarize", "Binarize", "select", "none", Group: "Preprocessing", Options: [new("None (grayscale)", "none"), new("Otsu", "otsu"), new("Adaptive Gaussian", "adaptive")], Description: "Optional binarization before OCR. None keeps grayscale; Otsu is global; adaptive Gaussian handles uneven lighting."),
+                new("invert", "Invert Image", "boolean", false, Group: "Preprocessing", Description: "Enable for light text on a dark background."),
+                new("minConfidence", "Minimum Word Confidence", "number", 0, 0, 1, 0.01, Group: "Output", Description: "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words.")
+            ,
+                ],
+            "Tesseract 5 OCR (algorithmBackend=tesseract). Wire: image + optional rectangular ROI → text, confidence, words/chars JSON. Key params: package path or tessdata directory + languages, page-seg/OEM, whitelist, DPI, upscale/binarize, low-confidence filter. Engines pooled per tessdata/lang/OEM with per-request adaptive reset. No font training/teaching. Failures: missing language data, low resolution, over-strict whitelist, wrong page segmentation.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
+        new("inference.classification", "ONNX Classification", "Inference", [Exec, Image],
+            [new("result", VisionDataType.String), new("label", VisionDataType.String), new("classIndex", VisionDataType.Integer), new("confidence", VisionDataType.Double), new("accepted", VisionDataType.Boolean), new("margin", VisionDataType.Double), new("entropy", VisionDataType.Double), new("classCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported classification package (manifest.json + model.onnx + labels). Supplies modelPath and package labels; explicit labels take precedence."), .. OnnxParameters,
+                new("layout", "Output Layout", "select", "scores", Group: "Decoding", Options: [new("Logits / scores (optional softmax)", "scores"), new("YOLO26 classify (already softmax)", "yolo26")], Description: "YOLO26-cls ONNX exports [1,C] probabilities with softmax already in the graph; choose yolo26 to skip a second softmax."),
+                new("letterbox", "Letterbox Resize", "boolean", false, Group: "Preprocessing", Description: "Preserve aspect with gray (114) padding. Usually off for classifiers."),
+                new("multiCrop", "Multi-crop Aggregation", "select", "none", Group: "Inference", Options: [new("Single view", "none"), new("Five crops", "five"), new("Five crops + horizontal flips", "ten")], Description: "Optionally average predictions from the center and four corner crops. The ten-view mode also evaluates horizontal flips. Each view runs independently through the model."),
+                new("viewCropFraction", "View Crop Fraction", "number", 0.9, 0.5, 1, 0.01, Group: "Inference", VisibleWhen: new("multiCrop", ["five", "ten"]), Description: "Width and height of each crop as a fraction of the largest crop matching the model aspect ratio. Used only when multiCrop is five or ten."),
+                new("labels", "Class Labels", "text", string.Empty, Group: "Model", Description: "Optional comma-separated labels in model class order; the count must match the model class count or the field must stay empty."),
+                new("applySoftmax", "Apply Softmax", "boolean", true, Group: "Decoding", VisibleWhen: new("layout", ["scores"]), Description: "Ignored when layout=yolo26 (probabilities are already normalized)."),
+                new("topK", "Top K", "number", 5, 1, 100, 1, Group: "Output", Description: "Number of ranked classes in the result JSON (clamped to the class count); values outside 1–100 fail."),
+                new("minimumConfidence", "Minimum Classification Confidence (0=off)", "number", 0, 0, 1, 0.01, Group: "Output", Description: "Emit accepted=false when the winning probability is below this threshold. Requires softmax probabilities; 0 disables the gate."),
+
+                ],
+            "ONNX image classification (algorithmBackend=onnx). Wire: image + model → topK/label/confidence/accepted. Key params: layout scores (optional softmax) or yolo26 (already softmaxed); input size; swapRB (often true for YOLO); multi-view crops; min confidence. Label count must match classes or be empty. No training/eval. Failures: layout mismatch, invalid topK, bad model path.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
+        new("inference.detection", "ONNX Detection", "Inference", [Exec, Image],
+            [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("result", VisionDataType.String), new("maxScore", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported detection package (manifest.json + model.onnx). Supplies modelPath; explicit modelPath is used only when this is empty."), .. OnnxParameters,
+                new("layout", "Output Layout", "select", "xyxy", Group: "Decoding", Options: [new("Rows [x1,y1,x2,y2,score,class]", "xyxy"), new("YOLO (cx,cy,w,h + class scores)", "yolo"), new("YOLOv5 (with objectness)", "yolov5")], Description: "xyxy = [N,6] boxes; yolo = YOLOv8 raw head; yolov5 adds objectness."), TensorOrder, new("coordinates", "Coordinate Units", "select", "normalized", Group: "Decoding", Options: [new("Normalized 0-1", "normalized"), new("Input Pixels", "pixels")], Description: "Whether network box coordinates are normalized 0-1 or in input pixels."), new("letterbox", "Letterboxed Input", "boolean", false, Group: "Preprocessing", Description: "Enable for Ultralytics YOLO: preprocess uses gray (114) letterbox AND coordinates are un-padded before mapping to the source."), new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01, Group: "Decoding", Description: "Drop candidates below this confidence before NMS."), new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01, Group: "Postprocessing", Description: "Class-aware NMS IoU threshold in [0,1]."), new("maxCount", "Max Detections", "number", 100, 1, 1000, 1, Group: "Postprocessing", Description: "Hard cap on detections returned after NMS (1..1000)."),
+
+
+                ],
+            "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6] (YOLO26 end-to-end nms=False export is typically [1,300,6]); layout yolo expects YOLOv8/YOLO26 raw cx,cy,w,h plus per-class scores as [1,C,N]; layout yolov5 adds objectness. Enable letterbox so preprocess pads like Ultralytics and coordinates un-pad correctly. Class-aware NMS is applied here (not embedded).", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false)),
+        new("inference.obb", "ONNX Oriented Box Detection (YOLO-OBB)", "Inference", [Exec, Image],
+            [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("overlay", VisionDataType.Image), new("result", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported OBB package (manifest.json + model.onnx + labels). Supplies modelPath and package labels; explicit labels take precedence."), .. OnnxYoloParameters,
+                new("layout", "Output Layout", "select", "yolo", Group: "Decoding", Options: [new("Raw YOLOv8/YOLO26 OBB head", "yolo"), new("YOLO26 end-to-end xywhr rows", "xywhr")], Description: "Raw head: [1,5+nc,N] (cx,cy,w,h,class scores,angle rad). End-to-end: [1,N,7] rows (cx,cy,w,h,score,classId,angle rad)."),
+                TensorOrder,
+                new("coordinates", "Coordinate Units", "select", "pixels", Group: "Decoding", Options: [new("Input Pixels", "pixels"), new("Normalized 0-1", "normalized")], Description: "Whether model box coordinates are normalized or absolute pixels."),
+                new("letterbox", "Letterboxed Input", "boolean", true, Group: "Preprocessing", Description: "Default on: Ultralytics gray (114) letterbox with exact padding removal. Disable only when source/model aspect ratios match."),
+                new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01, Group: "Decoding", Description: "Minimum detection confidence kept after decoding."),
+                new("nmsThreshold", "Rotated IoU Threshold", "number", 0.45, 0, 1, 0.01, Group: "Postprocessing", Description: "IoU threshold for non-maximum suppression."),
+                new("nmsMode", "NMS Mode", "select", "auto", Group: "Postprocessing", Options: [new("Automatic (raw=on, end-to-end=off)", "auto"), new("On", "on"), new("Off", "off")], Description: "Uses exact oriented polygon IoU and class-aware suppression. Automatic mode skips NMS on YOLO26 end-to-end predictions."),
+                new("maxCount", "Max Detections", "number", 100, 1, 1000, 1, Group: "Postprocessing", Description: "Hard cap on oriented detections retained after NMS (1..1000)."),
+                new("labels", "Class Labels", "text", string.Empty, Group: "Model", Description: "Optional comma-separated labels in model class order; leave empty to emit class_N labels.")],
+            "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+        new("inference.segmentation", "ONNX Semantic Segmentation", "Inference", [Exec, Image],
+            [new("mask", VisionDataType.Image), new("overlay", VisionDataType.Image), new("classes", VisionDataType.String), new("classCount", VisionDataType.Integer), new("dominantClass", VisionDataType.Integer, Required: false), new("dominantFraction", VisionDataType.Double, Required: false), new("meanConfidence", VisionDataType.Double), new("lowConfidenceFraction", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported segmentation package (manifest.json + model.onnx). Overrides modelPath when set."), .. OnnxParameters,
+                new("layout", "Output Layout", "select", "logits", Group: "Decoding", Options: [new("Logits [1,C,H,W] (argmax)", "logits"), new("YOLO26 semantic class map", "yolo26-semantic")], Description: "logits keeps legacy multi-channel scores; yolo26-semantic matches Ultralytics YOLO26-sem ONNX where argmax is already in the graph ([1,H,W])."),
+                new("letterbox", "Letterbox Resize", "boolean", false, Group: "Preprocessing", Description: "Preserve aspect with gray (114) padding. Enable when the YOLO26-sem export used letterbox."),
+                new("binaryThreshold", "Binary Threshold", "number", 0.5, -1000000, 1000000, 0.01, Group: "Decoding", VisibleWhen: new("layout", ["logits"]), Description: "Used only for layout=logits with one channel; multi-class logits use per-pixel argmax. Ignored for yolo26-semantic."),
+                new("lowConfidenceThreshold", "Low Confidence Threshold", "number", 0.5, -1000000, 1000000, 0.01, Group: "Output", Description: "Fraction of pixels whose winning score is below this value is reported as lowConfidenceFraction. For yolo26-semantic, scores are treated as 1.0."),
+
+                ],
+            "Semantic segmentation only. layout=logits: [1,C,H,W] argmax mask. layout=yolo26-semantic: YOLO26-sem ONNX class map [1,H,W]/[H,W]/[1,1,H,W] (argmax already applied). Emits label mask, colour overlay, per-class stats. For YOLO instance masks (yolo26n-seg) use inference.instanceSegmentation.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+        new("inference.instanceSegmentation", "ONNX Instance Segmentation (YOLO-Seg)", "Inference", [Exec, Image],
+            [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("mask", VisionDataType.Image), new("overlay", VisionDataType.Image), new("instances", VisionDataType.String), new("result", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported instance-seg package (manifest.json + model.onnx + labels). Supplies modelPath and package labels; explicit labels take precedence."), .. OnnxYoloParameters,
+                new("protoOutputName", "Prototype Output Name", "text", string.Empty, Group: "Model", Description: "Second ONNX output (mask prototypes). Leave empty with outputName empty to use the model's first two outputs in order."),
+                new("layout", "Output Layout", "select", "yolo26-seg", Group: "Decoding", Options: [new("Raw YOLO-Seg head", "yolo26-seg"), new("YOLO26 end-to-end rows", "xyxy")], Description: "Raw head: [1,4+nc+maskDim,N]. YOLO26 end-to-end: [1,N,6+maskDim] rows [x1,y1,x2,y2,score,class,coeffs]. Both use the prototype tensor [1,maskDim,H,W]."), TensorOrder,
+                new("coordinates", "Coordinate Units", "select", "pixels", Group: "Decoding", Options: [new("Input Pixels", "pixels"), new("Normalized 0-1", "normalized")], Description: "Whether model box coordinates are normalized or absolute pixels."),
+                new("letterbox", "Letterboxed Input", "boolean", true, Group: "Preprocessing", Description: "Default on: Ultralytics exports assume letterbox preprocess; disable only for stretch-trained custom exports."),
+                new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01, Group: "Decoding", Description: "Minimum detection confidence kept after decoding."),
+                new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01, Group: "Postprocessing", Description: "IoU threshold for non-maximum suppression."),
+                new("nmsMode", "NMS Mode", "select", "auto", Group: "Postprocessing", Options: [new("Automatic (raw=on, end-to-end=off)", "auto"), new("On", "on"), new("Off", "off")], Description: "YOLO26 end-to-end output is already NMS-free top detections; automatic mode skips duplicate suppression there and applies class-aware NMS to raw heads."),
+                new("maskThreshold", "Mask Threshold", "number", 0.5, 0, 1, 0.01, Group: "Decoding", Description: "Probability threshold when binarizing instance masks."),
+                new("includeMaskRuns", "Include Per-Instance Masks", "boolean", true, Group: "Output", Description: "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available."),
+                new("maxCount", "Max Instances", "number", 100, 1, 1000, 1, Group: "Postprocessing", Description: "Hard cap on instances retained after NMS (1..1000)."),
+
+                ],
+            "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+        new("inference.pose", "ONNX Pose (YOLO-Pose)", "Inference", [Exec, Image],
+            [new("detections", VisionDataType.DetectionList), new("count", VisionDataType.Integer), new("keypoints", VisionDataType.String), new("overlay", VisionDataType.Image), new("result", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported pose package (manifest.json + model.onnx + labels). Supplies modelPath and package labels; explicit labels take precedence."), .. OnnxYoloParameters,
+                new("layout", "Output Layout", "select", "yolo", Group: "Decoding", Options: [new("YOLO raw (YOLOv8/YOLO26 nms=None)", "yolo"), new("YOLO26 end-to-end xyxy+kpts", "xyxy")], Description: "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57]."), TensorOrder,
+                new("coordinates", "Coordinate Units", "select", "pixels", Group: "Decoding", Options: [new("Input Pixels", "pixels"), new("Normalized 0-1", "normalized")], Description: "Whether model box coordinates are normalized or absolute pixels."),
+                new("letterbox", "Letterboxed Input", "boolean", true, Group: "Preprocessing", Description: "Default on: Ultralytics letterbox preprocess and coordinate un-padding."),
+                new("numKeypoints", "Keypoint Count", "number", 17, 1, 128, 1, Group: "Model", Description: "COCO pose uses 17. Must match the exported model."),
+                new("keypointDims", "Keypoint Dims", "number", 3, 2, 3, 1, Group: "Model", Description: "3 = x,y,conf (Ultralytics default); 2 = x,y only."),
+                new("confidenceThreshold", "Confidence Threshold", "number", 0.25, 0, 1, 0.01, Group: "Decoding", Description: "Minimum detection confidence kept after decoding."),
+                new("nmsThreshold", "NMS IoU Threshold", "number", 0.45, 0, 1, 0.01, Group: "Postprocessing", Description: "IoU threshold for non-maximum suppression."),
+                new("keypointThreshold", "Keypoint Draw Threshold", "number", 0.5, 0, 1, 0.01, Group: "Output", Description: "Keypoints / skeleton bones below this confidence are skipped on the overlay."),
+                new("drawSkeleton", "Draw COCO Skeleton", "boolean", true, Group: "Output", VisibleWhen: new("numKeypoints", ["17"]), Description: "Draw the standard COCO-17 skeleton on the overlay; available only when Keypoint Count is 17."),
+                new("maxCount", "Max Poses", "number", 100, 1, 1000, 1, Group: "Postprocessing", Description: "Hard cap on poses retained after NMS (1..1000)."),
+
+                ],
+            "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
+        new("inference.anomaly", "ONNX Anomaly Score", "Inference", [Exec, Image],
+            [new("score", VisionDataType.Double), new("isAnomaly", VisionDataType.Boolean), new("heatmap", VisionDataType.Image, Required: false), new("mapPeak", VisionDataType.Double, Required: false), new("mapMean", VisionDataType.Double, Required: false), new("mapMin", VisionDataType.Double, Required: false), new("mapMax", VisionDataType.Double, Required: false), new("peakX", VisionDataType.Double, Required: false), new("peakY", VisionDataType.Double, Required: false), new("areaFraction", VisionDataType.Double, Required: false), new("suggestedThreshold", VisionDataType.Double, Required: false), new("result", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("packagePath", "External-Train Package", "text", string.Empty, Group: "Model", Description: "Optional imported anomaly package (manifest.json + model.onnx). Overrides modelPath when set."), .. OnnxParameters,
+                new("scoreOutputName", "Score Output Name", "text", string.Empty, Group: "Output", Description: "Optional scalar image-level anomaly score output. Set together with mapOutputName when the model exposes both outputs."),
+                new("mapOutputName", "Anomaly Map Output Name", "text", string.Empty, Group: "Output", Description: "Optional spatial anomaly map output. Set together with scoreOutputName for image-level gating plus pixel localization."),
+                new("mapLayout", "Map Layout", "select", "auto", Group: "Decoding", Options: [new("Automatic", "auto"), new("Channels First", "channelsFirst"), new("Channels Last", "channelsLast")], Description: "Spatial output may be [1,1,H,W], [1,H,W], [H,W], [1,H,W,1], or [H,W,1]. Explicitly select a layout when a narrow map shape is ambiguous."),
+                new("threshold", "Anomaly Threshold", "number", 0.5, -1000000, 1000000, 0.01, Group: "Threshold", Description: "Image-level score threshold; also used for the map when separate map threshold is off."),
+                new("useSeparateMapThreshold", "Use Separate Map Threshold", "boolean", false, Group: "Threshold", Description: "When enabled, mapThreshold controls pixel-area statistics independently of the image-level score threshold."),
+                new("mapThreshold", "Map Threshold", "number", 0.5, -1000000, 1000000, 0.01, Group: "Threshold", VisibleWhen: new("useSeparateMapThreshold", ["true"]), Description: "Pixel threshold for the anomaly map. Used only when Use Separate Map Threshold is enabled; the Otsu mode overrides it."),
+                new("thresholdMode", "Threshold Mode", "select", "manual", Group: "Threshold", Options: [new("Manual Threshold", "manual"), new("Otsu Auto (spatial maps)", "otsu")], Description: "Otsu derives the pixel threshold from the map distribution; image-level scores always use the manual Anomaly Threshold."),
+
+                ],
+            "ONNX anomaly score/map (algorithmBackend=onnx). Wire: image + model → isAnomaly; optional heatmap and peak. Key params: scoreOutputName/mapOutputName; image-score threshold; map threshold/Otsu. Score drives isAnomaly when present; map-only uses peak. Failures: output name/shape mismatch, threshold vs score scale.", "builtin",
+            new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false))
+    ];
+}

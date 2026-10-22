@@ -1,0 +1,229 @@
+{
+  "id": "region-shape-inspection",
+  "name": "Region Shape and Convex Deficit",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "region.fromRoi",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 40
+      },
+      "parameters": {
+        "canvasWidth": 128,
+        "canvasHeight": 128,
+        "roi": {
+          "type": "polygon",
+          "points": [
+            {
+              "x": 20,
+              "y": 20
+            },
+            {
+              "x": 100,
+              "y": 20
+            },
+            {
+              "x": 100,
+              "y": 100
+            },
+            {
+              "x": 75,
+              "y": 100
+            },
+            {
+              "x": 75,
+              "y": 45
+            },
+            {
+              "x": 45,
+              "y": 45
+            },
+            {
+              "x": 45,
+              "y": 100
+            },
+            {
+              "x": 20,
+              "y": 100
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "hull",
+      "type": "region.convexHull",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 40
+      },
+      "parameters": {}
+    },
+    {
+      "id": "gap",
+      "type": "region.boolean",
+      "name": null,
+      "position": {
+        "x": 580,
+        "y": 40
+      },
+      "parameters": {
+        "operation": "difference"
+      }
+    },
+    {
+      "id": "boundary",
+      "type": "region.boundary",
+      "name": null,
+      "position": {
+        "x": 860,
+        "y": 40
+      },
+      "parameters": {
+        "boundaryMode": "inner"
+      }
+    },
+    {
+      "id": "skeleton",
+      "type": "region.skeleton",
+      "name": null,
+      "position": {
+        "x": 1140,
+        "y": 40
+      },
+      "parameters": {}
+    },
+    {
+      "id": "tolerance",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 300
+      },
+      "parameters": {
+        "min": 1000,
+        "max": 2500
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 300,
+        "y": 300
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "hull",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c0"
+    },
+    {
+      "sourceNodeId": "hull",
+      "sourcePort": "next",
+      "targetNodeId": "gap",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c1"
+    },
+    {
+      "sourceNodeId": "gap",
+      "sourcePort": "next",
+      "targetNodeId": "boundary",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c2"
+    },
+    {
+      "sourceNodeId": "boundary",
+      "sourcePort": "next",
+      "targetNodeId": "skeleton",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c3"
+    },
+    {
+      "sourceNodeId": "skeleton",
+      "sourcePort": "next",
+      "targetNodeId": "tolerance",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c4"
+    },
+    {
+      "sourceNodeId": "tolerance",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control",
+      "id": "c5"
+    },
+    {
+      "sourceNodeId": "source",
+      "sourcePort": "region",
+      "targetNodeId": "hull",
+      "targetPort": "region",
+      "kind": "data",
+      "id": "d6"
+    },
+    {
+      "sourceNodeId": "hull",
+      "sourcePort": "region",
+      "targetNodeId": "gap",
+      "targetPort": "a",
+      "kind": "data",
+      "id": "d7"
+    },
+    {
+      "sourceNodeId": "source",
+      "sourcePort": "region",
+      "targetNodeId": "gap",
+      "targetPort": "b",
+      "kind": "data",
+      "id": "d8"
+    },
+    {
+      "sourceNodeId": "source",
+      "sourcePort": "region",
+      "targetNodeId": "boundary",
+      "targetPort": "region",
+      "kind": "data",
+      "id": "d9"
+    },
+    {
+      "sourceNodeId": "source",
+      "sourcePort": "region",
+      "targetNodeId": "skeleton",
+      "targetPort": "region",
+      "kind": "data",
+      "id": "d10"
+    },
+    {
+      "sourceNodeId": "gap",
+      "sourcePort": "area",
+      "targetNodeId": "tolerance",
+      "targetPort": "value",
+      "kind": "data",
+      "id": "d11"
+    },
+    {
+      "sourceNodeId": "tolerance",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data",
+      "id": "d12"
+    }
+  ]
+}

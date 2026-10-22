@@ -1,0 +1,263 @@
+{
+  "id": "robot-eye-in-hand",
+  "name": "V0.20 Eye-in-Hand robot guidance",
+  "nodes": [
+    {
+      "id": "observed-pose-1",
+      "type": "coordinate.pose",
+      "name": "observed-pose-1",
+      "position": {
+        "x": 20,
+        "y": 100
+      },
+      "parameters": {
+        "x": 18,
+        "y": 7,
+        "thetaDeg": 4,
+        "frame": "CameraPlane",
+        "unit": "mm"
+      }
+    },
+    {
+      "id": "camera-tool-1",
+      "type": "coordinate.transformConstant",
+      "name": "camera-tool-1",
+      "position": {
+        "x": 300,
+        "y": 100
+      },
+      "parameters": {
+        "sourceFrame": "CameraPlane",
+        "targetFrame": "Tool",
+        "unit": "mm",
+        "x": 35,
+        "y": -8,
+        "angleDeg": 1.5
+      }
+    },
+    {
+      "id": "robot-current-1",
+      "type": "robot.currentPose",
+      "name": "robot-current-1",
+      "position": {
+        "x": 300,
+        "y": 330
+      },
+      "parameters": {
+        "robotId": "virtual-abb-1",
+        "autoConnect": true
+      }
+    },
+    {
+      "id": "tool-base-1",
+      "type": "coordinate.poseToTransform",
+      "name": "tool-base-1",
+      "position": {
+        "x": 590,
+        "y": 330
+      },
+      "parameters": {
+        "sourceFrame": "Tool"
+      }
+    },
+    {
+      "id": "compose-1",
+      "type": "coordinate.transformCompose",
+      "name": "compose-1",
+      "position": {
+        "x": 870,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "to-robot-1",
+      "type": "coordinate.transformCoordinatePose",
+      "name": "to-robot-1",
+      "position": {
+        "x": 1160,
+        "y": 210
+      },
+      "parameters": {}
+    },
+    {
+      "id": "guidance-1",
+      "type": "robot.guidance2d",
+      "name": "guidance-1",
+      "position": {
+        "x": 1450,
+        "y": 210
+      },
+      "parameters": {
+        "robot": "ABB",
+        "guidanceMode": "EyeInHand",
+        "expectedFrame": "RobotBase"
+      }
+    },
+    {
+      "id": "compensation-1",
+      "type": "robot.j4TcpCompensation",
+      "name": "compensation-1",
+      "position": {
+        "x": 1740,
+        "y": 210
+      },
+      "parameters": {
+        "tcpOffsetX": 12,
+        "tcpOffsetY": 4,
+        "j4PivotOffsetX": 0,
+        "j4PivotOffsetY": 0,
+        "angleZeroOffsetDeg": 0
+      }
+    },
+    {
+      "id": "robot-execute-1",
+      "type": "robot.executeTarget",
+      "name": "robot-execute-1",
+      "position": {
+        "x": 2030,
+        "y": 210
+      },
+      "parameters": {
+        "robotId": "virtual-abb-1",
+        "action": "Handshake",
+        "autoConnect": true,
+        "waitForInPosition": true,
+        "timeoutMs": 10000,
+        "maxRetries": 1,
+        "retryDelayMs": 100,
+        "autoAck": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "observed-pose-1",
+      "sourcePort": "next",
+      "targetNodeId": "camera-tool-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "camera-tool-1",
+      "sourcePort": "next",
+      "targetNodeId": "robot-current-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "robot-current-1",
+      "sourcePort": "next",
+      "targetNodeId": "tool-base-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "robot-current-1",
+      "sourcePort": "pose",
+      "targetNodeId": "tool-base-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "tool-base-1",
+      "sourcePort": "next",
+      "targetNodeId": "compose-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "camera-tool-1",
+      "sourcePort": "transform",
+      "targetNodeId": "compose-1",
+      "targetPort": "transformA",
+      "kind": "data"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "tool-base-1",
+      "sourcePort": "transform",
+      "targetNodeId": "compose-1",
+      "targetPort": "transformB",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "compose-1",
+      "sourcePort": "next",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "observed-pose-1",
+      "sourcePort": "pose",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "compose-1",
+      "sourcePort": "transform",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "to-robot-1",
+      "sourcePort": "next",
+      "targetNodeId": "guidance-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "to-robot-1",
+      "sourcePort": "pose",
+      "targetNodeId": "guidance-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "next",
+      "targetNodeId": "compensation-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "target",
+      "targetNodeId": "compensation-1",
+      "targetPort": "target",
+      "kind": "data"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "compensation-1",
+      "sourcePort": "next",
+      "targetNodeId": "robot-execute-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "compensation-1",
+      "sourcePort": "target",
+      "targetNodeId": "robot-execute-1",
+      "targetPort": "target",
+      "kind": "data"
+    }
+  ]
+}

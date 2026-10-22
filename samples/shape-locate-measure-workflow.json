@@ -1,0 +1,425 @@
+{
+  "id": "shape-locate-measure",
+  "name": "Shape Locate + Dynamic ROI + Caliper Measurement",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": null,
+      "position": {
+        "x": 20,
+        "y": 240
+      },
+      "parameters": {
+        "width": 640,
+        "height": 480,
+        "centerX": 320,
+        "centerY": 240,
+        "radius": 80
+      }
+    },
+    {
+      "id": "template",
+      "type": "image.crop",
+      "name": null,
+      "position": {
+        "x": 260,
+        "y": 420
+      },
+      "parameters": {
+        "x": 220,
+        "y": 140,
+        "width": 200,
+        "height": 200
+      }
+    },
+    {
+      "id": "locate",
+      "type": "match.shape",
+      "name": null,
+      "position": {
+        "x": 520,
+        "y": 180
+      },
+      "parameters": {
+        "minScore": 0.5,
+        "angleRangeDeg": 180,
+        "angleStepDeg": 3,
+        "minArea": 400,
+        "signatureSamples": 360
+      }
+    },
+    {
+      "id": "roi",
+      "type": "roi.transform",
+      "name": null,
+      "position": {
+        "x": 800,
+        "y": 180
+      },
+      "parameters": {
+        "roi": {
+          "type": "Circle",
+          "x": 100,
+          "y": 100,
+          "radius": 80
+        },
+        "baseX": 100,
+        "baseY": 100,
+        "baseThetaDeg": 0
+      }
+    },
+    {
+      "id": "measure",
+      "type": "measure.caliperCircle",
+      "name": null,
+      "position": {
+        "x": 1080,
+        "y": 180
+      },
+      "parameters": {
+        "centerX": 100,
+        "centerY": 100,
+        "radius": 80,
+        "radialBand": 20,
+        "angleStepDeg": 5,
+        "minContrast": 8
+      }
+    },
+    {
+      "id": "found",
+      "type": "flow.ifBoolean",
+      "name": "Measurement Found?",
+      "position": { "x": 1280, "y": 180 },
+      "parameters": {}
+    },
+    {
+      "id": "tol",
+      "type": "value.range",
+      "name": null,
+      "position": {
+        "x": 1510,
+        "y": 100
+      },
+      "parameters": {
+        "min": 78,
+        "max": 82
+      }
+    },
+    {
+      "id": "result",
+      "type": "flow.result",
+      "name": null,
+      "position": {
+        "x": 1760,
+        "y": 100
+      },
+      "parameters": {}
+    },
+    {
+      "id": "export",
+      "type": "output.exportResult",
+      "name": null,
+      "position": {
+        "x": 2010,
+        "y": 100
+      },
+      "parameters": {
+        "path": "artifacts/shape-locate-measure-result.json",
+        "format": "json",
+        "overwrite": true
+      }
+    },
+    {
+      "id": "not-found-result",
+      "type": "flow.result",
+      "name": "Measurement Not Found",
+      "position": { "x": 1760, "y": 330 },
+      "parameters": {}
+    },
+    {
+      "id": "not-found-export",
+      "type": "output.exportResult",
+      "name": "Export NG Result",
+      "position": { "x": 2010, "y": 330 },
+      "parameters": {
+        "path": "artifacts/shape-locate-measure-result.json",
+        "format": "json",
+        "overwrite": true
+      }
+    },
+    {
+      "id": "join",
+      "type": "flow.join",
+      "name": "Branch Join",
+      "position": { "x": 2260, "y": 210 },
+      "parameters": {}
+    },
+    {
+      "id": "locate-found",
+      "type": "flow.ifBoolean",
+      "name": "Location Found?",
+      "position": { "x": 700, "y": 180 },
+      "parameters": {}
+    },
+    {
+      "id": "locate-not-found-result",
+      "type": "flow.result",
+      "name": "Location Not Found",
+      "position": { "x": 1760, "y": 560 },
+      "parameters": {}
+    },
+    {
+      "id": "locate-not-found-export",
+      "type": "output.exportResult",
+      "name": "Export Location NG",
+      "position": { "x": 2010, "y": 560 },
+      "parameters": {
+        "path": "artifacts/shape-locate-measure-result.json",
+        "format": "json",
+        "overwrite": true
+      }
+    },
+    {
+      "id": "locate-join",
+      "type": "flow.join",
+      "name": "Location Branch Join",
+      "position": { "x": 2500, "y": 300 },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c0",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "template",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d0",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "template",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c1",
+      "sourceNodeId": "template",
+      "sourcePort": "next",
+      "targetNodeId": "locate",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "locate",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "template",
+      "sourcePort": "image",
+      "targetNodeId": "locate",
+      "targetPort": "template",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "locate",
+      "sourcePort": "next",
+      "targetNodeId": "locate-found",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "locate",
+      "sourcePort": "pose",
+      "targetNodeId": "roi",
+      "targetPort": "currentPose",
+      "kind": "data"
+    },
+    {
+      "id": "d-roi-image",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "roi",
+      "targetPort": "debugImage",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "roi",
+      "sourcePort": "next",
+      "targetNodeId": "measure",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "locate",
+      "sourcePort": "image",
+      "targetNodeId": "measure",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "roi",
+      "sourcePort": "transform",
+      "targetNodeId": "measure",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "measure",
+      "sourcePort": "next",
+      "targetNodeId": "found",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "measure",
+      "sourcePort": "found",
+      "targetNodeId": "found",
+      "targetPort": "condition",
+      "kind": "data"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "found",
+      "sourcePort": "true",
+      "targetNodeId": "tol",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "found",
+      "sourcePort": "false",
+      "targetNodeId": "not-found-result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d12",
+      "sourceNodeId": "measure",
+      "sourcePort": "radius",
+      "targetNodeId": "tol",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "tol",
+      "sourcePort": "next",
+      "targetNodeId": "result",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "tol",
+      "sourcePort": "pass",
+      "targetNodeId": "result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "result",
+      "sourcePort": "next",
+      "targetNodeId": "export",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "result",
+      "sourcePort": "pass",
+      "targetNodeId": "export",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "d13",
+      "sourceNodeId": "measure",
+      "sourcePort": "found",
+      "targetNodeId": "not-found-result",
+      "targetPort": "pass",
+      "kind": "data"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "not-found-result",
+      "sourcePort": "next",
+      "targetNodeId": "not-found-export",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d14",
+      "sourceNodeId": "not-found-result",
+      "sourcePort": "pass",
+      "targetNodeId": "not-found-export",
+      "targetPort": "value",
+      "kind": "data"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "export",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch1",
+      "kind": "control"
+    },
+    {
+      "id": "c11",
+      "sourceNodeId": "not-found-export",
+      "sourcePort": "next",
+      "targetNodeId": "join",
+      "targetPort": "branch2",
+      "kind": "control"
+    },
+    {
+      "id": "d_locate_found", "sourceNodeId": "locate", "sourcePort": "found",
+      "targetNodeId": "locate-found", "targetPort": "condition", "kind": "data"
+    },
+    {
+      "id": "c_locate_true", "sourceNodeId": "locate-found", "sourcePort": "true",
+      "targetNodeId": "roi", "targetPort": "exec", "kind": "control"
+    },
+    {
+      "id": "c_locate_false", "sourceNodeId": "locate-found", "sourcePort": "false",
+      "targetNodeId": "locate-not-found-result", "targetPort": "exec", "kind": "control"
+    },
+    {
+      "id": "d_locate_ng", "sourceNodeId": "locate", "sourcePort": "found",
+      "targetNodeId": "locate-not-found-result", "targetPort": "pass", "kind": "data"
+    },
+    {
+      "id": "c_locate_ng_export", "sourceNodeId": "locate-not-found-result", "sourcePort": "next",
+      "targetNodeId": "locate-not-found-export", "targetPort": "exec", "kind": "control"
+    },
+    {
+      "id": "d_locate_ng_export", "sourceNodeId": "locate-not-found-result", "sourcePort": "pass",
+      "targetNodeId": "locate-not-found-export", "targetPort": "value", "kind": "data"
+    },
+    {
+      "id": "c_locate_join_success", "sourceNodeId": "join", "sourcePort": "next",
+      "targetNodeId": "locate-join", "targetPort": "branch1", "kind": "control"
+    },
+    {
+      "id": "c_locate_join_ng", "sourceNodeId": "locate-not-found-export", "sourcePort": "next",
+      "targetNodeId": "locate-join", "targetPort": "branch2", "kind": "control"
+    }
+  ]
+}

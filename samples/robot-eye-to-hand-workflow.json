@@ -1,0 +1,313 @@
+{
+  "id": "robot-eye-to-hand",
+  "name": "V0.20 Eye-to-Hand robot guidance",
+  "nodes": [
+    {
+      "id": "source-1",
+      "type": "image.synthetic",
+      "name": "source-1",
+      "position": {
+        "x": 20,
+        "y": 190
+      },
+      "parameters": {
+        "centerX": 330,
+        "centerY": 235,
+        "radius": 78
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "image.threshold",
+      "name": "threshold-1",
+      "position": {
+        "x": 260,
+        "y": 190
+      },
+      "parameters": {
+        "threshold": 110
+      }
+    },
+    {
+      "id": "rect-1",
+      "type": "measure.rotatedRect",
+      "name": "rect-1",
+      "position": {
+        "x": 500,
+        "y": 190
+      },
+      "parameters": {
+        "minArea": 1500
+      }
+    },
+    {
+      "id": "calibration-1",
+      "type": "calibration.planar",
+      "name": "calibration-1",
+      "position": {
+        "x": 760,
+        "y": 190
+      },
+      "parameters": {}
+    },
+    {
+      "id": "pixel-to-workpiece-1",
+      "type": "coordinate.transformPose",
+      "name": "pixel-to-workpiece-1",
+      "position": {
+        "x": 1030,
+        "y": 120
+      },
+      "parameters": {}
+    },
+    {
+      "id": "frame-tree-1",
+      "type": "coordinate.frameTree",
+      "name": "frame-tree-1",
+      "position": {
+        "x": 1030,
+        "y": 340
+      },
+      "parameters": {
+        "transformsJson": "[{\"sourceFrame\":\"Workpiece\",\"targetFrame\":\"Fixture\",\"unit\":\"mm\",\"x\":100,\"y\":50,\"angleDeg\":5},{\"sourceFrame\":\"Fixture\",\"targetFrame\":\"RobotBase\",\"unit\":\"mm\",\"x\":500,\"y\":200,\"angleDeg\":0}]"
+      }
+    },
+    {
+      "id": "frame-resolve-1",
+      "type": "coordinate.frameResolve",
+      "name": "frame-resolve-1",
+      "position": {
+        "x": 1310,
+        "y": 340
+      },
+      "parameters": {
+        "sourceFrame": "Workpiece",
+        "targetFrame": "RobotBase"
+      }
+    },
+    {
+      "id": "to-robot-1",
+      "type": "coordinate.transformCoordinatePose",
+      "name": "to-robot-1",
+      "position": {
+        "x": 1580,
+        "y": 190
+      },
+      "parameters": {}
+    },
+    {
+      "id": "guidance-1",
+      "type": "robot.guidance2d",
+      "name": "guidance-1",
+      "position": {
+        "x": 1850,
+        "y": 190
+      },
+      "parameters": {
+        "robot": "ABB",
+        "guidanceMode": "EyeToHand",
+        "expectedFrame": "RobotBase",
+        "offsetX": 0,
+        "offsetY": 0,
+        "angleOffsetDeg": 0
+      }
+    },
+    {
+      "id": "compensation-1",
+      "type": "robot.j4TcpCompensation",
+      "name": "compensation-1",
+      "position": {
+        "x": 2140,
+        "y": 190
+      },
+      "parameters": {
+        "tcpOffsetX": 12,
+        "tcpOffsetY": 4,
+        "j4PivotOffsetX": 0,
+        "j4PivotOffsetY": 0,
+        "angleZeroOffsetDeg": 0
+      }
+    },
+    {
+      "id": "robot-execute-1",
+      "type": "robot.executeTarget",
+      "name": "robot-execute-1",
+      "position": {
+        "x": 2430,
+        "y": 190
+      },
+      "parameters": {
+        "robotId": "virtual-abb-1",
+        "action": "Handshake",
+        "autoConnect": true,
+        "waitForInPosition": true,
+        "timeoutMs": 10000,
+        "maxRetries": 1,
+        "retryDelayMs": 100,
+        "autoAck": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "next",
+      "targetNodeId": "threshold-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source-1",
+      "sourcePort": "image",
+      "targetNodeId": "threshold-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "next",
+      "targetNodeId": "rect-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "threshold-1",
+      "sourcePort": "image",
+      "targetNodeId": "rect-1",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "rect-1",
+      "sourcePort": "next",
+      "targetNodeId": "calibration-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "calibration-1",
+      "sourcePort": "next",
+      "targetNodeId": "pixel-to-workpiece-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "rect-1",
+      "sourcePort": "pose",
+      "targetNodeId": "pixel-to-workpiece-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "calibration-1",
+      "sourcePort": "transform",
+      "targetNodeId": "pixel-to-workpiece-1",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "pixel-to-workpiece-1",
+      "sourcePort": "next",
+      "targetNodeId": "frame-tree-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "frame-tree-1",
+      "sourcePort": "next",
+      "targetNodeId": "frame-resolve-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "frame-tree-1",
+      "sourcePort": "tree",
+      "targetNodeId": "frame-resolve-1",
+      "targetPort": "tree",
+      "kind": "data"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "frame-resolve-1",
+      "sourcePort": "next",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "pixel-to-workpiece-1",
+      "sourcePort": "pose",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "d7",
+      "sourceNodeId": "frame-resolve-1",
+      "sourcePort": "transform",
+      "targetNodeId": "to-robot-1",
+      "targetPort": "transform",
+      "kind": "data"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "to-robot-1",
+      "sourcePort": "next",
+      "targetNodeId": "guidance-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d8",
+      "sourceNodeId": "to-robot-1",
+      "sourcePort": "pose",
+      "targetNodeId": "guidance-1",
+      "targetPort": "pose",
+      "kind": "data"
+    },
+    {
+      "id": "c9",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "next",
+      "targetNodeId": "compensation-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d9",
+      "sourceNodeId": "guidance-1",
+      "sourcePort": "target",
+      "targetNodeId": "compensation-1",
+      "targetPort": "target",
+      "kind": "data"
+    },
+    {
+      "id": "c10",
+      "sourceNodeId": "compensation-1",
+      "sourcePort": "next",
+      "targetNodeId": "robot-execute-1",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d10",
+      "sourceNodeId": "compensation-1",
+      "sourcePort": "target",
+      "targetNodeId": "robot-execute-1",
+      "targetPort": "target",
+      "kind": "data"
+    }
+  ]
+}

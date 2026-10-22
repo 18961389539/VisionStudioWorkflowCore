@@ -1,0 +1,210 @@
+{
+  "id": "foreach-detections",
+  "name": "For Each Detection",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "image.synthetic",
+      "name": "image.synthetic",
+      "position": {
+        "x": 30,
+        "y": 180
+      },
+      "parameters": {}
+    },
+    {
+      "id": "binary",
+      "type": "image.threshold",
+      "name": "image.threshold",
+      "position": {
+        "x": 300,
+        "y": 180
+      },
+      "parameters": {
+        "threshold": 80
+      }
+    },
+    {
+      "id": "objects",
+      "type": "measure.blobs",
+      "name": "measure.blobs",
+      "position": {
+        "x": 570,
+        "y": 180
+      },
+      "parameters": {
+        "minArea": 100
+      }
+    },
+    {
+      "id": "offset",
+      "type": "value.number",
+      "name": "value.number",
+      "position": {
+        "x": 840,
+        "y": 180
+      },
+      "parameters": {
+        "value": 0
+      }
+    },
+    {
+      "id": "loop",
+      "type": "flow.forEach",
+      "name": "flow.forEach",
+      "position": {
+        "x": 1110,
+        "y": 180
+      },
+      "parameters": {
+        "maxItems": 100
+      }
+    },
+    {
+      "id": "position",
+      "type": "value.arithmetic",
+      "name": "value.arithmetic",
+      "position": {
+        "x": 1410,
+        "y": 30
+      },
+      "parameters": {
+        "op": "add"
+      }
+    },
+    {
+      "id": "end",
+      "type": "flow.loopEnd",
+      "name": "flow.loopEnd",
+      "position": {
+        "x": 1700,
+        "y": 30
+      },
+      "parameters": {}
+    },
+    {
+      "id": "count",
+      "type": "collection.detections.count",
+      "name": "collection.detections.count",
+      "position": {
+        "x": 1410,
+        "y": 420
+      },
+      "parameters": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "c1",
+      "sourceNodeId": "source",
+      "sourcePort": "next",
+      "targetNodeId": "binary",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d1",
+      "sourceNodeId": "source",
+      "sourcePort": "image",
+      "targetNodeId": "binary",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c2",
+      "sourceNodeId": "binary",
+      "sourcePort": "next",
+      "targetNodeId": "objects",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d2",
+      "sourceNodeId": "binary",
+      "sourcePort": "image",
+      "targetNodeId": "objects",
+      "targetPort": "image",
+      "kind": "data"
+    },
+    {
+      "id": "c3",
+      "sourceNodeId": "objects",
+      "sourcePort": "next",
+      "targetNodeId": "offset",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c4",
+      "sourceNodeId": "offset",
+      "sourcePort": "next",
+      "targetNodeId": "loop",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d3",
+      "sourceNodeId": "objects",
+      "sourcePort": "detections",
+      "targetNodeId": "loop",
+      "targetPort": "detections",
+      "kind": "data"
+    },
+    {
+      "id": "c5",
+      "sourceNodeId": "loop",
+      "sourcePort": "body",
+      "targetNodeId": "position",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d4",
+      "sourceNodeId": "loop",
+      "sourcePort": "x",
+      "targetNodeId": "position",
+      "targetPort": "a",
+      "kind": "data"
+    },
+    {
+      "id": "d5",
+      "sourceNodeId": "offset",
+      "sourcePort": "value",
+      "targetNodeId": "position",
+      "targetPort": "b",
+      "kind": "data"
+    },
+    {
+      "id": "c6",
+      "sourceNodeId": "position",
+      "sourcePort": "next",
+      "targetNodeId": "end",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "c7",
+      "sourceNodeId": "end",
+      "sourcePort": "repeat",
+      "targetNodeId": "loop",
+      "targetPort": "repeat",
+      "kind": "control"
+    },
+    {
+      "id": "c8",
+      "sourceNodeId": "loop",
+      "sourcePort": "done",
+      "targetNodeId": "count",
+      "targetPort": "exec",
+      "kind": "control"
+    },
+    {
+      "id": "d6",
+      "sourceNodeId": "loop",
+      "sourcePort": "detections",
+      "targetNodeId": "count",
+      "targetPort": "detections",
+      "kind": "data"
+    }
+  ]
+}

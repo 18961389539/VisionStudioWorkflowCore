@@ -1,0 +1,5 @@
+# 统一换行策略：仓库内以 LF 存储、检出保持 LF（仓库级 core.autocrlf=false）。
+# shell / python 脚本固定 LF，避免在 Git Bash 下出现 "bad interpreter"。
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf

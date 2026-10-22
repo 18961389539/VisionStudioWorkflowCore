@@ -1,0 +1,32 @@
+name: soak-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_iterations:
+        description: Workflow execution iterations
+        required: false
+        default: '250'
+      robot_iterations:
+        description: Robot handshake iterations
+        required: false
+        default: '50'
+  schedule:
+    - cron: '30 18 * * 1-5'
+
+jobs:
+  soak:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      VISION_SOAK_WORKFLOW_ITERATIONS: ${{ inputs.workflow_iterations || '250' }}
+      VISION_SOAK_ROBOT_ITERATIONS: ${{ inputs.robot_iterations || '50' }}
+      VISION_SOAK_MATH_ITERATIONS: '50000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run soak tests
+        shell: pwsh
+        run: ./scripts/soak-test.ps1

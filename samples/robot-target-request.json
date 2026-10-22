@@ -1,0 +1,15 @@
+{
+  "x": 580.0,
+  "y": 280.0,
+  "rDeg": 35.0,
+  "frame": "RobotBase",
+  "unit": "mm",
+  "robot": "ABB",
+  "guidanceMode": "Manual",
+  "action": "Handshake",
+  "waitForInPosition": true,
+  "timeoutMs": 5000,
+  "maxRetries": 1,
+  "retryDelayMs": 100,
+  "autoAck": true
+}

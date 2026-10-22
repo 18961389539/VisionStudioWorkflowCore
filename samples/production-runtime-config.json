@@ -1,0 +1,10 @@
+{
+  "jobId": "my-production-job",
+  "autoStart": false,
+  "cycleDelayMs": 25,
+  "maxCycleMs": 15000,
+  "maxConsecutiveFailures": 3,
+  "autoRecover": true,
+  "recoveryDelayMs": 1000,
+  "stopTimeoutMs": 5000
+}
