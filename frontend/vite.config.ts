@@ -18,6 +18,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.{ts,tsx}']
+    include: ['src/**/*.test.{ts,tsx}'],
+    // jsdom 下多次完整渲染的用例在满载时接近 5s 默认期限（120 顶点多边形、圆几何联动等），
+    // 统一放宽到 15s；断言未放宽，只是避免负载造成的假失败。
+    testTimeout: 15_000
   }
 });

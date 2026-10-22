@@ -231,13 +231,20 @@ public sealed record NodeCatalogItem(
     /// 显式图像坐标帧语义。null = 未声明：输出沿输入帧（无输入时使用节点私有源帧）；
     /// 非空 = 按首条匹配规则解释，插件因此无需让宿主按节点类型字符串猜测。
     /// </summary>
-    IReadOnlyList<NodeFrameRule>? Frames = null)
+    IReadOnlyList<NodeFrameRule>? Frames = null,
+    /// <summary>
+    /// 只输出 transform（不输出图像）的节点的帧语义。null = 未声明（宿主不再推断它的 Source/Target）。
+    /// </summary>
+    NodeTransformFrameDeclaration? TransformFrames = null)
 {
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;
 
     /// <summary>该目录是否声明了图像坐标帧语义。</summary>
     public bool DeclaresFrames => Frames is not null;
+
+    /// <summary>该目录是否声明了 transform 帧语义。</summary>
+    public bool DeclaresTransformFrames => TransformFrames is not null;
 }
 
 /// <summary>
@@ -268,8 +275,25 @@ public enum NodeTransformFramePolicy
     /// <summary>Source = roi:{nodeId}:reference，Target = InputPort 的图像帧。</summary>
     RoiReference,
     /// <summary>Source = 输入图像帧，Target = ReferencePort 的图像帧。</summary>
-    ReferenceInput
+    ReferenceInput,
+    /// <summary>Source = 模板输入帧（或 match:{nodeId}:template），Target = 图像输入帧。</summary>
+    TemplateToImage,
+    /// <summary>Source = PrimaryPort 的 Source，Target = SecondaryPort 的 Target，并校验中间帧衔接。</summary>
+    Compose,
+    /// <summary>交换 PrimaryPort 的 Source/Target。</summary>
+    Invert
 }
+
+/// <summary>
+/// 只输出 transform 的节点的帧声明。与 <see cref="NodeFrameRule"/> 分开，避免让"图像输出策略"
+/// 在纯坐标节点上出现无意义的取值。
+/// </summary>
+public sealed record NodeTransformFrameDeclaration(
+    NodeTransformFramePolicy Policy,
+    string PrimaryPort = "transform",
+    string? SecondaryPort = null,
+    string ImagePort = "image",
+    string TemplatePort = "template");
 
 /// <summary>
 /// 一条图像帧语义规则。条件为空表示无条件匹配；否则按节点有效参数值（节点值优先、目录默认值兜底）

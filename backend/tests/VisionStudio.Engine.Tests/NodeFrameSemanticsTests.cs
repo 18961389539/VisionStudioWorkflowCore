@@ -35,6 +35,17 @@ public sealed class NodeFrameSemanticsTests
         Assert.Equal(suffix, rule!.FrameSuffix);
     }
 
+    [Theory]
+    [InlineData("match.shape", NodeTransformFramePolicy.TemplateToImage)]
+    [InlineData("coordinate.transformCompose", NodeTransformFramePolicy.Compose)]
+    [InlineData("coordinate.transformInverse", NodeTransformFramePolicy.Invert)]
+    public void BuiltInTransformNodes_DeclareTransformFrames(string type, NodeTransformFramePolicy policy)
+    {
+        var item = BuiltInNodeCatalog.Require(type);
+        Assert.True(item.DeclaresTransformFrames, $"{type} must declare transform frame semantics.");
+        Assert.Equal(policy, item.TransformFrames!.Policy);
+    }
+
     [Fact]
     public void ConditionalRules_FollowTheEffectiveOperatorParameter()
     {

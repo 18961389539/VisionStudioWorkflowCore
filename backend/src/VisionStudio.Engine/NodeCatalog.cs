@@ -850,7 +850,7 @@ public static class BuiltInNodeCatalog
 
                 ],
             "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
-            "builtin"),
+            "builtin", TransformFrames: new(NodeTransformFramePolicy.Invert, PrimaryPort: "transform")),
         new(
             "coordinate.transformCompose",
             "Compose Transform",
@@ -862,7 +862,7 @@ public static class BuiltInNodeCatalog
                 new("order", "Compose Order", "select", "outerInner", Options: [new("Outer*Inner", "outerInner"), new("Inner*Outer", "innerOuter")], Description: "Matrix multiply order when composing transforms."),
                 ],
             "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
-            "builtin"),
+            "builtin", TransformFrames: new(NodeTransformFramePolicy.Compose, PrimaryPort: "transformA", SecondaryPort: "transformB")),
         new(
             "coordinate.frameTree",
             "Frame Tree",

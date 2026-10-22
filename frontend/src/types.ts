@@ -51,7 +51,7 @@ export type VisionToolCapabilities = {
 };
 
 export type NodeImageFramePolicy = 'PreserveInput' | 'NewSpatialFrame' | 'NewFixedFrame' | 'TransformTarget' | 'InputFrame';
-export type NodeTransformFramePolicy = 'None' | 'Spatial' | 'RoiReference' | 'ReferenceInput';
+export type NodeTransformFramePolicy = 'None' | 'Spatial' | 'RoiReference' | 'ReferenceInput' | 'TemplateToImage' | 'Compose' | 'Invert';
 
 /** 目录声明的图像坐标帧语义（与后端 NodeFrameRule 一一对应）。 */
 export type NodeFrameRule = {
@@ -67,6 +67,15 @@ export type NodeFrameRule = {
   whenValues?: string[] | null;
 };
 
+/** 只输出 transform 的节点的帧声明（模板→图像、组合、求逆）。 */
+export type NodeTransformFrameDeclaration = {
+  policy: NodeTransformFramePolicy;
+  primaryPort?: string;
+  secondaryPort?: string | null;
+  imagePort?: string;
+  templatePort?: string;
+};
+
 export type NodeCatalogItem = {
   type: string;
   displayName: string;
@@ -79,6 +88,8 @@ export type NodeCatalogItem = {
   capabilities?: VisionToolCapabilities | null;
   /** 坐标帧声明；未声明时输出沿用输入帧。插件可据此参与帧跟踪。 */
   frames?: NodeFrameRule[] | null;
+  /** 纯 transform 节点的帧声明（match.shape / compose / inverse）。 */
+  transformFrames?: NodeTransformFrameDeclaration | null;
 };
 
 export type VisionValueSnapshot = {

@@ -281,6 +281,19 @@ new NodeFrameRule(
 `image.undistort` 的调度器行为随之与编译器对齐：输出帧确为 `:undistorted`（此前调度器保持输入帧，
 编译器却按新帧校验，属两套推断漂移）。
 
+### transform-only 声明（纯坐标节点）
+
+`match.shape`、`coordinate.transformCompose`、`coordinate.transformInverse` 只输出 transform，
+不输出图像，因此新增独立的 `NodeCatalogItem.TransformFrames`（`NodeTransformFrameDeclaration`）：
+
+| 策略 | 节点 | 语义 |
+| --- | --- | --- |
+| `TemplateToImage` | `match.shape` | Source = 模板输入帧（未连接时为 `match:{id}:template`，不可追踪），Target = 图像输入帧 |
+| `Compose` | `coordinate.transformCompose` | Source = transformA 的 Source，Target = transformB 的 Target，并校验中间帧衔接 |
+| `Invert` | `coordinate.transformInverse` | 交换输入 transform 的 Source/Target，反转映射路径 |
+
+编译器原有的三个类型分支已删除；插件声明同名策略即可获得相同的 transform 帧校验。
+
 ## 插件路径
 
 插件只需在目录中声明，宿主无需认识其类型名：
@@ -301,7 +314,8 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端已接入声明：`catalogNodeData` 把 `frames` 放进节点数据，`frameSemantics.ts` 按同一套
   条件规则求值；`NodeConfigurationDialog` 的 ROI 沿革优先读声明，旧目录/旧节点数据才回退到
   类型集合。插件节点因此不再被当作"保持输入帧"。
-- 仍以类型分支保留：`match.shape` / `coordinate.transformCompose` 的 transform 帧语义。
+- `RoiImageInputPort` / `ResolveRoiFrame` / `ResolveGeometryFrame` 仍按类型映射 ROI/几何输出的帧，
+  可在下一轮继续声明化。
 - `match.shape`、`coordinate.transformCompose` 的 transform 帧语义仍是类型分支；可继续按同一契约下沉。
 - 编译器其余类型字面量（约 90 处，含控制流、保存/导出、ROI 连线校验）尚未迁移。
 
@@ -310,6 +324,6 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 前端 `frameSemantics.test.ts` 6 项覆盖声明求值、条件规则、目录默认值与旧集合回退。
 - 新增 `NodeFrameSemanticsTests` 10 项（内置声明、条件规则、插件空间帧、未声明保持、固定帧）；
   `Catalog_FrameDeclarationsReferenceExistingPortsAndParameters` 校验声明的端口/参数/条件值均存在。
-- 后端全量 **2247 项通过**（Engine 1826 + Api 421）；前端 **1053 项通过**（69 文件，含新增
+- 后端全量 **2251 项通过**（Engine 1830 + Api 421）；前端 **1053 项通过**（69 文件，含新增
   `frameSemantics` 6 项），`tsc -b` 与生产构建通过。
-- 目录 hash 变为 `33761bf0…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
+- 目录 hash 变为 `13c274a0…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。

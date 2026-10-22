@@ -224,6 +224,39 @@ public sealed class NodeCatalogContractTests
     }
 
     [Fact]
+    public void Catalog_TransformFrameDeclarationsReferenceExistingPorts()
+    {
+        var problems = new List<string>();
+
+        foreach (var item in BuiltInNodeCatalog.Items.Where(item => item.TransformFrames is not null))
+        {
+            var declaration = item.TransformFrames!;
+            var inputs = item.Inputs.Select(port => port.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var id = $"{item.Type} transform frames {declaration.Policy}";
+
+            if (declaration.Policy != NodeTransformFramePolicy.TemplateToImage
+                && !inputs.Contains(declaration.PrimaryPort))
+                problems.Add($"{id}: primary port '{declaration.PrimaryPort}' does not exist");
+
+            if (declaration.Policy == NodeTransformFramePolicy.Compose)
+            {
+                if (string.IsNullOrWhiteSpace(declaration.SecondaryPort) || !inputs.Contains(declaration.SecondaryPort))
+                    problems.Add($"{id}: compose requires an existing secondary port");
+            }
+
+            if (declaration.Policy == NodeTransformFramePolicy.TemplateToImage)
+            {
+                if (!inputs.Contains(declaration.ImagePort))
+                    problems.Add($"{id}: image port '{declaration.ImagePort}' does not exist");
+                if (!inputs.Contains(declaration.TemplatePort))
+                    problems.Add($"{id}: template port '{declaration.TemplatePort}' does not exist");
+            }
+        }
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
     public void Catalog_HasNoRetiredControls()
     {
         var retired = BuiltInNodeCatalog.Items

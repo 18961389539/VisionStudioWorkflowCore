@@ -307,6 +307,60 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         if (!visited.Add(nodeId) || !byId.TryGetValue(nodeId, out var node)) return null;
         var type = node.Type;
         var catalog = registry.Require(type).Catalog;
+
+        if (catalog.TransformFrames is { } transformDeclaration)
+        {
+            switch (transformDeclaration.Policy)
+            {
+                case NodeTransformFramePolicy.TemplateToImage:
+                {
+                    var templateEdge = FindInputEdge(workflow.Edges, nodeId, transformDeclaration.TemplatePort);
+                    var imageEdge = FindInputEdge(workflow.Edges, nodeId, transformDeclaration.ImagePort);
+                    var source = templateEdge is null
+                        ? new CoordinateFrame($"match:{nodeId}:template", $"{nodeId} trained template", IsTraceable: false)
+                        : ResolveImageFrame(templateEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+                    var target = imageEdge is null
+                        ? null
+                        : ResolveImageFrame(imageEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
+                    return new TransformFrames(source, target, target is null ? [] : [target]);
+                }
+                case NodeTransformFramePolicy.Compose:
+                {
+                    TransformFrames? ResolveComposePort(string port)
+                    {
+                        var edge = FindInputEdge(workflow.Edges, nodeId, port);
+                        return edge is null
+                            ? null
+                            : ResolveTransformFrames(edge.SourceNodeId, workflow, byId,
+                                new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
+                    }
+
+                    var first = ResolveComposePort(transformDeclaration.PrimaryPort);
+                    var second = ResolveComposePort(transformDeclaration.SecondaryPort ?? string.Empty);
+                    if (first?.Target is { IsTraceable: true } firstTarget
+                        && second?.Source is { IsTraceable: true } secondSource
+                        && !string.Equals(firstTarget.Key, secondSource.Key, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(
+                            $"Node '{nodeId}' cannot compose transforms: '{firstTarget.Label}' does not match '{secondSource.Label}'. " +
+                            "Connect transforms whose intermediate image frames come from the same image path.");
+                    var mappedFrames = (first?.MappedFrames ?? [])
+                        .Concat(second?.MappedFrames ?? [])
+                        .GroupBy(frame => frame.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.First())
+                        .ToArray();
+                    return new TransformFrames(first?.Source, second?.Target, mappedFrames);
+                }
+                case NodeTransformFramePolicy.Invert:
+                {
+                    var edge = FindInputEdge(workflow.Edges, nodeId, transformDeclaration.PrimaryPort);
+                    var source = edge is null ? null : ResolveTransformFrames(edge.SourceNodeId, workflow, byId, visited);
+                    if (source is null) return null;
+                    var path = (source.Source is null ? source.MappedFrames : [source.Source, .. source.MappedFrames]).ToArray();
+                    return new TransformFrames(source.Target, source.Source, path.Reverse().Skip(1).ToArray());
+                }
+            }
+        }
+
         var frameRule = NodeFrameSemantics.Resolve(node, catalog);
         if (frameRule?.Transform is { } framePolicy && framePolicy != NodeTransformFramePolicy.None)
         {
@@ -339,45 +393,6 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     return new TransformFrames(source, target, target is null ? [] : [target]);
                 }
             }
-        }
-        if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
-        {
-            var templateEdge = FindInputEdge(workflow.Edges, nodeId, "template");
-            var imageInput = FindInputEdge(workflow.Edges, nodeId, "image");
-            var source = templateEdge is null
-                ? new CoordinateFrame($"match:{nodeId}:template", $"{nodeId} trained template", IsTraceable: false)
-                : ResolveImageFrame(templateEdge.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            var target = imageInput is null ? null : ResolveImageFrame(imageInput.SourceNodeId, workflow, byId, new(StringComparer.OrdinalIgnoreCase));
-            return new TransformFrames(source, target, target is null ? [] : [target]);
-        }
-        if (type.Equals("coordinate.transformCompose", StringComparison.OrdinalIgnoreCase))
-        {
-            var firstEdge = FindInputEdge(workflow.Edges, nodeId, "transformA");
-            var secondEdge = FindInputEdge(workflow.Edges, nodeId, "transformB");
-            var first = firstEdge is null ? null : ResolveTransformFrames(firstEdge.SourceNodeId, workflow, byId,
-                new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
-            var second = secondEdge is null ? null : ResolveTransformFrames(secondEdge.SourceNodeId, workflow, byId,
-                new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
-            if (first?.Target is { IsTraceable: true } firstTarget
-                && second?.Source is { IsTraceable: true } secondSource
-                && !string.Equals(firstTarget.Key, secondSource.Key, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"Node '{nodeId}' cannot compose transforms: '{firstTarget.Label}' does not match '{secondSource.Label}'. " +
-                    "Connect transforms whose intermediate image frames come from the same image path.");
-            var mappedFrames = (first?.MappedFrames ?? [])
-                .Concat(second?.MappedFrames ?? [])
-                .GroupBy(frame => frame.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .ToArray();
-            return new TransformFrames(first?.Source, second?.Target, mappedFrames);
-        }
-        if (type.Equals("coordinate.transformInverse", StringComparison.OrdinalIgnoreCase))
-        {
-            var input = FindInputEdge(workflow.Edges, nodeId, "transform");
-            var source = input is null ? null : ResolveTransformFrames(input.SourceNodeId, workflow, byId, visited);
-            if (source is null) return null;
-            var path = (source.Source is null ? source.MappedFrames : [source.Source, .. source.MappedFrames]).ToArray();
-            return new TransformFrames(source.Target, source.Source, path.Reverse().Skip(1).ToArray());
         }
         return null;
     }
