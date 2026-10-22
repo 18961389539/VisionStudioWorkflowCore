@@ -418,7 +418,12 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 3. 需要状态码分支（409/404/202）→ 保留 `apiFetch` + 原有分支。
 4. 轮询/取消仍由调用方控制器负责；`apiFetch` 只保证取消能到达底层请求。
 
-## 后续
+## 端点常量
 
-- 304 处硬编码 `/api/` 尚未收敛到端点常量；可在统一请求层之上再加 `endpoints.ts`。
+新增 `frontend/src/endpoints.ts`：`API_BASE` + 按资源域组织的 builder（jobs/traces/validation/
+runs/cameras/auth/plugins/workflows/debug/production 等 10 个域）。新代码必须从这里取路径。
+运行时代码中约 300 处硬编码 `/api/` 由 fetch 棘轮兜底；迁移时按文件逐步替换为
+`endpoints.ts` 的对应 builder，`API_BASE` 只需改一处即可适配子路径部署。
+
+## 后续
 - 160 处无 `AbortSignal` 的调用已随迁移保留原行为，轮询类可逐步改为显式控制器。
