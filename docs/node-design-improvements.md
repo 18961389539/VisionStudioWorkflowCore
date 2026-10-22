@@ -944,3 +944,35 @@
 - 前端：**1046 项通过**（68 个文件），含新增 `catalogLocalization` 2 项；`tsc -b` 与生产构建通过。
 - 两处渲染密集用例（120 顶点多边形、圆快捷设置联动）实测约 4.7–5.0 秒，已把单项期限放宽到 15 秒，
   避免负载下误报超时；没有放宽断言。
+
+## 第五十一轮：高级算子选项中文补齐（2026-10-22）
+
+第五十轮收口时遗留：约 400 个高级 JLVision 算子选项没有中文映射，中文界面在算子下拉框中
+回退显示英文（如 `Add images (add)`、`Absolute value (abs)`）。本轮补齐并加覆盖率防线。
+
+### 缺口与处理
+
+| 项 | 数量 | 说明 |
+| --- | --- | --- |
+| 缺失中文的选项标签 | 406 条（400 个唯一标签） | 13 个节点：imageOp 107、regionOp 77、regionFeature 49、matrixOp 45、contourOp 32、geometry 29、homMat 23、contourFeature 21、threshold 12、measure1d 6，以及基础节点 flow.merge / flow.try / image.dynamicThreshold 5 条 |
+| 跨节点复用标签 | 6 条 | 如 `Determinant (determinant)`、`Circularity (circularity)`，同一译法 |
+| 新增映射 | 400 条 `optionNames` | 统一格式 `中文 (原生算子名)`，保留原生算子名便于对照 JLVision 文档 |
+
+同时修正了 3 个基础节点的英文回退：`flow.merge`（Any/All ready）、`flow.try`（Unhandled only）、
+`image.dynamicThreshold`（Region/Mask Image）。
+
+### 防线
+
+新增前端 `catalogLocalization.test.ts` 用例「translates every built-in option label」：
+遍历 171 个内置节点的全部枚举选项，任何选项在中文界面下仍为纯英文即失败。
+本轮完成后，171 个节点的全部枚举选项都有中文标签（非中文选项数为 0）。
+
+### 兼容
+
+- 仅改前端翻译表，后端目录、节点 ID、选项 value、默认值与执行语义均未变化；
+  目录 hash 保持 `b7178b8b…`，无需重新生成 `catalog.generated.json`。
+- 英文界面不受影响（仍直接显示英文源）。
+
+### 验证
+
+前端 `tsc -b` 0 error；`catalogLocalization` 3 项通过；全量 **1047 项通过**（68 文件），生产构建通过。

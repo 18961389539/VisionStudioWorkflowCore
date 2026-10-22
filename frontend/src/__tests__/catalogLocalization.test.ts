@@ -53,4 +53,18 @@ describe('catalog localization for previously Chinese-authored nodes', () => {
     }
     expect(missing).toEqual([]);
   });
+
+  it('translates every built-in option label', () => {
+    // 高级 JLVision 算子选项曾长期回退英文（中文界面显示 "Add images (add)" 等）。
+    // 这里对全部 171 个节点的枚举选项做覆盖率检查：新增节点/算子忘记补中文会直接失败。
+    const missing: string[] = [];
+    for (const item of localized.values()) {
+      for (const parameter of item.parameters) {
+        for (const option of parameter.options ?? []) {
+          if (!cjk.test(option.label)) missing.push(`${item.type}.${parameter.name}=${option.label}`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
 });
