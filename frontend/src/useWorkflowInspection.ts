@@ -4,6 +4,7 @@ import type { NodeCatalogItem, WorkflowPayload } from './types';
 import { serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './validation';
 import { apiErrorMessage, responseErrorMessage } from './apiErrors';
 import { withRequestTimeout } from './requestTimeout';
+import { apiFetch } from './apiClient';
 
 type ValidationState = { status: 'unvalidated' | 'ok' | 'issues'; summary?: string };
 type Params = {
@@ -97,7 +98,7 @@ export function useWorkflowInspection(params: Params) {
       let outcome: { ok: true; value: string } | { ok: false; error: string };
       try {
         const data: unknown = await withRequestTimeout(controller, 15_000, async () => {
-          const response = await fetch(`/api/${action}`, { method: 'POST', signal: controller.signal,
+          const response = await apiFetch(`/api/${action}`, { method: 'POST', signal: controller.signal,
             headers: { 'Content-Type': 'application/json' }, body: context.snapshot });
           controller.signal.throwIfAborted();
           if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}失败（HTTP ${response.status}）`));

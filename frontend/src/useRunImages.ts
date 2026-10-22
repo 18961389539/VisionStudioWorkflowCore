@@ -3,6 +3,7 @@ import type { Edge, Node } from '@xyflow/react';
 import type { PortDescriptor, RunResult } from './types';
 import { portDisplayName } from './i18n/catalog';
 import { responseErrorMessage } from './apiErrors';
+import { apiFetch } from './apiClient';
 
 /** 运行期逐节点、逐图像端口的图像清单条目（/api/runs/{runId}/images）。 */
 export type RunImageEntry = { portName: string; width: number; height: number };
@@ -93,7 +94,7 @@ export function useRunImages({ result, selectedId, nodes, edges, nodeLabels }: P
     setCatalogRequest({ ...request, status: 'loading' });
     void (async () => {
       try {
-        const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/images`, { signal: controller.signal });
+        const response = await apiFetch(`/api/runs/${encodeURIComponent(runId)}/images`, { signal: controller.signal });
         if (cancelled || controller.signal.aborted) return;
         if (!response.ok) throw new Error(await responseErrorMessage(response, `HTTP ${response.status}`));
         const data: unknown = await response.json();

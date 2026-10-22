@@ -372,3 +372,56 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 - 后端全量 **2255 项通过**（Engine 1834 + Api 421）；前端 **1053 项通过**（69 文件，含新增
   `frameSemantics` 6 项），`tsc -b` 与生产构建通过。
 - 目录 hash 变为 `91688bb7…`，前端 fallback 已重新生成并通过 `CatalogExporter --check`。
+
+---
+
+# 第四轮：前端统一请求层（第一批）（2026-10-22）
+
+审计里"前端无统一请求层：186 处 fetch、304 处硬编码 /api/、160 处无 AbortSignal"开始落地。
+本轮建立入口并迁移带测试覆盖的 hooks；其余按文件分批推进。
+
+## 新增 `frontend/src/apiClient.ts`
+
+| 能力 | 说明 |
+| --- | --- |
+| `apiFetch(input, { signal, timeoutMs, ...init })` | 统一入口；**未指定 timeoutMs 时原样透传调用方 signal**（保持身份与后续 abort 可见），指定超时才组合信号并以 `TimeoutError` 中止 |
+| `apiJson<T>` / `apiText` | 读取成功响应；非 2xx 抛 `ApiError(status, ProblemDetails 文案)` |
+| `isAbortError` / `isTimeoutError` | 不依赖 `instanceof Error`（jsdom 的 DOMException 不是 Error 子类） |
+| 非 2xx 不抛错的 `apiFetch` | 保留调用方按状态码分别处理的既有逻辑（409 覆盖、404 探测等） |
+
+设计边界：
+- 不做自动重试。危险写入的重试必须由调用方显式决定（沿用设备动作/幂等键的既有约束）。
+- 不吞掉 `response`，需要读响应头（如 `X-Workflow-Revision`）的调用仍使用 `apiFetch`。
+- 超时统一用 `timeoutMs`，逐步替换各处自建 `setTimeout + AbortController` 的重复实现。
+
+## 已迁移（17 处）
+
+| 文件 | 调用数 |
+| --- | --- |
+| `useRunController.ts` | 9 |
+| `useTuningData.ts` / `useTraceQuery.ts` | 各 1 |
+| `useProductionActions.ts` / `useProductionMonitor.ts` / `useRunImages.ts` | 各 1 |
+| `useTuningCandidates.ts` / `useTuningPreview.ts` / `useWorkflowInspection.ts` | 各 1 |
+
+全部相关测试通过（`useRunController` 38、`useProductionMonitor` 等 140、请求层 7）；
+前端全量 **1060 项通过**（70 文件），生产构建通过。
+
+## 迁移配方
+
+1. 直接 `fetch(url, init)` → `apiFetch(url, init)`；需要整体超时的加 `timeoutMs`。
+2. 只关心"成功解析 / 失败给文案"的读取 → `apiJson`（不再手写 `if (!response.ok) throw`）。
+3. 需要状态码分支（409/404/202）→ 保留 `apiFetch` + 原有分支。
+4. 轮询/取消仍由调用方控制器负责；`apiFetch` 只保证取消能到达底层请求。
+
+## 剩余（169 处，按收益排序）
+
+| 文件 | 调用数 | 备注 |
+| --- | --- | --- |
+| `CameraPanel.tsx` | 36 | 轮询 + 设备动作，需先补面板测试 |
+| `CalibrationIntrinsicsWizard.tsx` | 18 | 向导多步请求 |
+| `PluginPackagePanel.tsx` | 13 | 上传/签名/安装，需保留错误分支 |
+| `JobPanel.tsx` / `DatasetValidationPanel.tsx` | 各 13 | 已有测试，下一批优先 |
+| `security.tsx` | 7 | 登录/会话，需补测试 |
+| 其余面板与 `App.tsx` | 约 69 | 按文件逐个迁移 |
+
+下一批建议：`JobPanel`、`DatasetValidationPanel`（测试现成），再补 `CameraPanel` 测试后迁移。

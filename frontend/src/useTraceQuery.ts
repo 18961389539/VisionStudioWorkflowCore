@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TracePage, TraceStats, TraceStorageStatus } from './types';
 import { buildStatsParams, buildTraceParams, describeRange, validateTraceFilter, type TraceFilterState } from './traceQuery';
+import { apiFetch } from './apiClient';
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -22,7 +23,7 @@ export type TraceQueryResult = {
 };
 
 async function responseData<T>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+  const response = await apiFetch(url, { signal });
   if (!response.ok) {
     let detail = '';
     try {

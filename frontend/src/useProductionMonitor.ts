@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AlarmRecord, ProductionRuntimeConfig, ProductionRuntimeStatus } from './types';
 import { responseErrorMessage } from './apiErrors';
 import { isProductionConfig, isProductionStatus } from './productionConfig';
+import { apiFetch } from './apiClient';
 
 export type ProductionJobItem = { id: string; name: string; publishedVersion?: number | null };
 export type DeviceActionPendingState = {
@@ -71,7 +72,7 @@ export function useProductionMonitor(open: boolean) {
     requests.current.set(resource, request);
     void (async () => {
       try {
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await apiFetch(url, { signal: controller.signal });
         if (!owns() || controller.signal.aborted) return;
         if (resource === 'pending' && response.status === 204) { accept(resource, undefined); return; }
         if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}读取失败（HTTP ${response.status}）`));

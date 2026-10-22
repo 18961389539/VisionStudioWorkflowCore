@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { responseErrorMessage } from './apiErrors';
+import { apiFetch } from './apiClient';
 
 type Messages = { success: (text: string) => unknown; error: (text: string) => unknown };
 type Action = { url: string; action: string; method?: string; body?: unknown; successMessage: string; onSuccess?: (data: unknown) => void };
@@ -38,7 +39,7 @@ export function useProductionActions(open: boolean, messages: Messages, refresh:
     const superseded = () => runtimeAction && generation !== runtimeGeneration.current;
     const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method, signal: controller.signal,
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),

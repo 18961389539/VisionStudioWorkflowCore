@@ -5,6 +5,7 @@ import type { NodeCatalogItem, RunResult, WorkflowPayload } from './types';
 import { workflowWithNodeParameters, type NodeParameters } from './nodeConfigurationState';
 import { apiErrorMessage, responseErrorMessage } from './apiErrors';
 import { isRunResult } from './runResult';
+import { apiFetch } from './apiClient';
 
 export type BottomTab = 'result' | 'issues' | 'observability';
 
@@ -87,7 +88,7 @@ export function useRunController({
       if (operationRef.current?.kind !== 'close') operationRef.current?.controller.abort();
       const session = debugSessionRef.current;
       if (session && operationRef.current?.kind !== 'close') {
-        void fetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}`, {
+        void apiFetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}`, {
           method: 'DELETE', signal: AbortSignal.timeout(15_000), keepalive: true,
         }).catch(() => undefined);
       }
@@ -218,7 +219,7 @@ export function useRunController({
     }));
     let resultApplied = false;
     try {
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: operation.controller.signal,
       });
@@ -258,7 +259,7 @@ export function useRunController({
     let timedOut = false;
     const timeout = setTimeout(() => { timedOut = true; operation.controller.abort(); }, 60_000);
     try {
-      const response = await fetch('/api/debug/run', {
+      const response = await apiFetch('/api/debug/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: operation.controller.signal,
         body: JSON.stringify({ workflow, options: { mode: 'RunNode', targetNodeId: nodeId, breakpoints: [] } }),
       });
@@ -288,7 +289,7 @@ export function useRunController({
   // 切换文档后才返回的会话只用于释放；不允许把现场或结果应用到新文档。
   const discardCreatedSession = (sessionId: string, fingerprint: string) => {
     if (!mounted.current) {
-      void fetch(`/api/debug/sessions/${encodeURIComponent(sessionId)}`, {
+      void apiFetch(`/api/debug/sessions/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE', signal: AbortSignal.timeout(15_000), keepalive: true,
       }).catch(() => undefined);
       return;
@@ -315,7 +316,7 @@ export function useRunController({
     } })));
     let resultApplied = false;
     try {
-      const response = await fetch('/api/debug/sessions', {
+      const response = await apiFetch('/api/debug/sessions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workflow: workflowPayload, options }), signal: operation.controller.signal,
       });
@@ -356,7 +357,7 @@ export function useRunController({
   };
   const refreshDebugSession = async (sessionId: string, operation: Operation) => {
     try {
-      const response = await fetch(`/api/debug/sessions/${encodeURIComponent(sessionId)}`, {
+      const response = await apiFetch(`/api/debug/sessions/${encodeURIComponent(sessionId)}`, {
         signal: AbortSignal.any([operation.controller.signal, AbortSignal.timeout(15_000)]),
       });
       if (!isCurrent(operation)) return false;
@@ -382,7 +383,7 @@ export function useRunController({
     const fingerprint = debugSessionWorkflowRef.current;
     let sessionConfirmed = false;
     try {
-      const response = await fetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}/continue`, {
+      const response = await apiFetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}/continue`, {
         method: 'POST', signal: operation.controller.signal,
       });
       const data: DebugSessionPayload = await response.json();
@@ -428,7 +429,7 @@ export function useRunController({
     let resultApplied = false;
     let sessionConfirmed = false;
     try {
-      const response = await fetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}/run-node`, {
+      const response = await apiFetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}/run-node`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodeId: targetNodeId }), signal: operation.controller.signal,
       });
@@ -465,7 +466,7 @@ export function useRunController({
     if (!operation) return;
     releasePendingRef.current = false;
     try {
-      const response = await fetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}`, {
+      const response = await apiFetch(`/api/debug/sessions/${encodeURIComponent(session.sessionId)}`, {
         method: 'DELETE', signal: AbortSignal.any([operation.controller.signal, AbortSignal.timeout(15_000)]),
       });
       if (!response.ok && response.status !== 404) throw new Error(await responseErrorMessage(response, `结束会话失败（HTTP ${response.status}）`));

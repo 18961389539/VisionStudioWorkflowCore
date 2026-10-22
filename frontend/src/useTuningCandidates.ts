@@ -4,6 +4,7 @@ import { responseErrorMessage } from './apiErrors';
 import { isValidationRun } from './tuningContracts';
 import { isWorkflowDocument } from './workflowDocument';
 import { withRequestTimeout } from './requestTimeout';
+import { apiFetch } from './apiClient';
 
 type Params = {
   open: boolean; datasetId?: string; scopeRevision: number; workflow: WorkflowPayload; revision: number; runs: ValidationRunRecord[];
@@ -70,7 +71,7 @@ export function useTuningCandidates(params: Params) {
       const url = action === 'validation' ? `/api/validation/datasets/${encodeURIComponent(context.datasetId)}/runs`
         : `/api/validation/runs/${encodeURIComponent(runId!)}/workflow`;
       const data: unknown = await withRequestTimeout(controller, action === 'validation' ? 20_000 : 15_000, async () => {
-        const response = await fetch(url, action === 'validation' ? { method: 'POST', signal: controller.signal,
+        const response = await apiFetch(url, action === 'validation' ? { method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: marker, workflow: JSON.parse(context.snapshot) }) }
           : { signal: controller.signal });
         controller.signal.throwIfAborted();

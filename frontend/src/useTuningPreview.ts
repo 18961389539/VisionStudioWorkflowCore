@@ -3,6 +3,7 @@ import type { ParameterTuningPreviewResult, ValidationDatasetItem, WorkflowPaylo
 import { responseErrorMessage } from './apiErrors';
 import { isTuningPreview } from './tuningContracts';
 import { withRequestTimeout } from './requestTimeout';
+import { apiFetch } from './apiClient';
 
 type Params = { open: boolean; workflow: WorkflowPayload; nodeId?: string; sample?: ValidationDatasetItem; ready: boolean; autoPreview: boolean; revision: number };
 type Operation = { controller: AbortController; key: string; fullWorkflow: boolean; automatic: boolean };
@@ -44,7 +45,7 @@ export function useTuningPreview(params: Params) {
     const owns = () => active.current && operation.current === value && latest.current.key === value.key;
     try {
       const data: unknown = await withRequestTimeout(controller, 60_000, async () => {
-        const response = await fetch('/api/tuning/preview', { method: 'POST', signal: controller.signal,
+        const response = await apiFetch('/api/tuning/preview', { method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: context.sample.datasetId,
             itemId: context.sample.itemId, workflow: JSON.parse(context.snapshot), targetNodeId: context.nodeId, fullWorkflow }) });
         controller.signal.throwIfAborted();

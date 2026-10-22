@@ -3,6 +3,7 @@ import type { ValidationDatasetDetail, ValidationDatasetSummary, ValidationRunRe
 import { responseErrorMessage } from './apiErrors';
 import { isDatasetDetail, isDatasetSummary, isValidationRun } from './tuningContracts';
 import { withRequestTimeout } from './requestTimeout';
+import { apiFetch } from './apiClient';
 
 type Resource = 'list' | 'detail' | 'runs';
 type Request = { controller: AbortController; id?: string };
@@ -45,7 +46,7 @@ export function useTuningData(open: boolean) {
       const root = '/api/validation/datasets';
       const url = resource === 'list' ? root : `${root}/${encodeURIComponent(id!)}${resource === 'runs' ? '/runs' : ''}`;
       const data: unknown = await withRequestTimeout(controller, 15_000, async () => {
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await apiFetch(url, { signal: controller.signal });
         controller.signal.throwIfAborted();
         if (!response.ok) throw new Error(await responseErrorMessage(response, `${label}读取失败（HTTP ${response.status}）`));
         return response.json();
