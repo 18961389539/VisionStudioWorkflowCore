@@ -409,7 +409,7 @@ transform 的 Source/Target 被补全；未声明帧的插件节点保持输入�
 迁移后补了 3 条冒烟：`CameraPanel` 打开才轮询、卸载后停止；`SecurityGate` 无会话显示登录、
 登录后进入应用；会话过期（focus 校验返回 401）回到登录页。
 `PluginPackagePanel` 已补安装失败冒烟（后端 422 拒签时不清理已选文件，用户修正后可直接重试）；
-`CalibrationIntrinsicsWizard` 仍待补步骤 4xx 冒烟。
+`CalibrationIntrinsicsWizard` 已补步骤 0 创建会话 4xx 冒烟（422 错误消息可见，向导不推进步骤）。
 
 ## 迁移配方
 
