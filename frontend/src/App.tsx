@@ -16,11 +16,9 @@ import {
   type OnConnectEnd,
   type OnNodesChange
 } from '@xyflow/react';
-import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, message, Modal, Segmented, Switch, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
+import { Alert, Button, Checkbox, Dropdown, Input, message, Modal, Segmented, Switch, Tag, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
 import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
-import RunPanel from './components/RunPanel';
-import RunObservabilityPanel from './components/RunObservabilityPanel';
 import CameraPanel from './components/CameraPanel';
 import RobotPanel from './components/RobotPanel';
 import DevicePanel from './components/DevicePanel';
@@ -42,7 +40,7 @@ import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
 import { graphConnectionVerdict, type WorkflowIssue } from './validation';
 import { responseErrorMessage } from './apiErrors';
-import { renameDecision, type DocumentBaseline } from './documentSync';
+import { type DocumentBaseline } from './documentSync';
 import { isWorkflowDocument } from './workflowDocument';
 import { useWorkflowChanges } from './useWorkflowChanges';
 import { useWorkflowImport } from './useWorkflowImport';
@@ -83,6 +81,8 @@ import {
   moduleCatalogFromNode, moduleMetadata, persistNodeCompact, persistRecentNodeTypes, readNodeCompact, readRecentNodeTypes,
   type ConnectionPicker, type NodeAttachment, type WorkflowDocumentSummary
 } from './appEditorShared';
+import EditorHeader from './components/EditorHeader';
+import EditorBottomDock from './components/EditorBottomDock';
 import ShortcutHelpModal from './components/ShortcutHelpModal';
 import TemplateGalleryModal from './components/TemplateGalleryModal';
 import WorkflowPickerModal from './components/WorkflowPickerModal';
@@ -1138,111 +1138,18 @@ function Editor() {
       } as CSSProperties}
     >
       {contextHolder}{modalContextHolder}
-      <header className="topbar">
-        <div className="topbar-menu-row">
-          <div className="brand">VisionStudio <span>V{APP_VERSION}</span></div>
-
-          <div className="topbar-center">
-            <Button className="topbar-file-action" type="text" onClick={showTemplates}>从模板新建</Button>
-              <Button className="topbar-file-action" type="text" onClick={() => void openWorkflowPicker()}>打开流程</Button>
-            <span className="topbar-divider" />
-            <Dropdown menu={{ items: debugMenuItems }} trigger={['click']}>
-              <Button className="topbar-domain-action" type={debugSession ? 'primary' : 'default'} title={debugSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debugSession ? `调试 · ${debugStatus.text}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
-            </Dropdown>
-            <Dropdown menu={{ items: deviceMenuItems }} trigger={['click']}>
-              <Button type="text" className="topbar-domain-action">设备 <span className="menu-caret">▾</span></Button>
-            </Dropdown>
-            <Dropdown menu={{ items: productionMenuItems }} trigger={['click']}>
-              <Button type="text" className="topbar-domain-action">生产 <span className="menu-caret">▾</span></Button>
-            </Dropdown>
-            <Dropdown
-              trigger={['click']}
-              menu={{
-                items: toolMenuItems,
-                selectable: true,
-                selectedKeys: layout.preset === 'custom' ? [] : [layout.preset],
-                onClick: ({ key }) => {
-                  if (key === 'layout-edit') applyLayoutPreset('edit');
-                  else if (key === 'layout-image') applyLayoutPreset('image');
-                  else if (key === 'layout-reset') applyLayoutPreset(layout.preset === 'custom' ? 'edit' : layout.preset);
-                }
-              }}
-            >
-              <Button type="text" className="topbar-domain-action">工具 <span className="menu-caret">▾</span></Button>
-            </Dropdown>
-          </div>
-          <Dropdown trigger={['click']} menu={moreMenu}>
-            <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
-          </Dropdown>
-          <div className="topbar-account"><SecurityAccountBadge /></div>
-        </div>
-        <div className="topbar-workflow-row">
-          <div className="topbar-left">
-            <div className="workflow-identity" title={`${designerWorkflowName} · ${designerWorkflowId}`}>
-              {/* 名称可点击重命名；技术 ID 收进悬停详情，不再常驻占位 */}
-              <Typography.Text
-                className="workflow-name"
-                editable={{
-                  onChange: (value) => {
-                    // 重命名属于文档内容；统一载入入口比较完整快照，使旧响应失效。
-                    const decision = renameDecision(value, designerWorkflowName);
-                    if (decision.changed) {
-                      setDesignerWorkflowName(decision.name);
-                    }
-                  },
-                  tooltip: '点击重命名工作流',
-                  icon: <span className="workflow-rename-icon">✎</span>
-                }}
-              >{designerWorkflowName}</Typography.Text>
-              <Tag
-                className="workflow-dirty"
-                color={dirty ? 'gold' : 'default'}
-                title={dirty
-                  ? '有未保存的修改（Ctrl+S 保存）'
-                  : lastSavedAt
-                    ? `已保存 · ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()))}`
-                    : '自上次保存或加载以来没有修改'}
-              >
-                {dirty ? '未保存' : lastSavedAt ? `已保存 ${lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()), { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
-              </Tag>
-            </div>
-          </div>
-          <div className="topbar-right">
-            {/* 目录回退常驻标签（P0）：后端目录不可用时只有一个转瞬即逝的提示——参数可能与运行时不一致，
-                用户需要随时可见的状态；恢复成功后自动消失 */}
-            {catalogError && (
-              <Tooltip title={`后端节点目录不可用，正在使用本地回退目录（节点参数可能与运行时不一致）：${catalogError}`}>
-                <Tag color="orange" className="catalog-fallback-tag">目录回退</Tag>
-              </Tooltip>
-            )}
-
-            <Tooltip title={validationState.status === 'ok' && !needsRevalidate ? validationState.summary : undefined}>
-              <Badge
-                count={validationState.status === 'issues' && !needsRevalidate ? validationIssues.length : 0}
-                dot={needsRevalidate}
-                color={needsRevalidate ? 'gold' : undefined}
-                size="small"
-                offset={[10, 0]}
-              >
-                <Button onClick={() => void validate()} loading={validationBusy}>
-                  {needsRevalidate
-                    ? '需要重新校验'
-                    : validationState.status === 'ok'
-                      ? '校验通过 ✓'
-                      : validationState.status === 'issues'
-                        ? `校验 · ${validationIssues.length} 项问题`
-                        : '校验'}
-                </Button>
-              </Badge>
-            </Tooltip>
-            <Button onClick={save} loading={saving}>保存</Button>
-            {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
-            {running
-              ? <Button danger onClick={abortRun} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
-              : <Button type="primary" onClick={run} disabled={debugBusy || Boolean(debugSession)} title={debugSession ? '请先结束调试会话，再运行流程' : undefined}>运行</Button>}
-          </div>
-        </div>
-      </header>
+      <EditorHeader
+        menus={{ debug: debugMenuItems, device: deviceMenuItems, production: productionMenuItems, tools: toolMenuItems, more: moreMenu }}
+        layoutPreset={layout.preset}
+        onApplyLayoutPreset={applyLayoutPreset}
+        templates={{ show: showTemplates, openSaved: openWorkflowPicker }}
+        debug={{ inSession: Boolean(debugSession), statusText: debugStatus.text }}
+        run={{ running, debugBusy, onRun: run, onAbort: abortRun }}
+        workflow={{ name: designerWorkflowName, id: designerWorkflowId, onRename: setDesignerWorkflowName, dirty, lastSavedAt }}
+        validation={{ status: validationState.status, summary: validationState.summary, needsRevalidate, issueCount: validationIssues.length, busy: validationBusy, onValidate: validate }}
+        catalogError={catalogError}
+        save={{ busy: saving, onSave: save }}
+      />
 
       <main className="workspace">
         <aside className="left-panel"><Toolbox catalog={catalog} recentTypes={recentNodeTypes} onAddNode={(type) => addNode(type)} /></aside>
@@ -1479,88 +1386,23 @@ function Editor() {
         onClose={() => setNodeConfigurationId(undefined)} onApply={applyNodeParameters}
         onPreview={(parameters) => previewNode(nodeConfigurationId, parameters)} previewBlockedReason={configurationPreviewBlockedReason} />}
 
-      <SplitHandle
-        axis="y"
-        label="调整结果区高度"
-        value={shownBottomBase}
-        min={LAYOUT_LIMITS.bottom.min}
-        max={bottomMax}
-        invert
-        collapsed={layout.bottomCollapsed}
-        collapseGlyph="⌄"
-        expandGlyph="⌃"
-        maximize={{
-          active: layout.bottomMaximized,
-          title: layout.bottomMaximized ? '还原结果区高度' : '最大化结果区',
-          onToggle: () => updateLayout({ bottomMaximized: !layout.bottomMaximized, bottomCollapsed: false })
-        }}
-        preview={(value) => previewVar('--vs-bottom-height', `${value}px`)}
-        commit={(value) => updateLayout({ bottom: value, bottomSizing: 'manual', bottomMaximized: false, bottomCollapsed: false, preset: 'custom' })}
-        reset={() => updateLayout({ bottom: presetSizes.bottom, bottomSizing: 'auto', bottomMaximized: false, bottomCollapsed: false })}
-        onToggleCollapse={() => updateLayout({ bottomCollapsed: !layout.bottomCollapsed })}
+      <EditorBottomDock
+        layout={layout}
+        updateLayout={updateLayout}
+        bottomMax={bottomMax}
+        presetBottom={presetSizes.bottom}
+        shownBottomBase={shownBottomBase}
+        bottomTab={bottomTab}
+        onBottomTabChange={setBottomTab}
+        onPreviewHeight={(value) => previewVar('--vs-bottom-height', `${value}px`)}
+        validationIssues={validationIssues}
+        locateIssue={locateIssue}
+        result={result}
+        resultStale={resultStale}
+        focusNode={focusNode}
+        nodeLabels={nodeLabels}
+        nodeTypeLabels={Object.fromEntries(catalog.map((item) => [item.type, item.displayName]))}
       />
-
-      <footer className={`bottom-panel${layout.bottomCollapsed ? ' collapsed' : ''}`}>
-        {/* 底部统一标签页：运行结果 / 校验问题（带数量）/ 运行观测；布局切换已移至画布右上角（P1）。
-            折叠态（P1）：标签条保留为展开入口——点击任一标签即展开对应页签 */}
-        <div className="bottom-tabs-bar">
-          {/* 折叠态点击即展开：Segmented 点击“已选中项”不触发 onChange，必须由外层点击区域兜底 */}
-          <span className="bottom-tabs-expand" title={layout.bottomCollapsed ? '展开结果区' : undefined}
-            onClick={() => { if (layout.bottomCollapsed) updateLayout({ bottomCollapsed: false }); }}>
-            <Segmented
-              size="small"
-              value={bottomTab}
-              onChange={(value) => {
-                setBottomTab(value as typeof bottomTab);
-                if (layout.bottomCollapsed) updateLayout({ bottomCollapsed: false });
-              }}
-              options={[
-                { label: '运行结果', value: 'result' },
-                { label: `校验问题${validationIssues.length > 0 ? ` · ${validationIssues.length}` : ''}`, value: 'issues' },
-                { label: '运行观测', value: 'observability' }
-              ]}
-            />
-          </span>
-          {result && !result.success && <Button size="small" danger onClick={() => {
-            setBottomTab('result');
-            updateLayout({ bottomCollapsed: false, bottomMaximized: false });
-            const failed = result.nodeReports.find((report) => !report.success);
-            if (failed) focusNode(failed.nodeId);
-          }}>{resultStale ? '查看上次错误' : '查看运行错误'}{result.nodeReports.some((report) => !report.success) ? ` · ${result.nodeReports.filter((report) => !report.success).length}` : ''}</Button>}
-          {layout.bottomCollapsed && <span className="bottom-collapsed-hint">点击标签展开结果区</span>}
-        </div>
-        {!layout.bottomCollapsed && bottomTab === 'result' && (
-          <RunPanel result={result} nodeLabels={nodeLabels} onSelectNode={focusNode} stale={resultStale} embedded />
-        )}
-        {!layout.bottomCollapsed && bottomTab === 'issues' && (
-          validationIssues.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击顶部“校验”检查流程；发现的问题将显示在这里，点击可定位到画布" />
-          ) : (
-            <div className="bottom-issues">
-              {validationIssues.map((issue) => {
-                const locatable = Boolean(issue.nodeId || issue.edgeId);
-                return (
-                  <div
-                    key={issue.id}
-                    onClick={() => locateIssue(issue)}
-                    title={locatable ? '点击定位到节点/连线' : '该问题无法自动定位，请根据描述排查'}
-                    style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 6, cursor: locatable ? 'pointer' : 'default', fontSize: 12, lineHeight: 1.55 }}
-                  >
-                    <Tag color={issue.source === 'server' ? 'red' : 'orange'} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
-                      {issue.source === 'server' ? '编译器' : '预检'}
-                    </Tag>
-                    <span>
-                      {issue.message}
-                      {locatable && <small style={{ color: 'var(--vs-text-4)' }}>{issue.edgeId ? `（连线 ${issue.edgeId}）` : `（节点 ${issue.nodeId}）`}</small>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-        {!layout.bottomCollapsed && bottomTab === 'observability' && <RunObservabilityPanel runId={result?.runId} nodeLabels={nodeLabels} nodeTypeLabels={Object.fromEntries(catalog.map((item) => [item.type, item.displayName]))} />}
-      </footer>
 
       <Modal
         open={compiledDsl !== undefined}
