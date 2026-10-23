@@ -85,11 +85,22 @@ try {
     npm ci --no-audit --no-fund
     Assert-LastExitCode 'npm ci'
 
-    npm test
-    Assert-LastExitCode 'frontend tests'
+    # 覆盖率门禁（2026-10-23 接入）：阈值写在 vite.config.ts 的 test.coverage.thresholds，
+    # 取首次基线（语句 69.29 / 分支 65.99 / 函数 59.35 / 行 74.02）并各留约 1% 余量。
+    # 棘轮规则：只升不降；覆盖提升后必须同步上调阈值，否则门禁形同虚设。
+    npm run test:coverage
+    Assert-LastExitCode 'frontend tests + coverage'
 
     npm run build
     Assert-LastExitCode 'npm run build'
+
+    # e2e（2026-10-23 接入）：真实浏览器，补 jsdom 覆盖不到的布局引擎、Canvas 与事件链。
+    # 浏览器按需安装——windows-latest 自带 Edge，但 Playwright 仍需自己的 Chromium 构建。
+    npx playwright install chromium
+    Assert-LastExitCode 'playwright browser install'
+
+    npm run test:e2e
+    Assert-LastExitCode 'frontend e2e'
 }
 finally { Pop-Location }
 

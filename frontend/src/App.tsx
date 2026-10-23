@@ -389,7 +389,10 @@ function Editor() {
 
     apiFetch(pluginEndpoints.list)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setPlugins(data))
+      // 契约漂移防御：网关错误体、代理返回的 JSON 对象都会走到这里。
+      // 非数组一旦进入 plugins 状态，工具栏标签的 plugins.filter 就会抛错，
+      // 而它在面板级错误边界之外——整棵编辑器会被顶层边界替换成错误页。
+      .then((data) => setPlugins(Array.isArray(data) ? data : []))
       .catch(() => setPlugins([]));
     apiFetch(apiUrl('plugins/sdk'))
       .then((r) => (r.ok ? r.json() : undefined))
@@ -403,7 +406,8 @@ function Editor() {
       const response = await apiFetch(apiUrl('plugins/rescan'), { method: 'POST' });
       const body = await response.json().catch(() => undefined);
       if (!response.ok) throw new Error(body?.detail ?? body?.error ?? `Plugin rescan failed (${response.status})`);
-      setPlugins(body?.plugins ?? []);
+      // 同上：body.plugins 可能是对象或缺省，不能让非数组进入状态。
+      setPlugins(Array.isArray(body?.plugins) ? body.plugins : []);
       await refreshCatalog();
       const loadedNow = Number(body?.loadedNow ?? 0);
       const restartRequired = Number(body?.restartRequired ?? 0);
@@ -1075,7 +1079,7 @@ function Editor() {
   const toolMenuItems: MenuProps['items'] = [
     // 目录/插件规模从顶栏收进菜单，降低顶栏视觉权重
     { type: 'group', label: `节点目录 · ${catalogSource === 'runtime' ? '运行时' : '本地'} ${catalog.length}（schema ${catalogSchemaVersion}）` },
-    { type: 'group', label: `插件 ${plugins.filter((p) => p.loaded).length} 个已加载` },
+    { type: 'group', label: `插件 ${plugins.filter((p) => p?.loaded).length} 个已加载` },
     { type: 'divider' },
     { key: 'undo', label: `撤销${history.undoLabel ? ` · ${history.undoLabel}` : ''}（Ctrl+Z）`, disabled: !history.canUndo, onClick: undo },
     { key: 'redo', label: `重做${history.redoLabel ? ` · ${history.redoLabel}` : ''}（Ctrl+Shift+Z）`, disabled: !history.canRedo, onClick: redo },

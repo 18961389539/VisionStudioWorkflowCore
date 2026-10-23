@@ -113,8 +113,9 @@ describe('PropertyPanel polygon ROI editing', () => {
     expect(closingEdge.points[4]).toEqual({ x: 5, y: 5 });
   });
 
-  // 120 顶点多边形的渲染 + 分页交互本身约 4.7s，5s 默认期限在负载下会偶发超时。
-  it('pages large polygons and keeps edits on the correct full-list vertex', { timeout: 15_000 }, () => {
+  // 120 顶点多边形的渲染 + 分页交互本身约 4.7s。开覆盖率（v8 插桩 + sourcemap 映射）后
+  // 同一用例实测超过 15s——这是插桩开销而非逻辑退化，故给到 30s；断言未放宽。
+  it('pages large polygons and keeps edits on the correct full-list vertex', { timeout: 30_000 }, () => {
     const points = Array.from({ length: 120 }, (_, index) => {
       const angle = 2 * Math.PI * index / 120;
       return { x: 100 + 50 * Math.cos(angle), y: 100 + 50 * Math.sin(angle) };
