@@ -29,7 +29,6 @@ import DiagnosticsPanel from './components/DiagnosticsPanel';
 import SplitHandle from './components/SplitHandle';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
-import VisionNode from './components/VisionNode';
 import CanvasMiniMap from './components/CanvasMiniMap';
 import WorkflowImagePreview from './components/WorkflowImagePreview';
 import TemplateFlowPreview from './components/TemplateFlowPreview';
@@ -39,7 +38,7 @@ import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
 import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
-import { demos, demoDescriptions, linearDemo, type DemoKey } from './demos';
+import { demos, demoDescriptions, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
 import { graphConnectionVerdict, type WorkflowIssue } from './validation';
@@ -53,7 +52,7 @@ import { useWorkflowDraft } from './useWorkflowDraft';
 import { useWorkflowInspection } from './useWorkflowInspection';
 import { onConfigureNode, onShowNodeDetails } from './uiBridge';
 import { useRunController, type BottomTab } from './useRunController';
-import { cloneParameters, hydrateNodeParameters, type NodeParameters } from './nodeConfigurationState';
+import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { applyReferenceParameters } from './roiReference';
 import { withSwitchPorts } from './switchPorts';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
@@ -75,174 +74,16 @@ const HardwareProvenancePanel = lazy(() => import('./components/HardwareProvenan
 const PluginPackagePanel = lazy(() => import('./components/PluginPackagePanel'));
 const AboutPanel = lazy(() => import('./components/AboutPanel'));
 
-// R12：条件挂载的按需面板包装——open=false 时完全不渲染（不触发动态加载）；
-// open=true 时由 Suspense 兜住加载窗口（面板自身是 Drawer，加载完立即展开）。
-// 每个面板各自持有错误边界：单个面板的渲染异常不能打掉画布、未保存修改和其它面板。
-function LazyPanel({ open, label, onClose, children }: { open: boolean; label: string; onClose: () => void; children: ReactNode }) {
-  return open
-    ? (
-      <ErrorBoundary variant="panel" scope={label} onDismiss={onClose}>
-        <Suspense fallback={null}>{children}</Suspense>
-      </ErrorBoundary>
-    )
-    : null;
-}
-
-const nodeTypes = { vision: VisionNode };
-type NodeAttachment = PortRecommendation & { nodeId: string; portName: string; newPort: string };
-type ConnectionPicker = PortRecommendation & { nodeId: string; portName: string; x: number; y: number; position: { x: number; y: number } };
-type WorkflowDocumentSummary = { id: string; name: string; nodeCount: number; edgeCount: number; updatedAt: string };
-
-// R06（2026-10-12 复审）：编辑器保存/加载是人工关键操作——请求必须有整体超时；失败必须给出
-// 可定位原因（状态码/业务码/关联号），且绝不在无法确认结果时改变本地 dirty/草稿状态。
-const WORKFLOW_IO_TIMEOUT_MS = 15_000;
-
-// 模板入口 P0：顶栏下拉替换为“从模板新建”弹窗——分组 + 用途 + 预览，替换流程前必须显式确认
-const DEMO_LABELS: Record<DemoKey, string> = {
-  contourThickness: '真实轮廓壁厚与局部变薄检测',
-  caliperWidth: '双边缘卡尺测宽与公差判定',
-  circularTolerance: '圆环壁厚与同心偏差',
-  smallFeatures: '细小亮暗特征检测',
-  regionShapes: '区域形状与凸包差',
-  edgeTolerance: '直线形状与轮廓偏差',
-  colors: '色彩检测与图像增强',
-  textValidation: '文本与批号校验',
-  alignment: '图像对齐与逐区域测量',
-  defects: '缺陷检测与良品比对',
-  regions: '区域处理与限定域',
-  forEach: '逐目标顺序执行',
-  inspection: '多目标检测与判定', precision: '形状模板匹配与精密测量',
-  camera: '相机示例', cameraTrigger: '触发式相机', frameSet: '同步帧组',
-  measurement: '测量示例', calibration: '标定示例',
-  robotEyeToHand: '眼在手外示例', robotEyeInHand: '眼在手上示例', robotRuntime: '机器人运行时',
-  robotPlc: '机器人 PLC 握手', robotTcp: '机器人 TCP 模拟器', devicePlc: '设备 / PLC 运行时',
-  linear: '线性流程示例', roi: '感兴趣区域示例', if: '条件分支示例', parallel: '并行流程示例', nested: '嵌套流程示例'
-};
-const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
-  { group: '相机采集', keys: ['camera', 'cameraTrigger', 'frameSet'] },
-  { group: '测量与标定', keys: ['contourThickness', 'caliperWidth', 'smallFeatures', 'regionShapes', 'circularTolerance', 'edgeTolerance', 'colors', 'textValidation', 'alignment', 'defects', 'regions', 'precision', 'inspection', 'measurement', 'calibration'] },
-  { group: '机器人', keys: ['robotEyeToHand', 'robotEyeInHand', 'robotRuntime', 'robotPlc', 'robotTcp'] },
-  { group: '设备 / PLC', keys: ['devicePlc'] },
-  { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested', 'forEach'] }
-];
-
-// 节点紧凑模式：全局显示偏好（压缩标题 / 端口间距 / 页脚），持久化在 localStorage
-const NODE_COMPACT_KEY = 'visionstudio.node-compact';
-const readNodeCompact = () => {
-  try { return window.localStorage.getItem(NODE_COMPACT_KEY) === '1'; } catch { return false; }
-};
-const persistNodeCompact = (value: boolean) => {
-  try { window.localStorage.setItem(NODE_COMPACT_KEY, value ? '1' : '0'); } catch { /* 忽略存储失败 */ }
-};
-
-// 工具栏已移出画布，自动适配在四周使用相同内缩。
-// 类型对齐 @xyflow/react 的 PaddingWithUnit（number | `${number}px` | `${number}%`），避免任意 string 撞类型。
-type FitPaddingUnit = number | `${number}px` | `${number}%`;
-const CANVAS_FIT_PADDING: { top: FitPaddingUnit; right: FitPaddingUnit; bottom: FitPaddingUnit; left: FitPaddingUnit } =
-  { top: 0.16, right: 0.16, bottom: 0.16, left: 0.16 };
-
-// 结果区折叠态保留的标签条高度（P1）：折叠不再等于“入口消失”，标签条即展开入口。
-// 与 .bottom-panel.collapsed .bottom-tabs-bar 的 padding + Segmented 高度对齐（4+24+4）。
-const COLLAPSED_RESULT_BAR_HEIGHT = 34;
-
-// 键盘快捷键一览（工具菜单 → 键盘快捷键…）：与下方 keydown 处理器保持同步，改快捷键时两处一起改。
-const SHORTCUT_ROWS: { combos: string[][]; desc: string }[] = [
-  { combos: [['Ctrl/Cmd', 'S']], desc: '保存工作流（节点配置弹窗内为“应用暂存参数”）' },
-  { combos: [['Ctrl/Cmd', 'Enter']], desc: '节点配置弹窗内：运行此节点（使用暂存参数测试，不写回流程）' },
-  { combos: [['Ctrl/Cmd', 'F']], desc: '在画布中查找节点（聚焦左上搜索框）' },
-  { combos: [['Ctrl/Cmd', 'Z']], desc: '撤销' },
-  { combos: [['Ctrl/Cmd', 'Shift', 'Z'], ['Ctrl', 'Y']], desc: '重做' },
-  { combos: [['Ctrl/Cmd', 'C']], desc: '复制选中节点（含集合内部连线）' },
-  { combos: [['Ctrl/Cmd', 'V']], desc: '粘贴节点（整体偏移，连续粘贴逐次错位）' },
-  { combos: [['Delete'], ['Backspace']], desc: '删除选中的节点或连线（可撤销）' },
-  { combos: [['Shift', '拖拽']], desc: '框选多个节点（Ctrl/Cmd/Shift + 点击为追加选择）' },
-  { combos: [['双击节点']], desc: '打开节点配置弹窗（参数 / 图像 / 说明）' },
-  { combos: [['双击分隔条']], desc: '复位该面板尺寸（工具箱 / 结果区）' },
-  { combos: [['Esc']], desc: '清空画布查找框；连线选择菜单中取消' }
-];
-
-function hydrateNodesFromCatalog(nodes: Node[], catalog: NodeCatalogItem[]): Node[] {
-  const byType = new Map(catalog.map((item) => [item.type.toLowerCase(), item]));
-  return nodes.map((node) => {
-    const typeKey = String(node.data.typeKey ?? '');
-    const catalogItem = byType.get(typeKey.toLowerCase());
-    if (!catalogItem) return node;
-    const item = withSwitchPorts(catalogItem, node.data.parameters as NodeParameters | undefined);
-
-    const previousCatalogLabel = typeof node.data.catalogDisplayName === 'string' ? node.data.catalogDisplayName : undefined;
-    const currentLabel = typeof node.data.label === 'string' ? node.data.label : typeKey;
-    const label = currentLabel === typeKey || currentLabel === previousCatalogLabel ? item.displayName : currentLabel;
-    return {
-      ...node,
-      data: {
-        ...node.data,
-        label,
-        catalogDisplayName: item.displayName,
-        parameters: hydrateNodeParameters((node.data.parameters ?? {}) as NodeParameters, item, makeDefaultParameters(item)),
-        ...catalogNodeData(item)
-      }
-    };
-  });
-}
-
-const initialGraph = linearDemo();
-const initial = { ...initialGraph, nodes: hydrateNodesFromCatalog(initialGraph.nodes, fallbackCatalog) };
-
-function getPorts(node: Node | undefined, key: 'inputs' | 'outputs'): PortDescriptor[] {
-  return ((node?.data?.[key] ?? []) as PortDescriptor[]);
-}
-
-
-function moduleMetadata(parameters: Record<string, unknown>) {
-  const inputs = Array.isArray(parameters.__moduleInputs) ? parameters.__moduleInputs as PortDescriptor[] : [];
-  const outputs = Array.isArray(parameters.__moduleOutputs) ? parameters.__moduleOutputs as PortDescriptor[] : [];
-  const moduleParameters = Array.isArray(parameters.__moduleParameters) ? parameters.__moduleParameters as WorkflowModuleParameter[] : [];
-  return { inputs, outputs, moduleParameters };
-}
-
-function moduleCatalogFromNode(node?: Node): NodeCatalogItem | undefined {
-  if (!node || String(node.data.typeKey) !== 'module.call') return undefined;
-  const parameters = (node.data.parameters ?? {}) as Record<string, unknown>;
-  const meta = moduleMetadata(parameters);
-  return {
-    type: 'module.call',
-    displayName: `可复用模块 · ${String(parameters.moduleId ?? node.data.label ?? node.id)} · V${String(parameters.moduleVersion ?? '?')}`,
-    category: '模块',
-    inputs: meta.inputs,
-    outputs: meta.outputs,
-    parameters: meta.moduleParameters.map((x) => ({
-      name: x.name, label: x.label, type: x.type as any, defaultValue: x.defaultValue, min: x.min, max: x.max, step: x.step, options: x.options, unit: x.unit, group: x.group, description: x.description
-    })),
-    description: 'Immutable reusable Workflow Module call. The pinned module version is expanded before compile/execution.',
-    pluginId: 'module',
-    capabilities: { deterministic: true, supportsRunNode: false, supportsParallel: true, executionMode: 'Auto' }
-  };
-}
-
-function edgePresentation(kind: 'control' | 'data') {
-  return kind === 'control'
-    ? { animated: true, data: { kind }, style: { strokeDasharray: '7 5' } }
-    : { animated: false, data: { kind } };
-}
-
-const RECENT_NODES_KEY = 'visionstudio.recent-node-types';
-const RECENT_NODES_LIMIT = 6;
-// 双击添加时的占位尺寸与最小间距（流程坐标）；实际渲染尺寸在 measured 中回读
-const NEW_NODE_WIDTH = 220;
-const NEW_NODE_HEIGHT = 180;
-const SPOT_GAP = 24;
-
-function readRecentNodeTypes(): string[] {
-  try {
-    const raw = window.localStorage.getItem(RECENT_NODES_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === 'string').slice(0, RECENT_NODES_LIMIT)
-      : [];
-  } catch {
-    return [];
-  }
-}
+// 模块级共享件（LazyPanel / 常量 / 类型 / 图数据纯函数）见 ./appEditorShared（巨型组件拆分，2026-10-23）。
+import {
+  LazyPanel, nodeTypes,
+  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, DEMO_GROUPS, DEMO_LABELS,
+  NEW_NODE_HEIGHT, NEW_NODE_WIDTH, RECENT_NODES_LIMIT, SPOT_GAP, WORKFLOW_IO_TIMEOUT_MS,
+  edgePresentation, getPorts, hydrateNodesFromCatalog, initial,
+  moduleCatalogFromNode, moduleMetadata, persistNodeCompact, persistRecentNodeTypes, readNodeCompact, readRecentNodeTypes,
+  type ConnectionPicker, type NodeAttachment, type WorkflowDocumentSummary
+} from './appEditorShared';
+import ShortcutHelpModal from './components/ShortcutHelpModal';
 
 function Editor() {
   const [catalog, setCatalog] = useState<NodeCatalogItem[]>(fallbackCatalog);
@@ -633,7 +474,7 @@ function Editor() {
   const rememberRecentNode = useCallback((typeKey: string) => {
     setRecentNodeTypes((current) => {
       const next = [typeKey, ...current.filter((x) => x !== typeKey)].slice(0, RECENT_NODES_LIMIT);
-      try { window.localStorage.setItem(RECENT_NODES_KEY, JSON.stringify(next)); } catch { /* 忽略存储失败 */ }
+      persistRecentNodeTypes(next);
       return next;
     });
   }, []);
@@ -1957,29 +1798,7 @@ function Editor() {
       </Modal>
 
       {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}
-      <Modal
-        open={shortcutsOpen}
-        title="键盘快捷键"
-        width={560}
-        footer={<Button onClick={() => setShortcutsOpen(false)}>关闭</Button>}
-        onCancel={() => setShortcutsOpen(false)}
-      >
-        <div className="shortcut-list">
-          {SHORTCUT_ROWS.map((row) => (
-            <div className="shortcut-row" key={row.desc}>
-              <span className="shortcut-keys">
-                {row.combos.map((combo, comboIndex) => (
-                  <span key={combo.join('+')}>
-                    {comboIndex > 0 && <span className="shortcut-alt">或</span>}
-                    {combo.map((key) => <kbd key={key}>{key}</kbd>)}
-                  </span>
-                ))}
-              </span>
-              <span className="shortcut-desc">{row.desc}</span>
-            </div>
-          ))}
-        </div>
-      </Modal>
+      <ShortcutHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       <ErrorBoundary variant="panel" scope="相机" onDismiss={() => setCamerasOpen(false)}>
         <CameraPanel open={camerasOpen} onClose={() => setCamerasOpen(false)} />
