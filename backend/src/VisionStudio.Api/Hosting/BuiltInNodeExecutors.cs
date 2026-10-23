@@ -21,7 +21,13 @@ public static class BuiltInNodeExecutors
     public static IServiceCollection AddBuiltInNodeExecutors(this IServiceCollection services)
     {
         foreach (var implementation in Discover())
+        {
             services.TryAddEnumerable(ServiceDescriptor.Singleton(typeof(IVisionNodeExecutor), implementation));
+            // 具体类型也必须可解析：CalibrationWizardService 等消费者按具体节点类构造注入。
+            // 工厂从枚举集合取回同一个实例，避免再 new 一份导致“单例”语义分裂。
+            services.TryAddSingleton(implementation, provider => provider.GetServices<IVisionNodeExecutor>()
+                .First(executor => executor.GetType() == implementation));
+        }
         return services;
     }
 
