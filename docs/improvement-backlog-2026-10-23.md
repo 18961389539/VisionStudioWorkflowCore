@@ -118,17 +118,51 @@ quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但
 
 ## 二、待办
 
-### P1-4 契约单一真相源：`Produces<T>` → 生成 `types.ts`
+### P1-4 契约单一真相源：`Produces<T>` → 生成 `types.ts`（第一批已完成）
 
-**现状**：`frontend/src/types.ts` 1,758 行手写后端 DTO 镜像；`src/generated/openapi.json` 是快照（101 schema），
-`apiContract.test.ts` 用 `PENDING_SPEC_DTOS` 棘轮记录"尚未进 spec 的核心 DTO"。
+**原状**：`frontend/src/types.ts` 1,758 行手写后端 DTO 镜像；快照 101 schema；
+`apiContract.test.ts` 用 `PENDING_SPEC_DTOS` 棘轮记录"尚未进 spec 的核心 DTO"（7 个）。
 
-**根因**：核心域端点未声明 `Produces<T>`，Swagger 生成不到这些 DTO 的 schema，因此无法用 `openapi-typescript` 生成类型替换手写文件。
+**根因**：核心域端点未声明 `Produces<T>`，OpenAPI 生成不到这些 DTO 的 schema。
 
-**动作**：按资源域分批（工作流 → 运行/追溯 → 标定 → 生产 → 插件）给端点补 `Produces<T>`，每批递减 `PENDING_SPEC_DTOS`，
-归零后用生成类型替换 `types.ts`，并把 `apiContract.test.ts` 改为"生成类型与手写类型零差异"断言。
+**第一批结果（2026-10-23）**：8 个端点组补齐响应类型声明，**schema 101 → 153**，核心 DTO 全部进入 spec。
 
-**验收**：`PENDING_SPEC_DTOS` 为空；`types.ts` 不再手工维护；改后端 DTO 而忘记同步前端时 CI 变红。
+| 端点 | 声明的响应类型 |
+|---|---|
+| `GET /api/catalog` | `IReadOnlyList<NodeCatalogItem>` |
+| `GET /api/devices`、`/api/devices/{id}` | `List<DeviceDescriptor>` / `DeviceDescriptor` |
+| `GET /api/robots` | `IReadOnlyList<RobotDescriptor>` |
+| `GET /api/jobs` | `IReadOnlyList<JobDescriptor>` |
+| `GET /api/alarms` | `IReadOnlyList<AlarmRecord>` |
+| `GET /api/traces`、`/api/traces/page` | `IReadOnlyList<RunTraceRecord>` / `TracePage` |
+| `POST /api/workflows/.../run`、`/api/debug/run` | `WorkflowRunResult` |
+
+**棘轮翻转**：`PENDING_SPEC_DTOS`（只减不增）改为 `REQUIRED_SPEC_DTOS`（必须存在）。
+现在如果哪个端点被改回匿名对象、或 DTO 改名，测试立刻失败。
+
+**过程中发现的两个真实缺陷（已修）**：
+
+1. **`RobotHandshakeSignals.UpdatedAt = default` 让整份 OpenAPI 文档 400**。
+   C# 把结构体参数的默认值在元数据里编码为 null，`System.Text.Json` 的 `JsonSchemaExporter`
+   用非 nullable 的 `T` 去 unbox（`UnboxOnWrite<DateTimeOffset>`）后抛异常，
+   `/openapi/v1.json` 整份文档返回 400，**所有契约相关工作同时失效**。
+   修法：把该参数移出可选区（提到首位，两处调用均为命名实参，不受影响），
+   因为 C# 不允许必需参数跟在可选参数之后。
+   守卫：新增 `backend/tests/VisionStudio.Api.Tests/OpenApiSchemaTests.cs`，对 8 个对外 DTO
+   逐个直接生成 schema——失败时能指出具体类型，而不是只看到整份文档 500。
+
+2. **`scripts/export-openapi.ps1` 在本机必失败**（三个叠加问题）：
+   - 读本地回环地址时走 IE/WinINET 代理 → 502 → 伪装成"端点 120s 未响应"。改用 `WebRequest` + `Proxy = $null`；
+   - 用 `ConvertTo-Json -Depth 100` 重新序列化，改为直接写后端原始 JSON；
+   - `Set-Content -Encoding utf8` 写入 BOM，使 `openapi-typescript` / `jq` / Python `json` 首字符解析失败。
+
+**剩余（第二批）**：`types.ts` 仍有大量手工 DTO（标定、生产、插件、诊断域）。下一步按域继续补
+`Produces<T>`，再用 `openapi-typescript` 生成替换，最后把 `apiContract.test.ts` 改成
+"生成类型与手写类型零差异"断言。**验收**：`types.ts` 不再手工维护。
+
+**PowerShell 脚本编码约定（本轮踩坑）**：`scripts/*.ps1` 若含中文注释，文件**必须是带 BOM 的 UTF-8**。
+PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语法——表现为变量莫名是 `$null`、
+循环一次不执行、错误信息与代码不符。`export-openapi.ps1` 与 `quality-gate.ps1` 已补 BOM。
 
 ### P2-5 后端巨型文件第二梯队
 

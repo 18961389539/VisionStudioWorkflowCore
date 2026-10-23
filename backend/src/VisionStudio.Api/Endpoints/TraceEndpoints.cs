@@ -10,7 +10,8 @@ public static class TraceEndpoints
     public static IEndpointRouteBuilder MapTraceEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/traces", async (int? take, string? jobId, string? disposition, TraceabilityStore traces, CancellationToken ct) =>
-            Results.Ok(await traces.ListAsync(take ?? 100, jobId, disposition, ct)));
+            Results.Ok(await traces.ListAsync(take ?? 100, jobId, disposition, ct)))
+            .Produces<IReadOnlyList<RunTraceRecord>>();
 
         app.MapGet("/api/traces/page", async (
             int? offset, int? limit,
@@ -23,7 +24,7 @@ public static class TraceEndpoints
                 offset ?? 0, limit ?? 50, jobId, jobVersion, disposition,
                 executionStatus, source, runIdPrefix, workflow, errorCode, from, to);
             return Results.Ok(await traces.PageAsync(query, ct));
-        });
+        }).Produces<TracePage>();
 
         // 统计与列表共用同一组过滤谓词：带上任一过滤参数即按筛选口径统计；
         // allTime 显式请求无时间限制；否则无筛选时保留旧的“近 N 天”口径。

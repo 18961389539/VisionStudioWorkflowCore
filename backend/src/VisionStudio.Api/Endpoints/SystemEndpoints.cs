@@ -131,7 +131,9 @@ public static class SystemEndpoints
             http.Response.Headers["X-VisionStudio-Catalog-Schema"] = VisionCatalogSnapshot.SchemaVersion.ToString();
             http.Response.Headers["X-VisionStudio-Catalog-Hash"] = hash;
             return Results.Ok(catalog);
-        });
+        // 契约单一真相源：声明响应类型后 NodeCatalogItem 及其嵌套类型进入 OpenAPI spec，
+        // 前端 types.ts 才能由生成替换手写镜像（见 docs/improvement-backlog-2026-10-23.md P1-4）。
+        }).Produces<IReadOnlyList<NodeCatalogItem>>();
 
         app.MapGet("/api/catalog/meta", (VisionNodeRegistry registry) =>
         {

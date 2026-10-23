@@ -26,7 +26,16 @@ public enum RobotHandshakeState
 /// Standard industrial handshake bits used by PLC bridges, TCP adapters and workflow diagnostics.
 /// TargetReady/Execute are command-side bits; Busy/Complete/Error are robot-side status bits; Ack closes the cycle.
 /// </summary>
+/// <remarks>
+/// UpdatedAt 必须是**第一个必需参数**，不能写成 `DateTimeOffset UpdatedAt = default`：
+/// 结构体参数的默认值在元数据里一律编码为 null，System.Text.Json 的 JsonSchemaExporter
+/// 会用非 nullable 的 T 去 unbox（UnboxOnWrite）而抛 "JSON value could not be converted to
+/// System.DateTimeOffset"，使 /openapi/v1.json 整份文档 400。C# 又不允许必需参数跟在可选参数之后，
+/// 故把它前置；两处调用均使用命名实参，位置调整不影响调用方。
+/// 守卫：VisionStudio.Api.Tests/OpenApiSchemaTests。
+/// </remarks>
 public sealed record RobotHandshakeSignals(
+    DateTimeOffset UpdatedAt,
     bool TargetReady = false,
     bool Execute = false,
     bool Busy = false,
@@ -34,8 +43,7 @@ public sealed record RobotHandshakeSignals(
     bool Error = false,
     bool Ack = false,
     long CommandId = 0,
-    string? ErrorCode = null,
-    DateTimeOffset UpdatedAt = default)
+    string? ErrorCode = null)
 {
     public static RobotHandshakeSignals Empty => new(UpdatedAt: DateTimeOffset.UtcNow);
 }

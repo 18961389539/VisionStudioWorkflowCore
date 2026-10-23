@@ -92,7 +92,8 @@ public static class ProductionEndpoints
         }).RequireAdministrator("production.device-actions.read", "production");
 
         app.MapGet("/api/alarms", async (bool? activeOnly, AlarmStore alarms, CancellationToken ct) =>
-            Results.Ok(await alarms.ListAsync(activeOnly ?? false, ct)));
+            Results.Ok(await alarms.ListAsync(activeOnly ?? false, ct)))
+            .Produces<IReadOnlyList<AlarmRecord>>();
 
         app.MapPost("/api/alarms/{id}/ack", async (string id, AlarmStore alarms, CancellationToken ct) =>
             Results.Ok(await alarms.AcknowledgeAsync(id, ct))).RequireOperator("alarm.ack", "alarm");

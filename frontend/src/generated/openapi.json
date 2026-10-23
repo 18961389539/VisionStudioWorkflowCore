@@ -4,6 +4,11 @@
     "title": "VisionStudio.Api | v1",
     "version": "1.0.0"
   },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:5399/"
+    }
+  ],
   "paths": {
     "/api/auth/status": {
       "get": {
@@ -328,7 +333,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeCatalogItem"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3202,7 +3217,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDescriptor"
+                }
+              }
+            }
           }
         }
       }
@@ -3268,7 +3290,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceDescriptor"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3431,7 +3463,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RobotDescriptor"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3748,7 +3790,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRunResult"
+                }
+              }
+            }
           }
         }
       }
@@ -3770,7 +3819,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRunResult"
+                }
+              }
+            }
           }
         }
       }
@@ -4075,7 +4131,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobDescriptor"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -4782,7 +4848,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AlarmRecord"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4844,7 +4920,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunTraceRecord"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4959,7 +5045,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TracePage"
+                }
+              }
+            }
           }
         }
       }
@@ -6531,6 +6624,74 @@
           }
         }
       },
+      "AlarmRecord": {
+        "required": [
+          "id",
+          "code",
+          "severity",
+          "source",
+          "message",
+          "active",
+          "acknowledged",
+          "raisedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/AlarmSeverity"
+          },
+          "source": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "acknowledged": {
+            "type": "boolean"
+          },
+          "raisedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recoveredAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "acknowledgedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "runId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "AlarmSeverity": {
+        "enum": [
+          "Info",
+          "Warning",
+          "Error",
+          "Critical"
+        ]
+      },
       "AssetKind": {
         "enum": [
           "Camera",
@@ -7643,6 +7804,40 @@
           }
         }
       },
+      "ControlFlowDecision": {
+        "required": [
+          "nodeId",
+          "nodeType",
+          "activeBranches"
+        ],
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeType": {
+            "type": "string"
+          },
+          "activeBranches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selectedBranch": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "condition": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
       "CopyRecipeRequest": {
         "required": [
           "name"
@@ -8019,6 +8214,184 @@
           }
         }
       },
+      "DeviceConnectionState": {
+        "enum": [
+          "Disconnected",
+          "Connecting",
+          "Connected",
+          "Reconnecting",
+          "Faulted"
+        ]
+      },
+      "DeviceDescriptor": {
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "model",
+          "driver",
+          "protocol",
+          "endpoint",
+          "connectionState",
+          "settings",
+          "stats",
+          "capabilities",
+          "diagnostics",
+          "tags",
+          "values",
+          "error",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "connectionState": {
+            "$ref": "#/components/schemas/DeviceConnectionState"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/DeviceRuntimeSettings"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/DeviceRuntimeStats"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/DeviceDriverCapabilities"
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/DeviceProtocolDiagnostics"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceTagDefinition"
+            }
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DeviceTagSample"
+            }
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceDriverCapabilities": {
+        "type": "object",
+        "properties": {
+          "supportsBatchRead": {
+            "type": "boolean",
+            "default": false
+          },
+          "supportsBatchWrite": {
+            "type": "boolean",
+            "default": false
+          },
+          "supportsDiagnostics": {
+            "type": "boolean",
+            "default": false
+          },
+          "realIo": {
+            "type": "boolean",
+            "default": false
+          },
+          "supportsString": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "DeviceProtocolDiagnostics": {
+        "type": "object",
+        "properties": {
+          "transactions": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "batchReads": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "batchWrites": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "lastRoundTripMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "averageRoundTripMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "lastTransactionAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastProtocolError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "DeviceRuntimeSettings": {
         "type": "object",
         "properties": {
@@ -8056,6 +8429,105 @@
           "deviceHeartbeatTagId": {
             "type": "string",
             "default": "deviceHeartbeat"
+          }
+        }
+      },
+      "DeviceRuntimeStats": {
+        "required": [
+          "pollCycles",
+          "batchReadCycles",
+          "readErrors",
+          "writeErrors",
+          "reconnectCount",
+          "actualPollHz",
+          "lastPollAt",
+          "lastGoodReadAt",
+          "lastDeviceHeartbeatAt",
+          "hostHeartbeat",
+          "deviceHeartbeat"
+        ],
+        "type": "object",
+        "properties": {
+          "pollCycles": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "batchReadCycles": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "readErrors": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "writeErrors": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "reconnectCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "actualPollHz": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "lastPollAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastGoodReadAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastDeviceHeartbeatAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "hostHeartbeat": {
+            "type": "boolean"
+          },
+          "deviceHeartbeat": {
+            "type": "boolean"
+          },
+          "runtimeError": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -8106,13 +8578,57 @@
           }
         }
       },
+      "DeviceTagQuality": {
+        "enum": [
+          "Good",
+          "Uncertain",
+          "Bad",
+          "Disconnected"
+        ]
+      },
+      "DeviceTagSample": {
+        "required": [
+          "deviceId",
+          "tagId",
+          "dataType",
+          "value",
+          "quality",
+          "timestamp"
+        ],
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string"
+          },
+          "tagId": {
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/DeviceTagDataType"
+          },
+          "value": { },
+          "quality": {
+            "$ref": "#/components/schemas/DeviceTagQuality"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "DeviceTagWriteRequest": {
         "required": [
           "value"
         ],
         "type": "object",
         "properties": {
-          "value": {}
+          "value": { }
         }
       },
       "EdgeDefinition": {
@@ -8416,6 +8932,189 @@
           }
         }
       },
+      "JobDescriptor": {
+        "required": [
+          "id",
+          "name",
+          "description",
+          "createdAt",
+          "updatedAt",
+          "latestVersion",
+          "publishedVersion",
+          "publishedDependencyManifestHash",
+          "versions",
+          "publicationHistory"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latestVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedDependencyManifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobVersionInfo"
+            }
+          },
+          "publicationHistory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicationEvent"
+            }
+          },
+          "productId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "recipeCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "JobVersionInfo": {
+        "required": [
+          "version",
+          "workflowHash",
+          "createdAt",
+          "note",
+          "published"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          },
+          "published": {
+            "type": "boolean"
+          },
+          "validation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobVersionValidationInfo"
+              }
+            ]
+          },
+          "bindingCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          }
+        }
+      },
+      "JobVersionValidationInfo": {
+        "required": [
+          "validationRunId",
+          "datasetId",
+          "accepted",
+          "linkedAt",
+          "reason",
+          "summary",
+          "policy"
+        ],
+        "type": "object",
+        "properties": {
+          "validationRunId": {
+            "type": "string"
+          },
+          "datasetId": {
+            "type": "string"
+          },
+          "accepted": {
+            "type": "boolean"
+          },
+          "linkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "summary": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ValidationRunSummary"
+              }
+            ]
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ValidationAcceptancePolicy"
+              }
+            ]
+          }
+        }
+      },
       "LinkRecipeValidationRequest": {
         "required": [
           "validationRunId"
@@ -8713,6 +9412,178 @@
           }
         }
       },
+      "NodeActionCompletion": {
+        "enum": [
+          "Synchronous",
+          "ProtocolConfirmed"
+        ]
+      },
+      "NodeActionDeclaration": {
+        "required": [
+          "kind",
+          "completion"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/NodeActionKind"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/NodeActionCompletion"
+          },
+          "whenParameter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "whenValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "NodeActionKind": {
+        "enum": [
+          "DeviceWrite",
+          "RobotCommand",
+          "CameraTrigger"
+        ]
+      },
+      "NodeCatalogItem": {
+        "required": [
+          "type",
+          "displayName",
+          "category",
+          "inputs",
+          "outputs",
+          "parameters"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortDescriptor"
+            }
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortDescriptor"
+            }
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParameterDescriptor"
+            }
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "pluginId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "capabilities": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VisionToolCapabilities"
+              }
+            ]
+          },
+          "actions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeActionDeclaration"
+            }
+          },
+          "resources": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeResourceDeclaration"
+            }
+          },
+          "frames": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeFrameRule"
+            }
+          },
+          "transformFrames": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NodeTransformFrameDeclaration"
+              }
+            ]
+          },
+          "outputFrames": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeOutputFrameRule"
+            }
+          },
+          "roiImageBindings": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/NodeRoiImageBinding"
+            }
+          },
+          "declaresActions": {
+            "type": "boolean"
+          },
+          "declaresFrames": {
+            "type": "boolean"
+          },
+          "declaresTransformFrames": {
+            "type": "boolean"
+          },
+          "declaresOutputFrames": {
+            "type": "boolean"
+          },
+          "declaresRoiImageBindings": {
+            "type": "boolean"
+          }
+        }
+      },
       "NodeDefinition": {
         "required": [
           "id",
@@ -8753,6 +9624,136 @@
           }
         }
       },
+      "NodeExecutionPhase": {
+        "enum": [
+          "Warmup",
+          "Run"
+        ],
+        "default": "Run"
+      },
+      "NodeFrameRule": {
+        "required": [
+          "policy"
+        ],
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/NodeImageFramePolicy"
+          },
+          "inputPort": {
+            "type": "string",
+            "default": "image"
+          },
+          "frameSuffix": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "frameLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fallbackFrame": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "transform": {
+            "$ref": "#/components/schemas/NodeTransformFramePolicy"
+          },
+          "referencePort": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "transformPort": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "whenParameter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "whenValues": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "NodeImageFramePolicy": {
+        "enum": [
+          "PreserveInput",
+          "NewSpatialFrame",
+          "NewFixedFrame",
+          "TransformTarget",
+          "InputFrame"
+        ]
+      },
+      "NodeOutputFrameRule": {
+        "required": [
+          "source"
+        ],
+        "type": "object",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/NodeOutputFrameSource"
+          },
+          "outputPort": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inputPort": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "whenParameter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "whenValues": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "NodeOutputFrameSource": {
+        "enum": [
+          "ImageInput",
+          "ImageOutput",
+          "GeometryInput",
+          "DetectionInput",
+          "RegionInput",
+          "ContourInput",
+          "FittedPoints",
+          "ImageOutputFrame",
+          "OutputTransformTarget"
+        ]
+      },
       "NodePosition": {
         "required": [
           "x",
@@ -8778,6 +9779,163 @@
           }
         }
       },
+      "NodeResourceDeclaration": {
+        "required": [
+          "kind",
+          "parameter"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "parameter": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeRoiImageBinding": {
+        "required": [
+          "roiPort",
+          "imagePort"
+        ],
+        "type": "object",
+        "properties": {
+          "roiPort": {
+            "type": "string"
+          },
+          "imagePort": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeRunReport": {
+        "required": [
+          "nodeId",
+          "nodeType",
+          "success",
+          "durationMs",
+          "summary"
+        ],
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeType": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "durationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "phase": {
+            "$ref": "#/components/schemas/NodeExecutionPhase"
+          },
+          "inputs": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/VisionValueSnapshot"
+            }
+          },
+          "outputs": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/VisionValueSnapshot"
+            }
+          },
+          "executionSequence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "startOffsetMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "endOffsetMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          }
+        }
+      },
+      "NodeTransformFrameDeclaration": {
+        "required": [
+          "policy"
+        ],
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/NodeTransformFramePolicy"
+          },
+          "primaryPort": {
+            "type": "string",
+            "default": "transform"
+          },
+          "secondaryPort": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "imagePort": {
+            "type": "string",
+            "default": "image"
+          },
+          "templatePort": {
+            "type": "string",
+            "default": "template"
+          }
+        }
+      },
+      "NodeTransformFramePolicy": {
+        "enum": [
+          "None",
+          "Spatial",
+          "RoiReference",
+          "ReferenceInput",
+          "TemplateToImage",
+          "Compose",
+          "Invert"
+        ],
+        "default": "None"
+      },
       "OfflineReplayRequest": {
         "type": "object",
         "properties": {
@@ -8799,6 +9957,208 @@
               {
                 "$ref": "#/components/schemas/VisionRunOptions"
               }
+            ]
+          }
+        }
+      },
+      "ParameterDescriptor": {
+        "required": [
+          "name",
+          "label",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "defaultValue": { },
+          "min": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "max": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "step": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "options": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ParameterOption"
+            }
+          },
+          "unit": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "group": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "visibleWhen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParameterVisibility"
+              }
+            ]
+          },
+          "internal": {
+            "type": "boolean",
+            "default": false
+          },
+          "visibleWhenAll": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ParameterVisibility"
+            }
+          },
+          "optional": {
+            "type": "boolean"
+          },
+          "integer": {
+            "type": "boolean"
+          },
+          "overriddenByPorts": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "variantParameter": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "variants": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ParameterPresentation"
+            }
+          }
+        }
+      },
+      "ParameterOption": {
+        "required": [
+          "label",
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "ParameterPresentation": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "suggestions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ParameterOption"
+            }
+          },
+          "min": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "max": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "step": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "defaultValue": { },
+          "unit": {
+            "type": [
+              "null",
+              "string"
             ]
           }
         }
@@ -8829,6 +10189,24 @@
           "fullWorkflow": {
             "type": "boolean",
             "default": false
+          }
+        }
+      },
+      "ParameterVisibility": {
+        "required": [
+          "parameter",
+          "values"
+        ],
+        "type": "object",
+        "properties": {
+          "parameter": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -9334,6 +10712,35 @@
           }
         }
       },
+      "PortDescriptor": {
+        "required": [
+          "name",
+          "dataType"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/VisionDataType"
+          },
+          "required": {
+            "type": "boolean",
+            "default": true
+          },
+          "requiredWhen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ParameterVisibility"
+              }
+            ]
+          }
+        }
+      },
       "ProductionRuntimeConfig": {
         "type": "object",
         "properties": {
@@ -9592,6 +10999,37 @@
           }
         }
       },
+      "PublicationEvent": {
+        "required": [
+          "version",
+          "action",
+          "at"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "action": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dependencyManifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ReplaceParameterValuesRequest": {
         "required": [
           "values"
@@ -9600,6 +11038,40 @@
         "properties": {
           "values": {
             "type": "object"
+          }
+        }
+      },
+      "ReplayInputArtifact": {
+        "required": [
+          "png",
+          "sourceNodeId",
+          "width",
+          "height"
+        ],
+        "type": "object",
+        "properties": {
+          "png": {
+            "type": "string",
+            "format": "byte"
+          },
+          "sourceNodeId": {
+            "type": "string"
+          },
+          "width": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "height": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -9633,6 +11105,226 @@
             }
           }
         }
+      },
+      "RobotCapabilities": {
+        "type": "object",
+        "properties": {
+          "readCurrentPose": {
+            "type": "boolean",
+            "default": true
+          },
+          "sendTarget": {
+            "type": "boolean",
+            "default": true
+          },
+          "move2D": {
+            "type": "boolean",
+            "default": true
+          },
+          "stop": {
+            "type": "boolean",
+            "default": true
+          },
+          "resetFault": {
+            "type": "boolean",
+            "default": true
+          },
+          "acknowledge": {
+            "type": "boolean",
+            "default": true
+          },
+          "industrialHandshake": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxLinearSpeedMmPerSec": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 1000
+          },
+          "maxAngularSpeedDegPerSec": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 360
+          }
+        }
+      },
+      "RobotConnectionState": {
+        "enum": [
+          "Disconnected",
+          "Connecting",
+          "Connected",
+          "Faulted"
+        ]
+      },
+      "RobotDescriptor": {
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "model",
+          "driver",
+          "baseFrame",
+          "unit",
+          "connectionState",
+          "handshakeState",
+          "handshake",
+          "currentPose",
+          "activeTarget",
+          "lastCommandId",
+          "busy",
+          "inPosition",
+          "error",
+          "settings",
+          "capabilities",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "driver": {
+            "type": "string"
+          },
+          "baseFrame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "connectionState": {
+            "$ref": "#/components/schemas/RobotConnectionState"
+          },
+          "handshakeState": {
+            "$ref": "#/components/schemas/RobotHandshakeState"
+          },
+          "handshake": {
+            "$ref": "#/components/schemas/RobotHandshakeSignals"
+          },
+          "currentPose": {
+            "$ref": "#/components/schemas/VisionCoordinatePose2D"
+          },
+          "activeTarget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VisionRobotTarget2D"
+              }
+            ]
+          },
+          "lastCommandId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "busy": {
+            "type": "boolean"
+          },
+          "inPosition": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/RobotRuntimeSettings"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/RobotCapabilities"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RobotHandshakeSignals": {
+        "required": [
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "targetReady": {
+            "type": "boolean",
+            "default": false
+          },
+          "execute": {
+            "type": "boolean",
+            "default": false
+          },
+          "busy": {
+            "type": "boolean",
+            "default": false
+          },
+          "complete": {
+            "type": "boolean",
+            "default": false
+          },
+          "error": {
+            "type": "boolean",
+            "default": false
+          },
+          "ack": {
+            "type": "boolean",
+            "default": false
+          },
+          "commandId": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64",
+            "default": 0
+          },
+          "errorCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RobotHandshakeState": {
+        "enum": [
+          "Disconnected",
+          "Ready",
+          "TargetAccepted",
+          "Executing",
+          "InPosition",
+          "Stopped",
+          "Faulted"
+        ]
       },
       "RobotPanelTargetRequest": {
         "required": [
@@ -9761,6 +11453,142 @@
             ],
             "format": "double",
             "default": 0.05
+          }
+        }
+      },
+      "RunTraceRecord": {
+        "required": [
+          "runId",
+          "startedAt",
+          "source",
+          "jobId",
+          "jobVersion",
+          "workflowId",
+          "workflowName",
+          "workflowHash",
+          "dependencyManifestHash",
+          "executionStatus",
+          "disposition",
+          "totalDurationMs",
+          "nodeCount",
+          "overlayCount",
+          "hasPreview",
+          "hasReplayInput",
+          "replaySourceNodeId",
+          "error",
+          "note",
+          "nodeReports"
+        ],
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "jobVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowName": {
+            "type": "string"
+          },
+          "workflowHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dependencyManifestHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "executionStatus": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "totalDurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "nodeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "overlayCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "hasPreview": {
+            "type": "boolean"
+          },
+          "hasReplayInput": {
+            "type": "boolean"
+          },
+          "replaySourceNodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nodeReports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeRunReport"
+            }
+          },
+          "errorCode": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -10025,6 +11853,47 @@
           }
         }
       },
+      "TracePage": {
+        "required": [
+          "offset",
+          "limit",
+          "total",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "offset": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "total": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunTraceRecord"
+            }
+          }
+        }
+      },
       "TrackInvestigationRequest": {
         "type": "object",
         "properties": {
@@ -10253,6 +12122,139 @@
           }
         }
       },
+      "ValidationRunSummary": {
+        "required": [
+          "total",
+          "completed",
+          "trueOk",
+          "trueNg",
+          "falseOk",
+          "falseNg",
+          "errors",
+          "accuracy",
+          "falseOkRate",
+          "falseNgRate",
+          "p50DurationMs",
+          "p95DurationMs",
+          "p99DurationMs",
+          "maxDurationMs"
+        ],
+        "type": "object",
+        "properties": {
+          "total": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "completed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "trueOk": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "trueNg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "falseOk": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "falseNg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "errors": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "accuracy": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "falseOkRate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "falseNgRate": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "p50DurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "p95DurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "p99DurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxDurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "VendorCameraRegistrationRequest": {
         "required": [
           "driver",
@@ -10311,6 +12313,288 @@
           }
         }
       },
+      "VisionCoordinatePose2D": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "thetaDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "frame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          }
+        }
+      },
+      "VisionDataType": {
+        "enum": [
+          "Control",
+          "Any",
+          "Image",
+          "FrameSet",
+          "Double",
+          "Integer",
+          "Boolean",
+          "String",
+          "Point2D",
+          "Line2D",
+          "Pose2D",
+          "Rectangle2D",
+          "Circle",
+          "Contour",
+          "DetectionList",
+          "Transform2D",
+          "FrameTree2D",
+          "CoordinatePoint2D",
+          "CoordinateLine2D",
+          "CoordinatePose2D",
+          "RobotTarget2D",
+          "DeviceTagValue",
+          "Measurement",
+          "ContourProperties",
+          "Roi",
+          "Region",
+          "DomainImage",
+          "Transform3D",
+          "CoordinatePoint3D",
+          "MetrologyResults"
+        ]
+      },
+      "VisionExecutionMode": {
+        "enum": [
+          "Auto",
+          "WorkflowCore",
+          "Pipeline"
+        ],
+        "default": "Auto"
+      },
+      "VisionOverlay": {
+        "required": [
+          "id",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/VisionOverlayType"
+          },
+          "nodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "label": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "x2": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y2": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "radius": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "width": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "height": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "angleDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "points": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VisionOverlayPoint"
+            }
+          },
+          "stroke": {
+            "type": "string",
+            "default": "#52c41a"
+          },
+          "strokeWidth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 2
+          },
+          "fill": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "VisionOverlayPoint": {
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object",
+        "properties": {
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "VisionOverlayType": {
+        "enum": [
+          "Point",
+          "Line",
+          "Circle",
+          "Rectangle",
+          "Polygon",
+          "Contour",
+          "Text",
+          "Polyline"
+        ]
+      },
+      "VisionRobotTarget2D": {
+        "type": "object",
+        "properties": {
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "rDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "frame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "robot": {
+            "type": "string"
+          },
+          "guidanceMode": {
+            "type": "string"
+          }
+        }
+      },
       "VisionRunOptions": {
         "type": "object",
         "properties": {
@@ -10349,6 +12633,50 @@
             "type": "boolean",
             "default": false
           }
+        }
+      },
+      "VisionToolCapabilities": {
+        "type": "object",
+        "properties": {
+          "supportsRoi": {
+            "type": "boolean",
+            "default": false
+          },
+          "emitsOverlay": {
+            "type": "boolean",
+            "default": false
+          },
+          "deterministic": {
+            "type": "boolean",
+            "default": true
+          },
+          "supportsRunNode": {
+            "type": "boolean",
+            "default": true
+          },
+          "supportsParallel": {
+            "type": "boolean",
+            "default": true
+          },
+          "executionMode": {
+            "$ref": "#/components/schemas/VisionExecutionMode"
+          }
+        }
+      },
+      "VisionValueSnapshot": {
+        "required": [
+          "type",
+          "display"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "display": {
+            "type": "string"
+          },
+          "value": { }
         }
       },
       "WorkflowDefinition": {
@@ -10400,6 +12728,127 @@
           },
           "reason": {
             "type": "string"
+          }
+        }
+      },
+      "WorkflowRunResult": {
+        "required": [
+          "runId",
+          "success",
+          "totalDurationMs",
+          "previewAvailable",
+          "previewWidth",
+          "previewHeight",
+          "nodeReports",
+          "overlays",
+          "previewJpeg"
+        ],
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "totalDurationMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "previewAvailable": {
+            "type": "boolean"
+          },
+          "previewWidth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "previewHeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "nodeReports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeRunReport"
+            }
+          },
+          "overlays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisionOverlay"
+            }
+          },
+          "previewJpeg": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "byte"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "debugState": {
+            "type": "string",
+            "default": "Complete"
+          },
+          "haltNodeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "haltReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "qualityDisposition": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "controlFlowDecisions": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ControlFlowDecision"
+            }
+          },
+          "replayInput": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReplayInputArtifact"
+              }
+            ]
+          },
+          "errorCode": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       }

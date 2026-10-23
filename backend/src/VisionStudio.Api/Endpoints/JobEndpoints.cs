@@ -9,7 +9,8 @@ public static class JobEndpoints
 {
     public static IEndpointRouteBuilder MapJobEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/jobs", async (JobStore jobs, CancellationToken ct) => Results.Ok(await jobs.ListAsync(ct)));
+        app.MapGet("/api/jobs", async (JobStore jobs, CancellationToken ct) => Results.Ok(await jobs.ListAsync(ct)))
+            .Produces<IReadOnlyList<JobDescriptor>>();
 
         app.MapPost("/api/jobs", async (
             CreateJobRequest request,

@@ -9,7 +9,8 @@ public static class RobotEndpoints
 {
     public static IEndpointRouteBuilder MapRobotEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/robots", (RobotManager robots) => Results.Ok(robots.List()));
+        app.MapGet("/api/robots", (RobotManager robots) => Results.Ok(robots.List()))
+            .Produces<IReadOnlyList<RobotDescriptor>>();
 
         app.MapPost("/api/robots/{id}/connect", async (string id, RobotManager robots, CancellationToken ct) =>
         {

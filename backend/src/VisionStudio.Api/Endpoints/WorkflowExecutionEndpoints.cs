@@ -107,7 +107,7 @@ public static class WorkflowExecutionEndpoints
                     actionIntent.MarkUnknown("the run returned success but an accepted device action still awaits completion confirmation");
             }
             return EndpointResults.StoreAndMapRunResult(result, store);
-        }).RequireEngineer("workflow.run.adhoc", "workflow");
+        }).RequireEngineer("workflow.run.adhoc", "workflow").Produces<WorkflowRunResult>();
 
         app.MapPost("/api/debug/run", async (
             DebugRunRequest request,
@@ -149,7 +149,7 @@ public static class WorkflowExecutionEndpoints
                     actionIntent.MarkUnknown("the debug run returned success but an accepted device action still awaits completion confirmation");
             }
             return EndpointResults.StoreAndMapRunResult(result, store);
-        }).RequireEngineer("workflow.run.debug", "workflow");
+        }).RequireEngineer("workflow.run.debug", "workflow").Produces<WorkflowRunResult>();
 
         app.MapGet("/api/runs/{runId}/preview", (string runId, RunStore store) =>
             store.TryGet(runId, out var artifact) && artifact.PreviewJpeg is { Length: > 0 } jpeg

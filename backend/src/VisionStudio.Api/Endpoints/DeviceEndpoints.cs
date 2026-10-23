@@ -91,8 +91,10 @@ public static class DeviceEndpoints
             return Results.Ok(devices.Get(id));
         }).RequireEngineer("device.tags.write", "device");
 
-        app.MapGet("/api/devices", (DeviceManager devices) => Results.Ok(devices.List()));
-        app.MapGet("/api/devices/{id}", (string id, DeviceManager devices) => Results.Ok(devices.Get(id)));
+        app.MapGet("/api/devices", (DeviceManager devices) => Results.Ok(devices.List()))
+            .Produces<List<DeviceDescriptor>>();
+        app.MapGet("/api/devices/{id}", (string id, DeviceManager devices) => Results.Ok(devices.Get(id)))
+            .Produces<DeviceDescriptor>();
 
         app.MapPost("/api/devices/{id}/connect", async (string id, DeviceManager devices, CancellationToken ct) =>
         {
