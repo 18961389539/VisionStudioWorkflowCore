@@ -16,7 +16,7 @@ import {
   type OnConnectEnd,
   type OnNodesChange
 } from '@xyflow/react';
-import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, Menu, message, Modal, Segmented, Select, Space, Switch, Table, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
+import { Alert, Badge, Button, Checkbox, Dropdown, Empty, Input, message, Modal, Segmented, Switch, Tag, Tooltip, Typography, type InputRef, type MenuProps } from 'antd';
 import Toolbox from './components/Toolbox';
 import NodeConfigurationDialog, { type NodeConfigurationTab } from './components/NodeConfigurationDialog';
 import RunPanel from './components/RunPanel';
@@ -31,14 +31,13 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
 import CanvasMiniMap from './components/CanvasMiniMap';
 import WorkflowImagePreview from './components/WorkflowImagePreview';
-import TemplateFlowPreview from './components/TemplateFlowPreview';
 import { automaticResultHeight } from './layout';
 import { catalogNodeData, fallbackCatalog, fallbackCatalogHash, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
 import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
 import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
-import { demos, demoDescriptions, type DemoKey } from './demos';
+import { demos, type DemoKey } from './demos';
 import { GraphHistory, captureGraph, restoreGraph, type GraphSnapshot } from './history';
 import { clearDraft, readDraft, type WorkflowDraft } from './draft';
 import { graphConnectionVerdict, type WorkflowIssue } from './validation';
@@ -84,6 +83,8 @@ import {
   type ConnectionPicker, type NodeAttachment, type WorkflowDocumentSummary
 } from './appEditorShared';
 import ShortcutHelpModal from './components/ShortcutHelpModal';
+import TemplateGalleryModal from './components/TemplateGalleryModal';
+import WorkflowPickerModal from './components/WorkflowPickerModal';
 
 function Editor() {
   const [catalog, setCatalog] = useState<NodeCatalogItem[]>(fallbackCatalog);
@@ -117,24 +118,11 @@ function Editor() {
   const [shellSize, setShellSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const shellRef = useRef<HTMLDivElement>(null);
   const [demoKey, setDemoKey] = useState<DemoKey>('linear');
-  // 模板入口 P0：顶栏下拉改为“从模板新建”弹窗——替换当前流程属于破坏性动作，必须显式确认
+  // 模板入口 P0：顶栏下拉改为“从模板新建”弹窗——替换当前流程属于破坏性动作，必须显式确认。
+  // 查询/分类/选中状态内聚于 TemplateGalleryModal（打开时重置），此处只保留开关。
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [templateQuery, setTemplateQuery] = useState('');
-  const [templateGroup, setTemplateGroup] = useState('all');
-  const visibleTemplateGroups = useMemo(() => {
-    const keyword = templateQuery.trim().toLowerCase();
-    return DEMO_GROUPS.filter((group) => templateGroup === 'all' || templateGroup === group.group)
-      .map((group) => ({ ...group, keys: group.keys.filter((key) => `${DEMO_LABELS[key]} ${demoDescriptions[key]}`.toLowerCase().includes(keyword)) }))
-      .filter((group) => group.keys.length > 0);
-  }, [templateQuery, templateGroup]);
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
-  const [templateSelected, setTemplateSelected] = useState<DemoKey | null>(null);
-  const showTemplates = () => {
-    setTemplateQuery('');
-    setTemplateGroup('all');
-    setTemplateSelected(demoKey);
-    setTemplateOpen(true);
-  };
+  const showTemplates = () => { setTemplateOpen(true); };
   // 专注画布（P1）：一键收起全部面板，画布独占窗口；退出时还原进入前的布局
   const [focusMode, setFocusMode] = useState(false);
   const focusSnapshotRef = useRef<LayoutState | null>(null);
@@ -752,20 +740,7 @@ function Editor() {
   const guardingSave = saving || workflowChanges.busy;
 
   // 模板真实图数据只构建一次；目录变化时同步更新预览中的显示名。
-  const templatePreviews = useMemo(() => {
-    const previews = new Map<DemoKey, { nodeCount: number; nodeChips: string[]; nodes: Node[]; edges: Edge[] }>();
-    for (const [key, build] of Object.entries(demos)) {
-      const graph = (build as () => { nodes: Node[]; edges: Edge[] })();
-      const labelOf = (type: string) => catalog.find((item) => item.type === type)?.displayName ?? type;
-      previews.set(key as DemoKey, {
-        nodeCount: graph.nodes.length, nodes: graph.nodes, edges: graph.edges,
-        nodeChips: graph.nodes.slice(0, 5).map((item) => labelOf(String(item.data.typeKey)))
-      });
-    }
-    return previews;
-  }, [catalog]);
-  const templateLabels = useMemo(() => Object.fromEntries(catalog.map((item) => [item.type, item.displayName])), [catalog]);
-  const selectedTemplatePreview = templateSelected ? templatePreviews.get(templateSelected) : undefined;
+  // 模板卡片/预览的派生数据内聚于 TemplateGalleryModal（巨型组件拆分，2026-10-23）。
 
   // P0-1：每次新的运行/调试结果落地时自动展开底部结果区（首次使用默认收起，结果出现即回位）
   const lastExpandedRunRef = useRef<string | undefined>(undefined);
@@ -1694,108 +1669,15 @@ function Editor() {
       </Modal>
 
       {/* P0-2：模板入口弹窗——分组/用途/预览，替换当前流程前显式确认；“打开已有流程”就近放置 */}
-      <Modal
-        open={templateOpen}
-        title="从模板新建"
-        width={780}
-        onCancel={() => setTemplateOpen(false)}
-        footer={[
-          <Button key="open" onClick={() => { setTemplateOpen(false); void openWorkflowPicker(); }}>打开已有流程…</Button>,
-          <Button key="cancel" onClick={() => setTemplateOpen(false)}>取消</Button>,
-          <Button
-            key="apply"
-            type="primary"
-            disabled={!templateSelected}
-            onClick={() => { if (!templateSelected) return; setTemplateOpen(false); guardUnsaved('从模板新建', () => applyDemo(templateSelected)); }}
-          >
-            {templateSelected ? `使用「${DEMO_LABELS[templateSelected]}」` : '使用此模板'}
-          </Button>
-        ]}
-      >
-        <div className="template-filters">
-          <Input allowClear value={templateQuery} onChange={(event) => { setTemplateQuery(event.target.value); setTemplateSelected(null); }}
-            aria-label="搜索流程模板" placeholder="搜索模板名称或用途" />
-          <Select value={templateGroup} onChange={(value) => { setTemplateGroup(value); setTemplateSelected(null); }} aria-label="模板分类" options={[
-            { value: 'all', label: '全部分类' }, ...DEMO_GROUPS.map((group) => ({ value: group.group, label: group.group }))
-          ]} />
-        </div>
-        {templateSelected && selectedTemplatePreview && <section className="template-selected-preview" aria-label="所选模板流程预览">
-          <div className="template-preview-heading"><strong>{DEMO_LABELS[templateSelected]}</strong><span>{selectedTemplatePreview.nodeCount} 个节点 · {selectedTemplatePreview.edges.length} 条连线</span></div>
-          <div className="template-preview-legend"><span>虚线：执行顺序</span><span>实线：数据传递</span><span>滚动查看完整流程</span></div>
-          <div className="template-preview-scroll" tabIndex={0} aria-label="完整流程图，可滚动查看">
-            <TemplateFlowPreview nodes={selectedTemplatePreview.nodes} edges={selectedTemplatePreview.edges}
-              labels={templateLabels} name={DEMO_LABELS[templateSelected]} detailed />
-          </div>
-        </section>}
-        <div className="template-results">
-          {visibleTemplateGroups.map((group) => (
-            <div key={group.group} className="template-group">
-              <div className="template-group-title">{group.group}</div>
-              <div className="template-cards">
-                {group.keys.map((key) => {
-                  const preview = templatePreviews.get(key);
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      className={`template-card${templateSelected === key ? ' active' : ''}`}
-                      aria-pressed={templateSelected === key}
-                      onClick={() => setTemplateSelected(key)}
-                      title={demoDescriptions[key]}
-                    >
-                      <div className="template-card-name">
-                        {DEMO_LABELS[key]}
-                        {demoKey === key && <span className="template-card-current">当前</span>}
-                      </div>
-                      <div className="template-card-desc">{demoDescriptions[key]}</div>
-                      {preview && <TemplateFlowPreview nodes={preview.nodes} edges={preview.edges} labels={templateLabels} name={DEMO_LABELS[key]} />}
-                      <div className="template-card-meta">
-                        {preview?.nodeCount ?? '—'} 节点
-                        {(preview?.nodeChips.length ?? 0) > 0 && <span className="template-card-chips">{preview?.nodeChips.join(' · ')}</span>}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-          {visibleTemplateGroups.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的模板，请调整搜索或分类" />}
-        </div>
-      </Modal>
+      <TemplateGalleryModal open={templateOpen} onClose={() => setTemplateOpen(false)}
+        currentDemoKey={demoKey} catalog={catalog}
+        onApply={(key) => guardUnsaved('从模板新建', () => applyDemo(key))}
+        onOpenSaved={() => void openWorkflowPicker()} />
 
-      <Modal
-        open={workflowPickerOpen}
-        title="打开已保存的工作流"
-        width={760}
-        onCancel={() => setWorkflowPickerOpen(false)}
-        footer={(
-          <Space>
-            <Button onClick={() => setWorkflowPickerOpen(false)}>取消</Button>
-            <Button type="primary" loading={workflowImport.loading} disabled={!workflowToLoad || workflowListLoading} onClick={loadSelectedSavedWorkflow}>加载选中流程</Button>
-          </Space>
-        )}
-      >
-        {workflowListError && <Alert type="error" showIcon message="工作流列表加载失败" description={workflowListError} style={{ marginBottom: 12 }} />}
-        <Table<WorkflowDocumentSummary>
-          rowKey="id"
-          size="small"
-          loading={workflowListLoading}
-          dataSource={savedWorkflows}
-          pagination={{ pageSize: 7, showSizeChanger: false }}
-          rowSelection={{
-            type: 'radio',
-            selectedRowKeys: workflowToLoad ? [workflowToLoad] : [],
-            onChange: (keys) => setWorkflowToLoad(keys[0] == null ? undefined : String(keys[0]))
-          }}
-          locale={{ emptyText: workflowListLoading ? '正在读取列表…' : '还没有已保存的工作流。先保存当前流程后可从这里打开。' }}
-          columns={[
-            { title: '名称', dataIndex: 'name', ellipsis: true },
-            { title: 'ID', dataIndex: 'id', width: 170, render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
-            { title: '节点 / 连线', width: 112, render: (_, item) => `${item.nodeCount} / ${item.edgeCount}` },
-            { title: '更新时间', dataIndex: 'updatedAt', width: 175, render: (value: string) => new Date(value).toLocaleString() }
-          ]}
-        />
-      </Modal>
+      <WorkflowPickerModal open={workflowPickerOpen} onClose={() => setWorkflowPickerOpen(false)}
+        workflows={savedWorkflows} loading={workflowListLoading} error={workflowListError}
+        selected={workflowToLoad} onSelect={setWorkflowToLoad}
+        onLoad={loadSelectedSavedWorkflow} applying={workflowImport.loading} />
 
       {/* 键盘快捷键一览（工具菜单）：快捷键此前只散落在悬停提示里，没有可查入口 */}
       <ShortcutHelpModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
