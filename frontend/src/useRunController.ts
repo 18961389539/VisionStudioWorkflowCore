@@ -10,6 +10,13 @@ import { debug as debugEndpoints, apiUrl } from './endpoints';
 
 export type BottomTab = 'result' | 'issues' | 'observability';
 
+/**
+ * 运行请求的前端兜底超时（2026-10-25）。此前普通运行不带任何超时：
+ * 后端挂起或连接静默断开时 `running` 永久为真，用户只能中止重来，也分不清"后端在算"与"连接掉了"。
+ * 取 15 分钟：工控单次流程远达不到这个量级，同时留足慢盘/大图批处理的余量。
+ */
+export const RUN_TIMEOUT_MS = 15 * 60_000;
+
 type MessageApi = ReturnType<typeof message.useMessage>[0];
 
 /** /api/debug/sessions 系列端点的返回负载：与 RunResult 同形，附带会话标识与操作名（detail 兼容 ProblemDetails）。 */
@@ -59,6 +66,8 @@ export function useRunController({
   messageApi
 }: Params) {
   const [running, setRunning] = useState(false);
+  /** 本次运行的开始时刻（界面显示已用时间）；未运行时为空 */
+  const [runStartedAt, setRunStartedAt] = useState<number>();
   const [result, setResult] = useState<RunResult>();
   const [resultReceivedAt, setResultReceivedAt] = useState<string>();
   const operationRef = useRef<Operation | undefined>(undefined);
@@ -219,6 +228,9 @@ export function useRunController({
       return edge.data?.kind === 'control' ? { ...rest, animated: true } : rest;
     }));
     let resultApplied = false;
+    let timedOut = false;
+    setRunStartedAt(Date.now());
+    const timeout = window.setTimeout(() => { timedOut = true; operation.controller.abort(); }, RUN_TIMEOUT_MS);
     try {
       const response = await apiFetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -233,9 +245,15 @@ export function useRunController({
       if (!response.ok) messageApi.error(apiErrorMessage(data, `运行失败（HTTP ${response.status}）`));
     } catch (error) {
       if (!mounted.current || operation.epoch !== epochRef.current) return;
-      if (operation.controller.signal.aborted) messageApi.info('已发送中止请求，请以运行追溯及设备实际状态确认收尾结果。');
-      else messageApi.error(error instanceof Error ? error.message : '运行失败');
+      if (timedOut) {
+        // 前端只是停止等待，不代表后端的执行被取消；必须把"去追溯确认"这条路明确指出来。
+        messageApi.error(`运行请求已超过 ${Math.round(RUN_TIMEOUT_MS / 60_000)} 分钟未返回，已中止前端等待。任务可能仍在后端执行——请在「追溯」中确认该次运行的最终结果。`);
+      } else if (operation.controller.signal.aborted) {
+        messageApi.info('已发送中止请求，请以运行追溯及设备实际状态确认收尾结果。');
+      } else messageApi.error(error instanceof Error ? error.message : '运行失败');
     } finally {
+      window.clearTimeout(timeout);
+      if (mounted.current) setRunStartedAt(undefined);
       if (mounted.current && operation.epoch === epochRef.current && !resultApplied) resetExecutionMarks();
       finish(operation);
     }
@@ -510,6 +528,7 @@ export function useRunController({
 
   return {
     running,
+    runStartedAt,
     result,
     resultReceivedAt,
     clearResult,

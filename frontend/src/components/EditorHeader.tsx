@@ -3,6 +3,7 @@
  * 从 App.tsx 拆出（巨型组件拆分，2026-10-23）；纯展示组件，闭包状态经分组 props 注入，
  * JSX 与原实现逐行一致。
  */
+import { useEffect, useState } from 'react';
 import { Badge, Button, Dropdown, Tag, Tooltip, Typography, type MenuProps } from 'antd';
 import { SecurityAccountBadge } from '../security';
 import { APP_VERSION } from '../version';
@@ -23,12 +24,29 @@ type EditorHeaderProps = {
   onApplyLayoutPreset: (preset: LayoutPreset) => void;
   templates: { show: () => void; openSaved: () => void };
   debug: { inSession: boolean; statusText: string };
-  run: { running: boolean; debugBusy: boolean; onRun: () => void; onAbort: () => void };
+  run: { running: boolean; debugBusy: boolean; onRun: () => void; onAbort: () => void; startedAt?: number };
   workflow: { name: string; id: string; onRename: (name: string) => void; dirty: boolean; lastSavedAt?: Date };
   validation: { status: string; summary: string; needsRevalidate: boolean; issueCount: number; busy: boolean; onValidate: () => void };
   catalogError?: string;
   save: { busy: boolean; onSave: () => void };
 };
+
+/**
+ * 运行中显示已用时间（2026-10-25）。长任务此前只有一个"中止"按钮：
+ * 用户无法判断"后端在算"还是"连接掉了"，只能中止重来。
+ */
+function RunClock({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+  const text = seconds >= 3600
+    ? `${Math.floor(seconds / 3600)}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+    : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  return <span className="run-elapsed" title="本次运行已用时间">已用 {text}</span>;
+}
 
 export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset, templates, debug, run, workflow, validation, catalogError, save }: EditorHeaderProps) {
   return (
@@ -132,7 +150,10 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
           <Button onClick={save.onSave} loading={save.busy}>保存</Button>
           {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
           {run.running
-            ? <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
+            ? <>
+                <RunClock startedAt={run.startedAt} />
+                <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
+              </>
             : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession} title={debug.inSession ? '请先结束调试会话，再运行流程' : undefined}>运行</Button>}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { RunTraceRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import {
@@ -15,7 +15,15 @@ import InvestigationPanel from './InvestigationPanel';
 import { apiFetch } from '../apiClient';
 import { apiUrl, traces } from '../endpoints';
 
-type Props = { open: boolean; onClose: () => void };
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  /**
+   * 从运行结果/错误横幅跳转过来时预置的运行 ID（2026-10-25）。
+   * 打开即筛到这一次运行并选中它，省掉"记住 runId 再去筛选框粘贴"。
+   */
+  initialRunId?: string;
+};
 
 const dispositionColor: Record<string, string> = { OK: 'green', NG: 'red', REVIEW: 'orange', ERROR: 'volcano' };
 const executionColor: Record<string, string> = {
@@ -25,7 +33,7 @@ const executionColor: Record<string, string> = {
 const DEFAULT_FILTER: TraceFilterState = { preset: 'today' };
 const DEFAULT_PAGE = { current: 1, pageSize: 50 };
 
-export default function TracePanel({ open, onClose }: Props) {
+export default function TracePanel({ open, onClose, initialRunId }: Props) {
   // applied 是真正发请求的筛选（离散控件即时生效；文本输入点“查询”或回车生效）。
   const [filter, setFilter] = useState<TraceFilterState>(DEFAULT_FILTER);
   const [appliedFilter, setAppliedFilter] = useState<TraceFilterState>(DEFAULT_FILTER);
@@ -46,6 +54,17 @@ export default function TracePanel({ open, onClose }: Props) {
     () => data?.items.find((x) => x.runId === selectedId) ?? selectedRecord,
     [data, selectedId, selectedRecord],
   );
+
+  // 跳转进来的运行 ID：筛到最近 7 天 + 该 ID 前缀，并直接选中（数据到达后由下方 effect 覆盖为完整记录）。
+  useEffect(() => {
+    if (!open || !initialRunId) return;
+    const next: TraceFilterState = { preset: 'week', runIdPrefix: initialRunId };
+    setFilter(next);
+    setAppliedFilter(next);
+    setPage(DEFAULT_PAGE);
+    setSelectedId(initialRunId);
+    setSelectedRecord(undefined);
+  }, [open, initialRunId]);
 
   useEffect(() => {
     if (!data || !selectedId) return;
@@ -220,7 +239,7 @@ export default function TracePanel({ open, onClose }: Props) {
         />
 
         <section className="trace-detail">
-          {!selected ? <div>请选择一条运行记录。</div> : <>
+          {!selected ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择一条运行记录查看判读、预览与诊断" /> : <>
             <div className="trace-detail-heading">
               <div>
                 <strong>{selected.workflowName}</strong>

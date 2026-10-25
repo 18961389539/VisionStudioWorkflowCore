@@ -151,6 +151,8 @@ function Editor() {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [tracesOpen, setTracesOpen] = useState(false);
+  /** 从运行结果跳转到追溯时预置的运行 ID（打开即定位到那次运行） */
+  const [traceRunId, setTraceRunId] = useState<string>();
   const [validationOpen, setValidationOpen] = useState(false);
   const [modelPackagesOpen, setModelPackagesOpen] = useState(false);
   const [tuningOpen, setTuningOpen] = useState(false);
@@ -256,7 +258,7 @@ function Editor() {
   // 运行 / 调试控制 + 图像资源管理（独立模块）：anyBusy 是全局唯一执行闸门；
   // 结果与图像以 result.runId 为代际统一管理（详见 useRunController.ts / useRunImages.ts）
   const {
-    running, result, resultReceivedAt, clearResult, applyResult, resultStale,
+    running, runStartedAt, result, resultReceivedAt, clearResult, applyResult, resultStale,
     run, abortRun, runNode, runFromHere, previewNode,
     debugSession, debugBusy, allowSideEffects, setAllowSideEffects, anyBusy,
     hasSideEffectNodes, hasModuleCalls,
@@ -1158,7 +1160,7 @@ function Editor() {
         onApplyLayoutPreset={applyLayoutPreset}
         templates={{ show: showTemplates, openSaved: openWorkflowPicker }}
         debug={{ inSession: Boolean(debugSession), statusText: debugStatus.text }}
-        run={{ running, debugBusy, onRun: run, onAbort: abortRun }}
+        run={{ running, debugBusy, onRun: run, onAbort: abortRun, startedAt: runStartedAt }}
         workflow={{ name: designerWorkflowName, id: designerWorkflowId, onRename: setDesignerWorkflowName, dirty, lastSavedAt }}
         validation={{ status: validationState.status, summary: validationState.summary, needsRevalidate, issueCount: validationIssues.length, busy: validationBusy, onValidate: validate }}
         catalogError={catalogError}
@@ -1414,6 +1416,7 @@ function Editor() {
         result={result}
         resultStale={resultStale}
         focusNode={focusNode}
+        onOpenTrace={(runId) => { setTraceRunId(runId); setTracesOpen(true); }}
         nodeLabels={nodeLabels}
         nodeTypeLabels={Object.fromEntries(catalog.map((item) => [item.type, item.displayName]))}
       />
@@ -1484,7 +1487,9 @@ function Editor() {
         onApplyToSelectedNode={applyCalibrationParameters}
       /></LazyPanel>
       <LazyPanel open={jobsOpen} label="作业" onClose={() => setJobsOpen(false)}><JobPanel open onClose={() => setJobsOpen(false)} workflow={workflowPayload} prepareWorkflowChange={workflowChanges.prepare} onRunResult={applyResult} /></LazyPanel>
-      <LazyPanel open={tracesOpen} label="追溯" onClose={() => setTracesOpen(false)}><TracePanel open onClose={() => setTracesOpen(false)} /></LazyPanel>
+      <LazyPanel open={tracesOpen} label="追溯" onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }}>
+        <TracePanel open initialRunId={traceRunId} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
+      </LazyPanel>
       <LazyPanel open={modelPackagesOpen} label="模型包" onClose={() => setModelPackagesOpen(false)}><ModelPackagePanel open onClose={() => setModelPackagesOpen(false)} /></LazyPanel>
       <LazyPanel open={validationOpen} label="数据集验证" onClose={() => setValidationOpen(false)}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
       <LazyPanel open={tuningOpen} label="参数调优" onClose={() => setTuningOpen(false)}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} prepareWorkflowChange={workflowChanges.prepare} onApplied={() => { setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>

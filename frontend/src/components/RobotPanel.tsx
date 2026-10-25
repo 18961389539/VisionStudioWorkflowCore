@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Form, InputNumber, message, Modal, Select, Space, Statistic, Switch, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Form, InputNumber, message, Modal, Select, Space, Statistic, Switch, Table, Tag, Typography } from 'antd';
 import type { RobotCommandTraceRecord, RobotDescriptor, RobotRuntimeSettings } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
@@ -295,7 +295,7 @@ export default function RobotPanel({ open, onClose }: Props) {
               ]}
             />
             {selected.error && <Alert type="error" showIcon message={selected.error} />}
-          </> : <div className="job-empty">尚未注册机器人</div>}
+          </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未注册机器人。添加控制器地址与协议后，这里会显示连接状态与运行指令。" />}
         </section>
       </div>
     </Modal>

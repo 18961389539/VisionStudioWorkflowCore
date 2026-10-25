@@ -1430,7 +1430,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               {isShapeMatch ? shapeWorkspaceTab === 'training' ? legacyWorkflow ? '训练并切换到训练模式' : trainedModelData ? '重新训练模型' : '训练模型' : '运行搜索' : '运行此节点'}
             </Button>
           </Tooltip>
-          <Button onClick={onClose}>取消</Button><Button type="primary" onClick={apply} disabled={locked || !dirty || issues.length > 0 || externalChange || referenceMismatch || isShapeMatch && !legacyWorkflow && trainingStale} title="应用暂存参数到流程（Ctrl+S）">应用</Button>
+          {/* 关闭语义（2026-10-25 复核）：✕/Esc 是"手滑也会碰到"的路径，因此二次确认；
+              "取消"是明确点选的动作，保持一次点击关闭——差异是刻意的，不强行统一。
+              仅补 title 说明后果，避免用户以为"取消"会保留暂存修改。 */}
+          <Button onClick={onClose} title={dirty ? '丢弃本次未应用的参数修改并关闭' : '关闭'}>取消</Button><Button type="primary" onClick={apply} disabled={locked || !dirty || issues.length > 0 || externalChange || referenceMismatch || isShapeMatch && !legacyWorkflow && trainingStale} title="应用暂存参数到流程（Ctrl+S）">应用</Button>
         </div>
       </div>}>
       {externalChange && <Alert type="warning" showIcon title="流程中的节点参数已更新，请关闭后重新打开，避免覆盖其他修改。" />}

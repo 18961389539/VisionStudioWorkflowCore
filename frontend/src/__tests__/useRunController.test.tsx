@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { useRunController } from '../useRunController';
+import { RUN_TIMEOUT_MS, useRunController } from '../useRunController';
 import type { NodeCatalogItem, RunResult, WorkflowPayload } from '../types';
 
 const nodes: Node[] = [
@@ -40,6 +40,29 @@ function mount() {
 }
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+describe('运行兜底超时', () => {
+  it('请求超过兜底超时后中止等待，并提示去追溯确认后端结果', async () => {
+    vi.useFakeTimers();
+    // 挂起的请求必须响应 abort，否则前端永远等不到 catch 分支。
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, messages } = mount();
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.run(); });
+    expect(result.current.running).toBe(true);
+    expect(typeof result.current.runStartedAt).toBe('number');
+
+    act(() => { vi.advanceTimersByTime(RUN_TIMEOUT_MS + 1); });
+    await act(async () => { await pending; });
+
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('追溯'));
+    expect(result.current.running).toBe(false);
+    expect(result.current.runStartedAt).toBeUndefined();
+  });
+});
 
 describe('运行入口互斥', () => {
   it.each(['run', 'previewNode', 'startDebugSession'] as const)('%s 在同一个事件内阻断其它运行和调试请求', async (entry) => {

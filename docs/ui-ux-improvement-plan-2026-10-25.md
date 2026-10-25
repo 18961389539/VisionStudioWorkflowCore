@@ -334,3 +334,34 @@ P0-4 加 grep 守卫；i18n 接线后加"新增中文硬编码"的棘轮。
 **antd 6.6.5 已把 `Alert` 的 `message` 标为废弃（改用 `title`）**：全仓 146 处 `<Alert>`、89 处 `message=`，
 现在每次渲染都会打 deprecation warning，且下一个主版本会移除该属性。建议与 P2-5/P2-6 一起做一次批量迁移
 （机械替换 + `dataErrorAlert.test.tsx` 那样的渲染断言兜底）。
+
+---
+
+## 七、第三批已落地（2026-10-25 19:10）
+
+| 编号 | 改动 | 关键文件 | 验证 |
+|---|---|---|---|
+| **P1-2（部分）** | 运行中显示已用时间；普通运行加 15 分钟前端兜底超时，超时文案明确"任务可能仍在后端执行，请在追溯确认" | `useRunController.ts`（`RUN_TIMEOUT_MS`、`runStartedAt`）、`EditorHeader.tsx`（`RunClock`） | 新增用例：超时后 `running=false`、`runStartedAt` 清空、错误文案含"追溯" |
+| **P1-3** | 结果区新增"在追溯中打开"，携带 `runId` 打开追溯并预筛选（最近 7 天 + 该 ID）+ 直接选中 | `EditorBottomDock.tsx`、`App.tsx`（`traceRunId`）、`TracePanel.tsx`（`initialRunId`） | 新增用例：跳转后查询参数为 `{preset:'week', runIdPrefix}` |
+| **P1-6（部分）** | 补回画布节点的键盘焦点环（@xyflow/react 自带样式把 `focus-visible` 的 outline 清零） | `styles.css` | 视觉改动，随 e2e 验证 |
+| **P2-3（部分）** | 设备 / 机器人 / 追溯详情的纯文本空态改为 `Empty`，并写清"下一步做什么" | `DevicePanel`、`RobotPanel`、`TracePanel` | 全量测试通过 |
+
+### 一条被测试挡回、复核后维持原状的改动
+
+原计划把节点配置弹窗的"取消"改成"放弃修改"（有修改时），以消除"✕/Esc 会确认、取消不确认"的不一致。
+落地后 `nodeConfigurationDialogDraft` 的两个用例失败——它们锁定的是既有决策：**✕/Esc 属于"手滑也会碰到"的路径，
+需要二次确认；"取消"是明确点选的动作，保持一次点击关闭。** 复核后认为这个区分是对的，不应为"形式统一"牺牲熟练用户的效率：
+保留原文案，只补 `title` 说明"会丢弃未应用的修改"，并把判断写进代码注释与本文，避免下次再被当成缺陷改一遍。
+
+**验证**：`tsc -b` 通过；`vitest run` 86 文件 / **1107 项**全绿（154s）；
+`test:coverage` 69.15 / 65.78 / 59.40 / 73.79（均高于阈值）；`build` 通过；`e2e` 4 项通过。
+
+### 尚未动的（按价值排序，建议单独立项）
+
+1. **P1-1 停靠式工作区**：不是把 Modal 换成 Drawer 就完事——这几个面板内部是像素下限栅格（标定 680+470、诊断 620+520），
+   窄化成右侧抽屉会直接压破布局。真做法是引入"右停靠区 + 面板可 pin"，复用现成的 `SplitHandle`/`layout.ts` 持久化，
+   属于设计 + 实现一体的活（估 2–3 人日）。
+2. **P1-2 的后半段**：逐节点进度需要后端 `/hubs/runs` 推送（前端已有诊断 hub 的范式），要动 API 与执行器，跨前后端。
+3. **P1-7 i18n 接线**：挂 Provider + 顶栏语言切换 + antd locale 跟随（1 人日），之后才能谈英文文案清理。
+4. **P1-4 命令面板、P1-5 PanelTable**：各自 1.5 人日，互相独立，可并行。
+5. **技术债**：antd 6 的 `Alert.message → title` 批量迁移（146 处 Alert / 89 处 `message=`）。

@@ -28,6 +28,8 @@ type EditorBottomDockProps = {
   result?: RunResult;
   resultStale: boolean;
   focusNode: (nodeId: string) => void;
+  /** 打开追溯并定位到这次运行（失败排查的下一站，2026-10-25） */
+  onOpenTrace?: (runId: string) => void;
   nodeLabels: Record<string, string>;
   nodeTypeLabels: Record<string, string>;
 };
@@ -35,7 +37,7 @@ type EditorBottomDockProps = {
 export default function EditorBottomDock({
   layout, updateLayout, bottomMax, presetBottom, shownBottomBase,
   bottomTab, onBottomTabChange, onPreviewHeight, validationIssues, locateIssue,
-  result, resultStale, focusNode, nodeLabels, nodeTypeLabels
+  result, resultStale, focusNode, onOpenTrace, nodeLabels, nodeTypeLabels
 }: EditorBottomDockProps) {
   return (
     <>
@@ -87,6 +89,8 @@ export default function EditorBottomDock({
             const failed = result.nodeReports.find((report) => !report.success);
             if (failed) focusNode(failed.nodeId);
           }}>{resultStale ? '查看上次错误' : '查看运行错误'}{result.nodeReports.some((report) => !report.success) ? ` · ${result.nodeReports.filter((report) => !report.success).length}` : ''}</Button>}
+          {result && onOpenTrace && <Button size="small" type="link" title="在追溯中打开这次运行：失败帧、节点时间线、诊断与调查"
+            onClick={() => onOpenTrace(result.runId)}>在追溯中打开</Button>}
           {layout.bottomCollapsed && <span className="bottom-collapsed-hint">点击标签展开结果区</span>}
         </div>
         {!layout.bottomCollapsed && bottomTab === 'result' && (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Empty, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import type { DeviceDescriptor, DeviceRuntimeSettings, DeviceTagDefinition } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
@@ -368,7 +368,7 @@ export default function DevicePanel({ open, onClose }: Props) {
           </Form> : <Alert type="info" showIcon message="所选标签为只读" />}
           {selected.error && <Alert style={{ marginTop: 10 }} type="error" showIcon message={selected.error} />}
         </section>
-      </div> : <div className="job-empty">尚未注册设备</div>}
+      </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未注册设备。先在左侧填写端点与协议，注册后会出现在这里。" />}
 
       <Modal open={registerOpen} onCancel={() => setRegisterOpen(false)} footer={null} width={900} title="注册真实 PLC 驱动" destroyOnHidden>
         <Form form={registerForm} layout="vertical" onFinish={registerDevice}>

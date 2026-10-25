@@ -9,13 +9,13 @@ vi.mock('../useTraceQuery', () => ({ useTraceQuery: vi.fn() }));
 vi.mock('../components/StoragePanel', () => ({ default: () => null }));
 vi.mock('../components/ReplayDebuggerPanel', () => ({ default: () => null }));
 
-function mount(overrides: Partial<TraceQueryResult> = {}) {
+function mount(overrides: Partial<TraceQueryResult> = {}, props: { initialRunId?: string } = {}) {
   vi.mocked(useTraceQuery).mockReturnValue({
     data: null, stats: null, storage: null, error: null, warnings: [],
     loading: false, stale: false, rangeDescription: null, loadedAt: null, reload: vi.fn(),
     ...overrides,
   });
-  return render(<ConfigProvider theme={{ token: { motion: false } }}><TracePanel open onClose={vi.fn()} /></ConfigProvider>);
+  return render(<ConfigProvider theme={{ token: { motion: false } }}><TracePanel open onClose={vi.fn()} initialRunId={props.initialRunId} /></ConfigProvider>);
 }
 
 beforeEach(() => {
@@ -26,6 +26,11 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('追溯查询反馈', () => {
+  it('从运行结果跳转进来时直接筛到那次运行', () => {
+    mount({}, { initialRunId: 'run-abc123' });
+    expect(vi.mocked(useTraceQuery).mock.lastCall?.[1]).toMatchObject({ preset: 'week', runIdPrefix: 'run-abc123' });
+  });
+
   it('显式点击查询时，即使筛选值未变也会刷新', () => {
     const reload = vi.fn();
     mount({ reload });
