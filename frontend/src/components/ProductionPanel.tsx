@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tabs, Tag } from 'antd';
+import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd';
 import type { AlarmRecord, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { isProductionConfig, isProductionStatus } from '../productionConfig';
@@ -100,7 +100,14 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   const actions = (
     <div className="production-actions">
       <Button type="primary" disabled={Boolean(startBlockedReason) || busy.size > 0} loading={busy.has('start')} onClick={() => void startProduction()}>启动生产</Button>
-      <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')} onClick={() => void call({ url: apiUrl('production/stop'), successMessage: '生产已停止', action: 'stop', onSuccess: acceptStatus })}>停止</Button>
+      <Popconfirm
+        title="停止生产运行"
+        description={`当前锁定在 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}。停止后产线不再接受触发，恢复需要重新启动。`}
+        okText="停止" cancelText="取消" okButtonProps={{ danger: true }}
+        onConfirm={() => void call({ url: apiUrl('production/stop'), successMessage: '生产已停止', action: 'stop', onSuccess: acceptStatus })}
+        disabled={!locked && statusFresh}>
+        <Button danger disabled={!locked && statusFresh} loading={busy.has('stop')}>停止</Button>
+      </Popconfirm>
       <Button disabled={state !== 'Faulted' || !statusFresh || dirty || !configReady || busy.size > 0} loading={busy.has('recover')} onClick={() => void call({ url: apiUrl('production/recover'), successMessage: '已发送恢复请求', action: 'recover', onSuccess: acceptStatus })}>恢复</Button>
       {startBlockedReason && <span className="production-actions-hint">{startBlockedReason}</span>}
     </div>

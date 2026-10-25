@@ -1,7 +1,9 @@
 ﻿import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
 import { apiUrl, modelPackages } from '../endpoints';
+import DataErrorAlert from './DataErrorAlert';
 
 type PackageSummary = {
   id: string; kind: string; name: string; description?: string | null; path: string; importedAt: string; fileCount: number;
@@ -17,11 +19,22 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   const [packageId, setPackageId] = useState('');
   const [busy, setBusy] = useState(false);
   const [smoke, setSmoke] = useState<SmokeResult | null>(null);
+  const [loadError, setLoadError] = useState<string>();
   const [messageApi, holder] = message.useMessage();
 
   const load = async () => {
-    const response = await apiFetch(apiUrl('model-packages'));
-    if (response.ok) setPackages(await response.json());
+    try {
+      const response = await apiFetch(apiUrl('model-packages'));
+      if (!response.ok) {
+        // 非 2xx 此前被静默忽略，界面保持空表——现场会读成"没有训练包"。
+        setLoadError(await responseErrorMessage(response, `读取训练包列表失败（HTTP ${response.status}）`));
+        return;
+      }
+      setPackages(await response.json());
+      setLoadError(undefined);
+    } catch (error) {
+      setLoadError(error instanceof Error ? `读取训练包列表失败：${error.message}` : '读取训练包列表失败：网络请求未完成');
+    }
   };
 
   useEffect(() => { if (open) void load(); }, [open]);
@@ -90,6 +103,7 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
   return (
     <Modal open={open} onCancel={onClose} onOk={onClose} width={960} title="外部训练包（导入 / 校验 / 冒烟）" okText="关闭" cancelButtonProps={{ style: { display: 'none' } }}>
       {holder}
+      <DataErrorAlert scope="训练包列表" error={loadError} onRetry={() => void load()} />
       <Alert
         type="info"
         showIcon
@@ -129,7 +143,13 @@ export default function ModelPackagePanel({ open, onClose }: Props) {
             render: (_, row) => (
               <Space>
                 <Button size="small" onClick={() => void runSmoke(row.id)}>冒烟</Button>
-                <Button size="small" danger onClick={() => void remove(row.id)}>删除</Button>
+                <Popconfirm
+                  title="删除训练包"
+                  description={`将从本机移除 ${row.id}（${row.fileCount} 个文件），不可恢复。`}
+                  okText="删除" cancelText="取消" okButtonProps={{ danger: true }}
+                  onConfirm={() => void remove(row.id)}>
+                  <Button size="small" danger>删除</Button>
+                </Popconfirm>
               </Space>
             ),
           },

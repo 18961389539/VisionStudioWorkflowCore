@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, InputNumber, Modal, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { RunTraceRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import {
@@ -125,7 +125,13 @@ export default function TracePanel({ open, onClose }: Props) {
       {storage && <Alert
         type="info" showIcon
         title={`SQLite ${(storage.databaseBytes / 1024 / 1024).toFixed(2)} MB · 文件 ${(storage.artifactBytes / 1024 / 1024).toFixed(2)} MB · 架构 v${storage.schema?.currentVersion ?? '?'} · 容量 ${localizeStatus(storage.capacity?.level) ?? '未知'} · 合格预览 1/${storage.retention.okPreviewSampleEvery} · 回放 1/${storage.retention.okReplaySampleEvery}`}
-        action={<Space><Button size="small" onClick={() => setStorageOpen(true)}>存储维护</Button><Button size="small" onClick={() => void cleanup()}>清理过期数据</Button></Space>}
+        action={<Space><Button size="small" onClick={() => setStorageOpen(true)}>存储维护</Button><Popconfirm
+          title="按保留策略清理追溯数据"
+          description="超出保留期的运行记录与关联预览图会被永久删除，审计证据无法恢复。"
+          okText="清理" cancelText="取消" okButtonProps={{ danger: true }}
+          onConfirm={() => void cleanup()}>
+          <Button size="small" danger>清理过期数据</Button>
+        </Popconfirm></Space>}
         style={{ marginBottom: 12 }}
       />}
 

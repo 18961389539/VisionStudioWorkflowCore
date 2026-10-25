@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
 import type { CameraIntrinsicAssetDescriptor, CameraIntrinsicVersionSnapshot, CalibrationWizardHint, CalibrationWizardSession } from '../types';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
+import DataErrorAlert from './DataErrorAlert';
 import { calibration, cameraIntrinsics, cameras as cameraEndpoints } from '../endpoints';
 
 type Props = {
@@ -27,6 +29,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   const [messageApi, contextHolder] = message.useMessage();
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const [session, setSession] = useState<CalibrationWizardSession>();
   const [pattern, setPattern] = useState('chessboard');
   const [columns, setColumns] = useState(7);
@@ -71,20 +74,32 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     void (async () => {
       try {
         const response = await apiFetch(cameraEndpoints.list);
-        if (response.ok) {
-          const list = await response.json() as CameraListItem[];
-          setCameras(list);
-          if (!cameraId && list[0]) setCameraId(list[0].id);
+        if (!response.ok) {
+          setLoadError(await responseErrorMessage(response, `读取相机列表失败（HTTP ${response.status}）`));
+          return;
         }
-      } catch { setCameras([]); }
+        const list = await response.json() as CameraListItem[];
+        setCameras(list);
+        setLoadError(undefined);
+        if (!cameraId && list[0]) setCameraId(list[0].id);
+      } catch (error) {
+        setLoadError(error instanceof Error ? `读取相机列表失败：${error.message}` : '读取相机列表失败：网络请求未完成');
+      }
     })();
   }, []);
 
   const refreshIntrinsicAssets = async () => {
     try {
       const response = await apiFetch(cameraIntrinsics.list);
-      if (response.ok) setIntrinsicAssets(await response.json() as CameraIntrinsicAssetDescriptor[]);
-    } catch { setIntrinsicAssets([]); }
+      if (!response.ok) {
+        setLoadError(await responseErrorMessage(response, `读取内参资产失败（HTTP ${response.status}）`));
+        return;
+      }
+      setIntrinsicAssets(await response.json() as CameraIntrinsicAssetDescriptor[]);
+      setLoadError(undefined);
+    } catch (error) {
+      setLoadError(error instanceof Error ? `读取内参资产失败：${error.message}` : '读取内参资产失败：网络请求未完成');
+    }
   };
 
   useEffect(() => { void refreshIntrinsicAssets(); }, []);
@@ -448,6 +463,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
   return (
     <div>
       {contextHolder}
+      <DataErrorAlert scope="标定基础数据" error={loadError} onRetry={() => void refreshIntrinsicAssets()} />
       <Steps size="small" current={step} items={stepTitles.map((title) => ({ title }))} style={{ marginBottom: 16 }}
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}

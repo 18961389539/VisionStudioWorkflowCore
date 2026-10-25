@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Divider, InputNumber, message, Modal, Select, Space, Table, Tag, Typography, Upload } from 'antd';
+import { Alert, Button, Divider, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography, Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import type { PluginBenchmarkRun, PluginLoadInfo, PluginPackagePreflightResult, PluginPackageVersionInfo, PluginWorkerPerformanceProfile, PluginWorkerStatus, TrustedPluginPublisher, ValidationDatasetSummary, ValidationRunRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import { APP_VERSION } from '../version';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
 import { plugins, validation } from '../endpoints';
+import DataErrorAlert from './DataErrorAlert';
 
 type Props = { open: boolean; onClose: () => void; onCatalogRefresh: () => Promise<void> };
 
@@ -32,22 +34,44 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   const [publisherFile, setPublisherFile] = useState<UploadFile>();
   const [preflight, setPreflight] = useState<PluginPackagePreflightResult>();
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const refresh = useCallback(async () => {
-    const [runtimeResponse, packageResponse, publisherResponse, workerResponse, performanceResponse, benchmarkResponse, datasetResponse] = await Promise.all([
-      apiFetch(plugins.list), apiFetch(plugins.packages), apiFetch(plugins.publishers), apiFetch(plugins.workers), apiFetch(plugins.workerPerformance), apiFetch(plugins.benchmarks), apiFetch(validation.datasets)
-    ]);
-    setRuntime(runtimeResponse.ok ? await runtimeResponse.json() : []);
-    setPackages(packageResponse.ok ? await packageResponse.json() : []);
-    setPublishers(publisherResponse.ok ? await publisherResponse.json() : []);
-    setWorkers(workerResponse.ok ? await workerResponse.json() : []);
-    setPerformance(performanceResponse.ok ? await performanceResponse.json() : []);
-    setBenchmarks(benchmarkResponse.ok ? await benchmarkResponse.json() : []);
-    setDatasets(datasetResponse.ok ? await datasetResponse.json() : []);
+    try {
+      const [runtimeResponse, packageResponse, publisherResponse, workerResponse, performanceResponse, benchmarkResponse, datasetResponse] = await Promise.all([
+        apiFetch(plugins.list), apiFetch(plugins.packages), apiFetch(plugins.publishers), apiFetch(plugins.workers), apiFetch(plugins.workerPerformance), apiFetch(plugins.benchmarks), apiFetch(validation.datasets)
+      ]);
+      // 失败不等于"没有"：逐项收集失败原因，成功的项照常更新，失败的项保留上一次已知列表。
+      const failures: string[] = [];
+      const read = async <T,>(response: Response, what: string): Promise<T | undefined> => {
+        if (!response.ok) {
+          failures.push(await responseErrorMessage(response, `${what}读取失败（HTTP ${response.status}）`));
+          return undefined;
+        }
+        return response.json() as Promise<T>;
+      };
+      const runtimeData = await read<PluginLoadInfo[]>(runtimeResponse, '插件运行时');
+      const packageData = await read<PluginPackageVersionInfo[]>(packageResponse, '已安装版本');
+      const publisherData = await read<TrustedPluginPublisher[]>(publisherResponse, '受信任发布者');
+      const workerData = await read<PluginWorkerStatus[]>(workerResponse, '进程池状态');
+      const performanceData = await read<PluginWorkerPerformanceProfile[]>(performanceResponse, '性能统计');
+      const benchmarkData = await read<PluginBenchmarkRun[]>(benchmarkResponse, '基准测试');
+      const datasetData = await read<ValidationDatasetSummary[]>(datasetResponse, '验证数据集');
+      if (runtimeData) setRuntime(runtimeData);
+      if (packageData) setPackages(packageData);
+      if (publisherData) setPublishers(publisherData);
+      if (workerData) setWorkers(workerData);
+      if (performanceData) setPerformance(performanceData);
+      if (benchmarkData) setBenchmarks(benchmarkData);
+      if (datasetData) setDatasets(datasetData);
+      setLoadError(failures.length > 0 ? failures.join('；') : undefined);
+    } catch (error) {
+      setLoadError(error instanceof Error ? `读取插件包数据失败：${error.message}` : '读取插件包数据失败：网络请求未完成');
+    }
   }, []);
 
-  useEffect(() => { if (open) refresh().catch(() => undefined); }, [open, refresh]);
+  useEffect(() => { if (open) void refresh(); }, [open, refresh]);
 
   const submitPackage = async (mode: 'preflight' | 'install') => {
     const native = packageFile?.originFileObj;
@@ -212,7 +236,8 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
 
   return <Modal open={open} title={`插件包管理器 · V${APP_VERSION}`} width={1280} footer={null} onCancel={onClose}>
     {contextHolder}
-    <Alert type="info" showIcon message="签名插件包与 CI 性能回归门禁" description="V0.59 保留可重复的 V0.58 进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
+    <DataErrorAlert scope="插件包数据" error={loadError} onRetry={() => void refresh()} />
+    <Alert type="info" showIcon message="签名插件包与 CI 性能回归门禁" description="保留可重复的进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
 
     <Divider titlePlacement="left">安装插件包</Divider>
     <Space wrap>
@@ -233,7 +258,15 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       { title: '状态', width: 160, render: (_: unknown, row: PluginPackageVersionInfo) => <Space wrap>{row.active && <Tag color="green">生效中</Tag>}{row.pending && <Tag color="orange">待启用</Tag>}{!row.active && !row.pending && <Tag>已安装</Tag>}{row.restartRequired && <Tag color="volcano">需重启</Tag>}</Space> },
       { title: '发布者', render: (_: unknown, row: PluginPackageVersionInfo) => <div>{row.publisherSubject ?? '未签名'}<br/><Tag color={row.publisherTrusted ? 'green' : 'default'}>{row.publisherTrusted ? '可信' : '不可信'}</Tag></div> },
       { title: '插件包 SHA', render: (_: unknown, row: PluginPackageVersionInfo) => <code>{row.packageSha256.slice(0, 12)}…</code> },
-      { title: '操作', width: 260, render: (_: unknown, row: PluginPackageVersionInfo) => <Space><Button size="small" disabled={row.active} onClick={() => selectVersion(row.id, row.version)}>选择</Button><Button size="small" disabled={!row.active} onClick={() => rollback(row.id)}>回滚</Button><Button size="small" danger disabled={row.active || row.pending} onClick={() => removeVersion(row.id, row.version)}>移除</Button></Space> }
+      { title: '操作', width: 260, render: (_: unknown, row: PluginPackageVersionInfo) => <Space>
+        <Button size="small" disabled={row.active} onClick={() => selectVersion(row.id, row.version)}>选择</Button>
+        <Popconfirm title="回滚插件版本" description={`将 ${row.id} 切回其他已安装版本，正在使用该插件的流程需要重启后生效。`} okText="回滚" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => rollback(row.id)}>
+          <Button size="small" disabled={!row.active}>回滚</Button>
+        </Popconfirm>
+        <Popconfirm title="移除已安装版本" description={`从磁盘移除 ${row.id} V${row.version}。该操作不可撤销，需要重新安装才能恢复。`} okText="移除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => removeVersion(row.id, row.version)}>
+          <Button size="small" danger disabled={row.active || row.pending}>移除</Button>
+        </Popconfirm>
+      </Space> }
     ]} />
 
     <Divider titlePlacement="left">受信任的发布者</Divider>
@@ -245,7 +278,13 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       { title: '发布者', render: (_: unknown, row: TrustedPluginPublisher) => <><b>{row.displayName ?? row.subject}</b><br/><Typography.Text type="secondary">{row.subject}</Typography.Text></> },
       { title: '证书指纹', render: (_: unknown, row: TrustedPluginPublisher) => <code>{row.thumbprint}</code> },
       { title: '有效期', render: (_: unknown, row: TrustedPluginPublisher) => `${row.notBefore?.slice(0,10) ?? '—'} → ${row.notAfter?.slice(0,10) ?? '—'}` },
-      { title: '操作', width: 100, render: (_: unknown, row: TrustedPluginPublisher) => <Button danger size="small" onClick={() => untrustPublisher(row.thumbprint)}>移除</Button> }
+      { title: '操作', width: 100, render: (_: unknown, row: TrustedPluginPublisher) => <Popconfirm
+        title="移除受信任发布者"
+        description={`移除后，由 ${row.displayName ?? row.subject} 签名的插件包将不再被信任，后续安装需要重新选择证书。`}
+        okText="移除" cancelText="取消" okButtonProps={{ danger: true }}
+        onConfirm={() => untrustPublisher(row.thumbprint)}>
+        <Button danger size="small">移除</Button>
+      </Popconfirm> }
     ]} />
 
     <Divider titlePlacement="left">运行时注册表</Divider>
@@ -274,7 +313,13 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       { title: '图像传输', width: 230, render: (_: unknown, row: PluginWorkerStatus) => <><div>{row.imageTransport}</div><Typography.Text type="secondary">阈值 {(row.sharedMemoryThresholdBytes / 1024).toFixed(0)} KB · 共享传输 {row.sharedMemoryTransfers} 次</Typography.Text></> },
       { title: '工作集', width: 120, render: (_: unknown, row: PluginWorkerStatus) => row.workingSetBytes ? `${(row.workingSetBytes / 1024 / 1024).toFixed(1)} MB` : '—' },
       { title: '最近错误', render: (_: unknown, row: PluginWorkerStatus) => row.lastError ? <Typography.Text type="danger">{row.lastError}</Typography.Text> : '—' },
-      { title: '操作', width: 100, render: (_: unknown, row: PluginWorkerStatus) => <Button size="small" loading={busy} onClick={() => restartWorker(row.pluginId)}>重启进程池</Button> }
+      { title: '操作', width: 100, render: (_: unknown, row: PluginWorkerStatus) => <Popconfirm
+        title="重启插件工作进程池"
+        description="正在执行的插件调用会被中断，产线流程可能出现该节点的失败结果。"
+        okText="重启" cancelText="取消" okButtonProps={{ danger: true }}
+        onConfirm={() => restartWorker(row.pluginId)}>
+        <Button size="small" loading={busy}>重启进程池</Button>
+      </Popconfirm> }
     ]} />
 
     <Divider titlePlacement="left">工作进程性能分析</Divider>
@@ -295,7 +340,13 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       { title: '主要阶段', width: 150, dataIndex: 'dominantStage' },
       { title: '自适应进程池', width: 130, render: (_: unknown, row: PluginWorkerPerformanceProfile) => <Tag color={!row.recommendationReady ? 'default' : row.recommendedPoolSize > row.poolSize ? 'orange' : row.recommendedPoolSize < row.poolSize ? 'blue' : 'green'}>{row.recommendationReady ? `${row.poolSize} → ${row.recommendedPoolSize}` : `正在收集 ${row.sampleCount} 个样本`}</Tag> },
       { title: '建议', render: (_: unknown, row: PluginWorkerPerformanceProfile) => <Typography.Text type="secondary">{row.recommendation}</Typography.Text> },
-      { title: '操作', width: 90, render: (_: unknown, row: PluginWorkerPerformanceProfile) => <Button size="small" loading={busy} onClick={() => resetPerformance(row.pluginId)}>重置</Button> }
+      { title: '操作', width: 90, render: (_: unknown, row: PluginWorkerPerformanceProfile) => <Popconfirm
+        title="重置性能统计"
+        description="该插件的样本数与 P95/P99 基线会被清空，自适应进程池建议需要重新积累样本。"
+        okText="重置" cancelText="取消"
+        onConfirm={() => resetPerformance(row.pluginId)}>
+        <Button size="small" loading={busy}>重置</Button>
+      </Popconfirm> }
     ]} />
 
 

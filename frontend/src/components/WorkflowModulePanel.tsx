@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Form, Input, InputNumber, message, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { responseErrorMessage } from '../apiErrors';
 import type { PrepareWorkflowChange, PreparedWorkflowChange } from '../useWorkflowChanges';
 import type { ExtractWorkflowModuleResult, WorkflowModuleDescriptor, WorkflowModuleVersion, WorkflowPayload } from '../types';
@@ -168,7 +168,8 @@ export default function WorkflowModulePanel(props: Props) {
     } finally { clearTimeout(timeout); finish(action); }
   };
 
-  return <Drawer open={props.open} onClose={props.onClose} width={1080} title="可复用模块 · V0.52">
+  // 版本号不再写死在标题里（此前与顶栏 V{APP_VERSION} 互相矛盾）：产品版本只有一个来源。
+  return <Drawer open={props.open} onClose={props.onClose} width={1080} title="可复用模块">
     {contextHolder}
     <Typography.Paragraph type="secondary">
       将稳定的节点组封装为带类型端口的模块。模块调用会固定到不可变的版本和哈希；修改模块不会自动升级现有配方。
@@ -190,7 +191,13 @@ export default function WorkflowModulePanel(props: Props) {
             { title: '类型', dataIndex: 'type', width: 190 },
           ]}
         />
-        <Button type="primary" style={{ marginTop: 12 }} loading={saving} onClick={extract}>提取模块并替换所选节点</Button>
+        <Popconfirm
+          title="用模块替换所选节点"
+          description="画布上选中的节点及其连线会被替换为新模块调用，原节点配置不再保留。"
+          okText="替换" cancelText="取消"
+          onConfirm={extract}>
+          <Button type="primary" style={{ marginTop: 12 }} loading={saving}>提取模块并替换所选节点</Button>
+        </Popconfirm>
       </section>
 
       <section className="module-card">

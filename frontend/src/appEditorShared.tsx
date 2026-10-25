@@ -4,6 +4,7 @@
  * 从 App.tsx 拆出（巨型组件拆分，2026-10-23）；语义与归属注释保留原样。
  */
 import { Suspense, type ReactNode } from 'react';
+import { Skeleton } from 'antd';
 import type { Node } from '@xyflow/react';
 import ErrorBoundary from './components/ErrorBoundary';
 import VisionNode from './components/VisionNode';
@@ -17,11 +18,22 @@ import type { NodeCatalogItem, PortDescriptor, WorkflowModuleParameter } from '.
 // R12：条件挂载的按需面板包装——open=false 时完全不渲染（不触发动态加载）；
 // open=true 时由 Suspense 兜住加载窗口（面板自身是 Drawer，加载完立即展开）。
 // 每个面板各自持有错误边界：单个面板的渲染异常不能打掉画布、未保存修改和其它面板。
+// 2026-10-25：fallback 从 null 改为可见占位——首开分包时此前是整屏无反馈的白屏；
+// 占位固定右上角且不接收指针事件，避免加载窗口挡住画布操作。
+function PanelLoading({ label }: { label: string }) {
+  return (
+    <div className="panel-loading" role="status" aria-live="polite">
+      <Skeleton active title={{ width: '55%' }} paragraph={{ rows: 3, width: ['92%', '84%', '68%'] }} />
+      <span className="panel-loading-label">正在加载 {label}…</span>
+    </div>
+  );
+}
+
 export function LazyPanel({ open, label, onClose, children }: { open: boolean; label: string; onClose: () => void; children: ReactNode }) {
   return open
     ? (
       <ErrorBoundary variant="panel" scope={label} onDismiss={onClose}>
-        <Suspense fallback={null}>{children}</Suspense>
+        <Suspense fallback={<PanelLoading label={label} />}>{children}</Suspense>
       </ErrorBoundary>
     )
     : null;

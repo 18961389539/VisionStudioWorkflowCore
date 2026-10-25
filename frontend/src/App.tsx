@@ -972,8 +972,18 @@ function Editor() {
   // 快捷键处理器见 ./useEditorShortcuts（巨型组件拆分，2026-10-23）：
   // Ctrl/Cmd+S 保存、Ctrl/Cmd+F 查找、Ctrl/Cmd+Z 撤销、Ctrl/Cmd+Shift+Z（或 Ctrl+Y）重做、
   // Ctrl/Cmd+C / V 复制粘贴选中集合、Delete/Backspace 删除选中的节点或连线。
+  //
+  // 2026-10-25：任一功能面板/弹窗打开时，画布快捷键整体让位——此前在追溯/配方面板里按 Delete
+  // 会删掉画布上选中的节点。打开状态在这里显式汇总：antd 关闭弹窗后 DOM 仍残留，
+  // 用 document.querySelector 判断会让快捷键在第一次打开过面板之后永久失效。
+  const overlayOpen = Boolean(
+    pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || pluginsOpen || camerasOpen
+    || robotsOpen || devicesOpen || jobsOpen || tracesOpen || validationOpen || modelPackagesOpen
+    || tuningOpen || modulesOpen || calibrationOpen || framesOpen || productionOpen || diagnosticsOpen
+    || hardwareProvenanceOpen || aboutOpen || shortcutsOpen
+  );
   useEditorShortcuts({
-    nodeConfigurationId, save, undo, redo, copySelection, deleteElements, pushHistory,
+    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection, deleteElements, pushHistory,
     setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
     searchInputRef, clipboardRef, pasteIndexRef
   });

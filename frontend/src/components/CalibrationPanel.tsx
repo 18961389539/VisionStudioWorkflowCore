@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Input, InputNumber, message, Modal, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Checkbox, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Statistic, Table, Tabs, Tag, Typography } from 'antd';
 import CalibrationIntrinsicsWizard from './CalibrationIntrinsicsWizard';
 import CalibrationHandEyeWizard from './CalibrationHandEyeWizard';
 import CalibrationHandEye3DWizard from './CalibrationHandEye3DWizard';
+import DataErrorAlert from './DataErrorAlert';
 import type {
   CalibrationAssetDescriptor,
   CalibrationResidual,
@@ -12,6 +13,7 @@ import type {
   CalibrationWorkspaceResult
 } from '../types';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
 import { apiUrl, calibrations } from '../endpoints';
 
 type Props = {
@@ -58,6 +60,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const [maxPointError, setMaxPointError] = useState(0);
   const [result, setResult] = useState<CalibrationWorkspaceResult>();
   const [assets, setAssets] = useState<CalibrationAssetDescriptor[]>([]);
+  const [assetError, setAssetError] = useState<string>();
   const [selectedAssetId, setSelectedAssetId] = useState<string>();
   const [loadedAssetVersion, setLoadedAssetVersion] = useState<number>(0);
   const [workspaceDirty, setWorkspaceDirty] = useState(true);
@@ -72,8 +75,16 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const refreshAssets = useCallback(async () => {
     try {
       const response = await apiFetch(apiUrl('calibrations'));
-      if (response.ok) setAssets(await response.json());
-    } catch { setAssets([]); }
+      if (!response.ok) {
+        // 失败不能落成"没有资产"：保留上一次已知列表，同时给出可重试的原因。
+        setAssetError(await responseErrorMessage(response, `读取标定资产失败（HTTP ${response.status}）`));
+        return;
+      }
+      setAssets(await response.json());
+      setAssetError(undefined);
+    } catch (error) {
+      setAssetError(error instanceof Error ? `读取标定资产失败：${error.message}` : '读取标定资产失败：网络请求未完成');
+    }
   }, []);
 
   useEffect(() => { if (open) refreshAssets(); }, [open, refreshAssets]);
@@ -224,6 +235,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   return (
     <Modal open={open} onCancel={onClose} footer={null} width={1480} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
       {contextHolder}
+      <DataErrorAlert scope="标定资产" error={assetError} onRetry={() => void refreshAssets()} />
       <Tabs
         items={[
           {
@@ -303,7 +315,22 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
             { title: '最新版本', dataIndex: 'latestVersion', width: 70, render: (v: number) => `V${v}` },
             { title: '已发布', dataIndex: 'publishedVersion', width: 90, render: (v?: number) => v ? <Tag color="green">V{v}</Tag> : <Tag>无</Tag> },
             { title: '版本', render: (_: unknown, row: CalibrationAssetDescriptor) => <Space wrap>{row.versions.map((v) => <Button key={v.version} size="small" type={v.published ? 'primary' : 'default'} onClick={(e) => { e.stopPropagation(); loadVersion(row.id, v.version); }}>V{v.version}</Button>)}</Space> },
-            { title: '操作', width: 210, render: (_: unknown, row: CalibrationAssetDescriptor) => <Space>{row.latestVersion > 0 && <Button size="small" onClick={(e) => { e.stopPropagation(); publish(row.id, row.latestVersion); }}>发布最新版本</Button>}{row.publishedVersion && row.publishedVersion > 1 && <Button size="small" onClick={(e) => { e.stopPropagation(); publish(row.id, 1, true); }}>回滚到 V1</Button>}</Space> }
+            { title: '操作', width: 230, render: (_: unknown, row: CalibrationAssetDescriptor) => <Space>
+              {row.latestVersion > 0 && <Popconfirm
+                title="发布标定版本"
+                description={`V${row.latestVersion} 将立即成为产线生效版本，下游坐标换算会改用新标定。`}
+                okText="发布" cancelText="取消"
+                onConfirm={() => publish(row.id, row.latestVersion)}>
+                <Button size="small" onClick={(e) => e.stopPropagation()}>发布最新版本</Button>
+              </Popconfirm>}
+              {row.publishedVersion && row.publishedVersion > 1 && <Popconfirm
+                title="回滚到 V1"
+                description={`当前生效版本为 V${row.publishedVersion}，回滚后产线立即切回 V1 的标定参数。`}
+                okText="回滚" cancelText="取消" okButtonProps={{ danger: true }}
+                onConfirm={() => publish(row.id, 1, true)}>
+                <Button size="small" danger onClick={(e) => e.stopPropagation()}>回滚到 V1</Button>
+              </Popconfirm>}
+            </Space> }
           ]}
         />
         {selectedAsset && <div className="calibration-publication-history">{selectedAsset.publicationHistory.map((x, i) => <Tag key={`${x.at}-${i}`}>{x.action} V{x.version}</Tag>)}</div>}

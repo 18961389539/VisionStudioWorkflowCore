@@ -77,7 +77,9 @@ describe('模块编辑与载入', () => {
     const { apply, change, warning } = mount();
     const extract = await screen.findByRole('button', { name: '提取模块并替换所选节点' });
     await flush();
-    act(() => { fireEvent.click(extract); fireEvent.click(extract); });
+    // 2026-10-25：替换画布节点属破坏性操作，先经 Popconfirm 确认才发请求。
+    act(() => { fireEvent.click(extract); });
+    fireEvent.click(await screen.findByRole('button', { name: /^替\s*换$/ }));
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/modules/extract')).toHaveLength(1);
     change({ ...workflow, name: 'Edited during extraction' });
     await act(async () => { pending.resolve(response({ module, version, replacementWorkflow: workflow })); });
@@ -94,6 +96,7 @@ describe('模块编辑与载入', () => {
     const { apply } = mount();
     await flush();
     fireEvent.click(await screen.findByRole('button', { name: '提取模块并替换所选节点' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^替\s*换$/ }));
     await screen.findByText('已创建 定位模块 V1 并替换所选节点');
     expect(apply).toHaveBeenCalledWith(expect.objectContaining({ id: workflow.id, name: 'Extracted' }), expect.objectContaining({ mode: 'edit', markClean: false, revision: undefined }));
     expect(screen.queryByRole('button', { name: '确认丢弃并载入' })).toBeNull();
@@ -109,6 +112,7 @@ describe('模块编辑与载入', () => {
     const { apply, change } = mount();
     await flush();
     fireEvent.click(await screen.findByRole('button', { name: '提取模块并替换所选节点' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^替\s*换$/ }));
     change(workflow, 1, false);
     expect(signal.aborted).toBe(true);
     await act(async () => { pending.resolve(response({ module, version, replacementWorkflow: workflow })); });

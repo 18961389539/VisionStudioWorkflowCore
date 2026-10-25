@@ -12,9 +12,32 @@ import type { InputRef } from 'antd';
 
 export type EditorClipboard = { nodes: Node[]; edges: Edge[] };
 
+/** 焦点在输入类控件内：只保留原生编辑行为，画布快捷键不响应。 */
+const INPUT_LIKE_SELECTOR = 'input, textarea, select, [contenteditable="true"], .toolbox, .ant-select-dropdown';
+/** 面板/弹窗内的快捷键属于面板自身，不能穿透到画布。 */
+const PANEL_SELECTOR = '.ant-modal, .ant-modal-wrap, .ant-drawer, [role="dialog"], .ant-popover';
+
+/** 焦点是否在输入类控件内（保存与查找不受此限制，与拆分前行为一致）。 */
+export function isEditableTarget(target: Element | null): boolean {
+  return Boolean(target?.closest?.(INPUT_LIKE_SELECTOR));
+}
+
+/**
+ * 事件焦点是否落在面板/弹窗内部。
+ *
+ * 注意：**不要**用 `document.querySelector('.ant-modal-wrap')` 判断"有没有面板打开"——
+ * antd 关闭弹窗后仍把 wrapper 留在 DOM 里（关闭瞬间也不带 display:none 的内联样式），
+ * 这样判断会让画布快捷键在第一次打开过面板之后永久失效。打开状态必须由调用方显式传入。
+ */
+export function isInsidePanel(target: Element | null): boolean {
+  return Boolean(target?.closest?.(PANEL_SELECTOR));
+}
+
 type EditorShortcutHandlers = {
   /** 节点配置弹窗打开时的目标节点 ID；弹窗内快捷键不穿透（仅保存/查找 preventDefault） */
   nodeConfigurationId: string | undefined;
+  /** 是否有面板/弹窗（抽屉、配方、追溯、设置…）打开。焦点落在蒙层或 body 时 target 判断不出来，必须显式传入。 */
+  overlayOpen?: boolean;
   save: () => void;
   undo: () => void;
   redo: () => void;
@@ -37,7 +60,7 @@ type EditorShortcutHandlers = {
 
 export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
   const {
-    nodeConfigurationId, save, undo, redo, copySelection, deleteElements, pushHistory,
+    nodeConfigurationId, overlayOpen, save, undo, redo, copySelection, deleteElements, pushHistory,
     setNodes, setEdges, setSelectedId, messageApi, nodes, selectedNodeIds, selectedEdgeIds,
     searchInputRef, clipboardRef, pasteIndexRef
   } = handlers;
@@ -51,6 +74,10 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
         if (mod && (comboKey === 's' || comboKey === 'f')) event.preventDefault();
         return;
       }
+      // 面板/弹窗打开时，画布级快捷键整体让位：保存/查找/撤销/删除都由面板自己决定语义。
+      // 焦点常在蒙层或 body 上，单看 target 判断不出来，所以打开状态由调用方显式传入；
+      // 焦点落在面板内部时再兜一层（覆盖未登记的第三方弹层）。
+      if (overlayOpen || isInsidePanel(event.target as Element | null)) return;
       if (mod && comboKey === 's') {
         event.preventDefault();
         void save();
@@ -62,8 +89,8 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
         searchInputRef.current?.select();
         return;
       }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest?.('input, textarea, select, [contenteditable="true"], .toolbox')) return;
+      // 输入控件内只保留原生编辑行为（保存与查找已在上面处理）。
+      if (isEditableTarget(event.target as Element | null)) return;
       if (mod && !event.altKey) {
         if (comboKey === 'z' && !event.shiftKey) { event.preventDefault(); undo(); return; }
         if ((comboKey === 'z' && event.shiftKey) || comboKey === 'y') { event.preventDefault(); redo(); return; }
@@ -119,5 +146,5 @@ export function useEditorShortcuts(handlers: EditorShortcutHandlers): void {
     // 捕获阶段监听：避免画布内部对按键的 stopPropagation 把删除快捷键吃掉
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [copySelection, deleteElements, messageApi, nodeConfigurationId, nodes, pushHistory, redo, save, selectedEdgeIds, selectedNodeIds, setEdges, setNodes, undo, searchInputRef, clipboardRef, pasteIndexRef]);
+  }, [copySelection, deleteElements, messageApi, nodeConfigurationId, overlayOpen, nodes, pushHistory, redo, save, selectedEdgeIds, selectedNodeIds, setEdges, setNodes, undo, searchInputRef, clipboardRef, pasteIndexRef]);
 }

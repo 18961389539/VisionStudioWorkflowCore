@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Divider, Input, Modal, Progress, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Col, Divider, Input, Modal, Popconfirm, Progress, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, ValidationDatasetSummary, ValidationResultRecord, ValidationRunRecord, WorkflowPayload } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
 import { validation, apiUrl } from '../endpoints';
+import DataErrorAlert from './DataErrorAlert';
 
 type Props = { open: boolean; onClose: () => void; currentWorkflow?: WorkflowPayload };
 const clsColor: Record<string, string> = { TRUE_OK: 'green', TRUE_NG: 'green', FALSE_OK: 'red', FALSE_NG: 'orange', ERROR: 'volcano' };
@@ -27,6 +29,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const [baselineRunId, setBaselineRunId] = useState<string>();
   const [candidateRunId, setCandidateRunId] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const [messageApi, holder] = message.useMessage();
 
   const replayableTraces = useMemo(() => traces.filter((x) => x.hasReplayInput && !x.nodeReports.some((r) => r.nodeType === 'camera.syncCapture')), [traces]);
@@ -36,21 +39,38 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
 
   const loadDatasets = async () => {
     const response = await apiFetch(validation.datasets);
-    if (!response.ok) return;
+    if (!response.ok) {
+      // 失败≠空集：此前直接 return，界面保持空表，现场会误判为"没有数据集"。
+      setLoadError(await responseErrorMessage(response, `读取验证数据集失败（HTTP ${response.status}）`));
+      return;
+    }
     const data: ValidationDatasetSummary[] = await response.json();
     setDatasets(data);
+    setLoadError(undefined);
     if (!datasetId && data.length) setDatasetId(data[0].id);
   };
   const loadTraces = async () => {
     const response = await apiFetch(apiUrl('traces?take=500'));
-    if (response.ok) setTraces(await response.json());
+    if (!response.ok) {
+      setLoadError(await responseErrorMessage(response, `读取追溯记录失败（HTTP ${response.status}）`));
+      return;
+    }
+    setTraces(await response.json());
   };
   const loadMedia = async () => {
     const response = await apiFetch(apiUrl('media/items?take=500'));
-    if (response.ok) setMediaItems(await response.json());
+    if (!response.ok) {
+      setLoadError(await responseErrorMessage(response, `读取媒体库失败（HTTP ${response.status}）`));
+      return;
+    }
+    setMediaItems(await response.json());
   };
+  const retrySources = () => { setLoadError(undefined); void loadDatasets(); void loadTraces(); void loadMedia(); };
   const loadDetail = async (id: string) => {
     const [datasetResponse, runResponse] = await Promise.all([apiFetch(validation.dataset(id)), apiFetch(validation.datasetRuns(id))]);
+    if (!datasetResponse.ok) {
+      setLoadError(await responseErrorMessage(datasetResponse, `读取数据集明细失败（HTTP ${datasetResponse.status}）`));
+    }
     if (datasetResponse.ok) {
       const data: ValidationDatasetDetail = await datasetResponse.json();
       setDetail(data);
@@ -67,7 +87,11 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   };
   const loadRun = async (id: string) => {
     const response = await apiFetch(apiUrl(`validation/runs/${id}?includeResults=true`));
-    if (response.ok) setSelectedRun(await response.json());
+    if (!response.ok) {
+      setLoadError(await responseErrorMessage(response, `读取验证运行详情失败（HTTP ${response.status}）`));
+      return;
+    }
+    setSelectedRun(await response.json());
   };
 
   useEffect(() => { if (open) { void loadDatasets(); void loadTraces(); void loadMedia(); } }, [open]);
@@ -108,12 +132,14 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const updateLabel = async (itemId: string, expectedDisposition: 'OK' | 'NG') => {
     if (!datasetId) return;
     const response = await apiFetch(validation.datasetItem(datasetId, itemId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedDisposition }) });
-    if (response.ok) setDetail(await response.json());
+    if (!response.ok) return messageApi.error(await responseErrorMessage(response, '修改样本标签失败'));
+    setDetail(await response.json());
   };
   const removeItem = async (itemId: string) => {
     if (!datasetId) return;
     const response = await apiFetch(validation.datasetItem(datasetId, itemId), { method: 'DELETE' });
-    if (response.ok) await loadDetail(datasetId);
+    if (!response.ok) return messageApi.error(await responseErrorMessage(response, '移除样本失败'));
+    await loadDetail(datasetId);
   };
   const loadCandidateWorkflow = async () => {
     if (!workflowSourceRunId) return;
@@ -139,12 +165,14 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   };
   const cancelRun = async (runId: string) => {
     const response = await apiFetch(validation.runCancel(runId), { method: 'POST' });
-    if (response.ok) messageApi.success('已请求取消');
+    if (!response.ok) return messageApi.error(await responseErrorMessage(response, '取消批量验证失败'));
+    messageApi.success('已请求取消');
   };
 
   return <Modal open={open} width={1560} title="数据集 / 批量验证" footer={null} onCancel={onClose} destroyOnHidden>
     {holder}
-    <Alert type="info" showIcon style={{ marginBottom: 12 }} message="V0.48 可在已保存的回放输入上运行同一候选工作流。数据集标签表示预期 OK/NG；批量结果会统计误判、失败节点和耗时分布。" />
+    <DataErrorAlert scope="验证数据" error={loadError} onRetry={retrySources} />
+    <Alert type="info" showIcon style={{ marginBottom: 12 }} message="可在已保存的回放输入上运行同一候选工作流。数据集标签表示预期 OK/NG；批量结果会统计误判、失败节点和耗时分布。" />
     <Row gutter={12}>
       <Col span={5}>
         <Card size="small" title="数据集" extra={<Button size="small" onClick={() => setCreateOpen(true)}>新建</Button>}>
@@ -183,7 +211,13 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
             { title: '名称', dataIndex: 'displayName' },
             { title: '预期结果', width: 110, render: (_: unknown, row) => <Select size="small" value={row.expectedDisposition} onChange={(v) => void updateLabel(row.itemId, v)} options={[{ value: 'OK', label: '合格' }, { value: 'NG', label: '不合格' }]} /> },
             { title: '可回放', dataIndex: 'replayReady', width: 75, render: (v: boolean) => <Tag color={v ? 'green' : 'red'}>{v ? '就绪' : '缺失'}</Tag> },
-            { title: '', width: 70, render: (_: unknown, row) => <Button size="small" danger onClick={() => void removeItem(row.itemId)}>移除</Button> }
+            { title: '', width: 70, render: (_: unknown, row) => <Popconfirm
+              title="从数据集移除样本"
+              description="该样本与对应标签会被删除；已有验证结果保留，但重新运行不再包含它。"
+              okText="移除" cancelText="取消" okButtonProps={{ danger: true }}
+              onConfirm={() => void removeItem(row.itemId)}>
+              <Button size="small" danger>移除</Button>
+            </Popconfirm> }
           ]} />
         </Card>
 

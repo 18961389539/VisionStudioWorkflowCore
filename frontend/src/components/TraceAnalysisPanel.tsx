@@ -112,7 +112,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
       {!signature.hasSignature ? <Alert
         type="success" showIcon
         message="未发现故障特征"
-        description="此运行没有执行失败、不合格判定或 V0.60 耗时回归特征。"
+        description="此运行没有执行失败、不合格判定或耗时回归特征。"
       /> : <>
         <div className="failure-signature-title">
           <Space wrap>

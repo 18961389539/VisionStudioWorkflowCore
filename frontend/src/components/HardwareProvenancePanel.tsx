@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { HardwareProvenanceDeclaration, HardwareProvenanceSnapshot } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
+import { responseErrorMessage } from '../apiErrors';
+import DataErrorAlert from './DataErrorAlert';
 import { apiUrl, hardwareProvenance } from '../endpoints';
 
 type Props = { open: boolean; onClose: () => void };
@@ -28,13 +30,19 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form] = Form.useForm();
+  const [loadError, setLoadError] = useState<string>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const refresh = async () => {
     const response = await apiFetch(apiUrl('hardware-provenance'));
-    if (!response.ok) return;
+    if (!response.ok) {
+      // 失败不能落成"没有资产"：保留已知列表并给出可重试原因。
+      setLoadError(await responseErrorMessage(response, `读取硬件溯源信息失败（HTTP ${response.status}）`));
+      return;
+    }
     const data: HardwareProvenanceSnapshot[] = await response.json();
     setItems(data);
+    setLoadError(undefined);
     if (selected) setSelected(data.find((x) => x.kind === selected.kind && x.id === selected.id));
   };
 
@@ -101,6 +109,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
 
   return <Modal open={open} onCancel={onClose} footer={null} width={1180} title="硬件来源信息 · 物理依赖锁定">
     {contextHolder}
+    <DataErrorAlert scope="硬件溯源信息" error={loadError} onRetry={() => void refresh()} />
     <Space style={{ marginBottom: 10 }}>
       <Select value={filter} onChange={setFilter} options={kindOptions} style={{ width: 160 }} />
       <Button onClick={refresh}>刷新</Button>
@@ -126,7 +135,13 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
               {selected.liveProbeProvider ?? '实时探测'} · {selected.liveProbeSucceeded ? '可用' : '不可用'}{selected.liveProbeRequired ? ' · 必需' : ''}
             </Tag>}
             <Button size="small" onClick={startEdit}>声明 / 编辑</Button>
-            {selected.hasManualDeclaration && <Button size="small" danger onClick={clearDeclaration} loading={busy}>清除声明</Button>}
+            {selected.hasManualDeclaration && <Popconfirm
+              title="清除硬件声明"
+              description="手工声明的制造商/型号/序列号将被删除，溯源链回到未声明状态；重新录入才能恢复。"
+              okText="清除" cancelText="取消" okButtonProps={{ danger: true }}
+              onConfirm={clearDeclaration}>
+              <Button size="small" danger loading={busy}>清除声明</Button>
+            </Popconfirm>}
           </Space>
           <Descriptions size="small" bordered column={1}>
             <Descriptions.Item label="制造商">{selected.data.manufacturer ?? '—'}</Descriptions.Item>

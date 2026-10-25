@@ -172,7 +172,7 @@ export const messages = {
   'run.phase.execute': { zh: '运行', en: 'Run' },
 
   // ── 作业 / 配方面板 / job panel ──────────────────────────────────────────
-  'job.title': { zh: '产品 / 配方参数 · V0.51', en: 'Products / recipe parameters · V0.51' },
+  'job.title': { zh: '产品 / 配方参数', en: 'Products / recipe parameters' },
   'job.intro.message': { zh: '一套标准工作流 + 产品 / 配方参数集', en: 'One standard workflow + product / recipe parameter sets' },
   'job.intro.description': {
     zh: '参数草稿可随时编辑。保存草稿版本时会将绑定映射和参数快照固化到不可变的有效工作流中。验证和生产运行只使用该固化版本。',
