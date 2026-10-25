@@ -169,10 +169,11 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     messageApi.success('已请求取消');
   };
 
-  return <Modal open={open} width={1560} title="数据集 / 批量验证" footer={null} onCancel={onClose} destroyOnHidden>
+  // 非模态（2026-10-25）：对照画布挑失败样本时不需要反复开关面板。
+  return <Modal open={open} width={1560} mask={false} title="数据集 / 批量验证" footer={null} onCancel={onClose} destroyOnHidden>
     {holder}
     <DataErrorAlert scope="验证数据" error={loadError} onRetry={retrySources} />
-    <Alert type="info" showIcon style={{ marginBottom: 12 }} message="可在已保存的回放输入上运行同一候选工作流。数据集标签表示预期 OK/NG；批量结果会统计误判、失败节点和耗时分布。" />
+    <Alert type="info" showIcon style={{ marginBottom: 12 }} title="可在已保存的回放输入上运行同一候选工作流。数据集标签表示预期 OK/NG；批量结果会统计误判、失败节点和耗时分布。" />
     <Row gutter={12}>
       <Col span={5}>
         <Card size="small" title="数据集" extra={<Button size="small" onClick={() => setCreateOpen(true)}>新建</Button>}>

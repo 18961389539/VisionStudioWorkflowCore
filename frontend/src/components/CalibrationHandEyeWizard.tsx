@@ -120,7 +120,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
       <Steps size="small" current={step} items={steps.map((title) => ({ title }))} style={{ marginBottom: 16 }}
         onChange={setStep} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-        message="二维手眼向导（平面 SE(2)）"
+        title="二维手眼向导（平面 SE(2)）"
         description="录入机器人位姿 + 视觉位姿对，求解后查看逐样本残差表，可剔除最差样本后重算，并导出到 calibration.handEye2D。仅平面手眼，非 3D。" />
 
       {step === 0 && (
@@ -170,7 +170,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {result && (
             <Alert type="success" showIcon
-              message={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} · 角度 RMS ${Number(result.angleRmsDeg ?? 0).toFixed(3)}°`}
+              title={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} · 角度 RMS ${Number(result.angleRmsDeg ?? 0).toFixed(3)}°`}
               description={`最差样本 #${String(result.worstSampleIndex ?? '-')} · maxTrans ${Number(result.maxTranslationError ?? 0).toFixed(4)} · maxAngle ${Number(result.maxAngleErrorDeg ?? 0).toFixed(3)}°`} />
           )}
           <Table size="small" pagination={false} rowKey="index" dataSource={residuals}
@@ -196,7 +196,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
 
       {step === 3 && (
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Alert type="info" showIcon message="参数已导出" description="可在手眼节点中再次运行验证。下方为当前 samplesJson。" />
+          <Alert type="info" showIcon title="参数已导出" description="可在手眼节点中再次运行验证。下方为当前 samplesJson。" />
           <Input.TextArea rows={10} value={samplesJson} readOnly />
           <Button onClick={() => setStep(1)}>继续编辑样本</Button>
         </Space>

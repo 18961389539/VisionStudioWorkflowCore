@@ -130,7 +130,7 @@
 html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--vs-bg-app); color: var(--vs-text-1); }
 
-.app-shell { width: 100vw; height: 100vh; display: grid; grid-template-rows: 96px minmax(0, 1fr) 10px var(--vs-bottom-height, 220px); background: var(--vs-bg-app); }
+.app-shell { width: 100vw; height: 100vh; display: grid; grid-template-rows: var(--vs-header-height, 96px) minmax(0, 1fr) 10px var(--vs-bottom-height, 220px); background: var(--vs-bg-app); }
 .topbar { display: grid; grid-template-rows: 44px 52px; background: var(--vs-bg-topbar); border-bottom: 1px solid var(--vs-border-frame); min-width: 0; }
 .topbar-menu-row, .topbar-workflow-row { display: flex; align-items: center; gap: 16px; padding: 0 16px; min-width: 0; }
 .topbar-menu-row { border-bottom: 1px solid var(--vs-border-subtle); }
@@ -890,6 +890,15 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .node-breakpoint-toggle:hover { border-color: var(--vs-border-frame); }
 .node-breakpoint-toggle:focus-visible { opacity: 1; outline: 2px solid #4d7dbd; outline-offset: 1px; }
 @media (hover: none) { .node-breakpoint-toggle { opacity: 1; } }
+/* 触屏（一体机 / 平板）：鼠标的精确命中换成手指，端口与断点必须放大到能点中（2026-10-25）。
+   端口视觉 11→16px、外扩命中区 -6→-8px（有效约 32px）；断点 18→26px；缩放按钮同步放大。 */
+@media (hover: none) {
+  .flow-area .react-flow__handle { width: 16px; height: 16px; }
+  .flow-area .react-flow__handle::after { inset: -8px; }
+  .node-breakpoint-toggle { width: 26px; height: 26px; }
+  .node-breakpoint-toggle::before { width: 10px; height: 10px; }
+  .react-flow__controls-button { width: 34px; height: 34px; }
+}
 /* 结果已过期：标题右侧徽标，避免把旧 OK/NG 当成当前结论 */
 .node-stale { padding: 1px 3px; border-radius: 3px; background: rgba(227,160,74,.18); color: #e3a04a; font-size: 9px; font-weight: 700; line-height: 1.4; }
 
@@ -1126,3 +1135,17 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .template-selected-preview + .template-results { max-height: 34vh; }
 
 .job-draft-grid-single { grid-template-columns: minmax(0, 1fr); }
+
+/* 命令面板（Ctrl/Cmd+K，2026-10-25）：顶部输入 + 分组结果 + 键盘提示条 */
+.command-palette .ant-modal-container { padding: 0; overflow: hidden; }
+.command-palette-search { padding: 12px 12px 8px; border-bottom: 1px solid var(--vs-border-subtle); }
+.command-palette-search .ant-input-affix-wrapper { background: var(--vs-bg-input); border-color: var(--vs-border-input); }
+.command-palette-glyph { margin-right: 4px; color: var(--vs-text-5); font-size: 13px; }
+.command-palette-list { max-height: 380px; overflow: auto; padding: 6px; }
+.command-palette-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; color: var(--vs-text-2); font-size: 13px; cursor: pointer; }
+.command-palette-row.is-active { background: var(--vs-bg-toolbox-hover); color: var(--vs-text-1); }
+.command-palette-group { flex: none; padding: 0 6px; border-radius: 4px; background: var(--vs-bg-toolbox); color: var(--vs-text-5); font-size: 11px; }
+.command-palette-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-palette-hint { flex: none; margin-left: auto; font-size: 11px; }
+.command-palette-footer { display: flex; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--vs-border-subtle); color: var(--vs-text-6); font-size: 11px; }
+.command-palette-count { margin-left: auto; }

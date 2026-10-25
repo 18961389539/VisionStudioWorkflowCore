@@ -26,7 +26,7 @@ import ProductionPanel from './components/ProductionPanel';
 import DiagnosticsPanel from './components/DiagnosticsPanel';
 import SplitHandle from './components/SplitHandle';
 import ErrorBoundary from './components/ErrorBoundary';
-import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
+import { HEADER_HEIGHT, LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, clampNumber, persistLayout, readLayout, type LayoutPreset, type LayoutState } from './layout';
 import CanvasMiniMap from './components/CanvasMiniMap';
 import WorkflowImagePreview from './components/WorkflowImagePreview';
 import { automaticResultHeight } from './layout';
@@ -87,11 +87,12 @@ import EditorBottomDock from './components/EditorBottomDock';
 import ShortcutHelpModal from './components/ShortcutHelpModal';
 import TemplateGalleryModal from './components/TemplateGalleryModal';
 import WorkflowPickerModal from './components/WorkflowPickerModal';
+import CommandPalette, { type PaletteCommand } from './components/CommandPalette';
 
 function Editor() {
   // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
   // 切换语言不再需要重新请求，也不会改写画布上已有节点的名称（节点名属于文档内容）。
-  const { lang, dateLocale: locale } = useI18n();
+  const { lang, toggleLang, dateLocale: locale } = useI18n();
   const langRef = useRef(lang);
   langRef.current = lang;
   const [rawCatalog, setRawCatalog] = useState<NodeCatalogItem[] | undefined>(undefined);
@@ -163,6 +164,7 @@ function Editor() {
   const [tracesOpen, setTracesOpen] = useState(false);
   /** 从运行结果跳转到追溯时预置的运行 ID（打开即定位到那次运行） */
   const [traceRunId, setTraceRunId] = useState<string>();
+  const [commandOpen, setCommandOpen] = useState(false);
   const [validationOpen, setValidationOpen] = useState(false);
   const [modelPackagesOpen, setModelPackagesOpen] = useState(false);
   const [tuningOpen, setTuningOpen] = useState(false);
@@ -286,8 +288,21 @@ function Editor() {
       setHighlightedEdgeId(undefined);
     },
   });
-  // 节点右键菜单：记录锚点（相对画布区）与目标节点，菜单动作就地可达
+  // 节点右键菜单：记录锚点（相对画布区）与目标节点，菜单动作就地实现可达
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeId: string }>();
+  // 触屏没有右键：长按 500ms 等价于 contextmenu（2026-10-25）。手指移动/抬起即取消，避免与拖拽冲突。
+  const longPressRef = useRef<{ timer: number; startX: number; startY: number } | undefined>(undefined);
+  const cancelLongPress = useCallback(() => {
+    if (!longPressRef.current) return;
+    window.clearTimeout(longPressRef.current.timer);
+    longPressRef.current = undefined;
+  }, []);
+  const openNodeMenuAt = useCallback((nodeId: string, clientX: number, clientY: number) => {
+    setSelectedId(nodeId);
+    const bounds = flowAreaRef.current?.getBoundingClientRect();
+    setNodeContextMenu({ x: clientX - (bounds?.left ?? 0), y: clientY - (bounds?.top ?? 0), nodeId });
+  }, []);
+  useEffect(() => cancelLongPress, [cancelLongPress]);
   const displayEdges = useMemo(() => highlightedEdgeId
     ? edges.map((edge) => edge.id === highlightedEdgeId
       ? { ...edge, animated: false, style: { ...(edge.style ?? {}), stroke: '#ff4d4f', strokeWidth: 2.5 } }
@@ -374,7 +389,7 @@ function Editor() {
   // 工具箱与结果区遵循主工作区最小尺寸；图像预览在中心区域内响应式分栏。
   const leftMax = Math.max(LAYOUT_LIMITS.left.min, shellSize.width - MIN_CENTER_WIDTH);
   const shownLeftBase = clampNumber(layout.left, LAYOUT_LIMITS.left.min, leftMax);
-  const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - 96 - MIN_WORKSPACE_HEIGHT);
+  const bottomMax = Math.max(LAYOUT_LIMITS.bottom.min, shellSize.height - HEADER_HEIGHT - MIN_WORKSPACE_HEIGHT);
   const normalBottom = layout.bottomSizing === 'manual' ? layout.bottom : automaticResultHeight(shellSize.height);
   const shownBottomBase = layout.bottomMaximized ? bottomMax : clampNumber(normalBottom, LAYOUT_LIMITS.bottom.min, bottomMax);
   const shownLeft = layout.leftCollapsed ? 0 : shownLeftBase;
@@ -787,6 +802,73 @@ function Editor() {
     updateLayout({ leftCollapsed: true, bottomCollapsed: true, bottomMaximized: false });
   };
 
+  // 命令面板（Ctrl/Cmd+K，2026-10-25）：把散在顶栏菜单、工具箱和按钮上的入口收成一个键盘入口。
+  // 命令与面板在这里登记；节点由面板内部复用工具箱的 searchTools 匹配。
+  const paletteTargets = useMemo<PaletteCommand[]>(() => [
+    { key: 'run', title: '运行流程', group: '命令', hint: 'Run', keywords: 'run execute' },
+    { key: 'validate', title: '校验流程', group: '命令', hint: 'Validate', keywords: 'validate check' },
+    { key: 'save', title: '保存工作流', group: '命令', hint: 'Ctrl+S', keywords: 'save' },
+    { key: 'fit', title: '适应画布', group: '命令', hint: 'Fit view', keywords: 'fit zoom 缩放' },
+    { key: 'focus', title: focusMode ? '退出专注画布' : '专注画布', group: '命令', keywords: 'focus fullscreen 专注' },
+    { key: 'theme', title: '切换深浅主题', group: '命令', keywords: 'theme dark light 主题' },
+    { key: 'lang', title: '切换界面语言 / Switch language', group: '命令', keywords: 'language lang 语言 english' },
+    { key: 'panel:calibration', title: '标定', group: '面板', keywords: 'calibration' },
+    { key: 'panel:traces', title: '运行追溯', group: '面板', keywords: 'trace' },
+    { key: 'panel:jobs', title: '配方管理', group: '面板', keywords: 'job recipe' },
+    { key: 'panel:validation', title: '数据集 / 批量验证', group: '面板', keywords: 'dataset validation' },
+    { key: 'panel:tuning', title: '参数调优', group: '面板', keywords: 'tuning' },
+    { key: 'panel:modules', title: '可复用模块', group: '面板', keywords: 'module' },
+    { key: 'panel:cameras', title: '相机采集', group: '面板', keywords: 'camera' },
+    { key: 'panel:robots', title: '机器人', group: '面板', keywords: 'robot' },
+    { key: 'panel:devices', title: '设备运行时', group: '面板', keywords: 'device plc' },
+    { key: 'panel:production', title: '生产运行', group: '面板', keywords: 'production' },
+    { key: 'panel:diagnostics', title: '诊断中心', group: '面板', keywords: 'diagnostics' },
+    { key: 'panel:plugins', title: '插件包管理', group: '面板', keywords: 'plugin' },
+    { key: 'panel:models', title: '外部训练包', group: '面板', keywords: 'model package' },
+    { key: 'panel:frames', title: '坐标系树', group: '面板', keywords: 'frame 坐标' },
+    { key: 'panel:provenance', title: '硬件溯源', group: '面板', keywords: 'provenance' }
+  ], [focusMode]);
+
+  const runPaletteCommand = (key: string) => {
+    switch (key) {
+      case 'run': void run(); return;
+      case 'validate': void validate(); return;
+      case 'save': void save(); return;
+      case 'fit': void fitView({ padding: CANVAS_FIT_PADDING, duration: 180 }); return;
+      case 'focus': toggleFocusMode(); return;
+      case 'theme': toggleTheme(); return;
+      case 'lang': toggleLang(); return;
+      case 'panel:calibration': setCalibrationOpen(true); return;
+      case 'panel:traces': setTracesOpen(true); return;
+      case 'panel:jobs': setJobsOpen(true); return;
+      case 'panel:validation': setValidationOpen(true); return;
+      case 'panel:tuning': setTuningOpen(true); return;
+      case 'panel:modules': setModulesOpen(true); return;
+      case 'panel:cameras': setCamerasOpen(true); return;
+      case 'panel:robots': setRobotsOpen(true); return;
+      case 'panel:devices': setDevicesOpen(true); return;
+      case 'panel:production': setProductionOpen(true); return;
+      case 'panel:diagnostics': setDiagnosticsOpen(true); return;
+      case 'panel:plugins': setPluginsOpen(true); return;
+      case 'panel:models': setModelPackagesOpen(true); return;
+      case 'panel:frames': setFramesOpen(true); return;
+      case 'panel:provenance': setHardwareProvenanceOpen(true); return;
+      default: return;
+    }
+  };
+
+  // Ctrl/Cmd+K 是全局入口：面板打开、输入框聚焦时也要能用，所以不放进画布快捷键（那里会被 overlayOpen 挡住）。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      setCommandOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
   // 切换示例 / 加载会整块替换流程图，存在未保存修改时先让用户选择
   const guardUnsaved = (label: string, run: () => void) => { void workflowChanges.request(label, run); };
 
@@ -1160,6 +1242,7 @@ function Editor() {
       className="app-shell"
       ref={shellRef}
       style={{
+        '--vs-header-height': `${HEADER_HEIGHT}px`,
         '--vs-left-width': `${shownLeft}px`,
         '--vs-bottom-height': `${shownBottom}px`
       } as CSSProperties}
@@ -1301,13 +1384,32 @@ function Editor() {
             </div>
           </div>
           <div className={`editor-content${imagePreviewOpen && !focusMode ? ' has-preview' : ''}`}>
-            <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef} onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
+            {/* 触屏长按等价右键（2026-10-25）：React Flow 没有 onNodePointerDown，
+                用容器上的指针事件做委托；移动超过 10px 或抬起即取消，避免与拖拽/平移打架。 */}
+            <div className={`flow-area${compactNodes ? ' compact-nodes' : ''}`} style={{ position: 'relative' }} ref={flowAreaRef}
+              onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+              onPointerDown={(event) => {
+                if (event.pointerType !== 'touch') return;
+                const nodeElement = (event.target as HTMLElement).closest('.react-flow__node') as HTMLElement | null;
+                const nodeId = nodeElement?.getAttribute('data-id');
+                if (!nodeId) return;
+                cancelLongPress();
+                const { clientX, clientY } = event;
+                const timer = window.setTimeout(() => { longPressRef.current = undefined; openNodeMenuAt(nodeId, clientX, clientY); }, 500);
+                longPressRef.current = { timer, startX: clientX, startY: clientY };
+              }}
+              onPointerMove={(event) => {
+                const pending = longPressRef.current;
+                if (!pending) return;
+                if (Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY) > 10) cancelLongPress();
+              }}
+              onPointerUp={cancelLongPress} onPointerCancel={cancelLongPress} onPointerLeave={cancelLongPress}>
               {draftNotice && (
                 <div className="draft-recovery" style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 50, width: 'min(640px, calc(100% - 24px))' }}>
                   <Alert
                     type="warning"
                     showIcon
-                    message="检测到未保存的本地草稿"
+                    title="检测到未保存的本地草稿"
                     description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(locale)}`}
                     action={(
                       <div style={{ display: 'flex', gap: 8 }}>
@@ -1352,21 +1454,16 @@ function Editor() {
                   if (flowAreaRef.current) delete flowAreaRef.current.dataset.connecting;
                   onConnectEnd(event, state);
                 }}
-                onMoveStart={() => setConnectionPicker(undefined)}
-                onNodeDragStart={() => pushHistory('移动节点')}
+                onMoveStart={() => { setConnectionPicker(undefined); cancelLongPress(); }}
+                onNodeDragStart={() => { cancelLongPress(); pushHistory('移动节点'); }}
                 onNodeClick={(_, node) => setSelectedId(node.id)}
                 onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
                 onMove={(_, viewport) => syncZoomLevel(viewport)}
                 // 右键即选中：菜单里的“运行/断点”动作与用户所见目标一致
                 onNodeContextMenu={(event, node) => {
                   event.preventDefault();
-                  setSelectedId(node.id);
-                  const bounds = flowAreaRef.current?.getBoundingClientRect();
-                  setNodeContextMenu({
-                    x: event.clientX - (bounds?.left ?? 0),
-                    y: event.clientY - (bounds?.top ?? 0),
-                    nodeId: node.id
-                  });
+                  cancelLongPress();
+                  openNodeMenuAt(node.id, event.clientX, event.clientY);
                 }}
                 fitView
                 fitViewOptions={{ padding: CANVAS_FIT_PADDING }}
@@ -1465,6 +1562,9 @@ function Editor() {
       >
         <p>当前工作流有未保存的修改，{pendingGuard?.label}前请选择如何处理：</p>
       </Modal>
+
+      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} catalog={catalog}
+        targets={paletteTargets} onRunCommand={runPaletteCommand} onAddNode={(type) => addNode(type)} />
 
       {/* P0-2：模板入口弹窗——分组/用途/预览，替换当前流程前显式确认；“打开已有流程”就近放置 */}
       <TemplateGalleryModal open={templateOpen} onClose={() => setTemplateOpen(false)}

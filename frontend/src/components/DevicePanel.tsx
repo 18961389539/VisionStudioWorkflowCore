@@ -346,7 +346,7 @@ export default function DevicePanel({ open, onClose }: Props) {
             <Tag color={selected.stats.deviceHeartbeat ? 'green' : 'default'}>设备心跳 {selected.stats.deviceHeartbeat ? '1' : '0'}</Tag>
             <Tag>读取错误 {selected.stats.readErrors}</Tag><Tag>写入错误 {selected.stats.writeErrors}</Tag>
           </Space>
-          {selected.diagnostics.lastProtocolError && <Alert type="error" showIcon message="最近的协议错误" description={selected.diagnostics.lastProtocolError} style={{ marginBottom: 10 }} />}
+          {selected.diagnostics.lastProtocolError && <Alert type="error" showIcon title="最近的协议错误" description={selected.diagnostics.lastProtocolError} style={{ marginBottom: 10 }} />}
 
           <Typography.Title level={5}>运行时设置</Typography.Title>
           <Form form={settingsForm} layout="vertical" onFinish={saveSettings}>
@@ -365,8 +365,8 @@ export default function DevicePanel({ open, onClose }: Props) {
             <Form.Item label="设备标签" name="tagId"><Select options={selected.tags.filter((x) => x.writable).map((x) => ({ value: x.id, label: `${x.id} · ${x.address}` }))} onChange={setSelectedTagId} /></Form.Item>
             <Form.Item label={`Value (${selectedTag.dataType})`} name="value"><Input /></Form.Item>
             <Button type="primary" htmlType="submit" loading={busy === 'write'}>写入标签</Button>
-          </Form> : <Alert type="info" showIcon message="所选标签为只读" />}
-          {selected.error && <Alert style={{ marginTop: 10 }} type="error" showIcon message={selected.error} />}
+          </Form> : <Alert type="info" showIcon title="所选标签为只读" />}
+          {selected.error && <Alert style={{ marginTop: 10 }} type="error" showIcon title={selected.error} />}
         </section>
       </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未注册设备。先在左侧填写端点与协议，注册后会出现在这里。" />}
 
@@ -391,7 +391,7 @@ export default function DevicePanel({ open, onClose }: Props) {
           <Form.Item label="标签映射 JSON" name="tagsJson" rules={[{ required: true }]} extra={registerKind === 'modbus' ? '地址示例：C:0 / DI:0 / HR:0 / IR:0，索引从 0 开始。' : '地址示例：DB10.DBX0.0 / DB10.DBW2 / DB10.DBD4 / M10.0 / MW20 / MD24。'}>
             <Input.TextArea rows={15} spellCheck={false} />
           </Form.Item>
-          <Alert type="info" showIcon style={{ marginBottom: 12 }} message="标签 ID 是工作流接口约定" description="只要 trigger / resultOk / resultX 等标签 ID 保持不变，之后可以调整协议地址而无需修改工作流节点。" />
+          <Alert type="info" showIcon style={{ marginBottom: 12 }} title="标签 ID 是工作流接口约定" description="只要 trigger / resultOk / resultX 等标签 ID 保持不变，之后可以调整协议地址而无需修改工作流节点。" />
           <Button type="primary" htmlType="submit" loading={busy === 'register'}>注册驱动</Button>
         </Form>
       </Modal>

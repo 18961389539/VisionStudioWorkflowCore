@@ -118,7 +118,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
       <Alert
         type={locked ? 'warning' : 'info'}
         showIcon
-        message={!statusFresh ? '生产状态尚未确认' : locked ? `生产已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : '当前已停止：可以编辑生产配置'}
+        title={!statusFresh ? '生产状态尚未确认' : locked ? `生产已锁定到 ${status?.jobId ?? '-'} V${status?.lockedJobVersion ?? '-'}` : '当前已停止：可以编辑生产配置'}
         description={locked ? `工作流：${status?.lockedWorkflowHash ?? '-'} · 依赖：${status?.lockedDependencyManifestHash?.slice(0, 12) ?? '-'}。发布作业或编辑依赖不会热切换当前运行时。` : '启动时会校验并锁定当前已发布作业及运行时依赖清单，直到停止。'}
       />
 
@@ -126,7 +126,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type={status.ptpGuard.healthy ? 'success' : 'error'}
           showIcon
-          message={`PTP 生产保护 · ${status.ptpGuard.healthy ? '正常' : '已阻止 / 故障'}`}
+          title={`PTP 生产保护 · ${status.ptpGuard.healthy ? '正常' : '已阻止 / 故障'}`}
           description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组`}
         />
       )}
@@ -135,7 +135,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type={status.synchronizationGuard.healthy ? 'success' : status.synchronizationGuard.liveRecoverableOnly ? 'warning' : 'error'}
           showIcon
-          message={`同步健康保护 · ${status.synchronizationGuard.healthy ? '正常' : status.synchronizationGuard.liveRecoverableOnly ? '可恢复' : '已降级 / 故障'}`}
+          title={`同步健康保护 · ${status.synchronizationGuard.healthy ? '正常' : status.synchronizationGuard.liveRecoverableOnly ? '可恢复' : '已降级 / 故障'}`}
           description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组`}
         />
       )}
@@ -305,7 +305,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type="warning"
           showIcon
-          message="待核对动作清单暂不可用"
+          title="待核对动作清单暂不可用"
           description={`${errors.pending}。保留最后读取到的清单，请核对连接和权限。`}
         />
       )}
@@ -313,7 +313,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type="error"
           showIcon
-          message="存在待核对的设备动作：核对前所有设备动作入口都会被拒绝"
+          title="存在待核对的设备动作：核对前所有设备动作入口都会被拒绝"
           description={
             <Space direction="vertical" size={4}>
               <span>原因：{pendingActions.reason ?? '上一周期的设备动作结果未确认'}{pendingActions.unreadable ? '（安全状态文件不可读，需人工处理）' : ''}</span>
@@ -385,27 +385,27 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type="error"
           showIcon
-          message={`生产已进入故障状态${status?.consecutiveFailures ? ` · 连续失败 ${status.consecutiveFailures} 次` : ''}`}
+          title={`生产已进入故障状态${status?.consecutiveFailures ? ` · 连续失败 ${status.consecutiveFailures} 次` : ''}`}
           description={<>
             <div>原因：{status?.lastError ?? '运行时未提供错误详情，请查看下方保护状态与告警记录。'}</div>
             <div>下一步：检查设备与同步健康后点击“恢复”；若故障持续，先“停止”再重新“启动”。</div>
           </>}
         />
       )}
-      {operationError && <Alert type="error" showIcon message="生产操作未完成或结果未确认" description={operationError} />}
-      {errors.config && <Alert type="warning" showIcon message="生产配置暂不可用" description={errors.config} action={<Button onClick={monitor.refresh}>重试读取</Button>} />}
-      {errors.jobs && <Alert type="warning" showIcon message="配方列表已过期" description={errors.jobs} />}
-      {errors.alarms && <Alert type="warning" showIcon message="告警记录已过期" description={errors.alarms} />}
-      {conflict && <Alert type="warning" showIcon message="服务端配置已变更，当前编辑已保留" description="请核对并载入最新配置后重新修改；当前草稿不会自动覆盖服务端的新配置。" />}
-      {dirty && !conflict && <Alert type="info" showIcon message="生产配置有未保存修改" description="实时监控继续刷新，配置草稿会保留；保存配置后才可启动生产。" />}
+      {operationError && <Alert type="error" showIcon title="生产操作未完成或结果未确认" description={operationError} />}
+      {errors.config && <Alert type="warning" showIcon title="生产配置暂不可用" description={errors.config} action={<Button onClick={monitor.refresh}>重试读取</Button>} />}
+      {errors.jobs && <Alert type="warning" showIcon title="配方列表已过期" description={errors.jobs} />}
+      {errors.alarms && <Alert type="warning" showIcon title="告警记录已过期" description={errors.alarms} />}
+      {conflict && <Alert type="warning" showIcon title="服务端配置已变更，当前编辑已保留" description="请核对并载入最新配置后重新修改；当前草稿不会自动覆盖服务端的新配置。" />}
+      {dirty && !conflict && <Alert type="info" showIcon title="生产配置有未保存修改" description="实时监控继续刷新，配置草稿会保留；保存配置后才可启动生产。" />}
       {status?.ptpGuard?.enabled && !status.ptpGuard.healthy && (
-        <Alert type="error" showIcon message="PTP 生产保护已阻止运行" description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组未就绪。`} />
+        <Alert type="error" showIcon title="PTP 生产保护已阻止运行" description={status.ptpGuard.summary ?? `${status.ptpGuard.groups.length} 个受保护的同步组未就绪。`} />
       )}
       {status?.synchronizationGuard?.enabled && !status.synchronizationGuard.healthy && (
         <Alert
           type={status.synchronizationGuard.liveRecoverableOnly ? 'warning' : 'error'}
           showIcon
-          message="同步健康保护降级"
+          title="同步健康保护降级"
           description={status.synchronizationGuard.summary ?? `${status.synchronizationGuard.groups.length} 个同步相机组未达标。`}
         />
       )}
@@ -413,7 +413,7 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         <Alert
           type="warning"
           showIcon
-          message={`${activeAlarms.length} 条活动告警${criticalAlarms.length ? ` · ${criticalAlarms.length} 条严重` : ''}`}
+          title={`${activeAlarms.length} 条活动告警${criticalAlarms.length ? ` · ${criticalAlarms.length} 条严重` : ''}`}
           description={latestAlarm ? `最近：${latestAlarm.message}` : undefined}
         />
       )}

@@ -252,7 +252,7 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
                 <Button size="small" type="primary" ghost onClick={() => openReplay()}>回放 / 调试</Button>
               </Space>
             </div>
-            {selected.error && <Alert type="error" showIcon message={selected.error} />}
+            {selected.error && <Alert type="error" showIcon title={selected.error} />}
             {selected.hasPreview
               ? <img className="trace-preview" src={traces.preview(selected.runId, `t=${Date.now()}`)} />
               : <div className="trace-no-preview">没有预览图像（未按保留策略采样、已过期清理，或本次执行没有产出预览）</div>}

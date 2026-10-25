@@ -302,6 +302,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
     { key: 'diff-latest', label: '对比最近两个版本', disabled: !selected || selected.versions.length < 2, onClick: () => selected && showDiff(Math.max(1, selected.latestVersion - 1), selected.latestVersion) }
   ];
 
+  // 配方管理是数据管理面板，不需要"边看画布边改"；保留遮罩与 operationBusy 期间的不可关闭语义。
   return <Modal open={open} width={1380} title="配方管理" className="job-manager-modal" style={{ top: 24 }}
     styles={{ body: { maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto' } }} footer={null} onCancel={onClose}
     closable={!operationBusy} mask={{ closable: !operationBusy }} keyboard={!operationBusy} destroyOnHidden>
@@ -356,7 +357,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
           {baseWorkflowRecipeId === selected.id && baseWorkflowVersion === selected.latestVersion && baseWorkflowId && workflow.id !== baseWorkflowId && <Alert
             type="warning"
             showIcon
-            message="当前画布不属于所选配方，已阻止保存新版本"
+            title="当前画布不属于所选配方，已阻止保存新版本"
             description={<Space wrap>配方基础工作流：<Typography.Text code>{baseWorkflowId}</Typography.Text>；当前画布：<Typography.Text code>{workflow.id}</Typography.Text><Button size="small" onClick={() => void loadBaseVersion(selected.latestVersion)} disabled={busy}>载入 V{selected.latestVersion} 基础工作流</Button></Space>}
             style={{ marginBottom: 10 }}
           />}
@@ -381,7 +382,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                 label: '参数',
                 children: (
                   <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                    <Alert type="warning" showIcon message="草稿参数不会直接修改已发布版本" description="先保存参数草稿，再将节点参数映射到 recipe.*，解析预览后保存草稿版本。不可变版本会固化具体参数值和有效工作流哈希。" />
+                    <Alert type="warning" showIcon title="草稿参数不会直接修改已发布版本" description="先保存参数草稿，再将节点参数映射到 recipe.*，解析预览后保存草稿版本。不可变版本会固化具体参数值和有效工作流哈希。" />
                     {parameterError && <Alert type="error" showIcon title={parameterError}
                       action={<Button size="small" disabled={busy} onClick={() => setParameterAttempt((attempt) => attempt + 1)}>重试加载参数</Button>} />}
                     {parameterLoading && <span><Spin size="small" /> 正在加载参数…</span>}
@@ -401,7 +402,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                       {title:'解析后的有效值',render:(_,r)=><code className="job-draft-nested">{r.resolved === undefined ? '—' : JSON.stringify(r.resolved)}</code>},
                       {title:'',width:80,render:(_,r)=><Button size="small" danger disabled={busy || parameterLoading || Boolean(parameterError)} onClick={()=>setBindings(x=>{const n={...x};delete n[r.target];return n})}>移除</Button>}
                     ]} />
-                    {resolved&&<Alert type="success" showIcon message={`Resolved effective hash ${resolved.effectiveWorkflowHash.slice(0,16)}…`} description={<span>Base {resolved.baseWorkflowHash.slice(0,12)}… · {resolved.bindingCount} bindings · Frozen snapshot: <code>{JSON.stringify(resolved.snapshot)}</code></span>}/>}
+                    {resolved&&<Alert type="success" showIcon title={`Resolved effective hash ${resolved.effectiveWorkflowHash.slice(0,16)}…`} description={<span>Base {resolved.baseWorkflowHash.slice(0,12)}… · {resolved.bindingCount} bindings · Frozen snapshot: <code>{JSON.stringify(resolved.snapshot)}</code></span>}/>}
                   </Space>
                 )
               },
@@ -429,7 +430,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                 label: '验证',
                 children: (
                   <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                    <Alert type="info" showIcon message="验证记录必须先于发布" description="发布前需要将该版本的不可变工作流哈希关联到一次已完成且通过策略的数据集验证。验证只认可哈希完全一致的记录。" />
+                    <Alert type="info" showIcon title="验证记录必须先于发布" description="发布前需要将该版本的不可变工作流哈希关联到一次已完成且通过策略的数据集验证。验证只认可哈希完全一致的记录。" />
                     <Space wrap>
                       <span>目标版本</span>
                       <Select
@@ -464,7 +465,7 @@ export default function JobPanel({ open, onClose, workflow, prepareWorkflowChang
                     {dependency && <Alert
                       type={dependency.compatible ? 'success' : 'error'}
                       showIcon
-                      message={dependency.compatible ? '运行时依赖一致' : '运行时依赖发生变化'}
+                      title={dependency.compatible ? '运行时依赖一致' : '运行时依赖发生变化'}
                       description={dependency.compatible ? undefined : (
                         <ul style={{ margin: 0, paddingLeft: 18 }}>
                           {dependency.drifts.slice(0, 8).map((drift, index) => <li key={`${drift.id}-${index}`}>{drift.kind} · {drift.id}：{drift.message}</li>)}

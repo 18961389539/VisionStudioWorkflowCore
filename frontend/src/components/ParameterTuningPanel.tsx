@@ -119,18 +119,20 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
   const nodeReport = preview?.selectedNodeReport;
   const progressRun = runs.find((x) => x.status === 'Running');
 
-  return <Modal open={open} width={1680} title="参数调优工作区" footer={null} onCancel={onClose} destroyOnHidden>
+  // 非模态（2026-10-25）：调参天生要"边看画布边改"。撤掉遮罩后画布仍可平移/缩放/选中，
+  // 但弹窗宽度保持原值——面板内部是像素下限栅格，压窄会直接破版。
+  return <Modal open={open} width={1680} mask={false} title="参数调优工作区" footer={null} onCancel={onClose} destroyOnHidden>
     {holder}
-    <Alert type="info" showIcon style={{ marginBottom: 10 }} message="快速参数 / ROI 预览为临时运行，不会写入运行追踪历史。使用“验证数据集”可生成可持久保存的回归证据和 A/B 指标。" />
+    <Alert type="info" showIcon style={{ marginBottom: 10 }} title="快速参数 / ROI 预览为临时运行，不会写入运行追踪历史。使用“验证数据集”可生成可持久保存的回归证据和 A/B 指标。" />
     {Object.entries(data.errors).map(([resource, text]) => <Alert key={resource} type="warning" showIcon style={{ marginBottom: 8 }}
-      message={`${({ list: '数据集列表', detail: '数据集详情', runs: '验证记录' })[resource]}暂不可用`} description={text}
+      title={`${({ list: '数据集列表', detail: '数据集详情', runs: '验证记录' })[resource]}暂不可用`} description={text}
       action={<Button onClick={data.refresh}>重新读取</Button>} />)}
-    {previewControl.error && <Alert type="error" showIcon message="离线预览失败" description={previewControl.error} style={{ marginBottom: 8 }} />}
-    {actions.errors.candidate && <Alert type="error" showIcon message="候选载入未完成" description={actions.errors.candidate} style={{ marginBottom: 8 }} />}
-    {actions.errors.validation && <Alert type="error" showIcon message="验证启动未完成或结果未确认" description={actions.errors.validation} style={{ marginBottom: 8 }}
+    {previewControl.error && <Alert type="error" showIcon title="离线预览失败" description={previewControl.error} style={{ marginBottom: 8 }} />}
+    {actions.errors.candidate && <Alert type="error" showIcon title="候选载入未完成" description={actions.errors.candidate} style={{ marginBottom: 8 }} />}
+    {actions.errors.validation && <Alert type="error" showIcon title="验证启动未完成或结果未确认" description={actions.errors.validation} style={{ marginBottom: 8 }}
       action={actions.uncertain && <Space><Button onClick={data.refreshRuns}>刷新验证记录</Button>
         <Button disabled={!actions.canAcknowledge} onClick={actions.acknowledge}>已核对记录，允许重新提交</Button></Space>} />}
-    {actions.submittedStale && <Alert type="info" showIcon message="当前参数与已提交验证的快照不同" description="验证记录对应提交时的候选工作流；当前修改需另行验证。" style={{ marginBottom: 8 }} />}
+    {actions.submittedStale && <Alert type="info" showIcon title="当前参数与已提交验证的快照不同" description="验证记录对应提交时的候选工作流；当前修改需另行验证。" style={{ marginBottom: 8 }} />}
     <Row gutter={10}>
       <Col span={5}>
         <Card size="small" title="1 · 数据集 / 样本">
@@ -164,7 +166,7 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
 
       <Col span={12}>
         <Card size="small" title="3 · 实时离线预览" extra={<Space><span>自动预览</span><Switch aria-label="自动预览" size="small" checked={autoPreview} onChange={setAutoPreview} /><Button size="small" disabled={!data.ready || !nodeId} loading={previewBusy && !previewControl.automatic && !previewControl.fullWorkflow} onClick={() => void previewControl.run(false)}>运行当前节点</Button><Button size="small" type="primary" ghost disabled={!data.ready || !nodeId} loading={previewBusy && !previewControl.automatic && Boolean(previewControl.fullWorkflow)} onClick={() => void previewControl.run(true)}>运行完整工作流</Button></Space>}>
-          {previewControl.backgroundStale && <Alert type="info" showIcon message="背景为上次预览，当前参数的结果尚未更新" style={{ marginBottom: 8 }} />}
+          {previewControl.backgroundStale && <Alert type="info" showIcon title="背景为上次预览，当前参数的结果尚未更新" style={{ marginBottom: 8 }} />}
           <div style={{ height: 510 }}>
             <ImageViewer previewUrl={previewUrl} imageWidth={previewControl.imageWidth} imageHeight={previewControl.imageHeight} overlays={preview?.replay.overlays ?? []} roi={roi} roiEnabled={roiEnabled && data.ready} roiTargetLabel={selectedNode?.name ?? selectedNode?.id} loading={previewBusy} onRoiChange={updateRoi} />
           </div>

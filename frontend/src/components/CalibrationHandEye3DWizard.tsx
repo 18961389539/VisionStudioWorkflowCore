@@ -153,7 +153,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
     <div>
       {contextHolder}
       <Steps size="small" current={step} items={['配置', '录入矩阵对', '求解与残差', '应用'].map((title) => ({ title }))} style={{ marginBottom: 16 }} />
-      <Alert type="info" showIcon style={{ marginBottom: 12 }} message="三维手眼向导（SE(3)）"
+      <Alert type="info" showIcon style={{ marginBottom: 12 }} title="三维手眼向导（SE(3)）"
         description="逐样本录入机器人基座到工具、标定板到相机的刚性 4×4 变换。至少六组样本，并覆盖两个非平行旋转轴；求解后可查看逐样本三维残差并回写 handEye3D 节点。" />
 
       {step === 0 && <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -183,7 +183,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
 
       {step === 1 && <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Alert type={samples.length < 6 || firstError ? 'warning' : 'success'} showIcon
-          message={samples.length < 6 ? `当前 ${samples.length} 组，至少需要 6 组` : firstError ?? `样本数 ${samples.length}，矩阵格式有效`}
+          title={samples.length < 6 ? `当前 ${samples.length} 组，至少需要 6 组` : firstError ?? `样本数 ${samples.length}，矩阵格式有效`}
           description="每个矩阵表示坐标从源框架映射到目标框架。可粘贴 4×4 嵌套数组或 16 个行优先数值；机器人矩阵方向为 RobotTool→RobotBase，视觉矩阵方向为 Target→Camera。" />
         <Button onClick={addSample} disabled={samples.length >= 1000}>添加位姿对</Button>
         <Table size="small" pagination={false} rowKey="key" dataSource={samples} scroll={{ x: 1050 }}
@@ -201,7 +201,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
 
       {step === 2 && <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {result && <Alert type="success" showIcon
-          message={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} ${unit} · 旋转 RMS ${Number(result.rotationRmsDeg ?? 0).toFixed(3)}°`}
+          title={`平移 RMS ${Number(result.translationRms ?? 0).toFixed(4)} ${unit} · 旋转 RMS ${Number(result.rotationRmsDeg ?? 0).toFixed(3)}°`}
           description={`最差样本 #${String(result.worstSampleIndex ?? '-')} · 最大平移 ${Number(result.maxTranslationError ?? 0).toFixed(4)} ${unit} · 最大旋转 ${Number(result.maxRotationErrorDeg ?? 0).toFixed(3)}° · 机器人位移跨度 ${Number(result.robotTranslationSpan ?? 0).toFixed(3)} ${unit}`} />}
         {transformJson && <Input.TextArea rows={6} value={transformJson} readOnly spellCheck={false} />}
         <Table size="small" pagination={false} rowKey="index" dataSource={residuals}
@@ -224,7 +224,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
       </Space>}
 
       {step === 3 && <Space direction="vertical" style={{ width: '100%' }}>
-        <Alert type="success" showIcon message="三维手眼参数已写入节点" description="节点保存了本次样本和质量门限，可在工作流运行时重新计算并校验。" />
+        <Alert type="success" showIcon title="三维手眼参数已写入节点" description="节点保存了本次样本和质量门限，可在工作流运行时重新计算并校验。" />
         <Input.TextArea rows={12} value={buildSamplesJson()} readOnly spellCheck={false} />
         <Button onClick={() => setStep(1)}>继续编辑样本</Button>
       </Space>}

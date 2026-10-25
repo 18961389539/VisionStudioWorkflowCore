@@ -375,6 +375,50 @@ export default function ImageViewer({
     setView({ scale, x: p.x - before.x * scale, y: p.y - before.y * scale });
   };
 
+  // 双指缩放（2026-10-25）：此前触摸只有平移/绘制，缩放依赖 onWheel——一体机与平板上等于没有缩放。
+  // 以两指中点为锚点缩放；首次识别到双指时记录基准距离与图像锚点，避免逐帧漂移。
+  const pinchRef = useRef<{ distance: number; scale: number; anchor: Point } | undefined>(undefined);
+
+  const stageTouchPoint = (clientX: number, clientY: number): Point | undefined => {
+    const container = stageRef.current?.container();
+    if (!container) return undefined;
+    const rect = container.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  const onStageTouchStart = (event: any) => {
+    // Konva 在某些调用路径（含测试里的合成事件）不保证有 evt，一律做空值保护
+    const touches = event?.evt?.touches as TouchList | undefined;
+    if (touches && touches.length >= 2) { pinchRef.current = undefined; return; }
+    onPointerDown();
+  };
+
+  const onStageTouchMove = (event: any) => {
+    const touches = event?.evt?.touches as TouchList | undefined;
+    if (!touches || touches.length < 2) { onPointerMove(); return; }
+    event?.evt?.preventDefault?.();
+    const [first, second] = [touches[0], touches[1]];
+    const distance = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+    const center = stageTouchPoint((first.clientX + second.clientX) / 2, (first.clientY + second.clientY) / 2);
+    if (!center) return;
+    if (!pinchRef.current || !pinchRef.current.distance) {
+      pinchRef.current = {
+        distance,
+        scale: view.scale,
+        anchor: { x: (center.x - view.x) / view.scale, y: (center.y - view.y) / view.scale }
+      };
+      return;
+    }
+    const pinch = pinchRef.current;
+    const scale = clamp(pinch.scale * (distance / pinch.distance), 0.02, 30);
+    setView({ scale, x: center.x - pinch.anchor.x * scale, y: center.y - pinch.anchor.y * scale });
+  };
+
+  const onStageTouchEnd = () => {
+    pinchRef.current = undefined;
+    onPointerUp();
+  };
+
   const beginBrushStroke = (point: Point, mode: VisionRoiBrushStroke['mode']) => {
     const activeStroke = { mode, width: brushWidth, points: [point, point] };
     brushStroke.current = { baseStrokes: roi?.type === 'Brush' ? roi.strokes : [], activeStroke };
@@ -964,11 +1008,11 @@ export default function ImageViewer({
             height={size.height}
             onWheel={onWheel}
             onMouseDown={onPointerDown}
-            onTouchStart={onPointerDown}
+            onTouchStart={onStageTouchStart}
             onMouseMove={onPointerMove}
-            onTouchMove={onPointerMove}
+            onTouchMove={onStageTouchMove}
             onMouseUp={onPointerUp}
-            onTouchEnd={onPointerUp}
+            onTouchEnd={onStageTouchEnd}
             onClick={onClick}
             onDblClick={commitPolygon}
             onMouseLeave={() => { setCursor(undefined); }}

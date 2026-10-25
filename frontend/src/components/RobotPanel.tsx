@@ -246,7 +246,7 @@ export default function RobotPanel({ open, onClose }: Props) {
             <Alert
               type="warning"
               showIcon
-              message="仅用于模拟和协议验证"
+              title="仅用于模拟和协议验证"
               description="ABB、PLC 和 TCP 模拟器用于验证软件握手，不提供控制器安全、RAPID 运动规划、轴限位或碰撞检测。"
             />
             <Form form={targetForm} layout="vertical" onFinish={sendTarget} style={{ marginTop: 12 }}>
@@ -294,7 +294,7 @@ export default function RobotPanel({ open, onClose }: Props) {
                 { title: '状态', width: 85, render: (_: unknown, row) => <Tag color={row.status === 'Complete' ? 'green' : row.status === 'Error' ? 'red' : 'blue'}>{localizeStatus(row.status)}</Tag> }
               ]}
             />
-            {selected.error && <Alert type="error" showIcon message={selected.error} />}
+            {selected.error && <Alert type="error" showIcon title={selected.error} />}
           </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未注册机器人。添加控制器地址与协议后，这里会显示连接状态与运行指令。" />}
         </section>
       </div>

@@ -51,23 +51,25 @@ function RunClock({ startedAt }: { startedAt?: number }) {
 export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset, templates, debug, run, workflow, validation, catalogError, save }: EditorHeaderProps) {
   // 语言切换入口此前不存在：词表与 Provider 都建好了，用户却只能靠改 localStorage 换语言（2026-10-25）。
   const { lang, toggleLang, dateLocale: locale } = useI18n();
+  // 顶栏是英文界面里最显眼的一层：先把这一层的按钮/状态切过来，菜单项与面板内部文案仍按面板逐个迁移。
+  const text = (zh: string, en: string) => (lang === 'en' ? en : zh);
   return (
     <header className="topbar">
       <div className="topbar-menu-row">
         <div className="brand">VisionStudio <span>V{APP_VERSION}</span></div>
 
         <div className="topbar-center">
-          <Button className="topbar-file-action" type="text" onClick={templates.show}>从模板新建</Button>
+          <Button className="topbar-file-action" type="text" onClick={templates.show}>{text('从模板新建', 'New from template')}</Button>
             <Button className="topbar-file-action" type="text" onClick={() => void templates.openSaved()}>打开流程</Button>
           <span className="topbar-divider" />
           <Dropdown menu={{ items: menus.debug }} trigger={['click']}>
-            <Button className="topbar-domain-action" type={debug.inSession ? 'primary' : 'default'} title={debug.inSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debug.inSession ? `调试 · ${debug.statusText}` : '运行与调试'} <span className="menu-caret">▾</span></Button>
+            <Button className="topbar-domain-action" type={debug.inSession ? 'primary' : 'default'} title={debug.inSession ? '打开调试菜单继续、运行节点或结束会话' : '节点运行、断点及调试会话'}>{debug.inSession ? `${text('调试', 'Debug')} · ${debug.statusText}` : text('运行与调试', 'Run & debug')} <span className="menu-caret">▾</span></Button>
           </Dropdown>
           <Dropdown menu={{ items: menus.device }} trigger={['click']}>
-            <Button type="text" className="topbar-domain-action">设备 <span className="menu-caret">▾</span></Button>
+            <Button type="text" className="topbar-domain-action">{text('设备', 'Devices')} <span className="menu-caret">▾</span></Button>
           </Dropdown>
           <Dropdown menu={{ items: menus.production }} trigger={['click']}>
-            <Button type="text" className="topbar-domain-action">生产 <span className="menu-caret">▾</span></Button>
+            <Button type="text" className="topbar-domain-action">{text('生产', 'Production')} <span className="menu-caret">▾</span></Button>
           </Dropdown>
           <Dropdown
             trigger={['click']}
@@ -82,11 +84,11 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
               }
             }}
           >
-            <Button type="text" className="topbar-domain-action">工具 <span className="menu-caret">▾</span></Button>
+            <Button type="text" className="topbar-domain-action">{text('工具', 'Tools')} <span className="menu-caret">▾</span></Button>
           </Dropdown>
         </div>
         <Dropdown trigger={['click']} menu={menus.more}>
-          <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
+          <Button className="topbar-more">{text('更多', 'More')} <span className="menu-caret">▾</span></Button>
         </Dropdown>
         {/* 英文覆盖是增量的（顶栏菜单、多数面板内部文案仍在迁移中），
             tooltip 如实说明，避免用户以为切换失效。 */}
@@ -122,7 +124,7 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
                   ? `已保存 · ${workflow.lastSavedAt.toLocaleTimeString(locale)}`
                   : '自上次保存或加载以来没有修改'}
             >
-              {workflow.dirty ? '未保存' : workflow.lastSavedAt ? `已保存 ${workflow.lastSavedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
+              {workflow.dirty ? text('未保存', 'Unsaved') : workflow.lastSavedAt ? `${text('已保存', 'Saved')} ${workflow.lastSavedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}` : text('已保存', 'Saved')}
             </Tag>
           </div>
         </div>
@@ -145,23 +147,23 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
             >
               <Button onClick={() => void validation.onValidate()} loading={validation.busy}>
                 {validation.needsRevalidate
-                  ? '需要重新校验'
+                  ? text('需要重新校验', 'Revalidate')
                   : validation.status === 'ok'
-                    ? '校验通过 ✓'
+                    ? text('校验通过 ✓', 'Valid ✓')
                     : validation.status === 'issues'
-                      ? `校验 · ${validation.issueCount} 项问题`
-                      : '校验'}
+                      ? text(`校验 · ${validation.issueCount} 项问题`, `Validate · ${validation.issueCount} issues`)
+                      : text('校验', 'Validate')}
               </Button>
             </Badge>
           </Tooltip>
-          <Button onClick={save.onSave} loading={save.busy}>保存</Button>
+          <Button onClick={save.onSave} loading={save.busy}>{text('保存', 'Save')}</Button>
           {/* P1：运行中把主按钮切换为“中止”——前端断开请求即触发后端取消（见 useRunController.abortRun） */}
           {run.running
             ? <>
                 <RunClock startedAt={run.startedAt} />
-                <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">中止</Button>
+                <Button danger onClick={run.onAbort} title="中止本次运行：断开请求并通知后端取消，设备动作按意图登记收尾">{text('中止', 'Abort')}</Button>
               </>
-            : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession} title={debug.inSession ? '请先结束调试会话，再运行流程' : undefined}>运行</Button>}
+            : <Button type="primary" onClick={run.onRun} disabled={run.debugBusy || debug.inSession} title={debug.inSession ? '请先结束调试会话，再运行流程' : undefined}>{text('运行', 'Run')}</Button>}
         </div>
       </div>
     </header>

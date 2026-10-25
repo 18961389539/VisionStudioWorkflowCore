@@ -63,7 +63,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
 
   if (!runId) return null;
   if (loading) return <div className="trace-analysis-loading"><Spin size="small" /> 正在对比追溯记录并归类故障特征…</div>;
-  if (error) return <Alert type="error" showIcon message="追溯分析不可用" description={error} />;
+  if (error) return <Alert type="error" showIcon title="追溯分析不可用" description={error} />;
   if (!comparison || !signature) return null;
 
   return <section className="trace-analysis">
@@ -79,7 +79,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
 
     {!comparison.baselineAvailable ? <Alert
       type="info" showIcon
-      message="同一分组中没有更早的合格基线"
+      title="同一分组中没有更早的合格基线"
       description="此工作流 / 来源 / 作业版本至少有一条更早完成且判定合格的运行记录后，才能进行对比。"
     /> : <>
       <div className="trace-analysis-stats">
@@ -89,7 +89,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
         <Statistic title="变更节点" value={comparison.changedNodeCount} />
         <Statistic title="性能下降节点" value={comparison.performanceRegressionNodeCount} />
       </div>
-      {comparison.workflowHashChanged && <Alert type="warning" showIcon message="工作流哈希与所选基线不同" style={{ marginBottom: 8 }} />}
+      {comparison.workflowHashChanged && <Alert type="warning" showIcon title="工作流哈希与所选基线不同" style={{ marginBottom: 8 }} />}
       <Table
         size="small"
         pagination={false}
@@ -111,7 +111,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
     <div className="failure-signature-card">
       {!signature.hasSignature ? <Alert
         type="success" showIcon
-        message="未发现故障特征"
+        title="未发现故障特征"
         description="此运行没有执行失败、不合格判定或耗时回归特征。"
       /> : <>
         <div className="failure-signature-title">
@@ -123,7 +123,7 @@ export default function TraceAnalysisPanel({ runId, onReplay }: Props) {
           <Typography.Text type="secondary">近 30 天分组范围</Typography.Text>
         </div>
         <div className="failure-signature-fingerprint">{signature.fingerprint}</div>
-        {signature.recommendedAction && <Alert type="info" showIcon message={signature.recommendedAction} style={{ marginTop: 8 }} />}
+        {signature.recommendedAction && <Alert type="info" showIcon title={signature.recommendedAction} style={{ marginTop: 8 }} />}
         {signature.recentOccurrences.length > 0 && <Table
           size="small"
           pagination={false}

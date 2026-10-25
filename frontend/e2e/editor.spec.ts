@@ -79,6 +79,20 @@ test.describe('编辑器画布（真实浏览器）', () => {
     expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(1);
   });
 
+  test('Ctrl+K 命令面板可直接加节点（真实画布命中链路）', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const before = await page.locator('.react-flow__node').count();
+
+    await page.keyboard.press('Control+KeyK');
+    const search = page.getByLabel('命令面板搜索');
+    await expect(search).toBeVisible();
+    await search.fill('阈值');
+    await page.keyboard.press('Enter');
+
+    await expect.poll(async () => page.locator('.react-flow__node').count(), { timeout: 10_000 }).toBe(before + 1);
+  });
+
   test('切换界面语言后 <html lang> 与工具箱文案同步（i18n 接线）', async ({ page }) => {
     // 这条用例守的是"Provider 真的挂上了"：词表与 Provider 早就存在，但 main.tsx 没挂、
     // 也没有切换入口，语言只能靠手改 localStorage。jsdom 里测不到 <html lang> 的副作用链。

@@ -467,12 +467,12 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       <Steps size="small" current={step} items={stepTitles.map((title) => ({ title }))} style={{ marginBottom: 16 }}
         onChange={(value) => setStep(value)} />
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-        message="相机内参向导（Batch F）"
+        title="相机内参向导（Batch F）"
         description="会话落盘 · 质量审核与离群处理 · JLVision 多项式针孔 / 物方远心模型、OpenCV 鱼眼模型 · SQLite 不可变内参版本、发布/回滚 · 可绑定到去畸变节点。远心倍率和像元尺寸请按镜头与相机数据表填写。" />
       <Typography.Paragraph type="secondary">{guidance}</Typography.Paragraph>
       {hints.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }}
-          message="建议下一姿态（规则提示，非自动规划）"
+          title="建议下一姿态（规则提示，非自动规划）"
           description={<ul style={{ margin: 0, paddingLeft: 18 }}>{hints.map((h) => <li key={h.code}>{h.message}</li>)}</ul>} />
       )}
 
@@ -582,7 +582,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
       {step === 4 && (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {solveSummary && (
-            <Alert type="success" showIcon message={`RMS ${Number(solveSummary.rms ?? 0).toFixed(4)} px · 启用视图 ${String(solveSummary.enabledViews ?? enabledCount)}`}
+            <Alert type="success" showIcon title={`RMS ${Number(solveSummary.rms ?? 0).toFixed(4)} px · 启用视图 ${String(solveSummary.enabledViews ?? enabledCount)}`}
               description={`最差视图索引 ${String(solveSummary.worstViewIndex ?? '无')} · 离群: ${String((solveSummary.nodeSummary as Record<string, unknown> | undefined)?.outlierViewIndex ?? '无')}`} />
           )}
           {viewStatsRows.length > 0 && (

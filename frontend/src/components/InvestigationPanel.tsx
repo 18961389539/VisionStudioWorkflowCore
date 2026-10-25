@@ -142,7 +142,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
       <div><Typography.Text strong>问题调查与回归验证门禁</Typography.Text><div>运行追踪 → 特征签名 → 问题案例 → 修复 → 数据集 A/B 回归 → 验证通过</div></div>
       {!detail && <Button type="primary" ghost loading={saving} onClick={() => void track()}>跟踪此特征</Button>}
     </div>
-    {error && <Alert type="error" showIcon message="调查信息不可用" description={error} />}
+    {error && <Alert type="error" showIcon title="调查信息不可用" description={error} />}
 
     {detail ? <div className="investigation-case-card">
       <div className="investigation-case-title">
@@ -181,8 +181,8 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
           }}>{nextAction.label}</Button>}
         {detail.case.status === 'Resolved' && <Button size="small" onClick={() => void update({ status: 'Investigating' })}>返回调查</Button>}
       </Space>
-      {detail.case.resolutionNote && <Alert type="info" showIcon message="处理记录" description={detail.case.resolutionNote} style={{ marginTop: 8 }} />}
-      {detail.case.verificationNote && <Alert type="success" showIcon message="验证记录" description={detail.case.verificationNote} style={{ marginTop: 8 }} />}
+      {detail.case.resolutionNote && <Alert type="info" showIcon title="处理记录" description={detail.case.resolutionNote} style={{ marginTop: 8 }} />}
+      {detail.case.verificationNote && <Alert type="success" showIcon title="验证记录" description={detail.case.verificationNote} style={{ marginTop: 8 }} />}
 
       {detail.case.status === 'Resolved' && <div style={{ marginTop: 12, padding: 12, border: '1px solid rgba(128,128,128,.25)', borderRadius: 6 }}>
         <Typography.Text strong>数据集回归验证门禁</Typography.Text>
@@ -194,12 +194,12 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
         </Space>
         <Input value={gateNote} onChange={(e) => setGateNote(e.target.value)} placeholder="可选：补充证据说明或依赖变更" style={{ marginTop: 8 }} />
         <Button type="primary" ghost loading={saving} disabled={!datasetId || !baselineRunId || !candidateRunId || baselineRunId === candidateRunId} onClick={() => void evaluateGate()} style={{ marginTop: 8 }}>评估验证门禁</Button>
-        {!freshPassed && <Alert type="warning" showIcon style={{ marginTop: 8 }} message="此问题处理完成后，需要有一条新的通过记录才能标记为已验证。" />}
+        {!freshPassed && <Alert type="warning" showIcon style={{ marginTop: 8 }} title="此问题处理完成后，需要有一条新的通过记录才能标记为已验证。" />}
       </div>}
 
       {latestVerification && <Alert
         style={{ marginTop: 10 }} showIcon type={latestVerification.gateStatus === 'Passed' ? 'success' : latestVerification.gateStatus === 'Failed' ? 'error' : 'warning'}
-        message={<Space><span>最近一次回归门禁</span><Tag color={gateColor[latestVerification.gateStatus] ?? 'default'}>{({ Passed: '通过', Failed: '失败', Inconclusive: '结论不明' }[latestVerification.gateStatus] ?? latestVerification.gateStatus)}</Tag><Typography.Text code>{latestVerification.datasetName}</Typography.Text></Space>}
+        title={<Space><span>最近一次回归门禁</span><Tag color={gateColor[latestVerification.gateStatus] ?? 'default'}>{({ Passed: '通过', Failed: '失败', Inconclusive: '结论不明' }[latestVerification.gateStatus] ?? latestVerification.gateStatus)}</Tag><Typography.Text code>{latestVerification.datasetName}</Typography.Text></Space>}
         description={<div>
           <div>特征命中数：基线 {latestVerification.baselineSignatureHits} → 候选 {latestVerification.candidateSignatureHits}；候选可检查结果 {latestVerification.candidateInspectableResults}。</div>
           <div>误判为 OK：{latestVerification.baselineSummary.falseOk} → {latestVerification.candidateSummary.falseOk}；误判为 NG：{latestVerification.baselineSummary.falseNg} → {latestVerification.candidateSummary.falseNg}；错误：{latestVerification.baselineSummary.errors} → {latestVerification.candidateSummary.errors}。</div>
@@ -223,7 +223,7 @@ export default function InvestigationPanel({ runId, onReplay }: Props) {
         { title: '运行耗时（毫秒）', dataIndex: 'totalDurationMs', width: 110, render: (v: number) => v.toFixed(1) },
         { title: '节点耗时（毫秒）', dataIndex: 'nodeDurationMs', width: 110, render: (v?: number | null) => v == null ? '—' : v.toFixed(2) }
       ]} />
-    </div> : <Alert type="info" showIcon message="此特征尚未登记为工程问题" description="当故障需要明确负责人、调查、处理和验证时，可创建问题案例，避免信息只留在运行追踪中。" />}
+    </div> : <Alert type="info" showIcon title="此特征尚未登记为工程问题" description="当故障需要明确负责人、调查、处理和验证时，可创建问题案例，避免信息只留在运行追踪中。" />}
 
     {trends && <div className="signature-trends">
       <div className="investigation-stats">

@@ -109,17 +109,17 @@ export default function StoragePanel({ open, onClose }: Props) {
         <Alert
           type="error"
           showIcon
-          message="恢复已完成，等待服务重启"
+          title="恢复已完成，等待服务重启"
           description={<Space direction="vertical" size={4}>
             <span>{restartNotice}</span>
             <span>重启后本页面应恢复正常；若仍需恢复，请先确认服务和数据根已重新加载。</span>
           </Space>}
         />
       )}
-      {error && <Alert type="warning" showIcon message={error} />}
+      {error && <Alert type="warning" showIcon title={error} />}
       {capacity && <>
         <Alert type={capacity.level === 'Critical' ? 'error' : capacity.level === 'Warning' ? 'warning' : 'success'} showIcon
-          message={<Space>存储容量 <Tag color={levelColor}>{localizeStatus(capacity.level)}</Tag></Space>}
+          title={<Space>存储容量 <Tag color={levelColor}>{localizeStatus(capacity.level)}</Tag></Space>}
           description={`生产启动${capacity.productionStartAllowed ? '允许' : '已阻止'} · 预览文件写入${capacity.artifactWritesAllowed ? '允许' : '已阻止'}`} />
         <div className="trace-stats">
           <Statistic title="可用空间" value={gb(capacity.availableFreeBytes)} suffix="GB" />
@@ -130,7 +130,7 @@ export default function StoragePanel({ open, onClose }: Props) {
       </>}
 
       {schema && <Alert type={schema.upToDate ? 'success' : 'warning'} showIcon
-        message={`SQLite 数据库架构 v${schema.currentVersion} / 目标 v${schema.targetVersion}`}
+        title={`SQLite 数据库架构 v${schema.currentVersion} / 目标 v${schema.targetVersion}`}
         description={`${schema.history.length} 条迁移记录 · ${schema.history.filter(x => x.baselined).length} 条来自 V0.28 之前安装的基线记录`} />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

@@ -145,8 +145,8 @@ export default function SecurityGate({ children }: { children: ReactNode }) {
       <div className="security-screen">
         <Card className="security-card" title={firstRun ? 'VisionStudio · 首次安全设置' : 'VisionStudio · 登录'}>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            {firstRun && <Alert type="info" showIcon message="创建首个管理员账户" description="创建首个账户后，此初始化入口会自动关闭。" />}
-            {error && <Alert type="error" showIcon message={error} />}
+            {firstRun && <Alert type="info" showIcon title="创建首个管理员账户" description="创建首个账户后，此初始化入口会自动关闭。" />}
+            {error && <Alert type="error" showIcon title={error} />}
             <Input value={username} onChange={e => setUsername(e.target.value)} placeholder="用户名" autoComplete="username" />
             {firstRun && <Input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="显示名称" />}
             <Input.Password value={password} onChange={e => setPassword(e.target.value)} placeholder={firstRun ? '密码（至少 10 个字符）' : '密码'} autoComplete={firstRun ? 'new-password' : 'current-password'} onPressEnter={() => void (firstRun ? bootstrap() : login())} />

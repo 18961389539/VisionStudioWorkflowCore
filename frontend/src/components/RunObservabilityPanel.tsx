@@ -47,8 +47,8 @@ export default function RunObservabilityPanel({ runId, nodeLabels = {}, nodeType
 
   if (!runId) return null;
   if (loading || (!error && data?.runId !== runId)) return <div className="run-observability-loading"><Spin size="small" /> 正在加载运行时间线…</div>;
-  if (error) return <Alert type="error" showIcon message="运行观测数据不可用" description={error} />;
-  if (!data?.timelineAvailable) return <Alert type="info" showIcon message="此运行记录没有精确的节点时间线" description="V0.60 之前的追溯记录仍可查看，但系统不会根据完成顺序推测节点开始时间。" />;
+  if (error) return <Alert type="error" showIcon title="运行观测数据不可用" description={error} />;
+  if (!data?.timelineAvailable) return <Alert type="info" showIcon title="此运行记录没有精确的节点时间线" description="V0.60 之前的追溯记录仍可查看，但系统不会根据完成顺序推测节点开始时间。" />;
 
   return <section className="run-observability">
     <div className="run-observability-heading">

@@ -233,7 +233,8 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   };
 
   return (
-    <Modal open={open} onCancel={onClose} footer={null} width={1480} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
+    // 非模态（2026-10-25）：标定要对着画布上的 ROI / 坐标系操作，遮罩挡住的正是要看的区域。
+    <Modal open={open} onCancel={onClose} footer={null} width={1480} mask={false} title="标定 · 平面九点 / 相机内参向导" destroyOnHidden>
       {contextHolder}
       <DataErrorAlert scope="标定资产" error={assetError} onRetry={() => void refreshAssets()} />
       <Tabs

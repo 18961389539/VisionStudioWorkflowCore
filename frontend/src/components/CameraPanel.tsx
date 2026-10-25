@@ -587,7 +587,7 @@ export default function CameraPanel({ open, onClose }: Props) {
           <div className="camera-preview-panel">
             <div className="camera-preview-title"><strong>{selected?.name ?? '未选择相机'}</strong><span>{selected?.id}</span></div>
             {selected && selected.acquisition.acquisitionState !== 'Stopped' && selected.acquisition.acquisitionState !== 'Faulted' ? <img key={`${selectedId}-${previewTick}`} src={cameraEndpoints.preview(selectedId, `maxWidth=960&quality=78&t=${previewTick}`)} alt={`${selectedId} 预览`} onError={(event) => { event.currentTarget.style.opacity = '0.25'; }} onLoad={(event) => { event.currentTarget.style.opacity = '1'; }} /> : <div className="camera-preview-empty">开始采集后即可预览</div>}
-            <Alert type="info" showIcon message="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
+            <Alert type="info" showIcon title="预览和工作流共用同一采集流" description="CameraAcquisitionWorker 只采集一次；网页预览和“采集图像”节点分别从有界 CameraFrameHub 获取独立帧租约。" />
           </div>
           <Tabs
             defaultActiveKey="acquisition"
@@ -617,16 +617,16 @@ export default function CameraPanel({ open, onClose }: Props) {
               <Tag>相机原生：{selected.acquisition.nativePixelFormat ?? '—'}</Tag>
               <Tag>主机输出：{selected.settings.outputPixelFormat}</Tag>
             </Space>
-            {selected.acquisition.runtimeError && <Alert type="warning" showIcon message={selected.acquisition.runtimeError} style={{ marginBottom: 8 }} />}
-            {selected.acquisition.transport?.error && <Alert type="info" showIcon message={selected.acquisition.transport.error} style={{ marginBottom: 8 }} />}
+            {selected.acquisition.runtimeError && <Alert type="warning" showIcon title={selected.acquisition.runtimeError} style={{ marginBottom: 8 }} />}
+            {selected.acquisition.transport?.error && <Alert type="info" showIcon title={selected.acquisition.transport.error} style={{ marginBottom: 8 }} />}
           </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请在左侧选择一台相机" />}
               </>) },
               { key: 'parameters', label: '参数', children: (<>
           {/* ── 参数：厂商调试配置（触发 / 闪光灯 / 功能浏览器） ── */}
           {selected && ['basler-pylon', 'hikrobot-mvs'].includes(selected.driver) ? <>
             <Typography.Title level={5}>触发 / 闪光灯调试</Typography.Title>
-            <Alert type="info" showIcon style={{ marginBottom: 10 }} message="修改传输或 I/O 功能前，请先停止采集" description="调试配置会适配 Basler/Hikrobot GenICam/MVS 的常见功能。对于不支持的功能，系统会跳过并报告，不会猜测配置值。" />
-            {selected.state === 'Closed' ? <Alert type="warning" showIcon message="请先打开相机以读取调试功能" /> : commissioning && <>
+            <Alert type="info" showIcon style={{ marginBottom: 10 }} title="修改传输或 I/O 功能前，请先停止采集" description="调试配置会适配 Basler/Hikrobot GenICam/MVS 的常见功能。对于不支持的功能，系统会跳过并报告，不会猜测配置值。" />
+            {selected.state === 'Closed' ? <Alert type="warning" showIcon title="请先打开相机以读取调试功能" /> : commissioning && <>
               <Space wrap style={{ marginBottom: 8 }}>
                 <Tag color="blue">配置 {commissioning.profileHash?.slice(0, 12) ?? '尚未采集'}</Tag>
                 <Tag color={commissioning.capabilities.gigENetworkTuning ? 'green' : 'default'}>GigE 调优</Tag>
@@ -680,7 +680,7 @@ export default function CameraPanel({ open, onClose }: Props) {
               </>) },
               { key: 'sync', label: '同步', children: (<>
           <Typography.Title level={5}>多相机同步</Typography.Title>
-          <Alert type="info" showIcon message="PTP + GigE Vision Action Command" description="创建使用相同驱动的同步组，为每台相机设置一致的 Action 密钥，将 TriggerSource 设为 Action1，然后发送立即或定时广播。系统优先使用设备 / PTP 时间戳计算偏差；设备时间戳不可用时才回退到主机接收时间。" style={{ marginBottom: 10 }} />
+          <Alert type="info" showIcon title="PTP + GigE Vision Action Command" description="创建使用相同驱动的同步组，为每台相机设置一致的 Action 密钥，将 TriggerSource 设为 Action1，然后发送立即或定时广播。系统优先使用设备 / PTP 时间戳计算偏差；设备时间戳不可用时才回退到主机接收时间。" style={{ marginBottom: 10 }} />
           <Space wrap style={{ marginBottom: 8 }}>
             <Select allowClear placeholder="选择已保存的同步组" value={selectedSyncId} onChange={setSelectedSyncId} style={{ minWidth: 240 }} options={syncGroups.map((x) => ({ value: x.id, label: `${x.name} · ${x.cameraIds.length} 台相机` }))} />
             <Button onClick={() => refreshSyncGroups()}>刷新分组</Button>
@@ -695,7 +695,7 @@ export default function CameraPanel({ open, onClose }: Props) {
               <Tag>同步偏差 {syncStatus.latestSkewUs == null ? '—' : `${syncStatus.latestSkewUs.toFixed(1)} µs`} · {localizeStatus(syncStatus.timestampBasis)}</Tag>
               <Tag>配置哈希 {syncStatus.group.configurationHash.slice(0, 12)}</Tag>
             </Space>
-            {syncStatus.error && <Alert type="warning" showIcon message={syncStatus.error} style={{ marginBottom: 8 }} />}
+            {syncStatus.error && <Alert type="warning" showIcon title={syncStatus.error} style={{ marginBottom: 8 }} />}
             <Table size="small" rowKey="cameraId" dataSource={syncStatus.members} pagination={false} columns={[
               { title: '相机', dataIndex: 'cameraId' },
               { title: 'PTP 状态', render: (_: unknown, row: any) => <Tag color={['Locked','Slave','Master'].includes(row.timeSync.state) ? 'green' : 'gold'}>{localizeStatus(row.timeSync.state)}</Tag> },
@@ -703,13 +703,13 @@ export default function CameraPanel({ open, onClose }: Props) {
               { title: '帧序号', render: (_: unknown, row: any) => row.latestFrame ? `#${row.latestFrame.sequence}` : '—' }
             ]} />
           </>}
-          {syncCapture && <Alert style={{ marginTop: 8 }} type={syncCapture.withinTolerance ? 'success' : 'warning'} showIcon message={`${syncCapture.scheduled ? '定时' : '立即'}采集 · 同步偏差 ${syncCapture.triggerSkewUs.toFixed(1)} µs（${localizeStatus(syncCapture.timestampBasis)}）`} description={`已确认设备数：${syncCapture.command.acknowledgedDevices}；允许偏差：${syncCapture.maxAllowedSkewUs.toFixed(1)} µs`} />}
+          {syncCapture && <Alert style={{ marginTop: 8 }} type={syncCapture.withinTolerance ? 'success' : 'warning'} showIcon title={`${syncCapture.scheduled ? '定时' : '立即'}采集 · 同步偏差 ${syncCapture.triggerSkewUs.toFixed(1)} µs（${localizeStatus(syncCapture.timestampBasis)}）`} description={`已确认设备数：${syncCapture.command.acknowledgedDevices}；允许偏差：${syncCapture.maxAllowedSkewUs.toFixed(1)} µs`} />}
           <Space wrap style={{ marginTop: 10, marginBottom: 6 }}><Typography.Text strong>同步调试</Typography.Text><Button size="small" onClick={() => refreshSyncStatistics()} disabled={!selectedSyncId}>刷新统计</Button></Space>
           {syncStatistics && <>
             <Alert
               showIcon
               type={syncStatistics.commissioning.status === 'Pass' ? 'success' : syncStatistics.commissioning.status === 'Fail' ? 'error' : 'info'}
-              message={`调试评估：${syncStatistics.commissioning.status === 'InsufficientData' ? '数据不足' : localizeStatus(syncStatistics.commissioning.status)}`}
+              title={`调试评估：${syncStatistics.commissioning.status === 'InsufficientData' ? '数据不足' : localizeStatus(syncStatistics.commissioning.status)}`}
               description={syncStatistics.commissioning.reasons.join(' ')}
               style={{ marginBottom: 8 }}
             />
@@ -777,7 +777,7 @@ export default function CameraPanel({ open, onClose }: Props) {
 
           <Space wrap style={{ marginTop: 12, marginBottom: 6 }}><Typography.Text strong>GigE 网络调试</Typography.Text><Button size="small" onClick={() => refreshGigEDiagnostics()} disabled={!selectedSyncId}>刷新网络诊断</Button><Button type="primary" size="small" onClick={startGigENetworkTest} disabled={!selectedSyncId || syncTests.some((x) => x.status === 'Queued' || x.status === 'Running')} loading={busy === 'gige-test-start'}>运行 {syncTestIterations} 轮 GigE 测试</Button></Space>
           {gigeDiagnostics && <>
-            <Alert showIcon type={gigeDiagnostics.assessment.status === 'Pass' ? 'success' : gigeDiagnostics.assessment.status === 'Fail' ? 'error' : 'info'} message={`GigE 网络：${gigeDiagnostics.assessment.status === 'InsufficientData' ? '数据不足' : localizeStatus(gigeDiagnostics.assessment.status)}`} description={gigeDiagnostics.assessment.reasons.join(' ')} style={{ marginBottom: 8 }} />
+            <Alert showIcon type={gigeDiagnostics.assessment.status === 'Pass' ? 'success' : gigeDiagnostics.assessment.status === 'Fail' ? 'error' : 'info'} title={`GigE 网络：${gigeDiagnostics.assessment.status === 'InsufficientData' ? '数据不足' : localizeStatus(gigeDiagnostics.assessment.status)}`} description={gigeDiagnostics.assessment.reasons.join(' ')} style={{ marginBottom: 8 }} />
             <div className="camera-settings-grid">
               <Statistic title="证据运行数" value={gigeDiagnostics.assessment.evidenceRuns} suffix={`/ ${gigeDiagnostics.assessment.minimumEvidenceRuns}`} />
               <Statistic title="网卡峰值负载" value={(gigeDiagnostics.assessment.peakNicUtilization ?? 0) * 100} precision={1} suffix="%" />
@@ -801,7 +801,7 @@ export default function CameraPanel({ open, onClose }: Props) {
               { title: '相机负载', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => `${row.currentCameraThroughputMbps.toFixed(1)} Mbit/s（${(row.currentUtilization * 100).toFixed(1)}%）` },
               { title: '状态', render: (_: unknown, row: GigENetworkDiagnostics['nicLoads'][number]) => <Tag color={row.level === 'Critical' ? 'red' : row.level === 'Warning' ? 'gold' : 'green'}>{localizeStatus(row.level)}</Tag> }
             ]} />}
-            <Alert type="info" showIcon message="网络调优建议" description={gigeDiagnostics.assessment.recommendations.join(' ')} style={{ marginTop: 8 }} />
+            <Alert type="info" showIcon title="网络调优建议" description={gigeDiagnostics.assessment.recommendations.join(' ')} style={{ marginTop: 8 }} />
           </>}
 
           <Space wrap style={{ marginTop: 12, marginBottom: 6 }}><Typography.Text strong>自动调试测试</Typography.Text></Space>
@@ -856,7 +856,7 @@ export default function CameraPanel({ open, onClose }: Props) {
               </>) },
               { key: 'registration', label: '设备注册', children: (<>
           <Typography.Title level={5}>厂商相机</Typography.Title>
-          <Alert type="info" showIcon message="运行时加载的 SDK 适配器" description="Basler pylon 和 Hikrobot MVS 将通过本机已安装的 SDK 进行发现。VisionStudio 不会重新分发厂商 DLL。" style={{ marginBottom: 10 }} />
+          <Alert type="info" showIcon title="运行时加载的 SDK 适配器" description="Basler pylon 和 Hikrobot MVS 将通过本机已安装的 SDK 进行发现。VisionStudio 不会重新分发厂商 DLL。" style={{ marginBottom: 10 }} />
           <Space wrap style={{ marginBottom: 8 }}>
             {adapters.map((adapter) => <Tag key={adapter.driver} color={adapter.isSdkAvailable ? 'green' : 'red'}>{adapter.vendor}：{adapter.isSdkAvailable ? 'SDK 已就绪' : 'SDK 不可用'}</Tag>)}
           </Space>
@@ -864,7 +864,7 @@ export default function CameraPanel({ open, onClose }: Props) {
             <Select value={discoverDriver} onChange={(value) => { setDiscoverDriver(value); setDiscovered([]); setSelectedDiscovered(undefined); }} options={adapters.map((x) => ({ value: x.driver, label: `${x.vendor} · ${x.driver}`, disabled: !x.isSdkAvailable }))} />
             <Button loading={busy === 'discover-vendor'} onClick={discoverVendor}>发现设备</Button>
           </div>
-          {adapters.find((x) => x.driver === discoverDriver && !x.isSdkAvailable)?.sdkError && <Alert type="warning" showIcon message={adapters.find((x) => x.driver === discoverDriver)?.sdkError} style={{ marginBottom: 8 }} />}
+          {adapters.find((x) => x.driver === discoverDriver && !x.isSdkAvailable)?.sdkError && <Alert type="warning" showIcon title={adapters.find((x) => x.driver === discoverDriver)?.sdkError} style={{ marginBottom: 8 }} />}
           <Table<CameraDiscoveredDevice> size="small" rowKey="deviceKey" dataSource={discovered} pagination={{ pageSize: 4, size: 'small' }} onRow={(row) => ({ onClick: () => selectDiscovered(row) })} rowClassName={(row) => row.deviceKey === selectedDiscovered?.deviceKey ? 'camera-selected-row' : ''} columns={[
             { title: '厂商', dataIndex: 'vendor', width: 82 }, { title: '型号', dataIndex: 'model', width: 145 }, { title: '序列号', dataIndex: 'serialNumber', width: 145 },
             { title: '名称 / IP', render: (_: unknown, row) => row.userDefinedName || row.ipAddress || '—', ellipsis: true }, { title: '传输层', dataIndex: 'transport', width: 70 }
@@ -877,7 +877,7 @@ export default function CameraPanel({ open, onClose }: Props) {
           </Form>}
 
           <Typography.Title level={5}>注册文件相机</Typography.Title>
-          <Alert type="info" showIcon message="仅支持沙箱媒体来源" description="文件相机接受媒体库中的 media:// 引用。绝对主机路径、UNC 路径和 ../ 路径跳转均会被拒绝。" style={{ marginBottom: 10 }} />
+          <Alert type="info" showIcon title="仅支持沙箱媒体来源" description="文件相机接受媒体库中的 media:// 引用。绝对主机路径、UNC 路径和 ../ 路径跳转均会被拒绝。" style={{ marginBottom: 10 }} />
           <Form form={form} layout="vertical" onFinish={registerFile} initialValues={{ id: 'file-1', name: 'File Camera 1' }}>
             <div className="camera-file-form"><Form.Item label="编号" name="id" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="名称" name="name"><Input /></Form.Item></div>
             <Form.Item label="媒体集合或图像" name="source" rules={[{ required: true }]}><Select showSearch options={sourceOptions} placeholder="media://offline 或已导入的图像" /></Form.Item>

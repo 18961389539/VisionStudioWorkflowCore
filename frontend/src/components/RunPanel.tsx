@@ -109,7 +109,7 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
       <Alert
         type={!result.success || result.qualityDisposition === 'NG' ? 'error' : (isPaused ? 'info' : 'success')}
         showIcon
-        message={
+        title={
           <span>
             {result.success
               ? `${executionStateLabel} · ${result.qualityDisposition ? localizeStatus(result.qualityDisposition) : '执行成功'} · ${result.totalDurationMs.toFixed(2)} 毫秒`

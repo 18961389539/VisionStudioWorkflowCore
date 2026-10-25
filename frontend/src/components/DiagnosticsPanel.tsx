@@ -77,13 +77,13 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
       <Button onClick={() => void refresh()}>刷新状态</Button>
       <Typography.Text type="secondary">仅当状态、健康度或错误发生变化时才会发送事件，不会在每次轮询时重复发送。</Typography.Text>
     </Space>
-    {error && <Alert type="warning" showIcon message={error} style={{ marginBottom: 12 }} />}
+    {error && <Alert type="warning" showIcon title={error} style={{ marginBottom: 12 }} />}
     {summary?.staleProviders && summary.staleProviders.length > 0 && (
       <Alert
         type="warning"
         showIcon
         style={{ marginBottom: 12 }}
-        message={`诊断采样故障：${summary.staleProviders.join('、')} 的数据可能过期（已保留上次快照，暂不作为删除处理）`}
+        title={`诊断采样故障：${summary.staleProviders.join('、')} 的数据可能过期（已保留上次快照，暂不作为删除处理）`}
       />
     )}
 

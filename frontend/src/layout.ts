@@ -13,6 +13,13 @@ export type LayoutState = {
   bottomMaximized: boolean;
 };
 
+/**
+ * 顶栏总高（菜单行 + 工作流身份行）。此前 CSS 的 grid-template-rows 与 App 的可用高度计算
+ * 各写一遍 96，改一个忘另一个就会算错可用高度（2026-10-25 收敛到单一常量）。
+ * CSS 侧通过外壳的 --vs-header-height 变量取值。
+ */
+export const HEADER_HEIGHT = 96;
+
 export const LAYOUT_LIMITS = {
   left: { min: 160, max: 460 },
   bottom: { min: 80, max: 560 }
@@ -72,7 +79,7 @@ export function readLayout(): LayoutState {
 }
 
 export function automaticResultHeight(shellHeight: number): number {
-  return clampNumber(Math.round(Math.max(0, shellHeight - 96) * 0.27), 120, LAYOUT_LIMITS.bottom.max);
+  return clampNumber(Math.round(Math.max(0, shellHeight - HEADER_HEIGHT) * 0.27), 120, LAYOUT_LIMITS.bottom.max);
 }
 
 export function persistLayout(state: LayoutState) {

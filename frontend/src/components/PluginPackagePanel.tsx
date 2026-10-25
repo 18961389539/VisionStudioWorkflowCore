@@ -8,6 +8,7 @@ import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { plugins, validation } from '../endpoints';
 import DataErrorAlert from './DataErrorAlert';
+import PanelTable from './PanelTable';
 
 type Props = { open: boolean; onClose: () => void; onCatalogRefresh: () => Promise<void> };
 
@@ -237,7 +238,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
   return <Modal open={open} title={`插件包管理器 · V${APP_VERSION}`} width={1280} footer={null} onCancel={onClose}>
     {contextHolder}
     <DataErrorAlert scope="插件包数据" error={loadError} onRetry={() => void refresh()} />
-    <Alert type="info" showIcon message="签名插件包与 CI 性能回归门禁" description="保留可重复的进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
+    <Alert type="info" showIcon title="签名插件包与 CI 性能回归门禁" description="保留可重复的进程池 1/2/4 基准测试，并增加便携式基线 CI 规范和无界面运行器。导出已完成的基线并提交规范，GitHub Actions/Jenkins 会在 P95/P99、吞吐量、内存或失败率超出预算时使构建失败。" />
 
     <Divider titlePlacement="left">安装插件包</Divider>
     <Space wrap>
@@ -248,11 +249,11 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       <Button type="primary" loading={busy} disabled={!packageFile || (preflight ? !preflight.valid : false)} onClick={() => submitPackage('install')}>安装</Button>
     </Space>
     {preflight && <Alert style={{ marginTop: 10 }} type={preflight.valid ? (preflight.publisherTrusted ? 'success' : 'warning') : 'error'} showIcon
-      message={`${preflight.id ?? '插件包'} ${preflight.version ?? ''} · ${preflight.signed ? (preflight.signatureValid ? '签名有效' : '签名无效') : '未签名'}`}
+      title={`${preflight.id ?? '插件包'} ${preflight.version ?? ''} · ${preflight.signed ? (preflight.signatureValid ? '签名有效' : '签名无效') : '未签名'}`}
       description={<div><div>发布者：{preflight.publisherSubject ?? '—'} {preflight.publisherTrusted ? '（可信）' : '（不可信）'}</div><div>内容 SHA-256：<code>{preflight.contentSha256 || '—'}</code></div>{preflight.warnings?.map((x) => <div key={x}>{x}</div>)}</div>} />}
 
     <Divider titlePlacement="left">已安装版本</Divider>
-    <Table size="small" pagination={false} rowKey={(x) => `${x.id}@${x.version}`} dataSource={packages} columns={[
+    <PanelTable emptyText="还没有安装任何插件包。先在上方选择 .vspkg 预检并安装。" rowKey={(x) => `${x.id}@${x.version}`} dataSource={packages} columns={[
       { title: '插件', render: (_: unknown, row: PluginPackageVersionInfo) => <><b>{row.name}</b><br/><code>{row.id}</code></> },
       { title: '版本', dataIndex: 'version', width: 100 },
       { title: '状态', width: 160, render: (_: unknown, row: PluginPackageVersionInfo) => <Space wrap>{row.active && <Tag color="green">生效中</Tag>}{row.pending && <Tag color="orange">待启用</Tag>}{!row.active && !row.pending && <Tag>已安装</Tag>}{row.restartRequired && <Tag color="volcano">需重启</Tag>}</Space> },
@@ -274,7 +275,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
       <Upload accept=".cer,.crt" maxCount={1} fileList={publisherFile ? [publisherFile] : []} beforeUpload={() => false} onChange={(info) => setPublisherFile(info.fileList.at(-1))} onRemove={() => { setPublisherFile(undefined); return true; }}><Button>选择证书</Button></Upload>
       <Button type="primary" loading={busy} disabled={!publisherFile} onClick={trustPublisher}>信任发布者</Button>
     </Space>
-    <Table size="small" pagination={false} rowKey="thumbprint" dataSource={publishers} columns={[
+    <PanelTable emptyText="尚未信任任何发布者；未签名插件包会在预检时提示警告。" rowKey="thumbprint" dataSource={publishers} columns={[
       { title: '发布者', render: (_: unknown, row: TrustedPluginPublisher) => <><b>{row.displayName ?? row.subject}</b><br/><Typography.Text type="secondary">{row.subject}</Typography.Text></> },
       { title: '证书指纹', render: (_: unknown, row: TrustedPluginPublisher) => <code>{row.thumbprint}</code> },
       { title: '有效期', render: (_: unknown, row: TrustedPluginPublisher) => `${row.notBefore?.slice(0,10) ?? '—'} → ${row.notAfter?.slice(0,10) ?? '—'}` },
@@ -288,7 +289,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
     ]} />
 
     <Divider titlePlacement="left">运行时注册表</Divider>
-    <Table size="small" pagination={false} rowKey={(p) => `${p.id}-${p.assemblyPath}`} dataSource={runtime} columns={[
+    <PanelTable emptyText="运行时没有加载任何插件。" rowKey={(p) => `${p.id}-${p.assemblyPath}`} dataSource={runtime} columns={[
       { title: '状态', width: 150, render: (_: unknown, row: PluginLoadInfo) => <Space wrap><Tag color={row.loaded ? 'green' : 'red'}>{row.loaded ? '已加载' : '失败'}</Tag>{row.restartRequired && <Tag color="orange">需要重启</Tag>}</Space> },
       { title: '插件', render: (_: unknown, row: PluginLoadInfo) => <><b>{row.name}</b> <code>{row.id}</code></> },
       { title: '版本', dataIndex: 'version', width: 100 },
@@ -351,7 +352,7 @@ export default function PluginPackagePanel({ open, onClose, onCatalogRefresh }: 
 
 
     <Divider titlePlacement="left">性能基准测试与回归门禁</Divider>
-    <Alert type="info" showIcon style={{ marginBottom: 10 }} message="基准测试使用临时进程池" description="同一数据集和已完成的验证工作流将分别在临时的 1/2/4 个工作进程中回放。不会修改当前插件配置、已发布配方或生产依赖来源记录。" />
+    <Alert type="info" showIcon style={{ marginBottom: 10 }} title="基准测试使用临时进程池" description="同一数据集和已完成的验证工作流将分别在临时的 1/2/4 个工作进程中回放。不会修改当前插件配置、已发布配方或生产依赖来源记录。" />
     <Space wrap style={{ marginBottom: 10 }}>
       <Select style={{ width: 220 }} placeholder="选择数据集" value={benchmarkDatasetId} onChange={chooseBenchmarkDataset} options={datasets.map(x => ({ value: x.id, label: `${x.name} (${x.itemCount})` }))} />
       <Select style={{ width: 250 }} placeholder="选择已完成的验证运行" value={benchmarkValidationRunId} onChange={setBenchmarkValidationRunId} options={validationRuns.map(x => ({ value: x.runId, label: `${x.runId.slice(0, 16)}… · ${x.workflowHash.slice(0, 8)}` }))} />

@@ -90,12 +90,12 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
   const comparisonById = useMemo(() => new Map((result?.comparison ?? []).map((x) => [x.nodeId, x])), [result]);
 
   return (
-    <Modal open={open} width={1480} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnClose>
+    <Modal open={open} width={1480} mask={false} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnClose>
       {holder}
-      {!context ? <Alert type="info" showIcon message="正在加载回放上下文…" /> : <>
+      {!context ? <Alert type="info" showIcon title="正在加载回放上下文…" /> : <>
         <Alert
           type={context.replayable ? 'success' : 'warning'} showIcon
-          message={context.replayable ? `回放已就绪 · 输入${context.hasReplayInput ? '已保存' : '非必需'}` : '此追溯记录无法离线回放'}
+          title={context.replayable ? `回放已就绪 · 输入${context.hasReplayInput ? '已保存' : '非必需'}` : '此追溯记录无法离线回放'}
           description={context.blockReason ?? context.executionModel}
           style={{ marginBottom: 12 }}
         />
@@ -138,8 +138,8 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
           </Col>
           <Col span={8}>
             <div className="panel-title">节点输入 / 输出检查</div>
-            {!selectedReport ? <Alert type="info" message="执行回放或单步运行以查看运行时数据。" /> : <>
-              <Alert type={selectedReport.success ? 'success' : 'error'} showIcon message={`${selectedReport.nodeType} · ${selectedReport.durationMs.toFixed(2)} 毫秒`} description={selectedReport.error ?? undefined} />
+            {!selectedReport ? <Alert type="info" title="执行回放或单步运行以查看运行时数据。" /> : <>
+              <Alert type={selectedReport.success ? 'success' : 'error'} showIcon title={`${selectedReport.nodeType} · ${selectedReport.durationMs.toFixed(2)} 毫秒`} description={selectedReport.error ?? undefined} />
               <Typography.Title level={5}>输入</Typography.Title>
               <pre className="debug-json">{JSON.stringify(selectedReport.inputs ?? {}, null, 2)}</pre>
               <Typography.Title level={5}>输出</Typography.Title>
@@ -154,7 +154,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
           <div className="panel-title" style={{ marginTop: 14 }}>基线与回放对比</div>
           <Alert
             type={!result.success || result.dispositionChanged ? 'warning' : 'success'} showIcon
-            message={`回放${result.success ? '已完成' : '失败'} · ${result.totalDurationMs.toFixed(2)} 毫秒 · 基线判定 ${result.baselineDisposition ?? '-'}${result.dispositionChanged ? ' · 判定已变化' : ''}`}
+            title={`回放${result.success ? '已完成' : '失败'} · ${result.totalDurationMs.toFixed(2)} 毫秒 · 基线判定 ${result.baselineDisposition ?? '-'}${result.dispositionChanged ? ' · 判定已变化' : ''}`}
             description={result.error ?? result.haltReason ?? result.executionModel}
             style={{ marginBottom: 8 }}
           />

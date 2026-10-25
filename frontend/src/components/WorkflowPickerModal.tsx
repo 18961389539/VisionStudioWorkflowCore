@@ -37,7 +37,7 @@ export default function WorkflowPickerModal({ open, onClose, workflows, loading,
         </Space>
       )}
     >
-      {error && <Alert type="error" showIcon message="工作流列表加载失败" description={error} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon title="工作流列表加载失败" description={error} style={{ marginBottom: 12 }} />}
       <Table<WorkflowDocumentSummary>
         rowKey="id"
         size="small"
