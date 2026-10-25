@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
+import { useI18n } from './i18n/provider';
 
 export type ThemeMode = 'dark' | 'light';
 
@@ -25,6 +27,9 @@ function applyMode(mode: ThemeMode) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  // antd 内置文案跟随界面语言（分页、日期、空态、Select 无数据…）。此前固定 zhCN，
+  // 英文界面里这些角落仍是中文（2026-10-25 接线）。
+  const { lang } = useI18n();
   const [mode, setMode] = useState<ThemeMode>(() => {
     const initial = readStoredMode();
     applyMode(initial);
@@ -46,7 +51,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeContext.Provider value={value}>
       <ConfigProvider
-        locale={zhCN}
+        locale={lang === 'en' ? enUS : zhCN}
         theme={{
           algorithm: mode === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
           token: {

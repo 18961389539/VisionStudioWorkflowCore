@@ -30,8 +30,9 @@ import { LAYOUT_LIMITS, LAYOUT_PRESETS, MIN_CENTER_WIDTH, MIN_WORKSPACE_HEIGHT, 
 import CanvasMiniMap from './components/CanvasMiniMap';
 import WorkflowImagePreview from './components/WorkflowImagePreview';
 import { automaticResultHeight } from './layout';
-import { catalogNodeData, fallbackCatalog, fallbackCatalogHash, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
-import { dateLocale, getInitialLang, localizeCatalog } from './i18n';
+import { catalogNodeData, fallbackCatalogHash, fallbackCatalogRaw, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
+import { localizeCatalog } from './i18n';
+import { useI18n } from './i18n/provider';
 import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
@@ -88,7 +89,16 @@ import TemplateGalleryModal from './components/TemplateGalleryModal';
 import WorkflowPickerModal from './components/WorkflowPickerModal';
 
 function Editor() {
-  const [catalog, setCatalog] = useState<NodeCatalogItem[]>(fallbackCatalog);
+  // 语言（2026-10-25 接线）：catalog 保存后端英文原文，显示用的本地化目录按语言派生——
+  // 切换语言不再需要重新请求，也不会改写画布上已有节点的名称（节点名属于文档内容）。
+  const { lang, dateLocale: locale } = useI18n();
+  const langRef = useRef(lang);
+  langRef.current = lang;
+  const [rawCatalog, setRawCatalog] = useState<NodeCatalogItem[] | undefined>(undefined);
+  const catalog = useMemo(
+    () => localizeCatalog(rawCatalog ?? fallbackCatalogRaw, lang),
+    [rawCatalog, lang]
+  );
   const [catalogSource, setCatalogSource] = useState<'runtime' | 'fallback'>('fallback');
   const [catalogHash, setCatalogHash] = useState(fallbackCatalogHash);
   const [catalogSchemaVersion, setCatalogSchemaVersion] = useState(fallbackCatalogSchemaVersion);
@@ -376,9 +386,10 @@ function Editor() {
     try {
       const response = await apiFetch(apiUrl('catalog'));
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
-      const data = localizeCatalog(validateCatalog(await response.json()));
-      setCatalog(data);
-      setNodes((current) => hydrateNodesFromCatalog(current, data));
+      const raw = validateCatalog(await response.json());
+      setRawCatalog(raw);
+      // 只在目录真的来自后端时重命名画布节点（沿用既有行为）；语言切换不触发本函数。
+      setNodes((current) => hydrateNodesFromCatalog(current, localizeCatalog(raw, langRef.current)));
       setCatalogSource('runtime');
       setCatalogHash(response.headers.get('X-VisionStudio-Catalog-Hash') ?? 'runtime');
       setCatalogSchemaVersion(Number(response.headers.get('X-VisionStudio-Catalog-Schema') ?? fallbackCatalogSchemaVersion));
@@ -1297,7 +1308,7 @@ function Editor() {
                     type="warning"
                     showIcon
                     message="检测到未保存的本地草稿"
-                    description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(dateLocale(getInitialLang()))}`}
+                    description={`${draftNotice.workflowName || draftNotice.workflowId || '未命名工作流'} · 保存于 ${new Date(draftNotice.savedAt).toLocaleString(locale)}`}
                     action={(
                       <div style={{ display: 'flex', gap: 8 }}>
                         <Button size="small" type="primary" onClick={restoreDraft}>恢复草稿</Button>

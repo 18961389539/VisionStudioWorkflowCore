@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { getInitialLang } from '../i18n';
+import { useI18n } from '../i18n/provider';
 
 /** 节点说明往往同时包含用途、接线、参数和失败语义；默认只显示第一句，完整内容按需展开。 */
 export default function NodeDescription({ text, className = 'node-info-description' }: { text?: string; className?: string }) {
   const [expanded, setExpanded] = useState(false);
-  const zh = getInitialLang() !== 'en';
+  const { lang } = useI18n();
+  const zh = lang !== 'en';
   const full = (text ?? '').trim();
   const summaryEnd = [full.indexOf('。'), full.indexOf('！'), full.indexOf('？'), full.search(/\.(?:\s|$)/)]
     .filter((index) => index >= 0)

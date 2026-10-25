@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Badge, Button, Dropdown, Tag, Tooltip, Typography, type MenuProps } from 'antd';
 import { SecurityAccountBadge } from '../security';
 import { APP_VERSION } from '../version';
-import { dateLocale, getInitialLang } from '../i18n';
+import { useI18n } from '../i18n/provider';
 import { renameDecision } from '../documentSync';
 import { type LayoutPreset, type LayoutState } from '../layout';
 
@@ -49,6 +49,8 @@ function RunClock({ startedAt }: { startedAt?: number }) {
 }
 
 export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset, templates, debug, run, workflow, validation, catalogError, save }: EditorHeaderProps) {
+  // 语言切换入口此前不存在：词表与 Provider 都建好了，用户却只能靠改 localStorage 换语言（2026-10-25）。
+  const { lang, toggleLang, dateLocale: locale } = useI18n();
   return (
     <header className="topbar">
       <div className="topbar-menu-row">
@@ -86,6 +88,11 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
         <Dropdown trigger={['click']} menu={menus.more}>
           <Button className="topbar-more">更多 <span className="menu-caret">▾</span></Button>
         </Dropdown>
+        {/* 英文覆盖是增量的（顶栏菜单、多数面板内部文案仍在迁移中），
+            tooltip 如实说明，避免用户以为切换失效。 */}
+        <Tooltip title={lang === 'zh' ? '切换到英文界面（英文覆盖仍在完善：部分面板内部文案可能仍为中文）' : 'Switch to Chinese'}>
+          <Button className="topbar-lang" type="text" aria-label="切换界面语言" onClick={toggleLang}>{lang === 'zh' ? 'EN' : '中'}</Button>
+        </Tooltip>
         <div className="topbar-account"><SecurityAccountBadge /></div>
       </div>
       <div className="topbar-workflow-row">
@@ -112,10 +119,10 @@ export default function EditorHeader({ menus, layoutPreset, onApplyLayoutPreset,
               title={workflow.dirty
                 ? '有未保存的修改（Ctrl+S 保存）'
                 : workflow.lastSavedAt
-                  ? `已保存 · ${workflow.lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()))}`
+                  ? `已保存 · ${workflow.lastSavedAt.toLocaleTimeString(locale)}`
                   : '自上次保存或加载以来没有修改'}
             >
-              {workflow.dirty ? '未保存' : workflow.lastSavedAt ? `已保存 ${workflow.lastSavedAt.toLocaleTimeString(dateLocale(getInitialLang()), { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
+              {workflow.dirty ? '未保存' : workflow.lastSavedAt ? `已保存 ${workflow.lastSavedAt.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}` : '已保存'}
             </Tag>
           </div>
         </div>

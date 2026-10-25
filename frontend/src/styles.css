@@ -136,6 +136,9 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .topbar-menu-row { border-bottom: 1px solid var(--vs-border-subtle); }
 .topbar-workflow-row { background: var(--vs-bg-side); }
 .topbar-account { margin-left: auto; flex: none; }
+/* 语言切换（2026-10-25）：按钮显示"要切到哪种语言"，比显示当前语言少一次心智转换 */
+.topbar-lang { flex: none; min-width: 32px; padding: 0 6px; color: var(--vs-text-4); font-size: 12px; letter-spacing: .3px; }
+.topbar-lang:hover { color: var(--vs-text-1); background: var(--vs-bg-toolbox-hover); }
 .topbar-left { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; }
 .topbar-divider { flex: none; width: 1px; height: 18px; background: var(--vs-border-frame); }
 .workflow-identity { min-width: 0; overflow: hidden; display: flex; align-items: baseline; gap: 8px; }

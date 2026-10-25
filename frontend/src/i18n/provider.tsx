@@ -21,7 +21,20 @@ export type I18nContextValue = {
   dateLocale: string;
 };
 
-const I18nContext = createContext<I18nContextValue | undefined>(undefined);
+/**
+ * 默认值 = 按已存储偏好静态解析（与 Provider 未接线时的行为一致）。
+ * 这样组件可以在 Provider 之外单独渲染（单元测试、面板独立预览），不会因为缺 Provider 直接抛错；
+ * 代价是"忘了挂 Provider"不会报错——由 `main.tsx` 的接线测试与 e2e 覆盖。
+ */
+const fallbackLang = getInitialLang();
+const I18nContext = createContext<I18nContextValue>({
+  lang: fallbackLang,
+  setLang: () => undefined,
+  toggleLang: () => undefined,
+  t: (key, params) => translate(fallbackLang, key, params),
+  localizeStatus: (value) => localizeStatus(value, fallbackLang),
+  dateLocale: dateLocale(fallbackLang)
+});
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(() => getInitialLang());
@@ -53,7 +66,5 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 }
 
 export function useI18n(): I18nContextValue {
-  const value = useContext(I18nContext);
-  if (!value) throw new Error('useI18n must be used inside <I18nProvider>.');
-  return value;
+  return useContext(I18nContext);
 }

@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Popconfirm, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
 import type { SchemaMigrationStatus, StorageBackupDescriptor, StorageCapacityStatus, StorageRestoreResult } from '../types';
-import { getInitialLang, localizeStatus, translate, type MessageKey, type MessageParams } from '../i18n';
+import { localizeStatus } from '../i18n';
+import { useI18n } from '../i18n/provider';
 import { apiFetch } from '../apiClient';
 import { apiUrl, storage } from '../endpoints';
-
-// i18n Provider 尚未接线：按已存储的语言偏好静态解析词条（默认中文）
-const t = (key: MessageKey, params?: MessageParams) => translate(getInitialLang(), key, params);
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -21,6 +19,7 @@ async function readProblem(response: Response) {
 }
 
 export default function StoragePanel({ open, onClose }: Props) {
+  const { t } = useI18n();
   const [capacity, setCapacity] = useState<StorageCapacityStatus>();
   const [schema, setSchema] = useState<SchemaMigrationStatus>();
   const [backups, setBackups] = useState<StorageBackupDescriptor[]>([]);

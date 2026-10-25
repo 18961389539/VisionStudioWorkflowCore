@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { Input, Select, type InputRef } from 'antd';
 import type { NodeCatalogItem } from '../types';
 import { compatiblePorts, nodePresentation, searchTools, type PortRecommendation } from '../toolboxModel';
-import { getInitialLang } from '../i18n';
+import { useI18n } from '../i18n/provider';
 import { portDisplayName } from '../i18n/catalog';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
@@ -34,7 +34,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 export default function Toolbox({ catalog, recentTypes, onAddNode, connection, onClose }: Props) {
-  const lang = getInitialLang();
+  const { lang } = useI18n();
   const text = (zh: string, en: string) => lang === 'en' ? en : zh;
   const portLabel = (port: { name: string; label?: string }) => portDisplayName(port.name, port.label, lang);
   const [query, setQuery] = useState('');

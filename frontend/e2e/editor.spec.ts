@@ -78,4 +78,24 @@ test.describe('编辑器画布（真实浏览器）', () => {
     // 打不开面板不算失败；关键是画布仍在，且未被错误边界外的异常清空。
     expect(await page.locator('.react-flow__node').count()).toBeGreaterThan(1);
   });
+
+  test('切换界面语言后 <html lang> 与工具箱文案同步（i18n 接线）', async ({ page }) => {
+    // 这条用例守的是"Provider 真的挂上了"：词表与 Provider 早就存在，但 main.tsx 没挂、
+    // 也没有切换入口，语言只能靠手改 localStorage。jsdom 里测不到 <html lang> 的副作用链。
+    await stubApi(page);
+    await page.goto('/');
+
+    const toggle = page.getByRole('button', { name: '切换界面语言' });
+    await expect(toggle).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+
+    await toggle.click();
+
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByLabel('Search nodes')).toBeVisible();
+    await expect(toggle).toHaveText('中');
+    // 语言偏好必须落盘：刷新后仍是英文
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  });
 });

@@ -365,3 +365,36 @@ P0-4 加 grep 守卫；i18n 接线后加"新增中文硬编码"的棘轮。
 3. **P1-7 i18n 接线**：挂 Provider + 顶栏语言切换 + antd locale 跟随（1 人日），之后才能谈英文文案清理。
 4. **P1-4 命令面板、P1-5 PanelTable**：各自 1.5 人日，互相独立，可并行。
 5. **技术债**：antd 6 的 `Alert.message → title` 批量迁移（146 处 Alert / 89 处 `message=`）。
+
+---
+
+## 八、第四批：i18n 接线（2026-10-25 19:25）
+
+**这条是"成本已付、收益没拿"的典型**：`i18n/catalog.ts` 2258 条词表、`provider.tsx` 的 Provider、
+`fallbackCatalogRaw`（专门为语言切换保留英文原文）都在——但 `main.tsx` 没挂 Provider、antd locale 写死 `zhCN`、
+界面上没有任何切换入口，语言只能靠手改 `localStorage`。
+
+| 改动 | 说明 |
+|---|---|
+| 挂载 `I18nProvider` | `main.tsx` 中置于 `ThemeProvider` 外层；Provider 未挂时 `useI18n` 返回默认上下文而不是抛错，面板与单测可独立渲染 |
+| antd locale 跟随 | `theme.tsx` 按语言选 `zhCN` / `enUS`：分页、日期、空态、Select 无数据等内置文案一起切换 |
+| 顶栏语言开关 | 显示"要切到哪种语言"（中文界面显示 `EN`，英文界面显示 `中`），持久化到 `localStorage`，并同步 `<html lang>` |
+| 目录按语言派生 | `catalog` 改为 `rawCatalog + useMemo(localizeCatalog(raw, lang))`；切换语言**不重新请求**、也**不改写画布节点名** |
+| 消费方改为上下文 | Toolbox / VisionNode / NodeDescription / SwitchCaseEditor / StoragePanel / EditorHeader / App 从 `getInitialLang()` 改为 `useI18n()`，切换即重渲染 |
+
+**一条刻意的边界**：语言切换**不重命名画布上已有节点**。节点名是文档内容（会随工作流保存），
+若切换语言时顺手 rehydrate，会静默把文档弄脏、并把用户改过的名字覆盖掉。宁可接受"新加节点用新语言、
+旧节点保持原样"这种混合状态，也不动用户数据。目录来源为后端时，`hydrateNodesFromCatalog` 仍然只在真正
+刷新目录时执行（沿用既有行为）。
+
+**当前英文覆盖范围（如实记录，避免误判为"切换失效"）**
+
+| 已跟随切换 | 仍是中文 |
+|---|---|
+| 工具箱（搜索/收藏/最近/分组）、节点内端口与提示、节点说明、开关分支编辑器、存储维护面板、antd 内置文案、日期时间格式 | 顶栏菜单与按钮文案、绝大多数面板内部文案（相机/机器人/设备/作业/追溯/标定/调优…）、`messageApi` 提示文案 |
+
+顶栏开关的 tooltip 已如实写明"英文覆盖仍在完善"。剩余工作是把各面板里的 `text(zh, en)` 双写字面量
+逐块迁到 `t()` + `messages.ts`，属于机械但量大的活（估 1–2 人日，可按面板切分、互不冲突）。
+
+**验证**：`tsc -b` 通过；`vitest` 87 文件 / **1111 项**全绿（155s）；覆盖率 69.25 / 65.90 / 59.56 / 73.87；
+`build` 通过；`e2e` **5 项**通过（新增"切换语言后 `<html lang>` 与工具箱文案同步、刷新后保持"，24s）。

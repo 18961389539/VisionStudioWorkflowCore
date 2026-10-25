@@ -9,7 +9,7 @@ import NodeCategoryIcon from './NodeCategoryIcon';
 import ExecutionStatus, { executionStatusLabel } from './ExecutionStatus';
 import { summarizeScalars } from '../summaryText';
 import { localizePortName, portDisplayName } from '../i18n/catalog';
-import { getInitialLang } from '../i18n';
+import { useI18n } from '../i18n/provider';
 import { legacyNodeReplacement } from '../legacyNodes';
 import { configureNode, showNodeDetails } from '../uiBridge';
 import type { CSSProperties } from 'react';
@@ -58,7 +58,7 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
     return edge ? [edge] : [];
   });
   // 语言在启动时由 localStorage 确定性决定（项目无运行时切换入口），直接读模块级值即可
-  const lang = getInitialLang();
+  const { lang } = useI18n();
   const legacyReplacement = legacyNodeReplacement(typeKey);
 
   const connectedHandles = useMemo(() => ({

@@ -1,5 +1,5 @@
 import { Button, Input, Tag } from 'antd';
-import { getInitialLang } from '../i18n';
+import { useI18n } from '../i18n/provider';
 
 type Props = {
   value: unknown;
@@ -17,7 +17,8 @@ function parseEditable(value: unknown): { labels?: string[]; raw: string } {
 }
 
 export default function SwitchCaseEditor({ value, disabled = false, onChange }: Props) {
-  const zh = getInitialLang() !== 'en';
+  const { lang } = useI18n();
+  const zh = lang !== 'en';
   const text = (cn: string, en: string) => zh ? cn : en;
   const { labels, raw } = parseEditable(value);
   const committed = (next: string[]) => onChange(JSON.stringify(next));
