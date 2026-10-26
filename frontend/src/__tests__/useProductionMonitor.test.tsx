@@ -153,7 +153,8 @@ describe('生产数据独立轮询', () => {
     { path: '/config', bad: { ...config, cycleDelayMs: null }, resource: 'config' as const },
     { path: '/api/jobs', bad: {}, resource: 'jobs' as const },
     { path: '/api/jobs', bad: [null], resource: 'jobs' as const },
-    { path: '/api/alarms?activeOnly=false', bad: [null], resource: 'alarms' as const },
+    // 报警列表自 2026-10-26 起显式带 take（服务端默认只返回最近 200 条）
+    { path: '/api/alarms?activeOnly=false&take=200', bad: [null], resource: 'alarms' as const },
     { path: '/pending', bad: null, resource: 'pending' as const },
     { path: '/pending', bad: { deviceIds: 'device' }, resource: 'pending' as const },
   ])('无效成功响应只降级对应资源：$resource $path', async ({ path, bad, resource }) => {

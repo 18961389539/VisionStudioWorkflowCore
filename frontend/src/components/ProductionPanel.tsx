@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd';
+import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import type { AlarmRecord, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { isProductionConfig, isProductionStatus } from '../productionConfig';
@@ -207,6 +207,12 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
   );
 
   const alarmsTab = (
+    <>
+      {/* 服务端自 2026-10-26 起按保留策略裁剪历史，并默认只返回最近 200 条：
+          不写清楚会让用户以为「更早的告警凭空消失了」。 */}
+      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
+        最多显示最近 200 条告警；已恢复且超出保留上限（2000 条）的历史会按时间清理，活动告警不会被裁剪。
+      </Typography.Text>
     <Table
       size="small"
       rowKey="id"
@@ -220,7 +226,8 @@ export default function ProductionPanel({ open, onClose, embedded = false }: Pro
         { title: '发生时间', dataIndex: 'raisedAt', width: 180, render: (v: string) => new Date(v).toLocaleString('zh-CN') },
         { title: '确认', width: 90, render: (_: unknown, a: AlarmRecord) => a.acknowledged ? <Tag>已确认</Tag> : <Button size="small" loading={busy.has(`ack:${a.id}`)} onClick={() => void call({ url: alarmEndpoints.ack(a.id), successMessage: '告警已确认', action: `ack:${a.id}` })}>确认</Button> }
       ]}
-    />
+      />
+    </>
   );
 
   const saveRow = (

@@ -113,3 +113,27 @@ React 19 不再警告，但这属于资源泄漏 + 潜在竞态（旧响应覆�
 | `npm run test:e2e` | 6 项通过（26.6s） |
 
 新增测试：`storage.test.ts`（5 项）。改动文件：11 个（错误契约）+ 5 个（存储）+ 1 个（配方弹窗）+ 新增 2 个。
+
+---
+
+## 四、第二轮：报警存储的保留策略与分页（2026-10-26 11:10）
+
+对应本文 P0-2。**问题**：`alarms.json` 只增不减，`GET /api/alarms` 返回全量数组——
+按每班 50 条估算，半年数万条，读全量进内存会让接口与 GC 一起变慢，看板/手机端一次拉满。
+
+**改法（保持响应体仍是数组，前端不必改结构）**：
+
+| 项 | 内容 |
+|---|---|
+| 保留策略 | `AlarmStore.MaxRetainedRecords = 2000`；`TrimToRetention()` 为纯函数：**活动报警永不裁剪**，其余按 `RaisedAt` 保留最近 N 条 |
+| 分页 | `ListAsync(activeOnly, skip, take)` 返回 `AlarmPage(Items, Total)`；`take` 夹在 `[1, 1000]`，默认 200；`skip` 负数按 0 |
+| 端点契约 | `GET /api/alarms?activeOnly=&skip=&take=`，总数放响应头 `X-Total-Count`（不动 body 形状） |
+| 前端 | `endpoints.alarms.active` 显式带 `take=200`；`useProductionMonitor` 复用该常量（此前 hook 里又写了一遍同样的 URL）；告警页签加说明：最多显示最近 200 条、超限历史按策略清理、活动报警不裁剪 |
+
+**为什么响应体不改成分页对象**：改结构会同时动 `useProductionMonitor` 的形状校验与 3 个测试，
+收益只是"少一个响应头"。用 `X-Total-Count` + 默认 take 是向后兼容的最小改动；将来要做"加载更多"再谈结构。
+
+**测试**：新增 `AlarmRetentionTests`（5 项）：裁剪保留活动报警、低于上限不动、活动超限也不丢、
+`Raise` 落盘后分页与 Total、`take` 夹紧与负 `skip`。
+后端 `VisionStudio.Api.Tests` **434 项全绿**（4 分 04 秒）；OpenAPI 快照已用 `scripts/export-openapi.ps1` 重导出（+24 行）。
+前端 89 文件 / 1120 项、覆盖率 69.31/66.10/59.75/73.91、build、e2e 6 项均通过。

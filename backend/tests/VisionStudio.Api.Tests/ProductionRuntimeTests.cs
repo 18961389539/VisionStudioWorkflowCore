@@ -64,7 +64,7 @@ public sealed class ProductionRuntimeTests
 
         Assert.True(service.Status.WatchdogTrips >= 2);
         Assert.True(service.Status.ErrorCount >= 2);
-        var active = await alarms.ListAsync(true, default);
+        var active = (await alarms.ListAsync(true, 0, AlarmStore.DefaultPageSize, default)).Items;
         Assert.Contains(active, x => x.Code == "PROD-WATCHDOG");
         Assert.Contains(active, x => x.Code == "PROD-FAULTED");
 
@@ -150,7 +150,7 @@ public sealed class ProductionRuntimeTests
         Assert.Equal(ProductionRuntimeState.Faulted, status.State);
         Assert.True(status.ProductionLocked);
         Assert.Contains("stop timed out", status.LastError ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(await alarms.ListAsync(true, default), x => x.Code == "PROD-STOP-TIMEOUT");
+        Assert.Contains((await alarms.ListAsync(true, 0, AlarmStore.DefaultPageSize, default)).Items, x => x.Code == "PROD-STOP-TIMEOUT");
 
         await Task.Delay(500);
         status = await service.StopAsync(default);

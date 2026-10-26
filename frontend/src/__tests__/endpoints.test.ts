@@ -48,7 +48,8 @@ describe('endpoints', () => {
     expect(storage.backups).toBe('/api/storage/backups');
     expect(investigations.forTrace('run-1')).toBe('/api/investigations/for-trace/run-1');
     expect(hardwareProvenance.byKindAndId('camera', 'c1')).toBe('/api/hardware-provenance/camera/c1');
-    expect(alarms.active).toBe('/api/alarms?activeOnly=false');
+    // 2026-10-26：服务端改为分页（默认 200 条），客户端显式声明 take
+    expect(alarms.active).toBe('/api/alarms?activeOnly=false&take=200');
     expect(diagnostics.events).toBe('/api/diagnostics/events?take=250');
   });
 });

@@ -3,6 +3,7 @@ import type { AlarmRecord, ProductionRuntimeConfig, ProductionRuntimeStatus } fr
 import { responseErrorMessage } from './apiErrors';
 import { isProductionConfig, isProductionStatus } from './productionConfig';
 import { apiFetch } from './apiClient';
+import { alarms as alarmsEndpoint } from './endpoints';
 import { apiUrl } from './endpoints';
 
 export type ProductionJobItem = { id: string; name: string; publishedVersion?: number | null };
@@ -21,7 +22,8 @@ const endpoints: Record<Resource, { url: string; label: string }> = {
   status: { url: apiUrl('production/status'), label: '生产状态' },
   config: { url: apiUrl('production/config'), label: '生产配置' },
   jobs: { url: apiUrl('jobs'), label: '配方列表' },
-  alarms: { url: apiUrl('alarms?activeOnly=false'), label: '告警记录' },
+  // 复用 endpoints.ts 的常量，避免同一路径在 hook 里再写一遍（改 take 时容易漏改一处）
+  alarms: { url: alarmsEndpoint.active, label: '告警记录' },
   pending: { url: apiUrl('production/device-actions/pending'), label: '待核对动作清单' },
 };
 const resources = Object.keys(endpoints) as Resource[];

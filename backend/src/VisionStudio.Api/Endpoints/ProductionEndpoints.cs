@@ -91,9 +91,14 @@ public static class ProductionEndpoints
             });
         }).RequireAdministrator("production.device-actions.read", "production");
 
-        app.MapGet("/api/alarms", async (bool? activeOnly, AlarmStore alarms, CancellationToken ct) =>
-            Results.Ok(await alarms.ListAsync(activeOnly ?? false, ct)))
-            .Produces<IReadOnlyList<AlarmRecord>>();
+        // 分页 + 总数（2026-10-26）：此前返回全量数组，报警历史只增不减时会一次拉进手机端/看板。
+        // 保持响应体仍是数组（前端不必改），总数放 X-Total-Count；take 上限由 Store 夹紧。
+        app.MapGet("/api/alarms", async (bool? activeOnly, int? skip, int? take, HttpContext http, AlarmStore alarms, CancellationToken ct) =>
+        {
+            var page = await alarms.ListAsync(activeOnly ?? false, skip ?? 0, take ?? AlarmStore.DefaultPageSize, ct);
+            http.Response.Headers["X-Total-Count"] = page.Total.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return Results.Ok(page.Items);
+        }).Produces<IReadOnlyList<AlarmRecord>>();
 
         app.MapPost("/api/alarms/{id}/ack", async (string id, AlarmStore alarms, CancellationToken ct) =>
             Results.Ok(await alarms.AcknowledgeAsync(id, ct))).RequireOperator("alarm.ack", "alarm");

@@ -285,7 +285,8 @@ export const storage = {
 // ── alarms ────────────────────────────────────────────────────────────────────
 export const alarms = {
   list: apiUrl('alarms'),
-  active: apiUrl('alarms?activeOnly=false'),
+  // take 显式写明（2026-10-26）：服务端默认只返回最近 200 条，客户端不要依赖"默认全量"。
+  active: apiUrl('alarms?activeOnly=false&take=200'),
   ack: (id: string) => apiUrl(`alarms/${encodeURIComponent(id)}/ack`)
 } as const;
 
