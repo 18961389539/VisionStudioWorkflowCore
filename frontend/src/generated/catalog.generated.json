@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "4f1ce636eecbd6f113ab9a63feb7c44b82a431ca54d6ff6c2845998bd1a34b7d",
+  "hash": "714ef797f4d6f7df613dc6f6f38b65b4a0e74f1a937e971cd75af20e3e743d22",
   "items": [
     {
       "type": "image.acquire",
@@ -34118,6 +34118,213 @@
         "executionMode": "Auto"
       },
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "recognition.barcodeQuality",
+      "displayName": "Barcode Quality Metrics",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        },
+        {
+          "name": "decodeOk",
+          "dataType": "Boolean",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "symbolContrast",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "modulation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "axialNonUniformity",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "darkFraction",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "grade",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "numericGrade",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "gridMode",
+          "label": "Grid Mode",
+          "type": "select",
+          "defaultValue": "modules",
+          "options": [
+            {
+              "label": "Module rows/cols",
+              "value": "modules"
+            },
+            {
+              "label": "Cell size (px)",
+              "value": "cellsize"
+            },
+            {
+              "label": "Whole ROI (SC only)",
+              "value": "whole"
+            }
+          ],
+          "group": "Grid",
+          "description": "How the module grid is derived. Module rows/cols is exact for matrix codes; cell size works when only the module pitch is known; whole ROI computes symbol contrast only."
+        },
+        {
+          "name": "rows",
+          "label": "Module Rows",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 1,
+          "max": 256,
+          "step": 1,
+          "group": "Grid",
+          "description": "Number of module rows in the symbol (for example 20 for a 20x20 DataMatrix).",
+          "visibleWhen": {
+            "parameter": "gridMode",
+            "values": [
+              "modules"
+            ]
+          },
+          "integer": true
+        },
+        {
+          "name": "cols",
+          "label": "Module Columns",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 1,
+          "max": 256,
+          "step": 1,
+          "group": "Grid",
+          "description": "Number of module columns in the symbol.",
+          "visibleWhen": {
+            "parameter": "gridMode",
+            "values": [
+              "modules"
+            ]
+          },
+          "integer": true
+        },
+        {
+          "name": "cellSizePx",
+          "label": "Cell Size",
+          "type": "number",
+          "defaultValue": 4,
+          "min": 1,
+          "max": 512,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Grid",
+          "description": "Module pitch in pixels; the grid is derived from the ROI size divided by this pitch.",
+          "visibleWhen": {
+            "parameter": "gridMode",
+            "values": [
+              "cellsize"
+            ]
+          }
+        },
+        {
+          "name": "enableGrade",
+          "label": "Enable Grade",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Grading",
+          "description": "Emit grade/numericGrade/pass. Disable when you only need the raw metrics and do not want a grade in reports."
+        },
+        {
+          "name": "minGrade",
+          "label": "Minimum Grade",
+          "type": "select",
+          "defaultValue": "C",
+          "options": [
+            {
+              "label": "A",
+              "value": "A"
+            },
+            {
+              "label": "B",
+              "value": "B"
+            },
+            {
+              "label": "C",
+              "value": "C"
+            },
+            {
+              "label": "D",
+              "value": "D"
+            }
+          ],
+          "group": "Grading",
+          "description": "Minimum acceptable indicator grade; pass is true when the computed grade is at least this letter.",
+          "visibleWhen": {
+            "parameter": "enableGrade",
+            "values": [
+              "true"
+            ]
+          }
+        }
+      ],
+      "description": "Measure three ISO/IEC 15415 parameters from one image: symbol contrast (Rmax-Rmin in the ROI), a module modulation proxy (worst module deviation from the global mid level) and axial non-uniformity (left/right and top/bottom half contrast ratio). The grade is the worst of those plus decode: wire decodeOk from recognition.barcode so an undecodable symbol grades F immediately. Scope is explicit: this is an **indicator grade**, not a certified ISO report - fixed pattern damage, unused error correction, grid non-uniformity and calibrated lighting are out of scope, and certified compliance still needs a dedicated verifier. The ROI should be tightened around the symbol; specular hotspots inflate Rmax. Grid mode whole computes only symbol contrast.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,

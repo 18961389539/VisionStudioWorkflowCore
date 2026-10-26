@@ -120,6 +120,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'collection.detectionPoints': 'crosshair', 'geometry.fitFromPoints': 'line', 'logic.boolean': 'branch',
   'collection.detections.filter': 'sliders', 'collection.detections.sort': 'detections',
   'collection.detections.at': 'crosshair', 'collection.detections.count': 'histogram',
+  'recognition.barcodeQuality': 'barcode',
   'recognition.barcode': 'barcode', 'recognition.ocr': 'text', 'text.match': 'text', 'text.regex': 'text',
   'inference.classification': 'inference', 'inference.detection': 'detections', 'inference.segmentation': 'region', 'inference.anomaly': 'target',
   'output.database': 'grid',
