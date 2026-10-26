@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>概念 01 · 工程工作站 VisionStudio Pro</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0f1318; --panel:#151a21; --panel2:#181e26; --panel3:#1b222b;
+    --line:#232b35; --line2:#2c3542; --line3:#394555;
+    --text:#d8dee9; --t2:#b6c1cf; --t3:#96a3b3; --t4:#7b8899;
+    --accent:#4c9aff; --accent-dim:#1e3a5f; --ok:#3ddc97; --warn:#e0b04a; --bad:#ff7875;
+    --mono:"JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  html,body{height:100%}
+  body{
+    background:#080b0f; color:var(--text); overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    font-size:13px; -webkit-font-smoothing:antialiased;
+  }
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1200px 600px at 50% 0%,#141a22 0%,#080b0f 70%);}
+  .cap{height:40px;flex:none;width:100%;display:flex;align-items:center;gap:10px;
+    padding:0 18px;background:#0c1117;color:#d7e2ee;font-size:12px;letter-spacing:.1px;
+    border-bottom:1px solid #1c242e;z-index:50}
+  .cap .num{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:10.5px;font-weight:700;font-family:Consolas,monospace;background:#182231;color:#6fc6ff}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#6fc6ff}
+  .stage{flex:none;margin:auto;width:1440px;height:900px;display:flex;flex-direction:column;
+    background:var(--bg);border:1px solid #262f3a;box-shadow:0 30px 90px rgba(0,0,0,.65);
+    transform-origin:center center;overflow:hidden;position:relative}
+  .i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .i.sm{width:12px;height:12px}
+  kbd{font-family:var(--mono);font-size:10px;padding:1px 5px;border:1px solid var(--line3);
+    border-radius:4px;color:var(--t4);background:#11161d}
+
+  /* ---------- 标题栏 ---------- */
+  .titlebar{height:36px;flex:none;display:flex;align-items:center;gap:14px;padding:0 10px 0 12px;
+    background:linear-gradient(#1a212a,#161c24);border-bottom:1px solid #0b0f14}
+  .brand{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.2px}
+  .mark{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;font-size:10px;
+    font-weight:800;color:#04121f;background:linear-gradient(140deg,#6fc6ff,#4c9aff);letter-spacing:-.5px}
+  .pro{font-size:9px;font-weight:700;letter-spacing:1.2px;color:#7fc0ff;border:1px solid #2f5b85;
+    padding:1px 4px;border-radius:3px;background:#14263a}
+  .menu{display:flex;gap:2px;font-size:12.5px;color:var(--t3)}
+  .menu span{padding:4px 8px;border-radius:4px}
+  .menu span:hover{background:#232c38;color:var(--text)}
+  .tb-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .omni{display:flex;align-items:center;gap:7px;height:24px;width:238px;padding:0 8px;
+    border:1px solid var(--line2);border-radius:5px;background:#111720;color:var(--t4);font-size:12px}
+  .omni kbd{margin-left:auto}
+  .tb-ico{width:24px;height:24px;display:grid;place-items:center;border-radius:5px;color:var(--t3)}
+  .tb-ico:hover{background:#232c38;color:var(--text)}
+  .avatar{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+    background:#2b3a4d;color:#cfe3ff;border:1px solid #3b4c62;margin-left:2px}
+
+  /* ---------- 文档页签 ---------- */
+  .tabbar{height:34px;flex:none;display:flex;align-items:stretch;gap:0;background:#12171e;
+    border-bottom:1px solid var(--line)}
+  .tab{display:flex;align-items:center;gap:7px;padding:0 12px;font-size:12.5px;color:var(--t3);
+    border-right:1px solid var(--line);position:relative;max-width:250px}
+  .tab.active{background:var(--bg);color:var(--text);box-shadow:inset 0 2px 0 var(--accent)}
+  .tab .dot{width:5px;height:5px;border-radius:50%;background:var(--warn);flex:none}
+  .tab .i{opacity:.65}
+  .tab .x{opacity:.4;margin-left:2px}
+  .tab-add{width:32px;display:grid;place-items:center;color:var(--t4)}
+  .tab-meta{margin-left:auto;display:flex;align-items:center;gap:14px;padding-right:12px;
+    font-size:11.5px;color:var(--t4)}
+  .tab-meta b{color:var(--t2);font-weight:500}
+  .branch{display:flex;align-items:center;gap:5px;color:var(--t3)}
+
+  /* ---------- 命令条 ---------- */
+  .cmdbar{height:40px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;
+    background:#171d25;border-bottom:1px solid var(--line)}
+  .btn{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:5px;
+    border:1px solid var(--line2);background:#1d252f;color:var(--t2);font-size:12px;white-space:nowrap}
+  .btn:hover{border-color:var(--line3);color:#fff}
+  .btn.primary{background:linear-gradient(#2f6fb8,#28619f);border-color:#3f83ce;color:#fff;
+    font-weight:500;box-shadow:0 1px 0 rgba(255,255,255,.08) inset}
+  .btn.ghost{background:transparent;border-color:transparent;color:var(--t3)}
+  .btn.dim{opacity:.42}
+  .sep{width:1px;height:18px;background:var(--line2);margin:0 4px}
+  .pass{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ok);
+    background:rgba(61,220,151,.09);border:1px solid rgba(61,220,151,.22);padding:3px 7px;border-radius:4px}
+  .cmd-note{font-size:11.5px;color:var(--t4);font-family:var(--mono)}
+  .cmd-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .chip{display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:4px;
+    background:#141a22;border:1px solid var(--line);font-size:11.5px;color:var(--t3)}
+  .chip b{color:var(--t2);font-weight:500}
+  .chip .on{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px rgba(61,220,151,.7)}
+
+  /* ---------- 主体 ---------- */
+  .work{flex:1;display:grid;grid-template-columns:242px 1fr 322px;min-height:0}
+
+  /* 工具箱 */
+  .toolbox{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .tb-head{padding:8px 10px 6px;border-bottom:1px solid var(--line)}
+  .search{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:5px;
+    background:#10151c;border:1px solid var(--line2);color:var(--t4);font-size:12px}
+  .seg{display:flex;margin-top:7px;background:#10151c;border:1px solid var(--line);border-radius:5px;padding:2px}
+  .seg div{flex:1;text-align:center;font-size:11.5px;padding:3px 0;border-radius:3px;color:var(--t4)}
+  .seg div.on{background:#232d3a;color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.4)}
+  .tb-scroll{flex:1;overflow:hidden;padding:4px 0 0}
+  .grp{display:flex;align-items:center;gap:5px;padding:6px 10px 4px;font-size:11px;
+    letter-spacing:.4px;color:var(--t4);text-transform:uppercase}
+  .grp .cnt{margin-left:auto;font-family:var(--mono);font-size:10px;color:#64707f}
+  .ni{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 14px;font-size:12px;color:var(--t2);
+    border-left:2px solid transparent}
+  .ni:hover{background:var(--panel3)}
+  .ni.on{background:#16293d;border-left-color:var(--accent);color:#e8f1ff}
+  .ni .ic{width:18px;height:18px;border-radius:4px;display:grid;place-items:center;flex:none;
+    background:#232d3a;color:#8fb6dd}
+  .ni .ic.g{color:#7fdcb0;background:#1a2f28}
+  .ni .ic.p{color:#c3a6ff;background:#271f3a}
+  .ni .ic.y{color:#e6c477;background:#2e2718}
+  .ni .typ{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:#5d6b7c}
+  .star{color:var(--warn);font-size:9px}
+  .tb-foot{flex:none;border-top:1px solid var(--line);padding:6px 10px;display:flex;gap:10px;
+    font-size:11px;color:var(--t4);font-family:var(--mono)}
+  .tb-foot b{color:var(--t3);font-weight:500}
+
+  /* 画布 */
+  .center{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+  .canvas{position:relative;flex:1;min-height:0;overflow:hidden;
+    background:
+      radial-gradient(circle at 1px 1px, #222a34 1px, transparent 0) 0 0/16px 16px,
+      radial-gradient(900px 420px at 45% 30%, #141b24 0%, #0e1218 75%)}
+  .canvas-tools{position:absolute;left:10px;top:10px;display:flex;flex-direction:column;gap:2px;z-index:6;
+    background:#161c24;border:1px solid var(--line2);border-radius:6px;padding:3px;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  .canvas-tools .t{width:26px;height:26px;display:grid;place-items:center;border-radius:4px;color:var(--t3)}
+  .canvas-tools .t.on{background:#22344a;color:#9fcbff}
+  .canvas-tools .t:hover{background:#232d3a;color:#fff}
+  .canvas-hint{position:absolute;right:12px;top:12px;display:flex;gap:6px;z-index:6}
+  .pill{display:flex;align-items:center;gap:5px;height:23px;padding:0 8px;border-radius:11px;
+    background:rgba(20,26,34,.92);border:1px solid var(--line2);font-size:11px;color:var(--t3);
+    backdrop-filter:blur(4px)}
+
+  .edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  .edges path{fill:none;stroke:#3c7fbf;stroke-width:1.6}
+  .edges path.dim{stroke:#2c4a6a;stroke-width:1.4}
+  .edges path.hot{stroke:#63b3ff;stroke-width:2.1;filter:drop-shadow(0 0 4px rgba(99,179,255,.55))}
+
+  .node{position:absolute;width:176px;background:#1a212a;border:1px solid #37424f;border-radius:6px;
+    box-shadow:0 6px 16px rgba(0,0,0,.45);z-index:3;overflow:visible}
+  .node-h{height:27px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid #2a333f;
+    background:linear-gradient(#242d38,#1f2731);border-radius:5px 5px 0 0;font-size:12px;font-weight:500}
+  .node-h .ic{width:14px;height:14px;display:grid;place-items:center;color:#7fb0dd}
+  .node-h .tag{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:#6f7e90}
+  .node-b{padding:4px 0 6px}
+  .row{position:relative;height:20px;display:flex;align-items:center;gap:5px;padding:0 9px;
+    font-size:11px;color:var(--t3)}
+  .row .ty{margin-left:auto;font-family:var(--mono);font-size:9px;color:#66748a}
+  .port{position:absolute;width:8px;height:8px;border-radius:50%;background:#2b3a4a;border:1.5px solid #5b7189;
+    top:50%;transform:translateY(-50%)}
+  .port.in{left:-5px}
+  .port.out{right:-5px;background:#1d3f5e;border-color:#5aa2e0}
+  .node.sel{border-color:#4c9aff;box-shadow:0 0 0 1px rgba(76,154,255,.55),0 10px 26px rgba(0,0,0,.55)}
+  .node.sel .node-h{background:linear-gradient(#2b3f56,#22364c)}
+  .node.sel .node-b{background:#1b232d}
+  .node.ghost{opacity:.85;border-style:dashed}
+  .node .brk{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--bad);
+    border:1.5px solid #2a0f12;left:-14px;top:-4px}
+  .node .run{position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;border-radius:50%;
+    background:var(--ok);border:2px solid #12241c;box-shadow:0 0 8px rgba(61,220,151,.6)}
+  .node.fail{border-color:#7d3b3d}
+  .handle{position:absolute;width:6px;height:6px;background:#0f1318;border:1px solid #6aa8ee}
+  .h1{left:-4px;top:-4px}.h2{right:-4px;top:-4px}.h3{left:-4px;bottom:-4px}.h4{right:-4px;bottom:-4px}
+
+  .groupbox{position:absolute;border:1px dashed #3d4c60;border-radius:8px;background:rgba(45,72,102,.09);z-index:2}
+  .groupbox .gh{position:absolute;left:0;top:-22px;font-size:10.5px;color:#7f93aa;display:flex;gap:6px;align-items:center}
+  .groupbox .gh b{color:#a9c5e0;font-weight:500}
+  .note{position:absolute;z-index:4;width:158px;background:rgba(58,48,20,.82);border:1px solid #6a5a26;
+    border-radius:5px;padding:7px 8px;font-size:10.5px;line-height:1.55;color:#e8d9a8;
+    box-shadow:0 6px 14px rgba(0,0,0,.4)}
+  .note b{color:#ffe9a8;font-weight:600}
+
+  .minimap{position:absolute;right:12px;bottom:12px;width:158px;height:98px;z-index:5;
+    background:rgba(13,18,24,.94);border:1px solid var(--line2);border-radius:5px;overflow:hidden}
+  .minimap .vp{position:absolute;left:16px;top:20px;width:96px;height:58px;border:1px solid #6aa8ee;
+    background:rgba(76,154,255,.08)}
+  .mini-n{position:absolute;background:#3a4757;border-radius:1px}
+  .zoom{position:absolute;right:12px;bottom:118px;display:flex;align-items:center;gap:8px;z-index:5;
+    background:rgba(20,26,34,.94);border:1px solid var(--line2);border-radius:5px;padding:3px 7px;
+    font-size:11px;color:var(--t3);font-family:var(--mono)}
+
+  /* 底部结果区 */
+  .dock{height:214px;flex:none;display:flex;flex-direction:column;background:var(--panel);
+    border-top:1px solid var(--line2)}
+  .dock-h{height:30px;flex:none;display:flex;align-items:center;gap:2px;padding:0 8px;
+    border-bottom:1px solid var(--line);background:#171d25}
+  .dt{display:flex;align-items:center;gap:6px;padding:0 10px;height:30px;font-size:12px;color:var(--t4);
+    border-bottom:2px solid transparent}
+  .dt.on{color:#fff;border-bottom-color:var(--accent);background:#1b232d}
+  .dt .n{font-size:10px;font-family:var(--mono);background:#2a3543;color:#b9c7d8;border-radius:8px;
+    padding:0 5px;line-height:14px}
+  .dt .n.bad{background:#4a2325;color:#ffb4b2}
+  .dock-meta{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:11px;
+    color:var(--t4);padding-right:6px}
+  .dock-meta b{color:var(--ok);font-weight:500}
+  .dock-body{flex:1;display:grid;grid-template-columns:1fr 236px;min-height:0}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  thead th{text-align:left;font-weight:500;color:var(--t4);font-size:10.5px;padding:5px 10px;
+    border-bottom:1px solid var(--line);position:sticky;top:0;background:#161c24;letter-spacing:.3px}
+  tbody td{padding:4px 10px;border-bottom:1px solid #1c232c;color:var(--t2)}
+  tbody tr:hover{background:#1a2129}
+  td.mono,.mono{font-family:var(--mono);font-size:10.5px;color:var(--t3)}
+  .st{display:inline-flex;align-items:center;gap:5px}
+  .st .d{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .st.w .d{background:var(--warn)}
+  .bar{height:4px;border-radius:2px;background:#26313d;width:64px;display:inline-block;vertical-align:middle;
+    margin-right:6px;overflow:hidden}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#3f83ce,#6fc6ff)}
+  .chartbox{border-left:1px solid var(--line);padding:8px 10px;display:flex;flex-direction:column}
+  .chartbox .ct{font-size:11px;color:var(--t4);display:flex;justify-content:space-between}
+  .chartbox .ct b{color:var(--t2);font-weight:500}
+  .bars{flex:1;display:flex;align-items:flex-end;gap:5px;padding-top:8px}
+  .bars div{flex:1;background:linear-gradient(#5aa2e0,#2c5f8d);border-radius:2px 2px 0 0;position:relative}
+  .bars div.hi{background:linear-gradient(#9fd0ff,#4c9aff)}
+  .bars div span{position:absolute;bottom:-15px;left:50%;transform:translateX(-50%);
+    font-size:8.5px;color:#5f6d7e;font-family:var(--mono)}
+
+  /* 检查器 */
+  .inspector{background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .ins-h{padding:9px 11px 0;border-bottom:1px solid var(--line)}
+  .ins-title{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600}
+  .ins-title .ic{width:18px;height:18px;border-radius:4px;display:grid;place-items:center;background:#22344a;color:#8fc6ff}
+  .ins-sub{display:flex;align-items:center;gap:6px;margin-top:3px;font-family:var(--mono);font-size:10px;color:#6f7e90}
+  .ins-badges{display:flex;gap:5px;margin:7px 0 8px}
+  .bdg{font-size:9.5px;padding:1.5px 5px;border-radius:3px;border:1px solid var(--line2);color:var(--t3)}
+  .bdg.ok{color:#8fe3bb;border-color:#2c5c48;background:rgba(61,220,151,.08)}
+  .bdg.t{font-family:var(--mono);color:#9fcbff;border-color:#2f4f70;background:#152436}
+  .ins-tabs{display:flex;gap:14px;font-size:12px;color:var(--t4);border-top:1px solid #202832;padding-top:7px}
+  .ins-tabs span{padding-bottom:7px;border-bottom:2px solid transparent}
+  .ins-tabs span.on{color:#fff;border-bottom-color:var(--accent)}
+  .ins-body{flex:1;overflow:hidden;padding:8px 0}
+  .sec{display:flex;align-items:center;gap:6px;padding:5px 11px 4px;font-size:10.5px;
+    letter-spacing:.4px;color:var(--t4);text-transform:uppercase}
+  .sec .line{flex:1;height:1px;background:#202832}
+  .fld{display:flex;align-items:center;gap:8px;padding:2px 11px;min-height:24px}
+  .fld label{width:88px;flex:none;font-size:11.5px;color:var(--t3)}
+  .ctl{flex:1;display:flex;align-items:center;height:22px;padding:0 7px;border-radius:4px;
+    background:#111720;border:1px solid var(--line2);font-size:11.5px;color:var(--t2);gap:6px}
+  .ctl .v{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--t4)}
+  .ctl.sel:after{content:"";margin-left:auto;width:0;height:0;border-left:3px solid transparent;
+    border-right:3px solid transparent;border-top:4px solid #6b7b8e}
+  .seg2{flex:1;display:flex;background:#111720;border:1px solid var(--line2);border-radius:4px;padding:1.5px}
+  .seg2 div{flex:1;text-align:center;font-size:10.5px;line-height:17px;border-radius:3px;color:var(--t4)}
+  .seg2 div.on{background:#27333f;color:#e6eef8}
+  .frame-chip{display:flex;align-items:center;gap:6px;padding:5px 7px;border:1px solid #2b3a4b;
+    border-radius:4px;background:#121a23;font-size:10.5px;color:#9db6cf}
+  .frame-chip .bx{width:22px;height:16px;border:1px solid #4a6b8c;border-radius:2px;position:relative;background:#0e1620}
+  .frame-chip .bx:after{content:"";position:absolute;inset:3px;border:1px dashed #7396b9}
+  .ports{display:flex;flex-wrap:wrap;gap:4px;padding:2px 11px 4px}
+  .pt{display:flex;align-items:center;gap:4px;font-size:10px;padding:1px 5px;border-radius:3px;
+    background:#16202b;border:1px solid #26333f;color:#9fb3c8;font-family:var(--mono)}
+  .pt i{width:4px;height:4px;border-radius:50%;background:#5aa2e0}
+  .ins-foot{flex:none;border-top:1px solid var(--line);padding:8px 11px;display:flex;align-items:center;gap:8px}
+  .ins-foot .est{font-size:10.5px;color:var(--t4);line-height:1.5;font-family:var(--mono)}
+  .ins-foot .est b{color:#9fcbff;font-weight:500}
+  .ins-foot .btns{margin-left:auto;display:flex;gap:6px}
+  .btn.sm{height:24px;font-size:11.5px;padding:0 9px}
+  .btn.solid{background:#2b6db3;border-color:#3f83ce;color:#fff}
+
+  /* 状态栏 */
+  .statusbar{height:24px;flex:none;display:flex;align-items:center;gap:14px;padding:0 10px;
+    background:#10161d;border-top:1px solid #0a0e13;font-size:10.5px;color:#758396;font-family:var(--mono)}
+  .statusbar .grp2{display:flex;align-items:center;gap:6px}
+  .statusbar .g{width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 5px rgba(61,220,151,.8)}
+  .statusbar .right{margin-left:auto;display:flex;gap:14px}
+  .statusbar b{color:#9fb0c4;font-weight:500}
+
+  .badge-float{position:fixed;left:18px;bottom:16px;display:flex;align-items:center;gap:9px;z-index:99;
+    padding:7px 13px 7px 9px;border-radius:999px;background:rgba(12,17,23,.86);border:1px solid #2b3542;
+    color:#c6d3e2;font-size:12px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  .badge-float .num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+    font-weight:700;background:#1d4a75;color:#a9d6ff;font-family:var(--mono)}
+  .badge-float span{color:#7d8b9c}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.6 16.6L21 21"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-step" viewBox="0 0 24 24"><path d="M6 4l9 8-9 8z"/><path d="M18 4v16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+  <symbol id="i-img" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 17l-5-5-6 6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 015.5 4H9M15 4h3.5A1.5 1.5 0 0120 5.5V9M20 15v3.5a1.5 1.5 0 01-1.5 1.5H15M9 20H5.5A1.5 1.5 0 014 18.5V15"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6 4v10a4 4 0 004 4h8"/><circle cx="6" cy="4" r="1.6"/><circle cx="18" cy="18" r="1.6"/><circle cx="6" cy="18" r="1.6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 2v3M14 2v3M10 19v3M14 19v3M2 10h3M2 14h3M19 10h3M19 14h3"/></symbol>
+  <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.6L10 19z"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 12V6.5a1.5 1.5 0 013 0V11m0-1.5a1.5 1.5 0 013 0V12m0-1a1.5 1.5 0 013 0v5a5 5 0 01-5 5h-1.5a5 5 0 01-4-2l-2.2-3a1.6 1.6 0 012.5-2L8 14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="viewport">
+<div class="cap"><span class="num">01</span><b>工程工作站</b><span class="sub">· 深度调试与标定的桌面级 IDE</span><span class="right"><i class="dot"></i>VisionStudio PRO · 产品形态备选 · 2026-10-26</span></div>
+<div class="stage">
+
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <div class="brand"><span class="mark">VS</span>VisionStudio<span class="pro">PRO</span></div>
+    <nav class="menu"><span>文件</span><span>编辑</span><span>视图</span><span>运行</span><span>工具</span><span>帮助</span></nav>
+    <div class="tb-right">
+      <div class="omni"><svg class="i sm"><use href="#i-search"/></svg><span>搜索节点、命令</span><kbd>Ctrl K</kbd></div>
+      <div class="tb-ico" style="font-size:11px">中</div>
+      <div class="tb-ico"><svg class="i"><use href="#i-moon"/></svg></div>
+      <div class="avatar">刘</div>
+    </div>
+  </div>
+
+  <!-- 文档页签 -->
+  <div class="tabbar">
+    <div class="tab active"><svg class="i sm"><use href="#i-branch"/></svg>上料定位<span class="dot"></span><svg class="i sm x"><use href="#i-x"/></svg></div>
+    <div class="tab"><svg class="i sm"><use href="#i-branch"/></svg>侧封检测<svg class="i sm x"><use href="#i-x"/></svg></div>
+    <div class="tab"><svg class="i sm"><use href="#i-branch"/></svg>二维码读码<svg class="i sm x"><use href="#i-x"/></svg></div>
+    <div class="tab-add"><svg class="i sm"><use href="#i-plus"/></svg></div>
+    <div class="tab-meta">
+      <span class="branch"><svg class="i sm"><use href="#i-branch"/></svg>main</span>
+      <span>版本 <b>v0.63.2</b></span>
+      <span>已保存 12:04</span>
+    </div>
+  </div>
+
+  <!-- 命令条 -->
+  <div class="cmdbar">
+    <div class="btn primary"><svg class="i sm"><use href="#i-play"/></svg>运行</div>
+    <div class="btn"><svg class="i sm"><use href="#i-step"/></svg>单步</div>
+    <div class="btn dim"><svg class="i sm"><use href="#i-stop"/></svg>中止</div>
+    <div class="sep"></div>
+    <div class="btn ghost"><svg class="i sm"><use href="#i-check"/></svg>校验</div>
+    <div class="pass"><svg class="i sm"><use href="#i-check"/></svg>校验通过</div>
+    <span class="cmd-note">已编译 · 23 节点 · 4 并行组</span>
+    <div class="cmd-right">
+      <div class="chip"><svg class="i sm"><use href="#i-target"/></svg>产线 A · 工位 3</div>
+      <div class="chip"><span class="on"></span>相机 <b>2/2</b></div>
+      <div class="chip"><svg class="i sm"><use href="#i-clock"/></svg>断点 <b>1</b></div>
+    </div>
+  </div>
+
+  <div class="work">
+    <!-- 工具箱 -->
+    <aside class="toolbox">
+      <div class="tb-head">
+        <div class="search"><svg class="i sm"><use href="#i-search"/></svg><span>搜索 171 个节点</span></div>
+        <div class="seg"><div class="on">节点</div><div>模板</div><div>模块</div></div>
+      </div>
+      <div class="tb-scroll">
+        <div class="grp">采集 <span class="cnt">12</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>图像采集<span class="typ">acq</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>同步采集<span class="typ">sync</span></div>
+        <div class="grp">图像处理 <span class="cnt">38</span></div>
+        <div class="ni"><span class="ic g"><svg class="i sm"><use href="#i-img"/></svg></span>阈值分割<span class="typ">thr</span><span class="star">★</span></div>
+        <div class="ni"><span class="ic g"><svg class="i sm"><use href="#i-img"/></svg></span>形态学<span class="typ">morph</span></div>
+        <div class="ni"><span class="ic g"><svg class="i sm"><use href="#i-img"/></svg></span>高斯滤波<span class="typ">blur</span></div>
+        <div class="ni"><span class="ic g"><svg class="i sm"><use href="#i-img"/></svg></span>通道分离<span class="typ">ch</span></div>
+        <div class="grp">测量 <span class="cnt">41</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-target"/></svg></span>卡尺测宽<span class="typ">caliper</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-target"/></svg></span>圆查找<span class="typ">circle</span><span class="star">★</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-target"/></svg></span>直线查找<span class="typ">line</span></div>
+        <div class="grp">识别 <span class="cnt">27</span></div>
+        <div class="ni"><span class="ic p"><svg class="i sm"><use href="#i-box"/></svg></span>斑点分析<span class="typ">blob</span><span class="star">★</span></div>
+        <div class="ni"><span class="ic p"><svg class="i sm"><use href="#i-box"/></svg></span>模板匹配<span class="typ">match</span></div>
+        <div class="ni"><span class="ic p"><svg class="i sm"><use href="#i-box"/></svg></span>条码识别<span class="typ">code</span></div>
+        <div class="grp">标定 <span class="cnt">9</span></div>
+        <div class="ni"><span class="ic y"><svg class="i sm"><use href="#i-grid"/></svg></span>九点标定<span class="typ">npoint</span></div>
+        <div class="ni"><span class="ic y"><svg class="i sm"><use href="#i-grid"/></svg></span>手眼标定<span class="typ">handeye</span></div>
+        <div class="grp">逻辑 <span class="cnt">18</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-branch"/></svg></span>条件分支<span class="typ">if</span></div>
+        <div class="ni"><span class="ic"><svg class="i sm"><use href="#i-layers"/></svg></span>并行<span class="typ">par</span></div>
+      </div>
+      <div class="tb-foot"><span>收藏 <b>6</b></span><span>最近 <b>12</b></span><span>共 <b>171</b></span></div>
+    </aside>
+
+    <!-- 画布 + 结果区 -->
+    <section class="center">
+      <div class="canvas">
+        <svg class="edges">
+          <path data-from="#nAcq .po-image" data-to="#nThr .pi-image"/>
+          <path data-from="#nAcq .po-image" data-to="#nMorph .pi-image" class="dim"/>
+          <path data-from="#nThr .po-image" data-to="#nBlob .pi-image" class="hot"/>
+          <path data-from="#nMorph .po-image" data-to="#nBlob .pi-image" class="dim"/>
+          <path data-from="#nBlob .po-json" data-to="#nOut .pi-value"/>
+          <path data-from="#nAcq .po-next" data-to="#nThr .pi-exec" class="dim"/>
+          <path data-from="#nThr .po-next" data-to="#nBlob .pi-exec" class="dim"/>
+          <path data-from="#nBlob .po-next" data-to="#nOut .pi-exec" class="dim"/>
+        </svg>
+
+        <div class="canvas-tools">
+          <div class="t on"><svg class="i sm"><use href="#i-cursor"/></svg></div>
+          <div class="t"><svg class="i sm"><use href="#i-hand"/></svg></div>
+          <div class="t"><svg class="i sm"><use href="#i-fit"/></svg></div>
+          <div class="t"><svg class="i sm"><use href="#i-grid"/></svg></div>
+        </div>
+        <div class="canvas-hint">
+          <div class="pill"><svg class="i sm"><use href="#i-cpu"/></svg>GPU 未启用</div>
+        </div>
+
+        <div class="groupbox" style="left:224px;top:214px;width:212px;height:196px">
+          <div class="gh"><svg class="i sm" style="color:#7f93aa"><use href="#i-layers"/></svg><b>For Each ROI</b>· 4 个工位</div>
+        </div>
+
+        <!-- 节点 -->
+        <div class="node" id="nAcq" style="left:58px;top:66px">
+          <div class="node-h"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>图像采集<span class="tag">2.4ms</span></div>
+          <div class="node-b">
+            <div class="row"><i class="port in pi-exec"></i>exec<span class="ty">control</span></div>
+            <div class="row">image<i class="port out po-image"></i><span class="ty">image</span></div>
+            <div class="row">sequence<i class="port out po-seq"></i><span class="ty">int</span></div>
+            <div class="row">next<i class="port out po-next"></i><span class="ty">ctrl</span></div>
+          </div>
+        </div>
+
+        <div class="node" id="nThr" style="left:270px;top:26px">
+          <div class="node-h"><span class="ic"><svg class="i sm"><use href="#i-img"/></svg></span>阈值分割<span class="tag">0.8ms</span></div>
+          <div class="node-b">
+            <div class="row"><i class="port in pi-exec"></i>exec<span class="ty">control</span></div>
+            <div class="row"><i class="port in pi-image"></i>image<span class="ty">image</span></div>
+            <div class="row">image<i class="port out po-image"></i><span class="ty">image</span></div>
+            <div class="row">next<i class="port out po-next"></i><span class="ty">ctrl</span></div>
+          </div>
+        </div>
+
+        <div class="node" id="nMorph" style="left:246px;top:262px">
+          <div class="node-h"><span class="ic"><svg class="i sm"><use href="#i-img"/></svg></span>形态学开运算<span class="tag">1.1ms</span></div>
+          <div class="node-b">
+            <div class="row"><i class="port in pi-exec"></i>exec<span class="ty">control</span></div>
+            <div class="row"><i class="port in pi-image"></i>image<span class="ty">image</span></div>
+            <div class="row">image<i class="port out po-image"></i><span class="ty">image</span></div>
+          </div>
+        </div>
+
+        <div class="node sel" id="nBlob" style="left:492px;top:150px">
+          <div class="brk" title="断点"></div>
+          <div class="run"></div>
+          <span class="handle h1"></span><span class="handle h2"></span><span class="handle h3"></span><span class="handle h4"></span>
+          <div class="node-h"><span class="ic"><svg class="i sm"><use href="#i-box"/></svg></span>斑点分析<span class="tag">2.1ms</span></div>
+          <div class="node-b">
+            <div class="row"><i class="port in pi-exec"></i>exec<span class="ty">control</span></div>
+            <div class="row"><i class="port in pi-image"></i>image<span class="ty">image</span></div>
+            <div class="row">blobs<i class="port out po-json"></i><span class="ty">region[]</span></div>
+            <div class="row">count<i class="port out po-cnt"></i><span class="ty">int</span></div>
+            <div class="row">next<i class="port out po-next"></i><span class="ty">ctrl</span></div>
+          </div>
+        </div>
+
+        <div class="node" id="nOut" style="left:668px;top:150px">
+          <div class="node-h"><span class="ic"><svg class="i sm"><use href="#i-target"/></svg></span>结果映射<span class="tag">0.2ms</span></div>
+          <div class="node-b">
+            <div class="row"><i class="port in pi-exec"></i>exec<span class="ty">control</span></div>
+            <div class="row"><i class="port in pi-value"></i>value<span class="ty">region[]</span></div>
+            <div class="row">pose<i class="port out po-pose"></i><span class="ty">pose</span></div>
+          </div>
+        </div>
+
+        <div class="note" style="left:476px;top:344px">
+          <b>换型注意</b><br>ROI 1 / 2 随治具偏移，标定已锁定在 Frame&nbsp;1。
+        </div>
+
+        <div class="minimap">
+          <div class="mini-n" style="left:14px;top:26px;width:22px;height:26px"></div>
+          <div class="mini-n" style="left:44px;top:18px;width:22px;height:20px"></div>
+          <div class="mini-n" style="left:44px;top:60px;width:22px;height:18px"></div>
+          <div class="mini-n" style="left:80px;top:36px;width:26px;height:30px;background:#4c9aff;opacity:.75"></div>
+          <div class="mini-n" style="left:120px;top:40px;width:22px;height:22px"></div>
+          <div class="vp"></div>
+        </div>
+        <div class="zoom"><svg class="i sm"><use href="#i-fit"/></svg>92%</div>
+        <div class="pill" style="position:absolute;left:12px;bottom:12px;z-index:5"><svg class="i sm"><use href="#i-img"/></svg>Frame 1 · 2448×2048 · Mono8 · #88124</div>
+      </div>
+
+      <!-- 结果区 -->
+      <div class="dock">
+        <div class="dock-h">
+          <div class="dt on">结果<span class="n">23</span></div>
+          <div class="dt">问题<span class="n bad">2</span></div>
+          <div class="dt">变量</div>
+          <div class="dt">性能</div>
+          <div class="dt">追溯</div>
+          <div class="dock-meta"><span>本次运行 12:04:31</span><span>1.84 s</span><b>通过</b></div>
+        </div>
+        <div class="dock-body">
+          <div style="overflow:hidden">
+            <table>
+              <thead><tr><th style="width:190px">节点</th><th style="width:78px">状态</th><th style="width:96px">耗时</th><th>输出摘要</th></tr></thead>
+              <tbody>
+                <tr><td>图像采集</td><td><span class="st"><i class="d"></i>成功</span></td><td><span class="bar"><i style="width:30%"></i></span><span class="mono">2.4 ms</span></td><td class="mono">image 2448×2048 · #88124</td></tr>
+                <tr><td>阈值分割</td><td><span class="st"><i class="d"></i>成功</span></td><td><span class="bar"><i style="width:12%"></i></span><span class="mono">0.8 ms</span></td><td class="mono">极性 auto · 前景 18.2%</td></tr>
+                <tr><td>形态学开运算</td><td><span class="st"><i class="d"></i>成功</span></td><td><span class="bar"><i style="width:16%"></i></span><span class="mono">1.1 ms</span></td><td class="mono">kernel 3×3 · rect</td></tr>
+                <tr style="background:#182636"><td><b>斑点分析</b> <span class="mono" style="color:#6aa8ee">● 选中</span></td><td><span class="st"><i class="d"></i>成功</span></td><td><span class="bar"><i style="width:26%"></i></span><span class="mono">2.1 ms</span></td><td class="mono">4 blobs · area 126–884 px²</td></tr>
+                <tr><td>结果映射</td><td><span class="st w"><i class="d"></i>警告</span></td><td><span class="bar"><i style="width:5%"></i></span><span class="mono">0.2 ms</span></td><td class="mono">blob[2] 置信度 0.71 &lt; 0.80</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="chartbox">
+            <div class="ct"><span>逐节点耗时</span><b>15.9 ms</b></div>
+            <div class="bars">
+              <div style="height:34%"><span>acq</span></div>
+              <div style="height:16%"><span>thr</span></div>
+              <div style="height:20%"><span>mor</span></div>
+              <div class="hi" style="height:52%"><span>blob</span></div>
+              <div style="height:12%"><span>cal</span></div>
+              <div style="height:24%"><span>map</span></div>
+              <div style="height:9%"><span>out</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 检查器 -->
+    <aside class="inspector">
+      <div class="ins-h">
+        <div class="ins-title"><span class="ic"><svg class="i sm"><use href="#i-box"/></svg></span>斑点分析</div>
+        <div class="ins-sub">image.blob.multi · Recognition</div>
+        <div class="ins-badges"><span class="bdg ok">已编译</span><span class="bdg t">2.1 ms</span><span class="bdg">Frame 1</span></div>
+        <div class="ins-tabs"><span class="on">参数</span><span>图像</span><span>诊断</span></div>
+      </div>
+      <div class="ins-body">
+        <div class="sec">分割 <span class="line"></span></div>
+        <div class="fld"><label>阈值方法</label><div class="ctl sel">Otsu<span class="v">自动</span></div></div>
+        <div class="fld"><label>极性</label><div class="seg2"><div class="on">自动</div><div>亮</div><div>暗</div></div></div>
+        <div class="fld"><label>最小面积</label><div class="ctl">120<span class="v">px²</span></div></div>
+        <div class="fld"><label>最大面积</label><div class="ctl">0<span class="v">不限</span></div></div>
+
+        <div class="sec">区域与输出 <span class="line"></span></div>
+        <div class="fld"><label>合并距离</label><div class="ctl">3<span class="v">px</span></div></div>
+        <div class="fld"><label>ROI</label><div class="frame-chip"><span class="bx"></span>输入帧 · Frame 1</div></div>
+        <div class="fld" style="align-items:flex-start"><label>输出</label>
+          <div class="ports" style="padding:0">
+            <span class="pt"><i></i>blobs region[]</span>
+            <span class="pt"><i></i>count int</span>
+            <span class="pt" style="border-color:#3d4b5c"><i style="background:#8a93a0"></i>next ctrl</span>
+          </div>
+        </div>
+
+        <div class="sec">执行 <span class="line"></span></div>
+        <div class="fld"><label>失败策略</label><div class="ctl sel">继续并标记<span class="v">warn</span></div></div>
+        <div class="fld"><label>缓存</label><div class="ctl sel">按输入哈希<span class="v">on</span></div></div>
+      </div>
+      <div class="ins-foot">
+        <div class="est">预估 <b>2.1 ms</b><br>上次 2.4 ms · P95 3.1 ms</div>
+        <div class="btns">
+          <div class="btn sm">还原</div>
+          <div class="btn sm solid">应用</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="statusbar">
+    <div class="grp2"><i class="g"></i>引擎已连接 · 24 ms</div>
+    <div class="grp2">相机 2/2 · 外触发 20 Hz</div>
+    <div class="grp2">编译 <b>OK</b> · 23 节点 / 4 并行组</div>
+    <div class="right">
+      <span>62.0 fps</span><span>执行 <b>15.9 ms</b></span><span>内存 412 MB</span><span>zh-CN</span><span>UTF-8</span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  function drawEdges(){
+    const c = document.querySelector('.canvas');
+    if (!c) return;
+    const cb = c.getBoundingClientRect();
+    c.querySelectorAll('path[data-from]').forEach(function(p){
+      const a = c.querySelector(p.dataset.from);
+      const b = c.querySelector(p.dataset.to);
+      if (!a || !b) return;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.left + ra.width / 2 - cb.left, y1 = ra.top + ra.height / 2 - cb.top;
+      const x2 = rb.left + rb.width / 2 - cb.left, y2 = rb.top + rb.height / 2 - cb.top;
+      const dx = Math.max(46, (x2 - x1) * 0.5);
+      p.setAttribute('d', 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ', ' + (x2 - dx) + ' ' + y2 + ', ' + x2 + ' ' + y2);
+    });
+  }
+  window.addEventListener('resize', function(){ fitStage(); drawEdges(); });
+  fitStage(); drawEdges();
+  window.addEventListener('load', drawEdges);
+</script>
+</body>
+</html>

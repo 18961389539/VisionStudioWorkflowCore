@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>概念 04 · AI 协作工作台 VisionStudio Studio</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#fbfbfe; --panel:#fff; --line:#e9e7f2; --line2:#f2f0f8;
+    --t1:#171429; --t2:#453f5c; --t3:#6d6685; --t4:#9a93b0;
+    --violet:#6d4aff; --violet2:#8b6bff; --soft:#f2efff; --soft2:#faf8ff;
+    --mint:#0aa87d; --mint-soft:#e8f8f2; --amber:#b26a00; --amber-soft:#fdf3e3;
+    --red:#d0402f; --red-soft:#fdeeec;
+  }
+  html,body{height:100%}
+  body{background:#eeecf6;color:var(--t1);overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1000px 520px at 30% 0%,#f7f4ff,#e6e2f2 85%)}
+  .cap{height:40px;flex:none;width:100%;display:flex;align-items:center;gap:10px;
+    padding:0 18px;background:#0c1117;color:#d7e2ee;font-size:12px;
+    border-bottom:1px solid #1c242e;z-index:50}
+  .cap .num{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:10.5px;font-weight:700;font-family:Consolas,monospace;background:#241a3d;color:#c4b5ff}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#c4b5ff}
+  .stage{width:1440px;height:900px;flex:none;margin:auto;display:flex;background:var(--bg);
+    overflow:hidden;transform-origin:center center;box-shadow:0 28px 80px rgba(30,20,70,.25)}
+  .i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .i.sm{width:12.5px;height:12.5px}
+  .i.xs{width:10px;height:10px}
+
+  /* 极窄图标栏 */
+  .rail{width:58px;flex:none;background:#fff;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px}
+  .rail .mark{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;margin-bottom:8px;
+    background:linear-gradient(145deg,#8b6bff,#5b34e6);box-shadow:0 3px 10px rgba(109,74,255,.32)}
+  .rail .mark .i{color:#fff;width:15px;height:15px}
+  .rail .r{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#8b84a3;position:relative}
+  .rail .r:hover{background:#f5f3fc;color:var(--violet)}
+  .rail .r.on{background:var(--soft);color:var(--violet)}
+  .rail .r.on:before{content:"";position:absolute;left:-12px;top:8px;width:3px;height:18px;
+    border-radius:2px;background:var(--violet)}
+  .rail .sp{flex:1}
+  .rail .av{width:28px;height:28px;border-radius:50%;background:#efe9ff;color:#5b34e6;
+    display:grid;place-items:center;font-size:11px;font-weight:600}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:54px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;
+    background:#fff;border-bottom:1px solid var(--line)}
+  .crumb{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t4)}
+  .crumb b{color:var(--t1);font-weight:600;font-size:13px}
+  .draft{font-size:10px;color:var(--violet);background:var(--soft);border-radius:4px;padding:1.5px 5px;font-weight:600}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .chip{display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;border:1px solid var(--line);
+    border-radius:7px;background:#fff;font-size:11.5px;color:var(--t3)}
+  .chip b{color:var(--t2);font-weight:600}
+  .btn{display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:7px;
+    border:1px solid var(--line);background:#fff;color:var(--t2);font-size:12px;font-weight:500}
+  .btn.ai{background:linear-gradient(140deg,#7c5cff,#5b34e6);border-color:#6d4aff;color:#fff;
+    box-shadow:0 2px 8px rgba(109,74,255,.28)}
+
+  .body{flex:1;display:grid;grid-template-columns:1fr 392px;min-height:0}
+  .left{display:flex;flex-direction:column;padding:16px 18px 18px;gap:12px;min-width:0}
+
+  /* 自然语言输入 */
+  .prompt{flex:none;background:#fff;border:1px solid #e3dcff;border-radius:12px;padding:11px 13px;
+    box-shadow:0 4px 18px rgba(109,74,255,.08)}
+  .prompt .lb{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--t4);letter-spacing:.3px}
+  .prompt .lb .spark{color:var(--violet);font-size:11px}
+  .prompt .row{display:flex;align-items:center;gap:10px;margin-top:7px}
+  .prompt .txt{flex:1;font-size:13.5px;color:var(--t1);line-height:1.5}
+  .prompt .txt em{font-style:normal;color:var(--violet);font-weight:600}
+  .gen{display:flex;align-items:center;gap:6px;height:30px;padding:0 13px;border-radius:7px;
+    background:linear-gradient(140deg,#7c5cff,#5b34e6);color:#fff;font-size:12px;font-weight:600;
+    box-shadow:0 3px 10px rgba(109,74,255,.3)}
+  .quick{display:flex;gap:6px;margin-top:8px}
+  .q{font-size:10.5px;color:var(--t3);border:1px solid var(--line);border-radius:20px;padding:2px 8px;background:#fdfdff}
+  .q.on{color:var(--violet);border-color:#d9cdff;background:var(--soft2)}
+
+  /* 画布 */
+  .canvas{flex:1;position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;
+    overflow:hidden;min-height:0;
+    background-image:radial-gradient(circle at 1px 1px,#ece9f5 1px,transparent 0);
+    background-size:18px 18px}
+  .cbar{position:absolute;left:12px;top:11px;display:flex;align-items:center;gap:7px;z-index:6;
+    font-size:10.5px;color:var(--t4)}
+  .cbar .t{background:#fff;border:1px solid var(--line);border-radius:5px;padding:2px 7px;
+    display:flex;align-items:center;gap:5px}
+  .cbar .t b{color:var(--t2);font-weight:600}
+  .edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .edges path{fill:none;stroke:#c3b6f5;stroke-width:1.8}
+  .edges path.soft{stroke:#e2dbf7;stroke-width:1.6;stroke-dasharray:4 3}
+
+  .node{position:absolute;width:158px;background:#fff;border:1px solid #e2ddf0;border-radius:9px;
+    box-shadow:0 3px 12px rgba(40,25,90,.07);z-index:3}
+  .node-h{height:26px;display:flex;align-items:center;gap:5px;padding:0 8px;border-bottom:1px solid #f1eef8;
+    font-size:11.5px;font-weight:600;color:var(--t1)}
+  .node-h .ai{margin-left:auto;font-size:8px;font-weight:700;color:#6d4aff;background:var(--soft);
+    border-radius:3px;padding:1px 3px;letter-spacing:.3px}
+  .node-b{padding:4px 0 5px}
+  .nrow{position:relative;height:18px;display:flex;align-items:center;gap:4px;padding:0 8px;
+    font-size:9.5px;color:var(--t4)}
+  .nrow .ty{margin-left:auto;font-family:Consolas,monospace;font-size:8.5px;color:#b3abc8}
+  .port{position:absolute;width:7px;height:7px;border-radius:50%;background:#fff;border:1.5px solid #9c8ad8;
+    top:50%;transform:translateY(-50%)}
+  .port.in{left:-4px}
+  .port.out{right:-4px;background:#6d4aff;border-color:#6d4aff}
+  .port.down{left:50%;right:auto;top:auto;bottom:-4px;transform:translateX(-50%)}
+  .port.up{left:50%;top:-4px;transform:translateX(-50%)}
+  .node.sel{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.12),0 8px 22px rgba(40,25,90,.12)}
+  .node.sel .node-h{background:linear-gradient(#f7f3ff,#fff)}
+  .node.ghost{border:1.5px dashed #b9a4ff;background:linear-gradient(#fdfbff,#faf6ff);
+    box-shadow:0 6px 18px rgba(109,74,255,.12);width:186px}
+  .node.ghost .node-h{border-bottom:1px dashed #d9cdfb;color:#5b34e6}
+  .ghost-body{padding:6px 9px;font-size:10px;color:#6d6685;line-height:1.45}
+  .ghost-body b{color:#4b3a86;font-weight:600}
+  .ghost-acts{display:flex;gap:5px;padding:0 8px 8px}
+  .gbtn{flex:1;height:20px;border-radius:5px;display:grid;place-items:center;font-size:9.5px;font-weight:600}
+  .gbtn.y{background:#6d4aff;color:#fff}
+  .gbtn.n{background:#fff;border:1px solid #e2ddf0;color:var(--t3)}
+
+  .preview{position:absolute;left:12px;right:12px;bottom:12px;height:56px;background:rgba(255,255,255,.96);
+    border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;gap:14px;padding:0 12px;
+    box-shadow:0 6px 18px rgba(40,25,90,.08);z-index:5}
+  .preview .tt{font-size:10.5px;color:var(--t4)}
+  .preview .tt b{display:block;font-size:11.5px;color:var(--t1);font-weight:650}
+  .pv{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--t3);
+    background:#faf9fe;border:1px solid #f0edf8;border-radius:5px;padding:2px 6px;font-family:Consolas,monospace}
+  .pv b{color:#5b34e6;font-weight:600}
+  .preview .lk{margin-left:auto;font-size:10.5px;color:var(--violet);font-weight:600;display:flex;align-items:center;gap:4px}
+
+  /* 样本 */
+  .samples{flex:none;height:206px;background:#fff;border:1px solid var(--line);border-radius:12px;
+    display:flex;padding:10px 12px;gap:14px;min-height:0}
+  .sleft{flex:1;min-width:0;display:flex;flex-direction:column}
+  .sh{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600}
+  .sh .sub{font-weight:400;color:var(--t4);font-size:10.5px}
+  .sh .more{margin-left:auto;font-size:10.5px;color:var(--violet);font-weight:600}
+  .thumbs{flex:1;display:flex;gap:9px;margin-top:8px;min-height:0}
+  .th{flex:1;display:flex;flex-direction:column;min-width:0}
+  .th .im{flex:1;border-radius:6px;background:radial-gradient(120% 120% at 35% 20%,#4c5766,#232b36 70%);
+    position:relative;overflow:hidden}
+  .th .im:before{content:"";position:absolute;left:16%;top:14%;width:58%;height:66%;
+    background:linear-gradient(150deg,#c8d1db,#93a0ae 60%,#7a8797);border-radius:2px}
+  .th .im:after{content:"";position:absolute;left:26%;top:30%;width:20%;height:22%;
+    background:#e9eff5;border-radius:1px;opacity:.9}
+  .def{position:absolute;z-index:3}
+  .def.burr{left:17%;top:11%;width:24%;height:15%;background:radial-gradient(circle,#fca5a5 1.1px,transparent 1.5px) 0 0/5px 5px;opacity:.95}
+  .def.scratch{left:29%;top:22%;width:28%;height:1.5px;background:linear-gradient(90deg,transparent,#fda4b4,#fb7185,transparent);transform:rotate(37deg);box-shadow:0 0 5px rgba(251,113,133,.7)}
+  .def.oil{left:33%;top:44%;width:32%;height:26%;border-radius:50%;background:radial-gradient(circle,rgba(46,56,72,.9),rgba(46,56,72,0) 72%)}
+  .th .bx{position:absolute;left:28%;top:24%;width:38%;height:46%;border:1.5px solid #34d399;border-radius:2px;z-index:2}
+  .th.bad .bx{border-color:#fb7185;box-shadow:0 0 8px rgba(251,113,133,.6)}
+  .th .cap{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--t4);margin-top:4px}
+  .th .cap .dot{width:4px;height:4px;border-radius:50%;background:var(--mint)}
+  .th.bad .cap .dot{background:var(--red)}
+  .sright{width:196px;flex:none;border-left:1px solid var(--line2);padding-left:14px;display:flex;
+    flex-direction:column;justify-content:center;gap:8px}
+  .big{display:flex;align-items:baseline;gap:6px}
+  .big b{font-size:26px;font-weight:680;letter-spacing:-.8px}
+  .big span{font-size:11px;color:var(--t4)}
+  .passbar{height:5px;border-radius:3px;background:#f1eef8;overflow:hidden;display:flex}
+  .passbar i{height:100%}
+  .srow{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--t3)}
+  .link{font-size:10.5px;color:var(--violet);font-weight:600;display:flex;align-items:center;gap:4px}
+
+  /* 对话栏 */
+  .chat{background:#f8f7fd;border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .chat-h{height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;
+    background:#fff;border-bottom:1px solid var(--line)}
+  .bot{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(145deg,#8b6bff,#5b34e6);color:#fff;font-size:12px}
+  .chat-h b{font-size:12.5px;font-weight:650}
+  .chat-h .model{font-size:9.5px;color:var(--t4);font-family:Consolas,monospace;
+    border:1px solid var(--line);border-radius:4px;padding:1px 4px}
+  .chat-h .r{margin-left:auto;display:flex;gap:4px;color:var(--t4)}
+  .msgs{flex:1;padding:14px 12px;display:flex;flex-direction:column;gap:11px;overflow:hidden}
+  .msg{display:flex;gap:8px}
+  .msg .a{width:22px;height:22px;border-radius:7px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(145deg,#8b6bff,#5b34e6);color:#fff;font-size:10px}
+  .msg .bubble{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 10px;
+    font-size:11.5px;line-height:1.6;color:var(--t2);box-shadow:0 1px 3px rgba(40,25,90,.04)}
+  .msg .bubble b{color:var(--t1);font-weight:650}
+  .msg.user{justify-content:flex-end}
+  .msg.user .bubble{background:linear-gradient(140deg,#7c5cff,#5b34e6);border-color:#6d4aff;color:#fff;
+    border-radius:10px 10px 3px 10px;max-width:290px;box-shadow:0 3px 10px rgba(109,74,255,.22)}
+  .pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+  .pill{font-size:9.5px;font-family:Consolas,monospace;color:#5b34e6;background:var(--soft);
+    border-radius:4px;padding:1.5px 5px}
+  .step{margin-top:7px;display:flex;flex-direction:column;gap:4px}
+  .step div{display:flex;gap:6px;font-size:10.5px;color:var(--t3)}
+  .step .n{width:14px;height:14px;border-radius:50%;background:var(--soft);color:#5b34e6;
+    font-size:8.5px;display:grid;place-items:center;flex:none;font-weight:700;margin-top:1px}
+  .cardmsg{background:#fff;border:1px solid #e3dcff;border-radius:10px;padding:9px 10px;margin-top:7px}
+  .cardmsg .t{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--t4)}
+  .cardmsg .v{display:flex;align-items:baseline;gap:6px;margin-top:3px}
+  .cardmsg .v b{font-size:19px;font-weight:680;letter-spacing:-.4px}
+  .cardmsg .v span{font-size:10px;color:var(--t4)}
+  .mini{height:4px;border-radius:2px;background:#f1eef8;margin-top:6px;overflow:hidden}
+  .mini i{display:block;height:100%;background:var(--mint)}
+  .acts{display:flex;gap:5px;margin-top:8px}
+  .abtn{flex:1;height:22px;border-radius:5px;font-size:9.5px;font-weight:600;display:grid;place-items:center;
+    border:1px solid var(--line);color:var(--t3);background:#fff}
+  .abtn.p{background:var(--soft);border-color:#d9cdff;color:#5b34e6}
+  .typing{display:flex;gap:3px;padding:2px 0}
+  .typing i{width:4px;height:4px;border-radius:50%;background:#c3b6f5}
+  .composer{flex:none;padding:10px 12px 12px;background:#f8f7fd}
+  .inputbox{background:#fff;border:1px solid #ddd5f5;border-radius:10px;padding:8px 9px;
+    box-shadow:0 2px 10px rgba(40,25,90,.05)}
+  .inputbox .ph{font-size:11.5px;color:var(--t4);line-height:1.5}
+  .inputbox .ph em{font-style:normal;color:#5b34e6}
+  .ibfoot{display:flex;align-items:center;gap:8px;margin-top:7px;color:var(--t4)}
+  .ibfoot .sp{flex:1}
+  .send{width:24px;height:24px;border-radius:6px;background:linear-gradient(140deg,#7c5cff,#5b34e6);
+    display:grid;place-items:center;color:#fff}
+  .hint{font-size:9.5px;color:var(--t4);text-align:center;margin-top:6px}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 17l5-9 3 5 3-4 4 8"/><circle cx="9" cy="8" r="1.6"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/><path d="M6.5 9v4a2 2 0 002 2H14"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.4L19 10.5l-5.1 2.1L12 18l-1.9-5.4L5 10.5l5.1-2.1z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-attach" viewBox="0 0 24 24"><path d="M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-2.8-2.8L15 6.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-6z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2 5.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</defs></svg>
+
+<div class="viewport">
+<div class="cap"><span class="num">04</span><b>AI 协作工作台</b><span class="sub">· 用自然语言把工艺意图变成可执行工作流</span><span class="right"><i class="dot"></i>VisionStudio STUDIO · 产品形态备选 · 2026-10-26</span></div>
+
+<div class="stage">
+  <aside class="rail">
+    <div class="mark"><svg class="i"><use href="#i-logo"/></svg></div>
+    <div class="r"><svg class="i"><use href="#i-home"/></svg></div>
+    <div class="r on"><svg class="i"><use href="#i-flow"/></svg></div>
+    <div class="r"><svg class="i"><use href="#i-cube"/></svg></div>
+    <div class="r"><svg class="i"><use href="#i-chart"/></svg></div>
+    <div class="r"><svg class="i"><use href="#i-cam"/></svg></div>
+    <div class="sp"></div>
+    <div class="r"><svg class="i"><use href="#i-more"/></svg></div>
+    <div class="av">李</div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb"><span>工作台</span><span style="color:#d5cfe6">/</span><b>上料件外观检测</b><span class="draft">草稿</span></div>
+      <div class="top-right">
+        <div class="chip"><svg class="i sm" style="color:#8b84a3"><use href="#i-cube"/></svg>样本 <b>240</b></div>
+        <div class="chip"><svg class="i sm" style="color:#8b84a3"><use href="#i-refresh"/></svg>自动保存 14:37</div>
+        <div class="btn"><svg class="i sm"><use href="#i-play"/></svg>试运行</div>
+        <div class="btn ai"><svg class="i sm"><use href="#i-arrow"/></svg>部署到 L2-01</div>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="left">
+        <!-- 意图输入 -->
+        <div class="prompt">
+          <div class="lb"><span class="spark">✦</span>用一句话描述检测目标，Copilot 会生成可执行的工作流</div>
+          <div class="row">
+            <div class="txt">上料件有<em>毛刺</em>和<em>划伤</em>，需要区分两类缺陷，并输出抓取坐标给机器人。</div>
+            <div class="gen"><svg class="i sm"><use href="#i-spark"/></svg>生成</div>
+          </div>
+          <div class="quick">
+            <span class="q on">缺陷检测</span><span class="q">定位抓取</span><span class="q">尺寸测量</span>
+            <span class="q">读码追溯</span><span class="q" style="color:#9a93b0">+ 从模板开始</span>
+          </div>
+        </div>
+
+        <!-- 画布 -->
+        <div class="canvas">
+          <div class="cbar">
+            <span class="t"><b>9</b> 节点 · 由 Copilot 生成</span>
+            <span class="t"><svg class="i xs"><use href="#i-check"/></svg>已通过静态校验</span>
+            <span class="t" style="color:#8b6bff">✦ 3 处建议待确认</span>
+          </div>
+          <svg class="edges">
+            <path data-from="#n1 .po" data-to="#n2 .pi"/>
+            <path data-from="#n2 .po" data-to="#n3 .pi"/>
+            <path data-from="#n3 .po" data-to="#n4 .pi"/>
+            <path data-from="#n4 .down" data-to="#n5 .up"/>
+            <path data-from="#n5 .po" data-to="#n6 .pi"/>
+          </svg>
+
+          <div class="node" id="n1" style="left:22px;top:44px">
+            <div class="node-h">图像采集<span class="ai">AI</span></div>
+            <div class="node-b"><div class="nrow"><i class="port in pi"></i>exec<span class="ty">ctrl</span></div>
+              <div class="nrow">image<i class="port out po"></i><span class="ty">img</span></div></div>
+          </div>
+          <div class="node" id="n2" style="left:198px;top:44px">
+            <div class="node-h">预处理<span class="ai">AI</span></div>
+            <div class="node-b"><div class="nrow"><i class="port in pi"></i>image<span class="ty">img</span></div>
+              <div class="nrow">image<i class="port out po"></i><span class="ty">img</span></div></div>
+          </div>
+          <div class="node sel" id="n3" style="left:374px;top:44px">
+            <div class="node-h">斑点分析<span class="ai">AI</span></div>
+            <div class="node-b"><div class="nrow"><i class="port in pi"></i>image<span class="ty">img</span></div>
+              <div class="nrow">blobs<i class="port out po"></i><span class="ty">region[]</span></div></div>
+          </div>
+          <div class="node" id="n4" style="left:550px;top:44px">
+            <div class="node-h">缺陷分类<span class="ai">AI</span></div>
+            <div class="node-b"><div class="nrow"><i class="port in pi"></i>blobs<span class="ty">region[]</span></div>
+              <div class="nrow">label<i class="port out down"></i><span class="ty">string</span></div></div>
+          </div>
+          <div class="node" id="n5" style="left:550px;top:186px">
+            <div class="node-h">坐标映射</div>
+            <div class="node-b"><div class="nrow"><i class="port in up"></i>blob<span class="ty">region</span></div>
+              <div class="nrow">pose<i class="port out po"></i><span class="ty">pose</span></div></div>
+          </div>
+          <div class="node" id="n6" style="left:726px;top:186px">
+            <div class="node-h">结果输出</div>
+            <div class="node-b"><div class="nrow"><i class="port in pi"></i>value<span class="ty">any</span></div>
+              <div class="nrow">json<i class="port out po"></i><span class="ty">json</span></div></div>
+          </div>
+
+          <div class="node ghost" style="left:198px;top:184px">
+            <div class="node-h">✦ 建议插入<span class="ai" style="background:#fff">可选</span></div>
+            <div class="ghost-body"><b>形态学开运算</b> 3×3<br>去除边缘噪点，预计误检率 −12%</div>
+            <div class="ghost-acts"><div class="gbtn y">采纳</div><div class="gbtn n">忽略</div></div>
+          </div>
+
+          <div class="preview">
+            <div class="tt"><b>预演 24 张 · 通过 22</b>最近一次 14:36:02 · 1.9 s</div>
+            <span class="pv">采集 <b>2448×2048</b></span>
+            <span class="pv">斑点 <b>4</b></span>
+            <span class="pv">毛刺 <b>×3</b></span>
+            <span class="pv">划伤 <b>×1</b></span>
+            <span class="pv" style="color:#b45309;border-color:#f6e6cb;background:#fdf8ef">失败 <b style="color:#b45309">2</b></span>
+            <span class="lk">逐节点结果 <svg class="i xs"><use href="#i-arrow"/></svg></span>
+          </div>
+        </div>
+
+        <!-- 样本与试运行 -->
+        <div class="samples">
+          <div class="sleft">
+            <div class="sh">试运行样本<span class="sub">240 张中抽样 24 张 · 覆盖 3 类</span><span class="more">管理样本集 →</span></div>
+            <div class="thumbs">
+              <div class="th"><div class="im"><i class="bx"></i></div><div class="cap"><i class="dot"></i>OK 01</div></div>
+              <div class="th"><div class="im"><i class="bx" style="left:34%;top:30%;width:30%;height:38%"></i></div><div class="cap"><i class="dot"></i>OK 02</div></div>
+              <div class="th bad"><div class="im"><i class="bx" style="left:22%;top:18%;width:48%;height:58%"></i><i class="def burr"></i><i class="def scratch" style="top:34%"></i></div><div class="cap"><i class="dot"></i>毛刺 03</div></div>
+              <div class="th"><div class="im"><i class="bx" style="left:30%;top:26%;width:34%;height:44%"></i><i class="def burr" style="left:28%;top:20%"></i></div><div class="cap"><i class="dot"></i>毛刺 04</div></div>
+              <div class="th bad"><div class="im"><i class="bx" style="left:38%;top:22%;width:26%;height:52%"></i><i class="def scratch" style="left:36%;top:30%"></i></div><div class="cap"><i class="dot"></i>划伤 05</div></div>
+              <div class="th"><div class="im"><i class="bx" style="left:26%;top:30%;width:40%;height:40%"></i><i class="def scratch" style="left:24%;top:38%"></i></div><div class="cap"><i class="dot"></i>划伤 06</div></div>
+            </div>
+          </div>
+          <div class="sright">
+            <div class="big"><b>22<span style="font-size:15px;color:#9a93b0">/24</span></b><span>通过 · 91.7%</span></div>
+            <div class="passbar"><i style="width:91.7%;background:#0aa87d"></i><i style="width:8.3%;background:#fb7185"></i></div>
+            <div class="srow"><i style="width:5px;height:5px;border-radius:50%;background:#0aa87d"></i>OK 8/8 · 毛刺 7/8 · 划伤 7/8</div>
+            <div class="srow" style="color:#b45309">主要失败：划伤 与 油污 混淆</div>
+            <div class="link">查看 2 张失败样本 <svg class="i xs"><use href="#i-arrow"/></svg></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Copilot -->
+      <aside class="chat">
+        <div class="chat-h">
+          <div class="bot"><svg class="i sm"><use href="#i-spark"/></svg></div>
+          <b>Copilot</b><span class="model">vision-llm · v2</span>
+          <div class="r"><svg class="i sm"><use href="#i-more"/></svg></div>
+        </div>
+        <div class="msgs">
+          <div class="msg user"><div class="bubble">上料件有毛刺和划伤，要区分两类缺陷并输出抓取坐标给机器人。</div></div>
+
+          <div class="msg">
+            <div class="a"><svg class="i xs"><use href="#i-spark"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="bubble">
+                我把目标拆成 3 步，并复用了现有标定资产：
+                <div class="step">
+                  <div><span class="n">1</span><span>采集 → 预处理，抑制毛刺边缘噪点</span></div>
+                  <div><span class="n">2</span><span>斑点分析 + 面积/长宽比分类</span></div>
+                  <div><span class="n">3</span><span>手眼标定映射到机器人坐标（复用 <b>九点标定 V3</b>）</span></div>
+                </div>
+                <div class="pills"><span class="pill">image.blob.multi</span><span class="pill">image.morph.open</span><span class="pill">calib.npoint.map</span></div>
+              </div>
+              <div class="cardmsg">
+                <div class="t"><svg class="i xs" style="color:#0aa87d"><use href="#i-check"/></svg>已生成 9 节点草稿 · 静态校验通过</div>
+                <div class="v"><b>98.6%</b><span>预计良率（基于 240 张历史样本）</span></div>
+                <div class="mini"><i style="width:98.6%"></i></div>
+                <div class="acts"><div class="abtn p">在画布中查看</div><div class="abtn">导出节点说明</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg">
+            <div class="a"><svg class="i xs"><use href="#i-spark"/></svg></div>
+            <div style="flex:1;min-width:0">
+              <div class="bubble">
+                试运行 24 张：<b>22 通过</b>，2 张把油污误判为划伤。建议把 ROI 收窄到治具内，并把「划伤」的最小长宽比从 3.0 提到 4.5。
+                <div class="acts"><div class="abtn p">应用这 2 处修改</div><div class="abtn">先看差异</div></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="composer">
+          <div class="inputbox">
+            <div class="ph">继续描述调整，或 <em>@</em> 引用节点 / 样本…</div>
+            <div class="ibfoot">
+              <svg class="i sm"><use href="#i-attach"/></svg>
+              <span style="font-size:10px">附样本</span>
+              <span class="sp"></span>
+              <span style="font-size:9.5px">⌘↵</span>
+              <div class="send"><svg class="i sm"><use href="#i-send"/></svg></div>
+            </div>
+          </div>
+          <div class="hint">Copilot 可能出错，请核对关键参数后再部署</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  function drawEdges(){
+    const c = document.querySelector('.canvas');
+    if (!c) return;
+    const cb = c.getBoundingClientRect();
+    c.querySelectorAll('path[data-from]').forEach(function(p){
+      const a = c.querySelector(p.dataset.from), b = c.querySelector(p.dataset.to);
+      if (!a || !b) return;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.left + ra.width/2 - cb.left, y1 = ra.top + ra.height/2 - cb.top;
+      const x2 = rb.left + rb.width/2 - cb.left, y2 = rb.top + rb.height/2 - cb.top;
+      if (Math.abs(y2 - y1) > Math.abs(x2 - x1) * 1.2) {
+        const dy = Math.max(26, Math.abs(y2 - y1) * 0.5);
+        p.setAttribute('d', 'M'+x1+' '+y1+' C'+x1+' '+(y1+dy)+', '+x2+' '+(y2-dy)+', '+x2+' '+y2);
+      } else {
+        const dx = Math.max(30, Math.abs(x2-x1) * 0.45);
+        p.setAttribute('d', 'M'+x1+' '+y1+' C'+(x1+dx)+' '+y1+', '+(x2-dx)+' '+y2+', '+x2+' '+y2);
+      }
+    });
+  }
+  window.addEventListener('resize', function(){ fitStage(); drawEdges(); });
+  fitStage(); drawEdges(); window.addEventListener('load', drawEdges);
+</script>
+</body>
+</html>

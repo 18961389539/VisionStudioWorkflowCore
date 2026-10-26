@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>VisionStudio · 5 种成熟产品形态（选型页）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f3f4f8; --panel:#fff; --line:#e4e7ee; --t1:#101828; --t2:#475467; --t3:#667085; --t4:#98a2b3;
+  }
+  html,body{height:100%}
+  body{background:#e9ebf1;color:var(--t1);overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;
+    -webkit-font-smoothing:antialiased}
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1100px 520px at 50% -10%,#fbfbfd,#e3e6ee 80%)}
+  .cap{height:40px;flex:none;width:100%;display:flex;align-items:center;gap:10px;padding:0 18px;
+    background:#0c1117;color:#d7e2ee;font-size:12px;border-bottom:1px solid #1c242e;z-index:50}
+  .cap .num{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:10.5px;font-weight:700;font-family:Consolas,monospace;background:#1b2432;color:#c9d7e6}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#c9d7e6}
+
+  .stage{width:1440px;height:900px;flex:none;margin:auto;background:var(--bg);
+    padding:22px 28px;display:flex;flex-direction:column;overflow:hidden;
+    transform-origin:center center;box-shadow:0 28px 80px rgba(20,30,60,.24)}
+  .hd{display:flex;align-items:flex-end;gap:16px;flex:none}
+  h1{font-size:25px;font-weight:680;letter-spacing:-.9px;line-height:1.15}
+  .sub{font-size:12.5px;color:var(--t3);margin-top:6px}
+  .sub b{color:var(--t1);font-weight:600}
+  .meta{margin-left:auto;font-size:11px;color:var(--t4);text-align:right;line-height:1.65}
+  .meta b{color:var(--t2);font-weight:600}
+
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;flex:1;min-height:0}
+  a.card,.rec{display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);
+    border-radius:11px;overflow:hidden;text-decoration:none;color:inherit;transition:.18s;
+    box-shadow:0 1px 2px rgba(16,24,40,.05);min-height:0}
+  a.card:hover{transform:translateY(-3px);border-color:#c7cede;box-shadow:0 16px 34px rgba(16,24,40,.16)}
+  .shot{position:relative;flex:1;min-height:0;background:#0d1218;overflow:hidden}
+  .shot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+  .shot .no{position:absolute;left:10px;top:10px;height:21px;min-width:21px;padding:0 5px;
+    border-radius:5px;display:grid;place-items:center;font-size:10.5px;font-weight:700;
+    font-family:Consolas,monospace;background:rgba(10,14,20,.78);color:#e6eef8;
+    border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(4px)}
+  .shot .open{position:absolute;right:10px;bottom:10px;font-size:10.5px;color:#fff;
+    background:rgba(10,14,20,.72);border:1px solid rgba(255,255,255,.16);border-radius:20px;
+    padding:3px 9px;opacity:0;transition:.18s;backdrop-filter:blur(4px)}
+  a.card:hover .open{opacity:1}
+  .ct{padding:10px 13px 12px;display:flex;flex-direction:column;gap:4px;flex:none}
+  .ct .t{font-size:14px;font-weight:650;letter-spacing:-.2px;display:flex;align-items:center;gap:7px}
+  .ct .t i{width:7px;height:7px;border-radius:50%;flex:none}
+  .ct .d{font-size:11.5px;color:var(--t3);line-height:1.55}
+  .ct .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+  .ct .tags span{font-size:9.5px;color:var(--t2);background:#f4f6fa;border:1px solid #e8ecf3;
+    border-radius:4px;padding:1px 5px}
+
+  .rec{background:linear-gradient(150deg,#0f1b2c 0%,#1b2b45 100%);border-color:#22314c;color:#e9f0fb;
+    padding:18px 20px;gap:0;position:relative;justify-content:space-between}
+  .rec:before{content:"";position:absolute;inset:0;
+    background:radial-gradient(340px 200px at 85% -10%,rgba(76,154,255,.22),transparent 70%)}
+  .rec .k{font-size:9.5px;letter-spacing:1px;color:#8fa6c4;font-weight:600;position:relative}
+  .rec h3{font-size:16.5px;font-weight:650;margin-top:6px;line-height:1.45;color:#fff;position:relative}
+  .rec h3 em{font-style:normal;color:#7fb8ff}
+  .rec p{font-size:11.5px;line-height:1.62;color:#b9c8dd;margin-top:7px;position:relative}
+  .rec p b{color:#fff;font-weight:600}
+  .rec ul{list-style:none;margin-top:11px;display:flex;flex-direction:column;gap:6px;position:relative}
+  .rec li{font-size:11px;color:#cfdcee;display:flex;gap:7px;line-height:1.5}
+  .rec li .b{width:15px;height:15px;border-radius:50%;background:#1e3b5e;color:#8fc6ff;flex:none;
+    display:grid;place-items:center;font-size:8.5px;font-weight:700;margin-top:1px}
+  .rec .row{display:flex;gap:6px;margin-top:auto;padding-top:10px;flex-wrap:wrap;position:relative}
+  .rec .row span{font-size:9.5px;color:#c8d8ee;border:1px solid #33456a;border-radius:20px;
+    padding:2px 8px;background:#17253d}
+
+  .foot{margin-top:12px;flex:none;display:flex;align-items:center;gap:10px;
+    font-size:10.5px;color:var(--t4);border-top:1px solid #e0e4ec;padding-top:10px}
+  .foot .r{margin-left:auto;display:flex;gap:14px}
+  .foot b{color:var(--t2);font-weight:600}
+</style>
+</head>
+<body>
+<div class="viewport">
+<div class="cap"><span class="num">00</span><b>VisionStudio · 产品形态备选</b><span class="sub">· 5 条成熟产品路线，同一套引擎能力的 5 种包装</span><span class="right"><i class="dot"></i>2026-10-26 · 点击卡片打开预览</span></div>
+
+<div class="stage">
+  <div class="hd">
+    <div>
+      <h1>如果做成成熟产品，应该是哪一副样子</h1>
+      <div class="sub">五套都基于现有能力（<b>171 节点</b> · <b>确定性编译</b> · 标定/调优/追溯 · 插件体系），差别只在<b>卖给谁、解决谁的痛</b>。</div>
+    </div>
+    <div class="meta"><b>5 个方案</b> · 均按 1440×900 制作<br>可缩放查看，不是静态截图</div>
+  </div>
+
+  <div class="cards">
+    <a class="card" href="01-engineering-workstation.html">
+      <div class="shot"><img src="thumb-01.png" alt="工程工作站"><span class="no">01</span><span class="open">打开预览 ↗</span></div>
+      <div class="ct">
+        <div class="t"><i style="background:#4c9aff"></i>工程工作站</div>
+        <div class="d">视觉工程师的桌面级 IDE：停靠面板、断点单步、逐节点耗时与追溯联动。</div>
+        <div class="tags"><span>卖工具</span><span>深度用户</span><span>License 一次性 + 年费</span></div>
+      </div>
+    </a>
+    <a class="card" href="02-production-cockpit.html">
+      <div class="shot"><img src="thumb-02.png" alt="产线运维驾驶舱"><span class="no">02</span><span class="open">打开预览 ↗</span></div>
+      <div class="ct">
+        <div class="t"><i style="background:#14b8a6"></i>产线运维驾驶舱</div>
+        <div class="d">班组长与工艺的现场看板：良率、节拍、报警、缺陷分布与多路画面一屏可见。</div>
+        <div class="tags"><span>卖稳定</span><span>现场管理</span><span>按产线订阅</span></div>
+      </div>
+    </a>
+    <a class="card" href="03-fleet-governance.html">
+      <div class="shot"><img src="thumb-03.png" alt="集团机群治理"><span class="no">03</span><span class="open">打开预览 ↗</span></div>
+      <div class="ct">
+        <div class="t"><i style="background:#4f46e5"></i>集团机群治理</div>
+        <div class="d">多工厂的设备机群：配方版本灰度下发、许可证席位、审计日志与合规留痕。</div>
+        <div class="tags"><span>卖治理</span><span>企业客户</span><span>设备 / 席位订阅</span></div>
+      </div>
+    </a>
+    <a class="card" href="04-ai-copilot-studio.html">
+      <div class="shot"><img src="thumb-04.png" alt="AI 协作工作台"><span class="no">04</span><span class="open">打开预览 ↗</span></div>
+      <div class="ct">
+        <div class="t"><i style="background:#7c5cff"></i>AI 协作工作台</div>
+        <div class="d">一句话生成工作流，样本驱动调参，失败原因可解释、每步修改可回滚。</div>
+        <div class="tags"><span>卖效率</span><span>降低门槛</span><span>按生成量 / 订阅</span></div>
+      </div>
+    </a>
+    <a class="card" href="05-plugin-platform.html">
+      <div class="shot"><img src="thumb-05.png" alt="插件开发者平台"><span class="no">05</span><span class="open">打开预览 ↗</span></div>
+      <div class="ct">
+        <div class="t"><i style="background:#34d399"></i>插件开发者平台</div>
+        <div class="d">节点 SDK、沙箱、签名与基准门禁，把 171 个节点变成可持续增长的生态。</div>
+        <div class="tags"><span>卖生态</span><span>二次开发</span><span>分成 / 授权</span></div>
+      </div>
+    </a>
+
+    <div class="rec">
+      <div class="k">如果只选一个</div>
+      <h3>以 <em>03 机群治理</em> 为主形态，<br><em>01 工作站</em> 做它的编辑端</h3>
+      <p>你们最强的资产不是画布，而是 <b>确定性编译 + 标定/配方/追溯</b> 的闭环。这类价值只在“多台设备、长期运行、可追责”时才卖得出溢价。</p>
+      <ul>
+        <li><span class="b">1</span>版本灰度就是护城河，别人抄不走运行数据</li>
+        <li><span class="b">2</span>审计与留痕可打汽车 / 医疗客户</li>
+        <li><span class="b">3</span>编辑器免费，靠设备端席位收费</li>
+      </ul>
+      <div class="row"><span>先补鉴权与多租户</span><span>再补版本灰度</span><span>编辑器可免费</span></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>共同前提：鉴权与多租户 · i18n 全量接线 · 面板非模态化 · 长任务实时进度</span>
+    <div class="r"><span>粗估工作量：<b>01 ≈ 3 周</b></span><span><b>02 ≈ 4 周</b></span><span><b>03 ≈ 8 周</b></span><span><b>04 ≈ 6 周</b></span><span><b>05 ≈ 10 周</b></span></div>
+  </div>
+</div>
+</div>
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>
+</body>
+</html>

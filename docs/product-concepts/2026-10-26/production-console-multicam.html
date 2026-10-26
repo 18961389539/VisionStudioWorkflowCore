@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>生产页面 · 多相机并联（6 路）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0c1015; --panel:#141a21; --panel2:#171e26;
+    --line:#232c37; --line2:#2c3743;
+    --t1:#e2e9f2; --t2:#b9c5d3; --t3:#8c9aab; --t4:#6d7c8e;
+    --ok:#3ddc97; --ok-bg:rgba(61,220,151,.1); --ok-line:rgba(61,220,151,.28);
+    --warn:#e6b455; --warn-bg:rgba(230,180,85,.1); --warn-line:rgba(230,180,85,.3);
+    --bad:#ff6f6f; --bad-bg:rgba(255,111,111,.1); --bad-line:rgba(255,111,111,.32);
+    --accent:#4c9aff;
+    --mono:"JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+  }
+  html,body{height:100%}
+  body{background:#05080b;color:var(--t1);overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:14px;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1000px 520px at 50% 0%,#0f151c,#05080b 80%)}
+  .cap{height:40px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;
+    background:#0c1117;border-bottom:1px solid #1c242e;color:#d7e2ee;font-size:12px;z-index:50}
+  .cap .num{width:22px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:9.5px;font-weight:700;font-family:Consolas,monospace;background:#12222e;color:#7dd3fc}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#7dd3fc}
+
+  .stage{width:1440px;height:900px;flex:none;margin:auto;display:flex;flex-direction:column;
+    background:var(--bg);overflow:hidden;transform-origin:center center;position:relative;
+    box-shadow:0 30px 90px rgba(0,0,0,.72)}
+  .i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .i.sm{width:13px;height:13px}.i.lg{width:20px;height:20px}
+
+  /* 顶栏 */
+  .top{height:64px;flex:none;display:flex;align-items:center;gap:16px;padding:0 16px;
+    background:linear-gradient(#171e26,#121820);border-bottom:1px solid #0a0e13}
+  .line-id{display:flex;align-items:center;gap:10px}
+  .line-id .mk{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:#1c2733;border:1px solid #2b3846;color:#9fcbff;font-family:var(--mono);font-size:11px;font-weight:700}
+  .line-id .nm{font-size:17px;font-weight:650;letter-spacing:-.2px;line-height:1.15;display:flex;align-items:center;gap:8px}
+  .line-id .lo{font-size:11px;color:var(--t4);margin-top:2px}
+  .cams-chip{font-family:var(--mono);font-size:10px;color:#9fcbff;background:#132438;border:1px solid #24405a;
+    border-radius:4px;padding:1px 5px;font-weight:500}
+  .state{display:flex;align-items:center;gap:9px;height:38px;padding:0 14px;border-radius:19px;
+    background:var(--ok-bg);border:1px solid var(--ok-line);margin-left:6px}
+  .state .p{width:9px;height:9px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 4px rgba(61,220,151,.14);animation:pl 2s infinite}
+  @keyframes pl{0%,100%{box-shadow:0 0 0 4px rgba(61,220,151,.14)}50%{box-shadow:0 0 0 7px rgba(61,220,151,.05)}}
+  .state b{font-size:15px;font-weight:650;color:#8ef0c4}
+  .state span{font-size:12px;color:#6fbf9c}
+  .cycle{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--t4);
+    background:#11171e;border:1px solid var(--line);border-radius:6px;padding:5px 9px}
+  .cycle b{color:var(--t2);font-weight:500}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:13px}
+  .tw{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t3)}
+  .tw .d{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .tw.warn .d{background:var(--warn)}
+  .tw b{color:var(--t2);font-weight:500}
+  .clock{font-family:var(--mono);font-size:15px;color:var(--t2);letter-spacing:.3px}
+  .op{display:flex;align-items:center;gap:8px;padding-left:12px;border-left:1px solid var(--line)}
+  .op .av{width:30px;height:30px;border-radius:50%;background:#22344a;color:#a9d6ff;
+    display:grid;place-items:center;font-size:12px;font-weight:600;border:1px solid #2f4863}
+  .op .nm{font-size:12px;font-weight:600;line-height:1.3}
+  .op .rl{font-size:10px;color:var(--t4)}
+
+  /* 报警条 */
+  .alertbar{height:42px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;
+    background:linear-gradient(90deg,rgba(255,111,111,.14),rgba(255,111,111,.04));
+    border-bottom:1px solid rgba(255,111,111,.24);color:#ffb4b4;font-size:12.5px}
+  .alertbar .tag{font-size:10px;font-weight:700;letter-spacing:.6px;color:#2a0d0d;background:#ff8d8d;
+    border-radius:3px;padding:2px 6px}
+  .alertbar b{color:#ffd0d0;font-weight:650}
+  .alertbar .sp{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:11.5px;color:#c98a8a}
+  .alertbar .lk{display:flex;align-items:center;gap:5px;color:#ffc4c4;font-weight:600}
+
+  .main{flex:1;display:grid;grid-template-columns:1fr 356px;gap:12px;padding:12px 16px 0;min-height:0}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;
+    flex-direction:column;min-height:0;overflow:hidden}
+  .ch{height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;
+    border-bottom:1px solid var(--line);background:#151c24}
+  .ch h3{font-size:12.5px;font-weight:600;letter-spacing:.1px}
+  .ch .sub{font-size:11px;color:var(--t4)}
+  .ch .r{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .mini{font-size:10px;font-family:var(--mono);color:var(--t3);border:1px solid var(--line2);
+    border-radius:4px;padding:1.5px 5px}
+  .tgl{display:flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:5px;
+    font-size:10.5px;color:var(--t3);border:1px solid var(--line2);background:#131a21}
+  .tgl.on{background:#17293b;border-color:#2f5c86;color:#a9d6ff}
+
+  /* 相机墙 */
+  .wall{flex:1;min-height:0}
+  .grid6{flex:1;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;
+    gap:9px;padding:8px;min-height:0}
+  .tile{background:#0f151c;border:1px solid #26313d;border-radius:8px;overflow:hidden;
+    display:flex;flex-direction:column;position:relative;min-height:0;transition:border-color .15s,opacity .15s}
+  .tile.sel{border-color:#4c9aff;box-shadow:0 0 0 1px rgba(76,154,255,.5)}
+  .tile.ng{border-color:#7a3538;box-shadow:0 0 0 1px rgba(255,111,111,.25) inset}
+  .tile.off{opacity:.62}
+  .tile.dim{opacity:.34}
+  .th{height:26px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;
+    background:#151d26;border-bottom:1px solid #212b36}
+  .th b{font-size:11px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .th .st{margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 4px;border-radius:3px;
+    background:var(--ok-bg);color:#8ef0c4;border:1px solid var(--ok-line);white-space:nowrap}
+  .tile.ng .th .st{background:var(--bad-bg);color:#ffb0b0;border-color:var(--bad-line)}
+  .tile.warn .th .st{background:var(--warn-bg);color:#ffd98a;border-color:var(--warn-line)}
+  .tile.off .th .st{background:#1b232c;color:#7d8fa2;border-color:#2b3744}
+  .img{flex:1;position:relative;min-height:0;overflow:hidden;
+    background:radial-gradient(120% 120% at 50% 20%,#2a333e 0%,#182029 60%,#0b1016 100%)}
+  .img .part{position:absolute;left:32%;top:24%;width:36%;height:46%;border-radius:2px;
+    background:linear-gradient(156deg,#9aa7b5,#7d8a99 36%,#5d6a79 74%,#788593);
+    box-shadow:0 10px 22px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.5)}
+  .img .part:before{content:"";position:absolute;left:14%;top:16%;width:34%;height:34%;
+    background:linear-gradient(150deg,#4d5866,#697684);border-radius:2px}
+  .img .part:after{content:"";position:absolute;right:12%;bottom:14%;width:24%;height:24%;
+    background:radial-gradient(circle at 42% 38%,#8b98a6,#4a5563 62%,#39434f);border-radius:50%}
+  .img .roi{position:absolute;left:27%;top:19%;width:46%;height:56%;border:1.5px solid rgba(61,220,151,.9)}
+  .tile.ng .img .roi{border-color:#ff8d8d;box-shadow:0 0 14px rgba(255,111,111,.35) inset}
+  .img .roi .lb{position:absolute;left:-1px;top:-16px;font-size:8.5px;font-family:var(--mono);
+    font-weight:700;color:#06281c;background:#3ddc97;padding:0 4px;border-radius:2px;line-height:13px}
+  .tile.ng .img .roi .lb{background:#ff8d8d;color:#2a0d0d}
+  .img .scratch{position:absolute;left:40%;top:30%;width:26%;height:1.4px;
+    background:linear-gradient(90deg,transparent,#ffb3b3,#ff8d8d,transparent);transform:rotate(38deg);
+    box-shadow:0 0 5px rgba(255,141,141,.7)}
+  .img .ts{position:absolute;left:6px;bottom:5px;font-family:var(--mono);font-size:8.5px;color:#9fb3c8;opacity:.9}
+  .img .fps{position:absolute;right:6px;bottom:5px;font-family:var(--mono);font-size:8.5px;color:#9fb3c8}
+  .img .zoom{position:absolute;right:5px;top:5px;width:20px;height:20px;border-radius:4px;display:grid;
+    place-items:center;background:rgba(10,15,20,.72);border:1px solid rgba(255,255,255,.14);color:#cfe0ef;
+    opacity:0;transition:.15s}
+  .tile:hover .img .zoom{opacity:1}
+  .img .offmask{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:5px;background:repeating-linear-gradient(45deg,#0e141a 0 8px,#111922 8px 16px);
+    color:#7d8fa2;font-size:10.5px}
+  .img .offmask b{font-family:var(--mono);font-size:14px;color:#a7b6c6}
+  .tf{height:26px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px;
+    border-top:1px solid #1b232c;background:#121921;font-size:9.5px;color:var(--t4);font-family:var(--mono)}
+  .tf b{color:var(--t2);font-weight:500}
+  .tf .bad{color:#ffb0b0}
+  .tf .r{margin-left:auto;display:flex;align-items:center;gap:5px}
+  .tf .sk{color:var(--t3)}
+  .tf .sk.hi{color:#ffd98a}
+
+  /* 综合判定条 */
+  .verdict{flex:none;height:46px;display:flex;align-items:center;gap:14px;padding:0 12px;
+    border-top:1px solid var(--line);background:#121921;font-size:11.5px;color:var(--t3)}
+  .verdict .big{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:650;color:#ffb0b0}
+  .verdict .big .dot{width:8px;height:8px;border-radius:50%;background:#ff6f6f;box-shadow:0 0 0 3px rgba(255,111,111,.15)}
+  .verdict .kv{display:flex;align-items:center;gap:5px}
+  .verdict .kv b{font-family:var(--mono);color:var(--t2);font-weight:500}
+  .verdict .kv.warn b{color:#ffd98a}
+  .verdict .r{margin-left:auto;display:flex;align-items:center;gap:7px;color:#9fcbff;font-weight:600;font-size:11px}
+
+  /* 计数 */
+  .counts{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .cnt{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;
+    height:86px;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden}
+  .cnt .k{font-size:11px;color:var(--t4);display:flex;align-items:center;gap:5px}
+  .cnt .v{font-size:26px;font-weight:680;letter-spacing:-.8px;line-height:1.12;margin-top:2px}
+  .cnt .v small{font-size:11px;color:var(--t4);font-weight:400;letter-spacing:0;margin-left:3px}
+  .cnt .f{font-size:10px;color:var(--t4);margin-top:2px}
+  .cnt .f b{color:var(--t3);font-weight:500}
+  .cnt.ok .v{color:#8ef0c4}.cnt.ng .v{color:#ffb0b0}.cnt.warn .v{color:#ffd98a}
+  .cnt .spark{position:absolute;right:9px;bottom:8px;width:60px;height:22px;opacity:.5}
+  .cnt .spark path{fill:none;stroke-width:1.6}
+
+  /* 右列 */
+  .sync{flex:none}
+  .srow{display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid #1b232c;font-size:11.5px}
+  .srow:last-child{border-bottom:0}
+  .srow .g{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+  .srow.warn .g{background:var(--warn);box-shadow:0 0 0 3px rgba(230,180,85,.14)}
+  .srow .nm{color:var(--t2)}
+  .srow .vv{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--t3)}
+  .srow.warn .vv{color:#ffd98a}
+
+  .alarms{flex:none;height:330px}
+  .alist{padding:6px 8px;display:flex;flex-direction:column;gap:5px;overflow:hidden}
+  .al{display:flex;gap:8px;padding:7px 8px;border-radius:7px;background:#151d25;border:1px solid #1f2934;position:relative}
+  .al:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--warn)}
+  .al.bad:before{background:var(--bad)}
+  .al .bd{padding-left:7px;min-width:0;flex:1}
+  .al .t1{font-size:11.5px;color:var(--t1);font-weight:600;display:flex;align-items:center;gap:5px}
+  .al .t1 .cam{font-family:var(--mono);font-size:9px;color:#9fcbff;background:#132438;border:1px solid #24405a;
+    border-radius:3px;padding:0 3px;font-weight:500}
+  .al .t1 .lv{font-size:8.5px;font-weight:700;letter-spacing:.3px;color:#2a1f0a;background:var(--warn);
+    border-radius:2px;padding:0 3px}
+  .al.bad .t1 .lv{background:var(--bad);color:#2a0d0d}
+  .al .t2{font-size:10.5px;color:var(--t4);margin-top:2px;line-height:1.45}
+  .al .t2 code{font-family:var(--mono);font-size:9.5px;color:var(--t3)}
+  .al .acts{display:flex;gap:4px;margin-top:5px}
+  .abtn{height:20px;padding:0 7px;border-radius:4px;display:grid;place-items:center;font-size:10px;
+    font-weight:600;border:1px solid #33414f;color:var(--t3);background:#111820}
+  .abtn.p{border-color:#3a5f45;background:#12251b;color:#8ef0c4}
+  .al .tm{font-family:var(--mono);font-size:9px;color:var(--t4);flex:none}
+
+  .log{flex:1;min-height:0}
+  .loglist{padding:4px 12px 6px;display:flex;flex-direction:column;overflow:hidden}
+  .le{display:flex;gap:9px;font-size:10.5px;padding:4px 0;border-bottom:1px solid #1a222b;align-items:flex-start}
+  .le:last-child{border-bottom:0}
+  .le .tm{font-family:var(--mono);font-size:9px;color:var(--t4);width:34px;flex:none;padding-top:1px}
+  .le .d{width:5px;height:5px;border-radius:50%;background:#3f4d5e;margin-top:4px;flex:none}
+  .le.ok .d{background:var(--ok)}.le.warn .d{background:var(--warn)}.le.bad .d{background:var(--bad)}
+  .le .tx{color:var(--t2);line-height:1.45}
+  .le .tx b{color:var(--t1);font-weight:600}
+  .le .tx code{font-family:var(--mono);font-size:9.5px;color:var(--t3)}
+
+  /* 操作栏 */
+  .actionbar{height:88px;flex:none;display:flex;align-items:center;gap:9px;padding:0 16px;margin-top:12px;
+    background:linear-gradient(#161d25,#111820);border-top:1px solid #232d38}
+  .big{height:52px;border-radius:9px;display:flex;align-items:center;gap:8px;padding:0 16px;
+    font-size:14.5px;font-weight:650;border:1px solid transparent;white-space:nowrap}
+  .big.stop{background:linear-gradient(#d94a4a,#b83232);border-color:#ef6a6a;color:#fff;
+    box-shadow:0 6px 18px rgba(200,50,50,.26);min-width:176px;justify-content:center}
+  .big.ghost{background:#161e26;border-color:#2b3744;color:var(--t2);font-size:13px;font-weight:500}
+  .big.station{background:#182433;border-color:#2f4a68;color:#a9d6ff;font-size:13px;font-weight:600}
+  .big.ng{background:rgba(230,180,85,.1);border-color:rgba(230,180,85,.35);color:#ffd98a;font-size:13px}
+  .big .n{font-family:var(--mono);font-size:10.5px;background:rgba(0,0,0,.28);border-radius:9px;padding:1px 5px}
+  .sel-note{margin-left:6px;display:flex;flex-direction:column;gap:3px}
+  .sel-note .l1{font-size:11.5px;color:#9fcbff;display:flex;align-items:center;gap:5px}
+  .sel-note .l2{font-size:10px;color:var(--t4)}
+  .bar-right{margin-left:auto;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+  .bar-right .l1{display:flex;align-items:center;gap:5px;font-size:11px;color:#8ef0c4}
+  .bar-right .l2{font-size:10px;color:var(--t4)}
+
+  /* 覆盖层通用 */
+  .overlay{position:absolute;inset:0;background:rgba(5,8,11,.74);backdrop-filter:blur(3px);
+    z-index:80;display:none;align-items:center;justify-content:center}
+  .overlay.on{display:flex}
+
+  /* 单路放大 */
+  .bigbox{width:780px;background:#111820;border:1px solid #333f4d;border-radius:12px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.7);display:flex;flex-direction:column}
+  .bigbox .bh{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;
+    border-bottom:1px solid #232d38;background:#151d26}
+  .bigbox .bh b{font-size:14px;font-weight:650}
+  .bigbox .bh .st{font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:3px}
+  .bigbox .bh .r{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--t4);font-size:11px}
+  .bigbox .frame{height:440px;position:relative;overflow:hidden;
+    background:radial-gradient(120% 100% at 50% 24%,#2a333e 0%,#182029 58%,#0b1016 100%)}
+  .bigbox .frame .grid{position:absolute;inset:0;opacity:.14;
+    background-image:linear-gradient(#8fa4ba 1px,transparent 1px),linear-gradient(90deg,#8fa4ba 1px,transparent 1px);
+    background-size:72px 72px}
+  .bigbox .part{position:absolute;left:29%;top:21%;width:42%;height:50%;border-radius:3px;
+    background:linear-gradient(156deg,#9aa7b5 0%,#7d8a99 34%,#5d6a79 74%,#788593 100%);
+    box-shadow:0 20px 44px rgba(0,0,0,.62),inset 0 1px 0 rgba(255,255,255,.55)}
+  .bigbox .part:before{content:"";position:absolute;left:13%;top:16%;width:34%;height:36%;
+    background:linear-gradient(150deg,#4d5866,#697684);border-radius:2px;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.16)}
+  .bigbox .part:after{content:"";position:absolute;right:12%;bottom:14%;width:22%;height:22%;
+    background:radial-gradient(circle at 42% 38%,#8b98a6,#4a5563 62%,#39434f);border-radius:50%}
+  .bigbox .roi{position:absolute;left:25%;top:17%;width:50%;height:58%;border:2px solid #3ddc97;
+    box-shadow:0 0 18px rgba(61,220,151,.2) inset}
+  .bigbox .roi.ng{border-color:#ff8d8d;box-shadow:0 0 18px rgba(255,111,111,.28) inset}
+  .bigbox .scratch{display:none;position:absolute;left:40%;top:34%;width:24%;height:1.6px;
+    background:linear-gradient(90deg,transparent,#ffb3b3,#ff8d8d,transparent);transform:rotate(38deg);
+    box-shadow:0 0 6px rgba(255,141,141,.75);z-index:2}
+  .bigbox .frame.isng .scratch{display:block}
+  .bigbox .roi .lb{position:absolute;left:-2px;top:-24px;font-size:11px;font-family:var(--mono);
+    font-weight:700;color:#06281c;background:#3ddc97;padding:1px 6px;border-radius:3px}
+  .bigbox .roi.ng .lb{background:#ff8d8d;color:#2a0d0d}
+  .bigbox .ov{position:absolute;font-family:var(--mono);font-size:10.5px;color:#cfe0ef;text-shadow:0 1px 3px #000}
+  .bigbox .ov.tl{left:14px;top:12px}
+  .bigbox .ov.tr{right:14px;top:12px;text-align:right}
+  .bigbox .ov.bl{left:14px;bottom:12px}
+  .bigbox .ov .k{color:#7f96ad}
+  .bigbox .bfoot{height:40px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;
+    border-top:1px solid #232d38;background:#0f151c;font-size:11px;color:var(--t4)}
+  .bigbox .bfoot b{color:var(--t2);font-weight:500;font-family:var(--mono)}
+
+  /* 停线确认 */
+  .dlg{width:520px;background:#151c24;border:1px solid #333f4d;border-radius:12px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.7)}
+  .dlg .dh{padding:16px 18px 12px;border-bottom:1px solid #232d38;display:flex;align-items:flex-start;gap:11px}
+  .dlg .dh .ic{width:34px;height:34px;border-radius:9px;background:rgba(255,111,111,.12);
+    border:1px solid rgba(255,111,111,.3);display:grid;place-items:center;color:#ff9b9b;flex:none}
+  .dlg h4{font-size:15.5px;font-weight:650}
+  .dlg .sub{font-size:11.5px;color:var(--t4);margin-top:3px}
+  .dlg .x{margin-left:auto;color:var(--t4);font-size:16px;line-height:1}
+  .dlg .db{padding:14px 18px}
+  .imp{background:#111820;border:1px solid #232d38;border-radius:8px;padding:10px 12px;
+    display:flex;flex-direction:column;gap:6px}
+  .imp .t{font-size:10.5px;color:var(--t4);letter-spacing:.4px;margin-bottom:2px}
+  .imp div{font-size:11.5px;color:var(--t2);display:flex;gap:7px;line-height:1.45}
+  .imp div i{width:4px;height:4px;border-radius:50%;background:#7d8fa2;margin-top:6px;flex:none}
+  .lab{font-size:11px;color:var(--t4);margin:13px 0 6px}
+  .reasons{display:flex;gap:6px;flex-wrap:wrap}
+  .rs{height:28px;padding:0 11px;border-radius:6px;border:1px solid #2c3743;background:#121922;
+    color:var(--t3);font-size:11.5px;display:grid;place-items:center}
+  .rs.on{background:#1d2a38;border-color:#3d5a78;color:#cfe3f8}
+  .dlg input{width:100%;height:34px;margin-top:8px;border-radius:6px;background:#0f151c;
+    border:1px solid #2c3743;color:var(--t1);padding:0 10px;font-size:12.5px;font-family:var(--mono)}
+  .dlg input:focus{outline:none;border-color:#4c9aff}
+  .dlg .df{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid #232d38;background:#121921}
+  .dlg .df .hint{font-size:10.5px;color:var(--t4);margin-right:auto}
+  .dlg .df .btn{height:34px;font-size:12.5px;display:grid;place-items:center;padding:0 13px;border-radius:7px;
+    border:1px solid #2c3743;background:#18212b;color:var(--t2)}
+  .dlg .df .danger{background:#c03a3a;border-color:#e05a5a;color:#fff;font-weight:650}
+  .dlg .df .danger[disabled]{background:#2a3138;border-color:#333c46;color:#5f6c7b}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2 5.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+  <symbol id="i-call" viewBox="0 0 24 24"><path d="M5 4h4l2 5-3 2a12 12 0 006 6l2-3 5 2v4a2 2 0 01-2 2A17 17 0 013 6a2 2 0 012-2z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+</defs></svg>
+
+<div class="viewport">
+<div class="cap"><span class="num">OP+</span><b>生产页面 · 多相机并联</b><span class="sub">· 6 路相机 / 同步组 / 单工位可暂停</span><span class="right"><i class="dot"></i>VisionStudio · 页面样张 · 2026-10-26</span></div>
+
+<div class="stage">
+  <div class="top">
+    <div class="line-id">
+      <div class="mk">L2</div>
+      <div>
+        <div class="nm">L2 包装线<span class="cams-chip">6 路 · 5 在线</span></div>
+        <div class="lo">苏州一厂 · A 车间 · 3 号工位 · 同步组 SYNC-A</div>
+      </div>
+    </div>
+    <div class="state"><i class="p"></i><b>运行中</b><span>已连续 2 小时 14 分</span></div>
+    <div class="cycle">cycle <b>#88214</b> · run <b>8f2a-41c7</b></div>
+    <div class="top-right">
+      <div class="tw"><i class="d"></i>同步组 <b>5/6 到齐</b></div>
+      <div class="tw warn"><i class="d"></i>最大 skew <b>0.8 ms</b></div>
+      <div class="tw"><i class="d"></i>看门狗 <b>0 次</b></div>
+      <div class="clock">15:19:04</div>
+      <div class="op"><span class="av">王</span><div><div class="nm">王海</div><div class="rl">操作员 · 可停整线</div></div></div>
+    </div>
+  </div>
+
+  <div class="alertbar">
+    <span class="tag">相机离线</span>
+    <span><b>L2-06 装箱校验</b> 已离线 3 分 12 秒 · 该工位转人工放行 · <b>本班影响 41 件</b></span>
+    <div class="sp">
+      <span>L2-04 连续 2 件划伤</span>
+      <span class="lk">检查相机电源 <svg class="i sm"><use href="#i-chev"/></svg></span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="col">
+      <!-- 相机墙 -->
+      <div class="card wall">
+        <div class="ch">
+          <h3>相机墙</h3><span class="sub">按循环同步采集 · 点击选中，双击放大</span>
+          <div class="r">
+            <span class="tgl" id="onlyBad">只看异常</span>
+            <span class="mini">9 : 16</span>
+            <span class="mini">20.0 fps</span>
+          </div>
+        </div>
+        <div class="grid6" id="wallGrid">
+
+          <div class="tile" data-name="L2-01 上料定位" data-state="OK" data-score="0.98" data-lat="2.4" data-skew="0.2">
+            <div class="th"><b>L2-01 上料定位</b><span class="st">OK</span></div>
+            <div class="img">
+              <div class="part"></div>
+              <div class="roi"><span class="lb">0.98</span></div>
+              <span class="ts">15:19:04.117</span><span class="fps">20.0 fps</span>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span>抓取 <b>2.4</b> ms</span><span class="r"><span class="sk">skew 0.2</span></span></div>
+          </div>
+
+          <div class="tile" data-name="L2-02 侧封检测" data-state="OK" data-score="0.96" data-lat="3.1" data-skew="0.4">
+            <div class="th"><b>L2-02 侧封检测</b><span class="st">OK</span></div>
+            <div class="img">
+              <div class="part" style="left:34%;top:22%;width:32%;height:50%"></div>
+              <div class="roi" style="left:29%;top:17%;width:42%;height:60%"><span class="lb">0.96</span></div>
+              <span class="ts">15:19:04.118</span><span class="fps">20.0 fps</span>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span>抓取 <b>3.1</b> ms</span><span class="r"><span class="sk">skew 0.4</span></span></div>
+          </div>
+
+          <div class="tile warn" data-name="L2-03 二维码读码" data-state="WARN" data-score="0.91" data-lat="4.2" data-skew="0.6">
+            <div class="th"><b>L2-03 二维码读码</b><span class="st">低置信</span></div>
+            <div class="img">
+              <div class="part" style="left:30%;top:26%;width:34%;height:44%"></div>
+              <div class="roi" style="left:25%;top:21%;width:44%;height:54%"><span class="lb">0.91</span></div>
+              <span class="ts">15:19:04.118</span><span class="fps">18.4 fps</span>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span>解码 <b>4.2</b> ms</span><span class="r"><span class="sk hi">skew 0.6</span></span></div>
+          </div>
+
+          <div class="tile ng sel" data-name="L2-04 外观缺陷" data-state="NG" data-score="0.88" data-lat="8.6" data-skew="0.8">
+            <div class="th"><b>L2-04 外观缺陷</b><span class="st">NG · 划伤</span></div>
+            <div class="img">
+              <div class="part"></div>
+              <div class="scratch"></div>
+              <div class="roi"><span class="lb">0.88 划伤</span></div>
+              <span class="ts">15:19:04.119</span><span class="fps">20.0 fps</span>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span class="bad">判定 <b>NG</b></span><span class="r"><span class="sk hi">skew 0.8</span></span></div>
+          </div>
+
+          <div class="tile" data-name="L2-05 尺寸测量" data-state="OK" data-score="0.99" data-lat="2.9" data-skew="0.3">
+            <div class="th"><b>L2-05 尺寸测量</b><span class="st">OK</span></div>
+            <div class="img">
+              <div class="part" style="left:33%;top:23%;width:34%;height:48%"></div>
+              <div class="roi" style="left:28%;top:18%;width:44%;height:58%"><span class="lb">0.99</span></div>
+              <span class="ts">15:19:04.119</span><span class="fps">20.0 fps</span>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span>测量 <b>2.9</b> ms</span><span class="r"><span class="sk">skew 0.3</span></span></div>
+          </div>
+
+          <div class="tile off" data-name="L2-06 装箱校验" data-state="OFF" data-score="—" data-lat="—" data-skew="—">
+            <div class="th"><b>L2-06 装箱校验</b><span class="st">离线</span></div>
+            <div class="img">
+              <div class="offmask"><b>NO SIGNAL</b><span>最后心跳 15:15:52</span></div>
+              <span class="zoom"><svg class="i sm"><use href="#i-expand"/></svg></span>
+            </div>
+            <div class="tf"><span class="bad">离线 3m12s</span><span class="r"><span class="sk">—</span></span></div>
+          </div>
+
+        </div>
+        <div class="verdict">
+          <div class="big"><i class="dot"></i>本循环 NG</div>
+          <div class="kv">到齐 <b>5 / 6</b></div>
+          <div class="kv warn">最大 skew <b>0.8 ms</b></div>
+          <div class="kv">缺帧 <b>0</b></div>
+          <div class="kv">降级放行 <b>1 路</b></div>
+          <div class="r">本循环追溯 <svg class="i sm"><use href="#i-chev"/></svg></div>
+        </div>
+      </div>
+
+      <div class="counts">
+        <div class="cnt">
+          <div class="k">循环数</div>
+          <div class="v">4,286<small>次</small></div>
+          <div class="f">本班目标 <b>4,800</b> · 完成 89%</div>
+          <svg class="spark" viewBox="0 0 70 22"><path d="M2 18 L12 16 L22 14 L32 13 L42 10 L52 7 L62 5 L68 4" stroke="#4c9aff"/></svg>
+        </div>
+        <div class="cnt ok">
+          <div class="k">良品</div>
+          <div class="v">4,254<small>件</small></div>
+          <div class="f">良率 <b>99.25%</b> · 目标 99.20%</div>
+          <svg class="spark" viewBox="0 0 70 22"><path d="M2 8 L12 7 L22 9 L32 6 L42 7 L52 5 L62 6 L68 4" stroke="#3ddc97"/></svg>
+        </div>
+        <div class="cnt ng">
+          <div class="k">NG</div>
+          <div class="v">32<small>件</small></div>
+          <div class="f">待复判 <b>3</b> · L2-04 占 14 件</div>
+          <svg class="spark" viewBox="0 0 70 22"><path d="M2 15 L12 11 L22 17 L32 9 L42 13 L52 8 L62 15 L68 11" stroke="#ff6f6f"/></svg>
+        </div>
+        <div class="cnt warn">
+          <div class="k">节拍</div>
+          <div class="v">1.86<small>s</small></div>
+          <div class="f">目标 ≤ 1.80s · 瓶颈 <b>L2-04</b></div>
+          <svg class="spark" viewBox="0 0 70 22"><path d="M2 7 L12 11 L22 8 L32 13 L42 9 L52 14 L62 10 L68 12" stroke="#e6b455"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card sync">
+        <div class="ch"><h3>同步与守护</h3><span class="sub">SYNC-A</span></div>
+        <div class="srow"><i class="g"></i><span class="nm">本循环到齐 · 缺帧</span><span class="vv">5 / 6 · 0</span></div>
+        <div class="srow"><i class="g"></i><span class="nm">最大 skew</span><span class="vv">0.8 ms</span></div>
+        <div class="srow"><i class="g"></i><span class="nm">时间同步 PTP</span><span class="vv">P95 0.8 ms</span></div>
+        <div class="srow warn"><i class="g"></i><span class="nm">连续失败</span><span class="vv">2 / 3</span></div>
+      </div>
+
+      <div class="card alarms">
+        <div class="ch"><h3>按相机报警</h3><span class="sub">3 条</span><div class="r"><span style="font-size:10px;color:#8fa3b8">全部 →</span></div></div>
+        <div class="alist">
+          <div class="al bad">
+            <div class="bd">
+              <div class="t1"><span class="cam">L2-04</span><span class="lv">严重</span>连续 2 件划伤</div>
+              <div class="t2">置信度 0.88 / 0.91 · 已自动锁存 2 帧<br><code>DEFECT_CONSECUTIVE</code></div>
+              <div class="acts"><span class="abtn p">复判 2 件</span><span class="abtn">查看原图</span></div>
+            </div>
+            <span class="tm">15:18</span>
+          </div>
+          <div class="al">
+            <div class="bd">
+              <div class="t1"><span class="cam">L2-03</span><span class="lv">警告</span>读码失败率超阈值</div>
+              <div class="t2">4.2%（阈值 2%）· 持续 21 分钟<br><code>READ_RATE_HIGH</code></div>
+              <div class="acts"><span class="abtn">确认并复位</span><span class="abtn">呼叫工程师</span></div>
+            </div>
+            <span class="tm">14:58</span>
+          </div>
+          <div class="al bad">
+            <div class="bd">
+              <div class="t1"><span class="cam">L2-06</span><span class="lv">严重</span>相机离线</div>
+              <div class="t2">3 分 12 秒 · 工位已转人工放行<br><code>CAMERA_OFFLINE</code></div>
+              <div class="acts"><span class="abtn p">重连相机</span><span class="abtn">呼叫工程师</span></div>
+            </div>
+            <span class="tm">15:15</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card log">
+        <div class="ch"><h3>当班事件</h3><span class="sub">08:00 至今</span></div>
+        <div class="loglist">
+          <div class="le bad"><span class="tm">15:19</span><i class="d"></i><span class="tx">循环 <code>#88214</code> 判 NG · <b>L2-04 划伤</b></span></div>
+          <div class="le warn"><span class="tm">15:15</span><i class="d"></i><span class="tx"><b>L2-06 离线</b> · 工位转人工放行</span></div>
+          <div class="le"><span class="tm">15:02</span><i class="d"></i><span class="tx">复判 3 件 NG · 2 报废 / 1 放行</span></div>
+          <div class="le warn"><span class="tm">14:58</span><i class="d"></i><span class="tx"><b>L2-03</b> 读码失败率 4.2%</span></div>
+          <div class="le"><span class="tm">12:04</span><i class="d"></i><span class="tx">配方 <code>v0.63.2</code> 下发 · 6 路同步组已校验</span></div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="actionbar">
+    <button class="big stop" id="stopBtn"><svg class="i"><use href="#i-stop"/></svg>停止整线</button>
+    <button class="big station" id="pauseBtn"><svg class="i sm"><use href="#i-pause"/></svg>暂停 L2-04</button>
+    <div class="sel-note">
+      <div class="l1"><svg class="i sm" style="color:#7d8fa2"><use href="#i-cam"/></svg>当前选中 L2-04 外观缺陷</div>
+      <div class="l2">单工位暂停只影响这一路，其余 5 路继续生产</div>
+    </div>
+    <button class="big ghost"><svg class="i sm"><use href="#i-reset"/></svg>复位</button>
+    <button class="big ng"><svg class="i sm"><use href="#i-alert"/></svg>复判<span class="n">3</span></button>
+    <button class="big ghost"><svg class="i sm"><use href="#i-call"/></svg>呼叫工程师</button>
+    <div class="bar-right">
+      <div class="l1"><svg class="i sm"><use href="#i-lock"/></svg>参数已锁定 · 6 路共用配方 v0.63.2</div>
+      <div class="l2">切换工程模式需工程师权限</div>
+    </div>
+  </div>
+
+  <!-- 单路放大 -->
+  <div class="overlay" id="bigOv">
+    <div class="bigbox">
+      <div class="bh">
+        <b id="bigName">L2-04 外观缺陷</b>
+        <span class="st" id="bigState" style="background:rgba(255,111,111,.12);color:#ffb0b0;border:1px solid rgba(255,111,111,.32)">NG</span>
+        <div class="r"><span id="bigMeta">2448 × 2048 · Mono8 · 20.0 fps</span>
+          <span class="mini">Esc 关闭</span><svg class="i sm" id="bigClose" style="cursor:pointer"><use href="#i-x"/></svg></div>
+      </div>
+      <div class="frame" id="bigFrame">
+        <div class="grid"></div>
+        <div class="part"></div>
+        <div class="scratch"></div>
+        <div class="roi" id="bigRoi"><span class="lb" id="bigLb">0.88 划伤</span></div>
+        <div class="ov tl"><span class="k">frame</span> #88214-04 &nbsp; <span class="k">exposure</span> 8.0 ms</div>
+        <div class="ov tr">2026-10-26 15:19:04.119<br><span class="k">trigger</span> 同步组 SYNC-A</div>
+        <div class="ov bl">抓取 <span class="k">2.4 ms</span> · 执行 <span class="k">8.6 ms</span> · 判定 <span class="k" id="bigVerdict">NG 划伤</span></div>
+      </div>
+      <div class="bfoot">
+        <span>相机 <b>acA2440-75um</b></span><span>曝光 <b>8.0 ms</b></span>
+        <span>skew <b id="bigSkew">0.8 ms</b></span>
+        <span>同步偏差在 1 ms 内，可用于同循环拼接</span>
+        <span style="margin-left:auto;color:#9fcbff;font-weight:600">在追溯中打开 →</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 停整线确认 -->
+  <div class="overlay" id="overlay">
+    <div class="dlg">
+      <div class="dh">
+        <span class="ic"><svg class="i"><use href="#i-alert"/></svg></span>
+        <div>
+          <h4>停止 L2 包装线</h4>
+          <div class="sub">6 路相机与 1 台机器人将一起停止</div>
+        </div>
+        <span class="x" id="closeX">✕</span>
+      </div>
+      <div class="db">
+        <div class="imp">
+          <div class="t">停线后将发生</div>
+          <div><i></i>6 路相机停止采集（其中 1 路已离线），同步组释放</div>
+          <div><i></i>在制 <b style="color:#ffd98a">12 件</b> 标记为「待复判」，不会自动放行</div>
+          <div><i></i>本次运行 <b style="color:#cfe3f8">8f2a-41c7</b> 关闭并归档，可按循环回放 6 路画面</div>
+          <div><i></i>若只想隔离单工位，请改用「暂停 L2-04」</div>
+        </div>
+        <div class="lab">停线原因（写入审计日志）</div>
+        <div class="reasons">
+          <span class="rs">换型</span><span class="rs on">故障处理</span><span class="rs">交接班</span><span class="rs">其他</span>
+        </div>
+        <div class="lab">输入产线名 <b style="color:#cfe3f8">L2</b> 以确认</div>
+        <input id="confirmInput" placeholder="L2" autocomplete="off">
+      </div>
+      <div class="df">
+        <span class="hint">确认后记录操作员、时间与原因</span>
+        <button class="btn" id="cancelBtn">取消</button>
+        <button class="btn danger" id="confirmBtn" disabled>确认停线</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+
+  /* 选中相机 */
+  var tiles = Array.prototype.slice.call(document.querySelectorAll('.tile'));
+  var pauseBtn = document.getElementById('pauseBtn');
+  tiles.forEach(function(t){
+    t.addEventListener('click', function(){
+      tiles.forEach(function(x){ x.classList.remove('sel'); });
+      t.classList.add('sel');
+      var nm = t.dataset.name;
+      document.querySelector('.sel-note .l1').innerHTML =
+        '<svg class="i sm" style="color:#7d8fa2"><use href="#i-cam"/></svg>当前选中 ' + nm;
+      document.querySelector('.sel-note .l2').textContent =
+        t.dataset.state === 'OFF' ? '该路离线，可尝试重连或转人工放行'
+        : '单工位暂停只影响这一路，其余 ' + (tiles.filter(function(x){return x.dataset.state!=='OFF';}).length) + ' 路继续生产';
+      pauseBtn.innerHTML = t.dataset.state === 'OFF'
+        ? '<svg class="i sm"><use href="#i-reset"/></svg>重连 ' + nm.split(' ')[0]
+        : '<svg class="i sm"><use href="#i-pause"/></svg>暂停 ' + nm.split(' ')[0];
+    });
+  });
+
+  /* 只看异常 */
+  var onlyBad = document.getElementById('onlyBad');
+  onlyBad.addEventListener('click', function(){
+    onlyBad.classList.toggle('on');
+    var on = onlyBad.classList.contains('on');
+    tiles.forEach(function(t){
+      var bad = t.dataset.state !== 'OK';
+      t.classList.toggle('dim', on && !bad);
+    });
+  });
+
+  /* 单路放大 */
+  var bigOv = document.getElementById('bigOv');
+  function openBig(t){
+    document.getElementById('bigName').textContent = t.dataset.name;
+    document.getElementById('bigState').textContent = t.dataset.state;
+    document.getElementById('bigLb').textContent = t.dataset.score + (t.dataset.state === 'NG' ? ' 划伤' : '');
+    document.getElementById('bigSkew').textContent = t.dataset.skew + ' ms';
+    var isNg = t.dataset.state === 'NG';
+    document.getElementById('bigRoi').classList.toggle('ng', isNg);
+    document.getElementById('bigFrame').classList.toggle('isng', isNg);
+    document.getElementById('bigVerdict').textContent = isNg ? 'NG 划伤' : (t.dataset.state === 'WARN' ? '低置信 · 放行' : 'OK');
+    bigOv.classList.add('on');
+  }
+  tiles.forEach(function(t){
+    t.addEventListener('dblclick', function(){ openBig(t); });
+    var z = t.querySelector('.zoom');
+    if (z) z.addEventListener('click', function(e){ e.stopPropagation(); openBig(t); });
+  });
+  document.getElementById('bigClose').addEventListener('click', function(){ bigOv.classList.remove('on'); });
+  bigOv.addEventListener('click', function(e){ if (e.target === bigOv) bigOv.classList.remove('on'); });
+
+  /* 停整线 */
+  var ov = document.getElementById('overlay');
+  var input = document.getElementById('confirmInput');
+  var confirmBtn = document.getElementById('confirmBtn');
+  document.getElementById('stopBtn').addEventListener('click', function(){
+    ov.classList.add('on');
+    setTimeout(function(){ input.focus(); }, 60);
+  });
+  function close(){ ov.classList.remove('on'); input.value=''; confirmBtn.disabled = true; }
+  document.getElementById('cancelBtn').addEventListener('click', close);
+  document.getElementById('closeX').addEventListener('click', close);
+  ov.addEventListener('click', function(e){ if (e.target === ov) close(); });
+  input.addEventListener('input', function(){
+    confirmBtn.disabled = input.value.trim().toUpperCase() !== 'L2';
+  });
+  document.querySelectorAll('.rs').forEach(function(el){
+    el.addEventListener('click', function(){
+      document.querySelectorAll('.rs').forEach(function(x){ x.classList.remove('on'); });
+      el.classList.add('on');
+    });
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') { bigOv.classList.remove('on'); close(); }
+  });
+</script>
+</body>
+</html>

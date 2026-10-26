@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>概念 02 · 产线运维驾驶舱 VisionStudio Ops</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#eef2f6; --card:#fff; --line:#e3e9f0; --line2:#edf1f6;
+    --t1:#0f1c2e; --t2:#42536a; --t3:#6b7c93; --t4:#93a2b5;
+    --brand:#0f766e; --brand2:#14b8a6; --brand-soft:#e6f6f3;
+    --ok:#0f9d63; --ok-soft:#e7f7ef; --warn:#c07a09; --warn-soft:#fdf3e1;
+    --bad:#d14343; --bad-soft:#fdeceb; --info:#2c6cb0; --info-soft:#eaf2fb;
+  }
+  html,body{height:100%}
+  body{background:#dde3ea;color:var(--t1);overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1100px 520px at 50% -10%,#f4f7fa 0%,#d7dee6 75%)}
+  .cap{height:40px;flex:none;width:100%;display:flex;align-items:center;gap:10px;
+    padding:0 18px;background:#0c1117;color:#d7e2ee;font-size:12px;letter-spacing:.1px;
+    border-bottom:1px solid #1c242e;z-index:50}
+  .cap .num{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:10.5px;font-weight:700;font-family:Consolas,monospace;background:#182231;color:#3ddc97}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#3ddc97}
+  .stage{flex:none;margin:auto;width:1440px;height:900px;background:var(--bg);display:flex;flex-direction:column;
+    transform-origin:center center;box-shadow:0 28px 80px rgba(23,44,70,.28);overflow:hidden;position:relative}
+  .i{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .i.sm{width:12px;height:12px}
+  .i.lg{width:16px;height:16px}
+
+  /* 顶栏 */
+  .top{height:56px;flex:none;background:#fff;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:22px;padding:0 18px}
+  .brand{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:650;letter-spacing:-.2px}
+  .mark{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(145deg,#16b8a6,#0f766e);box-shadow:0 2px 6px rgba(15,118,110,.28)}
+  .mark .i{color:#fff;width:15px;height:15px}
+  .ops{font-size:9.5px;font-weight:700;letter-spacing:1.4px;color:var(--brand);
+    background:var(--brand-soft);border-radius:4px;padding:2px 5px;margin-left:1px}
+  .nav{display:flex;gap:2px;margin-left:8px}
+  .nav a{padding:7px 11px;border-radius:7px;color:var(--t3);font-size:13px;text-decoration:none}
+  .nav a.on{background:#f1f5f9;color:var(--t1);font-weight:600}
+  .nav a:hover{color:var(--t1)}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .live{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t3)}
+  .live .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px rgba(15,157,99,.14)}
+  .clock{font-family:"JetBrains Mono",Consolas,monospace;font-size:13px;color:var(--t2);letter-spacing:.4px}
+  .shift{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);
+    background:#f4f7fa;border:1px solid var(--line);padding:5px 9px;border-radius:7px}
+  .icon-btn{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--t3);
+    border:1px solid var(--line);background:#fff;position:relative}
+  .icon-btn .dot{position:absolute;right:6px;top:6px;width:6px;height:6px;border-radius:50%;
+    background:var(--bad);border:1.5px solid #fff}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#dbeafe;color:#1d4ed8;
+    display:grid;place-items:center;font-size:12px;font-weight:600;border:1px solid #c3dbfb}
+
+  /* 过滤条 */
+  .subbar{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 18px;
+    background:#fff;border-bottom:1px solid var(--line)}
+  .crumb{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t3)}
+  .crumb b{color:var(--t1);font-weight:600}
+  .crumb .sep{color:#c8d2de}
+  .sel{display:flex;align-items:center;gap:7px;height:28px;padding:0 9px;border:1px solid var(--line);
+    border-radius:7px;font-size:12px;color:var(--t2);background:#fff}
+  .sel .i{color:var(--t4)}
+  .divider{width:1px;height:20px;background:var(--line);margin:0 4px}
+  .seg{display:flex;background:#f2f5f8;border-radius:8px;padding:3px}
+  .seg div{font-size:12px;color:var(--t3);padding:3px 10px;border-radius:6px}
+  .seg div.on{background:#fff;color:var(--t1);font-weight:600;box-shadow:0 1px 3px rgba(20,40,70,.1)}
+  .refresh{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--t4)}
+  .refresh .bar{width:34px;height:3px;border-radius:2px;background:#e2e9f1;overflow:hidden}
+  .refresh .bar i{display:block;height:100%;width:62%;background:var(--brand2)}
+  .btn{display:flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:7px;
+    border:1px solid var(--line);background:#fff;color:var(--t2);font-size:12px;font-weight:500}
+  .btn.solid{background:var(--brand);border-color:var(--brand);color:#fff;
+    box-shadow:0 1px 2px rgba(15,118,110,.25)}
+
+  /* 内容 */
+  .main{flex:1;padding:16px 18px;display:grid;grid-template-columns:repeat(12,1fr);
+    grid-template-rows:106px 248px 252px 1fr;gap:14px;min-height:0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 1px 2px rgba(23,44,70,.04);overflow:hidden}
+  .card-h{display:flex;align-items:center;gap:8px;padding:12px 14px 0}
+  .card-h h3{font-size:13px;font-weight:650;letter-spacing:-.1px}
+  .card-h .sub{font-size:11px;color:var(--t4);margin-left:2px}
+  .card-h .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+  /* KPI */
+  .kpi{grid-column:span 3;padding:12px 14px;position:relative}
+  .kpi .label{font-size:11.5px;color:var(--t3);display:flex;align-items:center;gap:6px}
+  .kpi .label .i{color:#a9b8c9}
+  .kpi .val{font-size:30px;font-weight:680;letter-spacing:-1px;line-height:1.12;margin-top:6px}
+  .kpi .val small{font-size:13px;font-weight:600;color:var(--t3);letter-spacing:0;margin-left:2px}
+  .kpi .delta{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;
+    padding:1px 5px;border-radius:4px;margin-left:7px;vertical-align:4px}
+  .up{color:var(--ok);background:var(--ok-soft)}
+  .down{color:var(--bad);background:var(--bad-soft)}
+  .flat{color:var(--warn);background:var(--warn-soft)}
+  .kpi .foot{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--t4);margin-top:9px}
+  .kpi .foot b{color:var(--t3);font-weight:600}
+  .kpi .spark{position:absolute;right:14px;bottom:12px;width:96px;height:28px;opacity:.9}
+  .kpi .spark path{fill:none;stroke-width:1.8;stroke-linecap:round}
+  .target-chip{font-size:10px;color:var(--ok);background:var(--ok-soft);padding:1px 5px;border-radius:4px;font-weight:600}
+  .target-chip.warn{color:var(--warn);background:var(--warn-soft)}
+
+  /* 趋势 */
+  .trend{grid-column:span 8;display:flex;flex-direction:column}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--t3)}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .legend i{width:14px;height:2.5px;border-radius:2px;display:block}
+  .chart{flex:1;padding:2px 8px 6px;min-height:0}
+  .chart svg{width:100%;height:100%;display:block}
+  .axis{font-size:9.5px;fill:#93a2b5;font-family:"Inter","Microsoft YaHei",sans-serif}
+
+  /* 工位 */
+  .stations{grid-column:span 4;display:flex;flex-direction:column}
+  .st-list{flex:1;padding:6px 8px 8px;display:flex;flex-direction:column;justify-content:space-between}
+  .st-row{display:grid;grid-template-columns:10px 1fr 46px 52px 54px;align-items:center;gap:8px;
+    padding:4px 6px;border-radius:6px}
+  .st-row:hover{background:#f7fafc}
+  .st-row .nm{font-size:12px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .st-row .nm em{font-style:normal;color:var(--t4);font-size:10.5px;margin-left:4px}
+  .st-row .pct{font-size:11.5px;color:var(--t2);text-align:right;font-family:"JetBrains Mono",Consolas,monospace}
+  .st-row .cyc{text-align:right;font-size:10.5px;color:var(--t4);font-family:"JetBrains Mono",Consolas,monospace}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .dot.warn{background:#e0a32e}.dot.bad{background:var(--bad)}.dot.idle{background:#c3cedb}
+  .tag{font-size:10px;padding:1.5px 5px;border-radius:4px;text-align:center;font-weight:600}
+  .tag.ok{color:var(--ok);background:var(--ok-soft)}
+  .tag.warn{color:var(--warn);background:var(--warn-soft)}
+  .tag.bad{color:var(--bad);background:var(--bad-soft)}
+  .tag.gray{color:#64748b;background:#f1f5f9}
+
+  /* 报警 */
+  .alarms{grid-column:span 5;display:flex;flex-direction:column}
+  .al-list{flex:1;padding:8px 10px 6px;display:flex;flex-direction:column;gap:1px}
+  .al{display:grid;grid-template-columns:3px 52px 1fr 66px 58px;gap:10px;align-items:center;
+    padding:5px 4px;border-radius:6px;position:relative}
+  .al:hover{background:#f8fafc}
+  .al .sev{width:3px;height:26px;border-radius:2px;background:var(--bad)}
+  .al.warn .sev{background:#e0a32e}.al.info .sev{background:#8fb4d8}.al.done .sev{background:#cdd8e4}
+  .al .tm{font-size:10.5px;color:var(--t4);font-family:"JetBrains Mono",Consolas,monospace}
+  .al .msg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .al .msg b{color:var(--t1);font-weight:600}
+  .al .who{font-size:10.5px;color:var(--t4);text-align:right}
+  .al .who.sev-bad{color:var(--bad);font-weight:600}
+  .al .who.sev-warn{color:var(--warn);font-weight:600}
+  .al .act{font-size:11px;color:var(--brand);text-align:right;font-weight:600}
+  .al .act.done{color:var(--t4);font-weight:400}
+
+  /* 缺陷 */
+  .pareto{grid-column:span 4;display:flex;flex-direction:column}
+  .bars{flex:1;padding:10px 14px 8px;display:flex;flex-direction:column;justify-content:space-between}
+  .brow{display:grid;grid-template-columns:60px 1fr 54px;gap:10px;align-items:center}
+  .brow .k{font-size:11.5px;color:var(--t2)}
+  .brow .track{height:14px;border-radius:4px;background:#f1f5f9;overflow:hidden}
+  .brow .track i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#2ba898,#14b8a6)}
+  .brow:nth-child(2) .track i{background:linear-gradient(90deg,#2ba898,#3fc3b2);opacity:.92}
+  .brow:nth-child(3) .track i{background:linear-gradient(90deg,#2ba898,#5fcfc0);opacity:.84}
+  .brow:nth-child(4) .track i{background:linear-gradient(90deg,#2ba898,#7cd9cd);opacity:.76}
+  .brow:nth-child(5) .track i{background:linear-gradient(90deg,#2ba898,#96e1d7);opacity:.68}
+  .brow .v{font-size:11.5px;color:var(--t2);text-align:right;font-family:"JetBrains Mono",Consolas,monospace}
+  .brow .v em{font-style:normal;color:var(--t4);font-size:10px;margin-left:3px}
+  .pareto .note{font-size:10.5px;color:var(--t4);padding:0 14px 10px;display:flex;gap:6px;align-items:center}
+
+  /* 健康 */
+  .health{grid-column:span 3;display:flex;flex-direction:column}
+  .gauges{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 12px 10px}
+  .gauge{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}
+  .ring{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;position:relative}
+  .ring:after{content:"";position:absolute;inset:8px;border-radius:50%;background:#fff}
+  .ring b{position:relative;z-index:1;font-size:13px;font-weight:650;letter-spacing:-.4px}
+  .gauge .g-label{font-size:10.5px;color:var(--t4)}
+
+  /* 画面 */
+  .cams{grid-column:span 12;display:flex;gap:14px;padding:0;background:transparent;border:0;box-shadow:none}
+  .cam{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    display:flex;box-shadow:0 1px 2px rgba(23,44,70,.04);padding:8px;gap:10px}
+  .cam .thumb{width:104px;flex:none;position:relative;overflow:hidden;border-radius:6px;
+    background:radial-gradient(120% 120% at 30% 20%,#3b4756 0%,#222c37 55%,#151d26 100%)}
+  .cam .thumb:before{content:"";position:absolute;left:14%;top:8%;width:56%;height:80%;
+    background:linear-gradient(150deg,#c3ccd6 0%,#9aa7b4 42%,#7c8a99 100%);border-radius:2px;
+    box-shadow:0 2px 8px rgba(0,0,0,.45),inset 0 0 0 1px rgba(255,255,255,.3)}
+  .cam .thumb:after{content:"";position:absolute;left:24%;top:26%;width:20%;height:26%;
+    background:#eef3f8;border-radius:1px;opacity:.9;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+  .cam .roi{position:absolute;left:30%;top:26%;width:36%;height:46%;border:1.5px solid #22c55e;
+    border-radius:2px;z-index:2}
+  .cam .roi:after{content:"OK .96";position:absolute;left:-1px;top:-12px;font-size:7.5px;color:#fff;
+    background:#16a34a;padding:0 3px;border-radius:2px;font-family:Consolas,monospace;letter-spacing:.2px}
+  .cam.ng .roi{border-color:#f87171;box-shadow:0 0 10px rgba(248,113,113,.55)}
+  .cam.ng .roi:after{content:"NG .42";background:#dc2626}
+  .cam .meta{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:4px}
+  .cam .meta b{font-size:11.5px;color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cam .meta .row2{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--t4);
+    font-family:"JetBrains Mono",Consolas,monospace}
+  .cam .meta .row2 .dot{width:5px;height:5px}
+  .cam .meta .kind{font-size:10px;color:var(--t3);background:#f2f6f9;border-radius:3px;padding:1px 4px;width:max-content}
+
+  .badge-float{position:fixed;left:18px;bottom:16px;display:flex;align-items:center;gap:9px;z-index:99;
+    padding:7px 13px 7px 9px;border-radius:999px;background:rgba(255,255,255,.92);border:1px solid #d3dce6;
+    color:#26374d;font-size:12px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(23,44,70,.16)}
+  .badge-float .num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+    font-weight:700;background:#d9f0ec;color:#0f766e;font-family:Consolas,monospace}
+  .badge-float span{color:#75879c}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 17l5-9 3 5 3-4 4 8"/><circle cx="9" cy="8" r="1.6"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 15V10a6 6 0 10-12 0v5l-2 3h16z"/><path d="M10 21h4"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2 5.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a8 8 0 1116 0"/><path d="M12 18l4-5"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+</defs></svg>
+
+<div class="viewport">
+<div class="cap"><span class="num">02</span><b>产线运维驾驶舱</b><span class="sub">· 面向班组长与工艺的现场看板</span><span class="right"><i class="dot"></i>VisionStudio OPS · 产品形态备选 · 2026-10-26</span></div>
+<div class="stage">
+
+  <div class="top">
+    <div class="brand"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span>VisionStudio<span class="ops">OPS</span></div>
+    <nav class="nav">
+      <a href="#" class="on">车间总览</a><a href="#">工位</a><a href="#">报警</a><a href="#">追溯</a><a href="#">班次报表</a>
+    </nav>
+    <div class="top-right">
+      <div class="live"><i class="pulse"></i>实时数据 · 3 条产线</div>
+      <div class="clock">2026-10-26 14:38:35</div>
+      <div class="shift"><svg class="i sm"><use href="#i-clock"/></svg>白班 08:00–20:00</div>
+      <div class="icon-btn"><svg class="i"><use href="#i-bell"/></svg><i class="dot"></i></div>
+      <div class="icon-btn"><svg class="i"><use href="#i-expand"/></svg></div>
+      <div class="avatar">王</div>
+    </div>
+  </div>
+
+  <div class="subbar">
+    <div class="crumb"><span>苏州一厂</span><span class="sep">/</span><span>A 车间</span><span class="sep">/</span><b>L2 包装线</b></div>
+    <div class="sel"><svg class="i sm"><use href="#i-box"/></svg>全部工位 · 8<svg class="i sm"><use href="#i-chev"/></svg></div>
+    <div class="divider"></div>
+    <div class="seg"><div class="on">今日</div><div>本周</div><div>自定义</div></div>
+    <div class="refresh"><svg class="i sm"><use href="#i-refresh"/></svg>自动刷新 10s<i class="bar"><i></i></i></div>
+    <div class="btn"><svg class="i sm"><use href="#i-download"/></svg>班次报表</div>
+    <div class="btn solid"><svg class="i sm"><use href="#i-alert"/></svg>报警中心 <span style="opacity:.8">3</span></div>
+  </div>
+
+  <div class="main">
+    <!-- KPI -->
+    <div class="card kpi">
+      <div class="label"><svg class="i sm"><use href="#i-shield"/></svg>一次通过率 FPY</div>
+      <div class="val">99.32<small>%</small><span class="delta up">▲ 0.08</span></div>
+      <div class="foot"><span class="target-chip">目标 99.20% 达成</span><span>近 24h</span></div>
+      <svg class="spark" viewBox="0 0 96 28"><path d="M3.0 25.0 C9.4 25.0 9.4 17.7 15.9 17.7 C22.3 17.7 22.3 21.3 28.7 21.3 C35.1 21.3 35.1 10.3 41.6 10.3 C48.0 10.3 48.0 11.8 54.4 11.8 C60.9 11.8 60.9 6.7 67.3 6.7 C73.7 6.7 73.7 8.9 80.1 8.9 C86.6 8.9 86.6 3.0 93.0 3.0" stroke="#14b8a6"/></svg>
+    </div>
+    <div class="card kpi">
+      <div class="label"><svg class="i sm"><use href="#i-clock"/></svg>平均节拍</div>
+      <div class="val">1.86<small>s</small><span class="delta flat">▲ 0.06</span></div>
+      <div class="foot"><span class="target-chip warn">目标 ≤ 1.80s</span><span>偏差 +3.3%</span></div>
+      <svg class="spark" viewBox="0 0 96 28"><path d="M3.0 3.0 C9.4 3.0 9.4 14.0 15.9 14.0 C22.3 14.0 22.3 8.5 28.7 8.5 C35.1 8.5 35.1 19.5 41.6 19.5 C48.0 19.5 48.0 11.3 54.4 11.3 C60.9 11.3 60.9 25.0 67.3 25.0 C73.7 25.0 73.7 16.7 80.1 16.7 C86.6 16.7 86.6 19.5 93.0 19.5" stroke="#e0a32e"/></svg>
+    </div>
+    <div class="card kpi">
+      <div class="label"><svg class="i sm"><use href="#i-gauge"/></svg>设备综合效率 OEE</div>
+      <div class="val">87.4<small>%</small><span class="delta up">▲ 1.2</span></div>
+      <div class="foot"><span>可用 94.1% · 性能 95.2% · 良品 97.5%</span></div>
+      <svg class="spark" viewBox="0 0 96 28"><path d="M3.0 25.0 C9.4 25.0 9.4 15.0 15.9 15.0 C22.3 15.0 22.3 20.0 28.7 20.0 C35.1 20.0 35.1 5.0 41.6 5.0 C48.0 5.0 48.0 11.0 54.4 11.0 C60.9 11.0 60.9 3.0 67.3 3.0 C73.7 3.0 73.7 7.0 80.1 7.0 C86.6 7.0 86.6 11.0 93.0 11.0" stroke="#2c6cb0"/></svg>
+    </div>
+    <div class="card kpi">
+      <div class="label"><svg class="i sm"><use href="#i-alert"/></svg>今日 NG</div>
+      <div class="val">128<small>件</small><span class="delta up">▼ 12</span></div>
+      <div class="foot"><span>待复判 <b>9</b> · 已处置 <b>119</b> · 报废 4</span></div>
+      <svg class="spark" viewBox="0 0 96 28"><path d="M3.0 3.0 C9.4 3.0 9.4 9.9 15.9 9.9 C22.3 9.9 22.3 6.4 28.7 6.4 C35.1 6.4 35.1 16.8 41.6 16.8 C48.0 16.8 48.0 12.6 54.4 12.6 C60.9 12.6 60.9 22.2 67.3 22.2 C73.7 22.2 73.7 18.1 80.1 18.1 C86.6 18.1 86.6 25.0 93.0 25.0" stroke="#d14343"/></svg>
+    </div>
+
+    <!-- 趋势 -->
+    <div class="card trend">
+      <div class="card-h">
+        <h3>良率趋势</h3><span class="sub">近 24 小时 · 按小时聚合</span>
+        <div class="right">
+          <div class="legend"><span><i style="background:#14b8a6"></i>良率</span><span><i style="background:#e0a32e"></i>挑出率</span></div>
+        </div>
+      </div>
+      <div class="chart">
+        <svg viewBox="0 0 760 190" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="gYield" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#14b8a6" stop-opacity=".18"/>
+              <stop offset="1" stop-color="#14b8a6" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <g stroke="#eef2f7" stroke-width="1">
+            <line x1="46" y1="14" x2="746" y2="14"/><line x1="46" y1="48" x2="746" y2="48"/>
+            <line x1="46" y1="82" x2="746" y2="82"/><line x1="46" y1="116" x2="746" y2="116"/>
+            <line x1="46" y1="150" x2="746" y2="150"/>
+          </g>
+          <g class="axis" text-anchor="end">
+            <text x="38" y="17">100</text><text x="38" y="51">99.75</text><text x="38" y="85">99.5</text>
+            <text x="38" y="119">99.25</text><text x="38" y="153">99.0</text>
+          </g>
+          <g class="axis" text-anchor="start">
+            <text x="752" y="167">0</text><text x="752" y="129">1</text><text x="752" y="93">2</text>
+            <text x="752" y="57">3</text><text x="752" y="21">4%</text>
+          </g>
+          <path d="M46.0 112.2 C60.6 112.2 60.6 108.1 75.2 108.1 C89.8 108.1 89.8 117.6 104.3 117.6 C118.9 117.6 118.9 102.6 133.5 102.6 C148.1 102.6 148.1 94.5 162.7 94.5 C177.2 94.5 177.2 98.5 191.8 98.5 C206.4 98.5 206.4 90.4 221.0 90.4 C235.6 90.4 235.6 79.5 250.2 79.5 C264.8 79.5 264.8 86.3 279.3 86.3 C293.9 86.3 293.9 75.4 308.5 75.4 C323.1 75.4 323.1 83.5 337.7 83.5 C352.2 83.5 352.2 71.3 366.8 71.3 C381.4 71.3 381.4 80.8 396.0 80.8 C410.6 80.8 410.6 90.4 425.2 90.4 C439.8 90.4 439.8 97.2 454.3 97.2 C468.9 97.2 468.9 87.6 483.5 87.6 C498.1 87.6 498.1 79.5 512.7 79.5 C527.2 79.5 527.2 84.9 541.8 84.9 C556.4 84.9 556.4 74.0 571.0 74.0 C585.6 74.0 585.6 67.2 600.2 67.2 C614.8 67.2 614.8 71.3 629.3 71.3 C643.9 71.3 643.9 64.5 658.5 64.5 C673.1 64.5 673.1 69.9 687.7 69.9 C702.2 69.9 702.2 75.4 716.8 75.4 C731.4 75.4 731.4 65.8 746.0 65.8 L746.0 164 L46 164 Z" fill="url(#gYield)"/>
+          <path d="M46.0 112.2 C60.6 112.2 60.6 108.1 75.2 108.1 C89.8 108.1 89.8 117.6 104.3 117.6 C118.9 117.6 118.9 102.6 133.5 102.6 C148.1 102.6 148.1 94.5 162.7 94.5 C177.2 94.5 177.2 98.5 191.8 98.5 C206.4 98.5 206.4 90.4 221.0 90.4 C235.6 90.4 235.6 79.5 250.2 79.5 C264.8 79.5 264.8 86.3 279.3 86.3 C293.9 86.3 293.9 75.4 308.5 75.4 C323.1 75.4 323.1 83.5 337.7 83.5 C352.2 83.5 352.2 71.3 366.8 71.3 C381.4 71.3 381.4 80.8 396.0 80.8 C410.6 80.8 410.6 90.4 425.2 90.4 C439.8 90.4 439.8 97.2 454.3 97.2 C468.9 97.2 468.9 87.6 483.5 87.6 C498.1 87.6 498.1 79.5 512.7 79.5 C527.2 79.5 527.2 84.9 541.8 84.9 C556.4 84.9 556.4 74.0 571.0 74.0 C585.6 74.0 585.6 67.2 600.2 67.2 C614.8 67.2 614.8 71.3 629.3 71.3 C643.9 71.3 643.9 64.5 658.5 64.5 C673.1 64.5 673.1 69.9 687.7 69.9 C702.2 69.9 702.2 75.4 716.8 75.4 C731.4 75.4 731.4 65.8 746.0 65.8" fill="none" stroke="#14b8a6" stroke-width="2.2"/>
+          <path d="M46.0 106.9 C60.6 106.9 60.6 114.0 75.2 114.0 C89.8 114.0 89.8 96.1 104.3 96.1 C118.9 96.1 118.9 110.4 133.5 110.4 C148.1 110.4 148.1 117.6 162.7 117.6 C177.2 117.6 177.2 103.3 191.8 103.3 C206.4 103.3 206.4 110.4 221.0 110.4 C235.6 110.4 235.6 121.1 250.2 121.1 C264.8 121.1 264.8 106.9 279.3 106.9 C293.9 106.9 293.9 124.7 308.5 124.7 C323.1 124.7 323.1 114.0 337.7 114.0 C352.2 114.0 352.2 121.1 366.8 121.1 C381.4 121.1 381.4 110.4 396.0 110.4 C410.6 110.4 410.6 96.1 425.2 96.1 C439.8 96.1 439.8 89.0 454.3 89.0 C468.9 89.0 468.9 99.7 483.5 99.7 C498.1 99.7 498.1 106.9 512.7 106.9 C527.2 106.9 527.2 92.6 541.8 92.6 C556.4 92.6 556.4 103.3 571.0 103.3 C585.6 103.3 585.6 114.0 600.2 114.0 C614.8 114.0 614.8 117.6 629.3 117.6 C643.9 117.6 643.9 110.4 658.5 110.4 C673.1 110.4 673.1 121.1 687.7 121.1 C702.2 121.1 702.2 114.0 716.8 114.0 C731.4 114.0 731.4 121.1 746.0 121.1" fill="none" stroke="#e0a32e" stroke-width="1.6" stroke-dasharray="4 3"/>
+          <line x1="473" y1="14" x2="473" y2="164" stroke="#9fb0c4" stroke-width="1" stroke-dasharray="3 3"/>
+          <g>
+            <rect x="440" y="6" width="66" height="15" rx="7.5" fill="#0f1c2e" opacity=".08"/>
+            <text x="473" y="17" text-anchor="middle" class="axis" fill="#42536a" style="font-size:9px">当前 14:38</text>
+          </g>
+          <g class="axis" text-anchor="middle">
+            <text x="46" y="182">00:00</text><text x="163" y="182">04:00</text><text x="279" y="182">08:00</text>
+            <text x="396" y="182">12:00</text><text x="513" y="182">16:00</text><text x="629" y="182">20:00</text><text x="746" y="182">24:00</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <!-- 工位 -->
+    <div class="card stations">
+      <div class="card-h">
+        <h3>工位实时状态</h3>
+        <div class="right"><span class="tag ok">8 / 8 在线</span></div>
+      </div>
+      <div class="st-list">
+        <div class="st-row"><i class="dot"></i><span class="nm">L2-01 上料定位<em>20.0fps</em></span><span class="pct">99.6%</span><span class="cyc">1.72s</span><span class="tag ok">运行</span></div>
+        <div class="st-row"><i class="dot"></i><span class="nm">L2-02 侧封检测<em>20.0fps</em></span><span class="pct">99.1%</span><span class="cyc">1.88s</span><span class="tag ok">运行</span></div>
+        <div class="st-row"><i class="dot warn"></i><span class="nm">L2-03 二维码读码<em>18.4fps</em></span><span class="pct">98.4%</span><span class="cyc">1.94s</span><span class="tag warn">注意</span></div>
+        <div class="st-row"><i class="dot"></i><span class="nm">L2-04 尺寸测量<em>20.0fps</em></span><span class="pct">99.8%</span><span class="cyc">1.66s</span><span class="tag ok">运行</span></div>
+        <div class="st-row"><i class="dot bad"></i><span class="nm">L2-05 外观缺陷<em>17.2fps</em></span><span class="pct">97.9%</span><span class="cyc">2.10s</span><span class="tag bad">偏差</span></div>
+        <div class="st-row"><i class="dot"></i><span class="nm">L2-06 下料确认<em>20.0fps</em></span><span class="pct">99.4%</span><span class="cyc">1.78s</span><span class="tag ok">运行</span></div>
+        <div class="st-row"><i class="dot idle"></i><span class="nm">L2-07 贴标复核<em>待机</em></span><span class="pct">—</span><span class="cyc">—</span><span class="tag gray">换型</span></div>
+        <div class="st-row"><i class="dot"></i><span class="nm">L2-08 装箱校验<em>20.0fps</em></span><span class="pct">99.5%</span><span class="cyc">1.74s</span><span class="tag ok">运行</span></div>
+      </div>
+    </div>
+
+    <!-- 报警 -->
+    <div class="card alarms">
+      <div class="card-h">
+        <h3>报警与事件</h3><span class="sub">今日 23 条 · 未处置 3</span>
+        <div class="right"><span style="font-size:11px;color:var(--brand);font-weight:600">全部记录 →</span></div>
+      </div>
+      <div class="al-list">
+        <div class="al"><i class="sev"></i><span class="tm">14:36</span><span class="msg"><b>L2-03</b> 读码失败率 4.2%，连续 3 分钟超阈值</span><span class="who sev-bad">严重</span><span class="act">去处置</span></div>
+        <div class="al warn"><i class="sev"></i><span class="tm">14:21</span><span class="msg"><b>L2-05</b> 曝光漂移 +0.8 EV，已自动补偿</span><span class="who sev-warn">警告</span><span class="act">查看</span></div>
+        <div class="al warn"><i class="sev"></i><span class="tm">13:58</span><span class="msg"><b>L2-05</b> 连续 12 件 NG，已触发停线 6 分钟</span><span class="who sev-bad">严重</span><span class="act done">已恢复</span></div>
+        <div class="al info"><i class="sev"></i><span class="tm">13:12</span><span class="msg"><b>系统</b> 配方 v0.63.2 已下发 4 台，灰度通过</span><span class="who">提示</span><span class="act done">已确认</span></div>
+        <div class="al done"><i class="sev"></i><span class="tm">12:47</span><span class="msg"><b>L2-02</b> 光源亮度衰减 6%，建议下次换型校准</span><span class="who">提示</span><span class="act done">已排期</span></div>
+      </div>
+    </div>
+
+    <!-- 缺陷 Pareto -->
+    <div class="card pareto">
+      <div class="card-h"><h3>缺陷分布</h3><span class="sub">今日 TOP 5 · 共 128 件</span></div>
+      <div class="bars">
+        <div class="brow"><span class="k">毛刺</span><span class="track"><i style="width:92%"></i></span><span class="v">47<em>36.7%</em></span></div>
+        <div class="brow"><span class="k">划伤</span><span class="track"><i style="width:62%"></i></span><span class="v">32<em>25.0%</em></span></div>
+        <div class="brow"><span class="k">偏位</span><span class="track"><i style="width:44%"></i></span><span class="v">22<em>17.2%</em></span></div>
+        <div class="brow"><span class="k">异物</span><span class="track"><i style="width:28%"></i></span><span class="v">15<em>11.7%</em></span></div>
+        <div class="brow"><span class="k">脏污</span><span class="track"><i style="width:22%"></i></span><span class="v">12<em>9.4%</em></span></div>
+      </div>
+      <div class="note"><svg class="i sm" style="color:#b28a3a"><use href="#i-alert"/></svg>毛刺与划伤合计 61.7%，建议优先排查 L2-05 光源与刀模</div>
+    </div>
+
+    <!-- 健康 -->
+    <div class="card health">
+      <div class="card-h"><h3>设备健康</h3></div>
+      <div class="gauges">
+        <div class="gauge">
+          <div class="ring" style="background:conic-gradient(#14b8a6 0 100%,#eef2f7 0)">
+            <b>8/8</b>
+          </div><span class="g-label">相机在线</span>
+        </div>
+        <div class="gauge">
+          <div class="ring" style="background:conic-gradient(#e0a32e 0 6%,#eef2f7 0)">
+            <b>6%</b>
+          </div><span class="g-label">光源衰减</span>
+        </div>
+        <div class="gauge">
+          <div class="ring" style="background:conic-gradient(#2c6cb0 0 62%,#eef2f7 0)">
+            <b>62%</b>
+          </div><span class="g-label">追溯磁盘</span>
+        </div>
+        <div class="gauge">
+          <div class="ring" style="background:conic-gradient(#14b8a6 0 41%,#eef2f7 0)">
+            <b>41%</b>
+          </div><span class="g-label">引擎负载</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 现场画面 -->
+    <div class="cams">
+      <div class="cam">
+        <div class="thumb"><i class="roi"></i></div>
+        <div class="meta"><b>L2-01 上料定位</b><span class="kind">GigE · Mono8</span>
+          <div class="row2"><i class="dot"></i>20.0 fps · 2.4 ms</div>
+          <div class="row2">#88124 · 4 ROI</div></div>
+      </div>
+      <div class="cam">
+        <div class="thumb"><i class="roi" style="left:38%;top:32%;width:26%;height:36%"></i></div>
+        <div class="meta"><b>L2-02 侧封检测</b><span class="kind">GigE · Mono8</span>
+          <div class="row2"><i class="dot"></i>20.0 fps · 3.1 ms</div>
+          <div class="row2">#88125 · 2 ROI</div></div>
+      </div>
+      <div class="cam ng">
+        <div class="thumb"><i class="roi" style="left:26%;top:20%;width:46%;height:54%"></i></div>
+        <div class="meta"><b>L2-05 外观缺陷</b><span class="kind">USB3 · Color8</span>
+          <div class="row2"><i class="dot bad"></i>17.2 fps · 8.6 ms</div>
+          <div class="row2" style="color:#d14343">NG 连续 12 件 · 已复判 7</div></div>
+      </div>
+      <div class="cam">
+        <div class="thumb"><i class="roi" style="left:44%;top:28%;width:22%;height:40%"></i></div>
+        <div class="meta"><b>L2-08 装箱校验</b><span class="kind">GigE · Mono8</span>
+          <div class="row2"><i class="dot"></i>20.0 fps · 1.9 ms</div>
+          <div class="row2">#88126 · 1 ROI</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>
+</body>
+</html>

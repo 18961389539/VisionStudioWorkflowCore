@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>概念 03 · 集团机群治理 VisionStudio Cloud</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#f7f8fb; --panel:#fff; --line:#e8ebf1; --line2:#f1f3f8;
+    --t1:#0f172a; --t2:#3f4a5c; --t3:#6b7688; --t4:#98a2b3;
+    --indigo:#4f46e5; --indigo2:#6366f1; --soft:#eef0ff;
+    --ok:#0e9f6e; --ok-soft:#e7f7f0; --warn:#b45309; --warn-soft:#fdf4e3;
+    --bad:#c02a2a; --bad-soft:#fdeceb; --blue:#2563eb; --blue-soft:#eaf1fe;
+  }
+  html,body{height:100%}
+  body{background:#e9ecf3;color:var(--t1);overflow:hidden;
+    font-family:"Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:13px;
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .viewport{height:100vh;display:flex;flex-direction:column;overflow:hidden;
+    background:radial-gradient(1000px 500px at 40% 0%,#f6f7fb,#dfe3ec 80%)}
+  .cap{height:40px;flex:none;width:100%;display:flex;align-items:center;gap:10px;
+    padding:0 18px;background:#0c1117;color:#d7e2ee;font-size:12px;letter-spacing:.1px;
+    border-bottom:1px solid #1c242e;z-index:50}
+  .cap .num{width:20px;height:20px;border-radius:5px;display:grid;place-items:center;
+    font-size:10.5px;font-weight:700;font-family:Consolas,monospace;background:#182231;color:#a5b4fc}
+  .cap b{font-weight:650;font-size:12.5px;color:#eef4fb}
+  .cap .sub{color:#8194a8}
+  .cap .right{margin-left:auto;display:flex;align-items:center;gap:10px;color:#6d8095;font-size:11px}
+  .cap .dot{width:5px;height:5px;border-radius:50%;background:#a5b4fc}
+  .stage{flex:none;margin:auto;width:1440px;height:900px;display:flex;background:var(--bg);overflow:hidden;
+    transform-origin:center center;box-shadow:0 28px 80px rgba(20,30,60,.22)}
+  .i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .i.sm{width:12.5px;height:12.5px}
+  .i.xs{width:10px;height:10px}
+
+  /* 侧栏 */
+  .side{width:214px;flex:none;background:#fff;border-right:1px solid var(--line);
+    display:flex;flex-direction:column}
+  .side-top{height:56px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--line2)}
+  .mark{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;
+    background:linear-gradient(145deg,#6366f1,#4338ca);box-shadow:0 2px 6px rgba(79,70,229,.28)}
+  .mark .i{color:#fff;width:14px;height:14px}
+  .side-top b{font-size:13.5px;font-weight:650;letter-spacing:-.1px}
+  .cloud{font-size:8.5px;font-weight:700;letter-spacing:1.2px;color:var(--indigo);
+    background:var(--soft);padding:2px 4px;border-radius:3px}
+  .org{margin:10px 12px;border:1px solid var(--line);border-radius:8px;padding:8px 9px;
+    display:flex;align-items:center;gap:8px;background:#fcfcfe}
+  .org .logo{width:26px;height:26px;border-radius:6px;background:#0f172a;color:#fff;
+    display:grid;place-items:center;font-size:11px;font-weight:700}
+  .org .nm{font-size:12px;font-weight:600;line-height:1.35}
+  .org .sub{font-size:10px;color:var(--t4)}
+  .org .i{margin-left:auto;color:var(--t4)}
+  .nav{flex:1;padding:6px 8px;overflow:hidden}
+  .nav .sec{font-size:10px;color:#a6b0c0;letter-spacing:.6px;padding:10px 8px 4px;font-weight:600}
+  .nav a{display:flex;align-items:center;gap:9px;height:32px;padding:0 9px;border-radius:6px;
+    color:var(--t2);text-decoration:none;font-size:12.5px;position:relative}
+  .nav a:hover{background:#f5f6fa}
+  .nav a.on{background:var(--soft);color:#3730a3;font-weight:600}
+  .nav a.on .i{color:var(--indigo)}
+  .nav a .badge{margin-left:auto;font-size:9.5px;font-weight:700;padding:0 5px;line-height:15px;
+    border-radius:8px;background:#eef1f6;color:var(--t3)}
+  .nav a .badge.hot{background:#fde8e8;color:#c02a2a}
+  .nav a .badge.ind{background:var(--indigo);color:#fff}
+  .side-foot{border-top:1px solid var(--line2);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .sys{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--t4)}
+  .sys .d{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(14,159,110,.12)}
+  .user{display:flex;align-items:center;gap:8px}
+  .user .av{width:26px;height:26px;border-radius:50%;background:#e0e7ff;color:#4338ca;
+    display:grid;place-items:center;font-size:11px;font-weight:600}
+  .user .nm{font-size:11.5px;font-weight:600;line-height:1.3}
+  .user .rl{font-size:9.5px;color:var(--t4)}
+  .user .i{margin-left:auto;color:var(--t4)}
+
+  /* 主区 */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:56px;flex:none;display:flex;align-items:center;gap:14px;padding:0 24px;
+    background:#fff;border-bottom:1px solid var(--line)}
+  .crumb{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--t4)}
+  .crumb b{color:var(--t1);font-weight:600;font-size:13px}
+  .crumb .sep{color:#d4dae6}
+  .search{width:300px;height:30px;display:flex;align-items:center;gap:7px;padding:0 10px;
+    border:1px solid var(--line);border-radius:7px;background:#fbfcfe;color:var(--t4);font-size:12px}
+  .search kbd{margin-left:auto;font-family:Consolas,monospace;font-size:9.5px;color:#a8b2c2;
+    border:1px solid var(--line);border-radius:3px;padding:0 4px;background:#fff}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .tbtn{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--t3);
+    border:1px solid var(--line);background:#fff;position:relative}
+  .tbtn .dot{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:#e5484d;border:1.5px solid #fff}
+  .avatar{width:28px;height:28px;border-radius:50%;background:#0f172a;color:#fff;display:grid;
+    place-items:center;font-size:11px;font-weight:600}
+
+  .content{flex:1;padding:20px 24px 0;display:flex;flex-direction:column;min-height:0}
+  .page-h{display:flex;align-items:flex-start;gap:12px}
+  .page-h h1{font-size:21px;font-weight:660;letter-spacing:-.5px;line-height:1.2}
+  .page-h .sub{font-size:12px;color:var(--t4);margin-top:5px;display:flex;align-items:center;gap:8px}
+  .page-h .sub .d{width:5px;height:5px;border-radius:50%;background:var(--ok)}
+  .page-actions{margin-left:auto;display:flex;gap:8px;align-items:center;padding-top:2px}
+  .btn{display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:7px;
+    border:1px solid var(--line);background:#fff;color:var(--t2);font-size:12.5px;font-weight:500;
+    box-shadow:0 1px 1px rgba(16,24,40,.03)}
+  .btn.primary{background:var(--indigo);border-color:var(--indigo);color:#fff;
+    box-shadow:0 1px 2px rgba(79,70,229,.35)}
+  .btn.ghost{border-color:transparent;background:transparent;box-shadow:none}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:13px 14px;position:relative}
+  .stat .hd{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t3)}
+  .stat .hd .i{color:#a9b3c4}
+  .stat .num{font-size:25px;font-weight:670;letter-spacing:-.7px;margin-top:6px;line-height:1.1}
+  .stat .num small{font-size:11.5px;font-weight:500;color:var(--t4);letter-spacing:0;margin-left:4px}
+  .stat .desc{font-size:10.5px;color:var(--t4);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat .desc b{color:var(--t2);font-weight:600}
+  .stat .go{position:absolute;right:12px;bottom:11px;font-size:10.5px;color:var(--indigo);font-weight:600}
+  .stat.attention{border-color:#f3e2c8;background:linear-gradient(#fffdf8,#fff)}
+  .prog{height:5px;border-radius:3px;background:#eef1f6;margin-top:9px;display:flex;overflow:hidden}
+  .prog i{height:100%;display:block}
+  .prog .a{background:#0e9f6e}.prog .b{background:#7c6cf0}.prog .c{background:#dbe1ea}
+
+  /* 表格区 */
+  .panel{flex:1;background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:14px;
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .tabs{height:44px;flex:none;display:flex;align-items:center;gap:2px;padding:0 12px;border-bottom:1px solid var(--line)}
+  .tb{height:44px;display:flex;align-items:center;gap:6px;padding:0 11px;font-size:12.5px;color:var(--t3);
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tb.on{color:var(--indigo);border-bottom-color:var(--indigo);font-weight:600}
+  .tb .n{font-size:10px;font-family:Consolas,monospace;background:#f1f3f8;color:var(--t3);
+    border-radius:8px;padding:0 5px;line-height:15px}
+  .tb.on .n{background:var(--soft);color:var(--indigo)}
+  .filterbar{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;
+    border-bottom:1px solid var(--line);background:#fcfcfe}
+  .fsel{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;border:1px solid var(--line);
+    border-radius:6px;background:#fff;font-size:11.5px;color:var(--t2)}
+  .fsel .i{color:var(--t4)}
+  .fsearch{display:flex;align-items:center;gap:6px;height:26px;width:190px;padding:0 8px;
+    border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--t4);font-size:11.5px}
+  .filterbar .right{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--t4)}
+
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  thead th{height:34px;background:#fbfcfe;border-bottom:1px solid var(--line);text-align:left;
+    font-size:10.5px;font-weight:600;color:var(--t4);letter-spacing:.3px;padding:0 10px}
+  tbody tr{height:50px;border-bottom:1px solid var(--line2)}
+  tbody tr:hover{background:#fafbff}
+  tbody tr.sel{background:#f6f6ff;box-shadow:inset 2px 0 0 var(--indigo)}
+  td{padding:0 10px;font-size:12px;color:var(--t2)}
+  .chk{width:13px;height:13px;border:1.5px solid #cbd3e1;border-radius:3px;display:block;background:#fff}
+  .chk.on{background:var(--indigo);border-color:var(--indigo);position:relative}
+  .chk.on:after{content:"";position:absolute;left:3.5px;top:1px;width:4px;height:7px;
+    border:1.5px solid #fff;border-top:0;border-left:0;transform:rotate(42deg)}
+  .dev{display:flex;align-items:center;gap:9px;min-width:0}
+  .dev .ic{width:26px;height:26px;border-radius:6px;background:#f1f3fa;color:#4f46e5;
+    display:grid;place-items:center;flex:none;border:1px solid #e6e9f5}
+  .dev .nm{font-size:12px;color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dev .meta{font-size:10px;color:var(--t4);font-family:Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .site{font-size:11.5px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .site em{display:block;font-style:normal;font-size:10px;color:var(--t4)}
+  .mono{font-family:Consolas,monospace;font-size:10.5px;color:var(--t3)}
+  .chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:1.5px 5px;border-radius:4px;
+    font-family:Consolas,monospace;border:1px solid transparent;white-space:nowrap}
+  .chip.latest{color:#0b7a55;background:#e9f8f1;border-color:#c9ecdd}
+  .chip.old{color:#5b6678;background:#f3f5f9;border-color:#e6eaf1}
+  .chip.up{color:#a16207;background:#fdf6e6;border-color:#f2e2bc}
+  .st{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;white-space:nowrap}
+  .st i{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2.5px rgba(14,159,110,.12)}
+  .st.warn i{background:#d97706;box-shadow:0 0 0 2.5px rgba(217,119,6,.12)}
+  .st.off i{background:#b6c0cf;box-shadow:none}
+  .st.off{color:var(--t4)}
+  .st.upd i{background:#2563eb;box-shadow:0 0 0 2.5px rgba(37,99,235,.12)}
+  .yield{display:flex;align-items:center;gap:7px}
+  .yield b{font-size:11.5px;font-weight:600;color:var(--t1);width:38px}
+  .yield .bar{width:38px;height:3px;border-radius:2px;background:#eef1f6;overflow:hidden}
+  .yield .bar i{display:block;height:100%;background:#0e9f6e;border-radius:2px}
+  .yield.low b{color:#b45309}.yield.low .bar i{background:#d97706}
+  .ops{display:flex;align-items:center;gap:2px;color:var(--t4)}
+  .ops span{width:22px;height:22px;display:grid;place-items:center;border-radius:4px}
+  .ops span:hover{background:#eef0ff;color:var(--indigo)}
+  .tfoot{height:42px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;
+    border-top:1px solid var(--line);font-size:11px;color:var(--t4);background:#fcfcfe}
+  .tfoot .pages{margin-left:auto;display:flex;align-items:center;gap:3px}
+  .tfoot .pages span{min-width:22px;height:22px;padding:0 5px;display:grid;place-items:center;
+    border-radius:4px;font-size:11px;color:var(--t3);border:1px solid transparent}
+  .tfoot .pages span.on{background:var(--soft);color:var(--indigo);font-weight:600}
+  .tfoot .pages span.b{border-color:var(--line);background:#fff}
+
+  .badge-float{position:fixed;left:18px;bottom:16px;display:flex;align-items:center;gap:9px;z-index:99;
+    padding:7px 13px 7px 9px;border-radius:999px;background:rgba(255,255,255,.94);border:1px solid #dfe3ec;
+    color:#26303f;font-size:12px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(20,30,60,.16)}
+  .badge-float .num{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:10px;
+    font-weight:700;background:#e6e6ff;color:#4338ca;font-family:Consolas,monospace}
+  .badge-float span{color:#7b879b}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 17l5-9 3 5 3-4 4 8"/><circle cx="9" cy="8" r="1.6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 2v3M14 2v3M10 19v3M14 19v3M2 10h3M2 14h3M19 10h3M19 14h3"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6 4v10a4 4 0 004 4h8"/><circle cx="6" cy="4" r="1.6"/><circle cx="18" cy="18" r="1.6"/><circle cx="6" cy="18" r="1.6"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M5 15l-2 6 6-2 9-9a4.5 4.5 0 00-6.4-6.4z"/><circle cx="14.5" cy="9.5" r="1.6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0112 0"/><path d="M16 5.2a3.2 3.2 0 010 5.6M17 20a6 6 0 00-2-4.5"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-life" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M5.6 5.6l3.9 3.9M18.4 5.6l-3.9 3.9M18.4 18.4l-3.9-3.9M5.6 18.4l3.9-3.9"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.6 16.6L21 21"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 15V10a6 6 0 10-12 0v5l-2 3h16z"/><path d="M10 21h4"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 114 2c-.8.6-1.6 1-1.6 2.2M12 17h.01"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M7 9l5-5 5 5"/><path d="M5 15v4a1 1 0 001 1h12a1 1 0 001-1v-4"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 015.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0121 8.5v9A2.5 2.5 0 0118.5 20h-13A2.5 2.5 0 013 17.5z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2 5.3"/><path d="M20 5v6h-6"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.5 7a8 8 0 1011 0"/></symbol>
+</defs></svg>
+
+<div class="viewport">
+<div class="cap"><span class="num">03</span><b>集团机群治理</b><span class="sub">· 多工厂、版本灰度与审计合规</span><span class="right"><i class="dot"></i>VisionStudio CLOUD · 产品形态备选 · 2026-10-26</span></div>
+<div class="stage">
+
+  <aside class="side">
+    <div class="side-top"><span class="mark"><svg class="i"><use href="#i-logo"/></svg></span><b>VisionStudio</b><span class="cloud">CLOUD</span></div>
+    <div class="org">
+      <span class="logo">德</span>
+      <div><div class="nm">德尔塔智造</div><div class="sub">企业版 · 42 / 50 席位</div></div>
+      <svg class="i sm"><use href="#i-chev"/></svg>
+    </div>
+    <nav class="nav">
+      <a href="#"><svg class="i"><use href="#i-grid"/></svg>总览</a>
+      <div class="sec">运行</div>
+      <a href="#" class="on"><svg class="i"><use href="#i-cpu"/></svg>设备机群<span class="badge">42</span></a>
+      <a href="#"><svg class="i"><use href="#i-branch"/></svg>工作流配方<span class="badge">18</span></a>
+      <a href="#"><svg class="i"><use href="#i-rocket"/></svg>部署与发布<span class="badge hot">2</span></a>
+      <div class="sec">治理</div>
+      <a href="#"><svg class="i"><use href="#i-key"/></svg>许可证与席位<span class="badge">87%</span></a>
+      <a href="#"><svg class="i"><use href="#i-users"/></svg>组织与权限</a>
+      <a href="#"><svg class="i"><use href="#i-list"/></svg>审计日志</a>
+      <a href="#"><svg class="i"><use href="#i-life"/></svg>远程支援<span class="badge ind">1</span></a>
+    </nav>
+    <div class="side-foot">
+      <div class="sys"><i class="d"></i>全部服务正常 · 运行 128 天</div>
+      <div class="user"><span class="av">王</span><div><div class="nm">王工</div><div class="rl">平台管理员</div></div><svg class="i sm"><use href="#i-chev"/></svg></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb"><span>德尔塔智造</span><span class="sep">/</span><b>设备机群</b></div>
+      <div class="search" style="margin-left:12px"><svg class="i sm"><use href="#i-search"/></svg>搜索设备、配方、成员<kbd>⌘K</kbd></div>
+      <div class="top-right">
+        <div class="tbtn"><svg class="i"><use href="#i-refresh"/></svg></div>
+        <div class="tbtn"><svg class="i"><use href="#i-bell"/></svg><i class="dot"></i></div>
+        <div class="tbtn"><svg class="i"><use href="#i-help"/></svg></div>
+        <div class="avatar">王</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="page-h">
+        <div>
+          <h1>设备机群</h1>
+          <div class="sub"><i class="d"></i>3 个工厂 · 12 条线体 · 42 台设备 · 数据同步于 12 秒前</div>
+        </div>
+        <div class="page-actions">
+          <div class="btn ghost"><svg class="i sm"><use href="#i-filter"/></svg>保存的视图</div>
+          <div class="btn"><svg class="i sm"><use href="#i-export"/></svg>导出</div>
+          <div class="btn primary"><svg class="i sm"><use href="#i-plus"/></svg>添加设备</div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="hd"><svg class="i sm"><use href="#i-rocket"/></svg>发布进度 · v0.63.2</div>
+          <div class="num">34<small>/ 42 台已升级</small></div>
+          <div class="prog"><i class="a" style="width:81%"></i><i class="b" style="width:7%"></i><i class="c" style="width:12%"></i></div>
+          <div class="desc" style="margin-top:7px">灰度 3 台 · 待升级 5 台 · <b>v0.63.3 待审批</b></div>
+        </div>
+        <div class="stat attention">
+          <div class="hd"><svg class="i sm"><use href="#i-power"/></svg>离线设备</div>
+          <div class="num">2<small>台 · 宁波二厂</small></div>
+          <div class="desc" style="margin-top:8px">最长离线 <b>2 小时 14 分</b> · 已通知现场</div>
+          <span class="go">查看 →</span>
+        </div>
+        <div class="stat">
+          <div class="hd"><svg class="i sm"><use href="#i-key"/></svg>许可证占用</div>
+          <div class="num">36<small>/ 50 席位</small></div>
+          <div class="prog" style="margin-top:9px"><i class="b" style="width:72%"></i></div>
+          <div class="desc" style="margin-top:7px">有效期至 2027-03-31 · <b>建议增购 8 席</b></div>
+        </div>
+        <div class="stat">
+          <div class="hd"><svg class="i sm"><use href="#i-alert"/></svg>近 7 天异常</div>
+          <div class="num">5<small>起 · 已闭环 4</small></div>
+          <div class="desc" style="margin-top:8px">读码失败 2 · 通信超时 2 · 磁盘告警 1</div>
+          <span class="go">审计日志 →</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="tabs">
+          <div class="tb on">全部<span class="n">42</span></div>
+          <div class="tb">在线<span class="n">39</span></div>
+          <div class="tb">告警<span class="n">3</span></div>
+          <div class="tb">离线<span class="n">2</span></div>
+          <div class="tb">待升级<span class="n">5</span></div>
+          <div class="tb">未授权<span class="n">0</span></div>
+          <div class="right" style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--t4)">
+            <span style="display:flex;align-items:center;gap:5px"><i style="width:5px;height:5px;border-radius:50%;background:#0e9f6e"></i>自动刷新 30s</span>
+          </div>
+        </div>
+        <div class="filterbar">
+          <div class="fsearch"><svg class="i sm"><use href="#i-search"/></svg>设备名、IP、序列号</div>
+          <div class="fsel"><svg class="i sm"><use href="#i-filter"/></svg>全部工厂<svg class="i xs"><use href="#i-chev"/></svg></div>
+          <div class="fsel">全部型号<svg class="i xs"><use href="#i-chev"/></svg></div>
+          <div class="fsel">配方版本<svg class="i xs"><use href="#i-chev"/></svg></div>
+          <div class="fsel">状态<svg class="i xs"><use href="#i-chev"/></svg></div>
+          <div class="right"><span>已选 <b style="color:var(--indigo)">1</b> 台</span><span style="color:#e2e6ee">|</span><span>列设置</span></div>
+        </div>
+
+        <div style="flex:1;overflow:hidden">
+          <table>
+            <colgroup>
+              <col style="width:38px"><col style="width:272px"><col style="width:150px"><col style="width:108px">
+              <col style="width:86px"><col style="width:104px"><col style="width:96px"><col style="width:106px">
+              <col style="width:96px"><col style="width:56px">
+            </colgroup>
+            <thead>
+              <tr><th></th><th>设备</th><th>工厂 / 线体</th><th>型号</th><th>固件</th><th>配方版本</th><th>状态</th><th>24h 良率</th><th>最后心跳</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr class="sel">
+                <td><i class="chk on"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">SZ-L2-01 上料定位</div><div class="meta">10.12.4.21 · SN 3F81-2201</div></div></div></td>
+                <td><div class="site">苏州一厂<em>A 车间 / L2 包装线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.8.2</td>
+                <td><span class="chip latest">v0.63.2</span></td>
+                <td><span class="st"><i></i>运行</span></td>
+                <td><div class="yield"><b>99.6%</b><span class="bar"><i style="width:96%"></i></span></div></td>
+                <td class="mono">12 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">SZ-L2-03 二维码读码</div><div class="meta">10.12.4.23 · SN 3F81-2203</div></div></div></td>
+                <td><div class="site">苏州一厂<em>A 车间 / L2 包装线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.8.2</td>
+                <td><span class="chip latest">v0.63.2</span></td>
+                <td><span class="st warn"><i></i>告警</span></td>
+                <td><div class="yield low"><b>98.4%</b><span class="bar"><i style="width:78%"></i></span></div></td>
+                <td class="mono">8 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">SZ-L2-05 外观缺陷</div><div class="meta">10.12.4.25 · SN 3F81-2205</div></div></div></td>
+                <td><div class="site">苏州一厂<em>A 车间 / L2 包装线</em></div></td>
+                <td class="mono">VS-1200</td><td class="mono">3.8.1</td>
+                <td><span class="chip old">v0.62.8</span></td>
+                <td><span class="st warn"><i></i>告警</span></td>
+                <td><div class="yield low"><b>97.9%</b><span class="bar"><i style="width:72%"></i></span></div></td>
+                <td class="mono">5 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">SZ-L1-02 尺寸测量</div><div class="meta">10.12.3.12 · SN 3F79-1180</div></div></div></td>
+                <td><div class="site">苏州一厂<em>B 车间 / L1 装配线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.8.2</td>
+                <td><span class="chip latest">v0.63.2</span></td>
+                <td><span class="st"><i></i>运行</span></td>
+                <td><div class="yield"><b>99.8%</b><span class="bar"><i style="width:98%"></i></span></div></td>
+                <td class="mono">15 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic" style="background:#f6f2fa;color:#8b5cf6;border-color:#eee5fa"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">NB-L3-07 装配定位</div><div class="meta">10.20.7.31 · SN 3F76-0912</div></div></div></td>
+                <td><div class="site">宁波二厂<em>C 车间 / L3 总装线</em></div></td>
+                <td class="mono">VS-1200</td><td class="mono">3.7.9</td>
+                <td><span class="chip old">v0.62.8</span></td>
+                <td><span class="st off"><i></i>离线</span></td>
+                <td><div class="yield" style="opacity:.45"><b>—</b><span class="bar"><i style="width:0"></i></span></div></td>
+                <td class="mono" style="color:#b45309">2h 14m</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic" style="background:#f6f2fa;color:#8b5cf6;border-color:#eee5fa"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">NB-L3-08 装盒校验</div><div class="meta">10.20.7.32 · SN 3F76-0913</div></div></div></td>
+                <td><div class="site">宁波二厂<em>C 车间 / L3 总装线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.7.9</td>
+                <td><span class="chip old">v0.62.8</span></td>
+                <td><span class="st off"><i></i>离线</span></td>
+                <td><div class="yield" style="opacity:.45"><b>—</b><span class="bar"><i style="width:0"></i></span></div></td>
+                <td class="mono" style="color:#b45309">2h 13m</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">CQ-L1-01 上料定位</div><div class="meta">10.30.1.11 · SN 3F80-0431</div></div></div></td>
+                <td><div class="site">重庆三厂<em>A 车间 / L1 冲压线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.8.0</td>
+                <td><span class="chip up">v0.63.0 可升级</span></td>
+                <td><span class="st upd"><i></i>待更新</span></td>
+                <td><div class="yield"><b>99.2%</b><span class="bar"><i style="width:88%"></i></span></div></td>
+                <td class="mono">31 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">CQ-L1-04 焊缝检测</div><div class="meta">10.30.1.14 · SN 3F80-0434</div></div></div></td>
+                <td><div class="site">重庆三厂<em>A 车间 / L1 冲压线</em></div></td>
+                <td class="mono">VS-2000</td><td class="mono">3.8.2</td>
+                <td><span class="chip latest">v0.63.2</span></td>
+                <td><span class="st"><i></i>运行</span></td>
+                <td><div class="yield"><b>99.5%</b><span class="bar"><i style="width:94%"></i></span></div></td>
+                <td class="mono">21 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+              <tr>
+                <td><i class="chk"></i></td>
+                <td><div class="dev"><span class="ic"><svg class="i sm"><use href="#i-cam"/></svg></span>
+                  <div style="min-width:0"><div class="nm">SZ-L2-08 装箱校验</div><div class="meta">10.12.4.28 · SN 3F81-2208</div></div></div></td>
+                <td><div class="site">苏州一厂<em>A 车间 / L2 包装线</em></div></td>
+                <td class="mono">VS-800</td><td class="mono">3.8.2</td>
+                <td><span class="chip latest">v0.63.2</span></td>
+                <td><span class="st"><i></i>运行</span></td>
+                <td><div class="yield"><b>99.4%</b><span class="bar"><i style="width:92%"></i></span></div></td>
+                <td class="mono">9 秒前</td>
+                <td><div class="ops"><span><svg class="i sm"><use href="#i-dots"/></svg></span></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tfoot">
+          <span>共 42 台设备 · 当前筛选 10 条</span>
+          <span style="color:#e2e6ee">|</span>
+          <span>批量操作：下发配方 · 重启引擎 · 导出诊断包</span>
+          <div class="pages"><span class="b">‹</span><span class="on">1</span><span>2</span><span>3</span><span>4</span><span>5</span><span class="b">›</span></div>
+        </div>
+      </div>
+      <div style="height:16px;flex:none"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+
+<script>
+  function fitStage(){
+    const s = Math.min((window.innerWidth - 32) / 1440, (window.innerHeight - 64) / 900, 1);
+    document.querySelector('.stage').style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fitStage);
+  fitStage();
+</script>
+</body>
+</html>
