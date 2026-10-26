@@ -1,3 +1,4 @@
+using VisionStudio.Abstractions;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http.Features;
@@ -206,6 +207,8 @@ public static class VisionStudioServiceRegistration
         services.Configure<PluginPackageOptions>(configuration.GetSection("PluginPackages"));
 
         services.AddSingleton<SqliteMetadataDatabase>();
+        // 结果落库：output.database 节点通过 IResultRecordStore 写 result_records 表（migration 23）。
+        services.AddSingleton<IResultRecordStore, SqliteResultRecordStore>();
         services.AddSingleton<LegacyStorageMigrationService>();
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。

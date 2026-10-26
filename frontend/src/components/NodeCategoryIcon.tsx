@@ -122,6 +122,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'collection.detections.at': 'crosshair', 'collection.detections.count': 'histogram',
   'recognition.barcode': 'barcode', 'recognition.ocr': 'text', 'text.match': 'text', 'text.regex': 'text',
   'inference.classification': 'inference', 'inference.detection': 'detections', 'inference.segmentation': 'region', 'inference.anomaly': 'target',
+  'output.database': 'grid',
   'output.saveImage': 'image', 'output.exportResult': 'histogram', 'output.httpRequest': 'deviceWrite', 'module.call': 'layers',
   'jlvision.worldPlane': 'perspective', 'jlvision.contourOp': 'contour', 'jlvision.dxf': 'file',
   'jlvision.featureExtract': 'edge', 'defect.referenceCompare': 'compare',

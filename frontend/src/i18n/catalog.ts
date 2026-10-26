@@ -49,6 +49,7 @@ const nodeNames: Record<string, string> = {
   'flow.log': '流程日志', 'flow.fail': '主动失败',
   'device.tcpRequest': 'TCP 请求', 'device.udpMessage': 'UDP 报文', 'device.serialPort': '串口请求',
   'image.load': '读取图像文件',
+  'output.database': '结果落库',
   'calibration.cameraIntrinsics': '相机内参标定', 'image.undistort': '畸变校正', 'calibration.handEye2D': '二维手眼标定', 'calibration.handEye3D': '三维手眼标定',
   'collection.detections.filter': '筛选检测目标', 'collection.detections.sort': '目标排序',
   'collection.detections.at': '按索引提取目标', 'collection.detections.count': '目标计数',
@@ -559,6 +560,7 @@ const parameterNames: Record<string, string> = {
   'Failure Code': '失败代码',
   'Failure Message': '失败消息',
   'Host': '主机', 'Port': '端口', 'Request Payload': '请求报文',
+  'Dataset': '数据集', 'Record Key': '业务键',
   'Path': '路径', 'Path Mode': '路径模式', 'Frame Index': '帧序号', 'Index Policy': '越界策略', 'Recursive': '包含子目录', 'Max File Size': '文件大小上限',
   'Field': '数值列', 'Deviation': '偏差口径', 'Enable Spec Limits': '启用规格限', 'LSL': '规格下限', 'USL': '规格上限',
   'Payload Encoding': '报文编码', 'Send Terminator': '发送终止符', 'Read Mode': '读取模式', 'Read Terminator': '接收终止符',
@@ -595,7 +597,7 @@ const parameterGroups: Record<string, string> = {
   Contours: '轮廓选择', Limits: '限值', 'Sort Keys': '排序字段', 'Binary Kernel': '二值核', 'Gray Kernel': '灰度核', Hysteresis: '迟滞',
   Views: '视图', 'Quality Gates': '质量门限', Failure: '失败处理', Completion: '完成等待',
   'Top Left': '左上角', 'Top Right': '右上角', 'Bottom Right': '右下角', 'Bottom Left': '左下角',
-  Log: '日志', Endpoint: '端点', Source: '来源', Decode: '解码', Statistics: '统计', Capability: '过程能力', Extraction: '提取', Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐'
+  Log: '日志', Endpoint: '端点', Source: '来源', Decode: '解码', Storage: '存储', Statistics: '统计', Capability: '过程能力', Extraction: '提取', Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐'
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
@@ -1344,6 +1346,7 @@ export const portNames: Record<string, string> = {
   message: '消息', level: '级别', severity: '严重度', logged: '已记录', code: '代码',
   response: '应答文本', responseHex: '应答十六进制', bytesRead: '接收字节数', payload: '请求报文',
   resolvedPath: '实际路径', bitDepth: '位深',
+  recordId: '记录 ID', dataset: '数据集', payloadBytes: '负载字节数',
   numberList: '数值列表', pointList: '点集', skipped: '跳过条数', std: '标准差', sum: '合计', cp: 'CP', cpk: 'CPK', residualPx: '拟合残差',
   rawProjectionT: '原始投影参数 t', projectionClamped: '已裁剪至端点', projectedPoint: '直线垂足', lineDistance: '直线垂距',
   xWritten: 'X 已写入', yWritten: 'Y 已写入', rWritten: 'R 已写入', url: '请求地址', idempotencyKey: '幂等键',
@@ -1671,7 +1674,8 @@ const descriptions: Record<string, string> = {
   'geometry.fitFromPoints': '用点集拟合直线或圆。直线用点云主方向（总体最小二乘），竖直方向的线同样稳定，返回覆盖全部点的线段；圆用 Kåsa 代数拟合再加平均半径收尾，至少需要 3 个不共线的点。residualPx 是各点到拟合几何的正交距离均方根，两种模式都输出。点共线时圆拟合直接失败，而不是给出任意圆心。',  'jlvision.matrixOp': '矩阵转置、求逆、行列式、加减乘除、范数、对称及广义对称特征值、线性求解等。matrix 可直接接到 matrixA/matrixB；未接线时用表格或 JSON。最多 100 万元素，热力图只预览左上 128×128，调试曲线最多 64 点并按幅值归一化；matrix 保留完整结果。',
 
   'image.load': '离线读取一张本地图像，用于离线验证、教学与样本跑批，不必先把目录注册成相机。目录模式按自然排序枚举 png/bmp/jpg/jpeg/tif/tiff（img2 排在 img10 之前，保证跑批可复现），用 sequence 输入选择第几帧，通常接 flow.repeat.index。**读盘一律经宿主授权**：数据根、媒体库根与 VisionStudio:ReplayInputRoots 之外的路径会被拒绝——流程文档是可导入的 JSON，不能成为任意文件读取入口。超过 maxMegabytes 的文件在解码前就被拒；解不开的文件会带上文件名报错。',  'jlvision.measure1d': 'JLVision 原生一维测量对象：矩形或弧形测量，执行 MeasurePos/Pairs/Thresh/Projection，输出边缘 JSON。',
-  'measure.circleSpacing': '输出圆心距，以及 gap=圆心距−半径A−半径B。gap<0 时 overlapping=true；gap 不是包含状态下的最短圆周距离。relation 区分分离、相切（内切或外切）、相交和包含；contained 表示一圆被另一圆包含，含内切及重合。关系判定沿用 1e-9 px 容差。',
+
+  'output.database': '把接线进来的结果作为一条记录追加到宿主的结果存储，省掉上位机再写一套接收服务。负载与 output.exportResult 的 JSON 形态一致（{type,value}，图像降级为尺寸对象），并带上 runId 与节点 id。宿主未提供结果存储时**直接失败而不是静默丢弃**——静默丢弃只会在事后对账时才暴露。数据集名与业务键有长度校验（96/256 字符），负载超过 maxPayloadBytes 时拒绝写入；写入失败会带上记录 id，便于核对是否产生半行。',  'measure.circleSpacing': '输出圆心距，以及 gap=圆心距−半径A−半径B。gap<0 时 overlapping=true；gap 不是包含状态下的最短圆周距离。relation 区分分离、相切（内切或外切）、相交和包含；contained 表示一圆被另一圆包含，含内切及重合。关系判定沿用 1e-9 px 容差。',
   'jlvision.contourFeature': '按序号选择一条输入轮廓，计算面积与重心、圆度、凸度、矩形度、方向、偏心率、直径、矩等特征。轮廓输出、点数和叠加图均对应所选轮廓；双轮廓特征可另选参考轮廓。',
   'measure.pointLineDistance': 'distance/closestPoint 对应所选直线或线段；projectedPoint、lineDistance 和 signedDistance 始终对应无限直线。沿 X 正向的水平线，图像下方点的 signedDistance 为负；反转线方向则符号反转，不能将其当作端点距离。rawProjectionT 为原始参数，projectionT 为实际使用参数，projectionClamped 表示是否裁剪到端点。',
   'jlvision.regionFeature': '计算输入区域的 JLVision 区域特征：几何、矩、游程、命名特征以及灰度统计。',
@@ -1724,6 +1728,9 @@ const parameterDescriptions: Record<string, string> = {
   'value.string.padChar': '用于补齐的单个字符；长度不是 1 时失败。',
   'value.string.padSide': '补齐字符加在哪一端。',
   'value.string.maxLength': '结果字符串的 UTF-16 码元上限。超出时失败，而不是静默截断后存储。',
+  'output.database.dataset': '逻辑数据集名，用于分组记录（如 caliper-width、ng-parts）；最长 96 字符。',
+  'output.database.key': '可选业务键（产品序列号、批次号），便于按件追溯；key 端口接线时覆盖此参数，最长 256 字符。',
+  'output.database.maxPayloadBytes': '超过上限直接拒绝写入，而不是截断后落库。',
   'image.load.path': '图像文件或目录；path 端口接线时覆盖此参数。只能读取宿主授权的根目录内的路径。',
   'image.load.pathMode': '自动识别时，已存在的目录按帧序列处理，其余按单文件处理。',
   'image.load.index': '目录模式下从 0 开始的帧序号；sequence 端口接线时覆盖此参数。文件模式必须为 0。',

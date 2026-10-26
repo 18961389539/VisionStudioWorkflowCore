@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "2aab121b3c139897296c27868b8d903b71e0ba93bd61e56ea4c99a7c44a95fd9",
+  "hash": "4f1ce636eecbd6f113ab9a63feb7c44b82a431ca54d6ff6c2845998bd1a34b7d",
   "items": [
     {
       "type": "image.acquire",
@@ -27622,6 +27622,102 @@
       ],
       "description": "Supports continuous image archiving: timestamp/template/fixed naming, date and OK/NG folders, and error/overwrite/unique-name/skip conflict handling. path/partId can be wired, sequence comes from upstream, and runId is this workflow run's identity. Files are published atomically and the actual path is returned; when saved=false, reason distinguishes the skip cause. Legacy workflows keep fixed-path and overwrite semantics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "output.database",
+      "displayName": "Write Result Record",
+      "category": "Output",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": true
+        },
+        {
+          "name": "key",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "recordId",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "dataset",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "payloadBytes",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "dataset",
+          "label": "Dataset",
+          "type": "text",
+          "defaultValue": "results",
+          "group": "Storage",
+          "description": "Logical dataset name used to group records (for example 'caliper-width' or 'ng-parts'); at most 96 characters."
+        },
+        {
+          "name": "key",
+          "label": "Record Key",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Storage",
+          "description": "Optional business key such as a part serial or batch number, so records can be looked up per unit. The key input overrides it; at most 256 characters.",
+          "overriddenByPorts": [
+            "key"
+          ]
+        },
+        {
+          "name": "maxPayloadBytes",
+          "label": "Max Payload Bytes",
+          "type": "number",
+          "defaultValue": 65536,
+          "min": 64,
+          "max": 4194304,
+          "step": 1,
+          "group": "Limits",
+          "description": "Reject payloads above this size instead of writing a truncated record."
+        }
+      ],
+      "description": "Append the connected value as one record in the host result store, so results reach a database without a separate receiver service. The payload is serialized exactly like output.exportResult JSON ({type,value}; images degrade to their size) and tagged with the run id and node id. Requires the host to provide IResultRecordStore: without it the node fails instead of silently dropping results, because a silent drop only surfaces during reconciliation. Dataset and key are validated (96/256 characters) and the payload size is capped before writing; a failing write reports the record id so the operator can check for a half written row.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,

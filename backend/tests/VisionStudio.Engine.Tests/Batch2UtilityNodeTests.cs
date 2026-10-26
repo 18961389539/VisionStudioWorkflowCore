@@ -130,7 +130,15 @@ public sealed class Batch2UtilityNodeTests
     [Fact]
     public void Catalog_DeclaresWorkflowCoreOnlyIoAndNoHardwareActions()
     {
-        Assert.Equal(10, Batch2UtilityCatalog.Items.Count);
+        // 用类型清单代替纯计数：新增节点时失败信息会直接指出多出/缺少的类型，
+        // 而不是只报"期望 10 实际 11"。
+        string[] expected =
+        [
+            "flow.delay", "flow.ifBoolean", "flow.merge", "flow.switch", "flow.try",
+            "flow.log", "flow.fail",
+            "output.saveImage", "output.exportResult", "output.httpRequest", "output.database"
+        ];
+        Assert.Equal(expected.Order(), Batch2UtilityCatalog.Items.Select(item => item.Type).Order());
         Assert.All(Batch2UtilityCatalog.Items, item => Assert.Empty(item.Actions!));
         Assert.All(Batch2UtilityCatalog.Items, item => Assert.Equal(VisionExecutionMode.WorkflowCore, item.Capabilities!.ExecutionMode));
         Assert.False(Batch2UtilityCatalog.Items.Single(x => x.Type == "output.saveImage").Capabilities!.SupportsRunNode);

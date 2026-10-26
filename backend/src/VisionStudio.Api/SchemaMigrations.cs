@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 22;
+    public const int CurrentVersion = 23;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -58,7 +58,8 @@ public sealed class SqliteSchemaMigrationRunner
             "run_traces.error_code"),
         new(21, "Independent recipe validation policy", "", ApplyIndependentRecipeValidationAsync,
             "jobs.requires_validation"),
-        new(22, "Versioned camera intrinsic calibration assets", CameraIntrinsicAssetSchemaSql)
+        new(22, "Versioned camera intrinsic calibration assets", CameraIntrinsicAssetSchemaSql),
+        new(23, "Run result records for database persistence", ResultRecordSchemaSql)
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -868,6 +869,25 @@ CREATE TABLE IF NOT EXISTS investigation_case_verifications (
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_case ON investigation_case_verifications(case_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_gate ON investigation_case_verifications(gate_status,created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_investigation_case_verifications_runs ON investigation_case_verifications(baseline_validation_run_id,candidate_validation_run_id);
+""";
+
+    /// <summary>
+    /// 结果落库表（output.database）。一条记录一行，payload 为 {type,value} JSON。
+    /// payload 不建索引、不做全文检索：它可能很大，查询走 dataset/record_key/created_at。
+    /// </summary>
+    private const string ResultRecordSchemaSql = """
+CREATE TABLE IF NOT EXISTS result_records (
+    id TEXT PRIMARY KEY,
+    dataset TEXT NOT NULL,
+    record_key TEXT NULL,
+    payload_json TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    workflow_scope TEXT NULL,
+    node_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_result_records_dataset_created ON result_records(dataset, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_result_records_key ON result_records(record_key);
 """;
 
     private const string CameraIntrinsicAssetSchemaSql = """
