@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "7a6ddbdaf46ae4b70cf5aaaaf4d72345b330d9936805077753ec905708def8c7",
+  "hash": "30af4ab759149f3cd0da8849689cb0f957297507e089041029a3fb9f10622108",
   "items": [
     {
       "type": "image.acquire",
@@ -8079,6 +8079,852 @@
         }
       ],
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "device.serialPort",
+      "displayName": "Serial Request",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "payload",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "response",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "responseHex",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "bytesRead",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "elapsedMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "serial-1",
+          "group": "Device",
+          "description": "Logical device name used for the dispatch permit and audit trail (max 128 chars)."
+        },
+        {
+          "name": "portName",
+          "label": "Port Name",
+          "type": "text",
+          "defaultValue": "COM1",
+          "group": "Endpoint",
+          "description": "Serial port name such as COM3."
+        },
+        {
+          "name": "baudRate",
+          "label": "Baud Rate",
+          "type": "number",
+          "defaultValue": 9600,
+          "min": 50,
+          "max": 4000000,
+          "step": 1,
+          "group": "Endpoint",
+          "description": "Baud rate (50-4000000)."
+        },
+        {
+          "name": "dataBits",
+          "label": "Data Bits",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 5,
+          "max": 8,
+          "step": 1,
+          "group": "Endpoint",
+          "description": "Data bits (5-8)."
+        },
+        {
+          "name": "parity",
+          "label": "Parity",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Odd",
+              "value": "odd"
+            },
+            {
+              "label": "Even",
+              "value": "even"
+            },
+            {
+              "label": "Mark",
+              "value": "mark"
+            },
+            {
+              "label": "Space",
+              "value": "space"
+            }
+          ],
+          "group": "Endpoint",
+          "description": "Parity mode."
+        },
+        {
+          "name": "stopBits",
+          "label": "Stop Bits",
+          "type": "select",
+          "defaultValue": "one",
+          "options": [
+            {
+              "label": "1",
+              "value": "one"
+            },
+            {
+              "label": "1.5",
+              "value": "onePointFive"
+            },
+            {
+              "label": "2",
+              "value": "two"
+            }
+          ],
+          "group": "Endpoint",
+          "description": "Stop bits."
+        },
+        {
+          "name": "dtrEnable",
+          "label": "DTR",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Endpoint",
+          "description": "Assert DTR while the port is open; some RS-485 converters need it."
+        },
+        {
+          "name": "rtsEnable",
+          "label": "RTS",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Endpoint",
+          "description": "Assert RTS while the port is open; no handshake is used."
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 50,
+          "max": 60000,
+          "step": 50,
+          "unit": "ms",
+          "group": "Endpoint",
+          "description": "Budget for write + read. On expiry the port is closed and the node fails; the command may already have reached the device."
+        },
+        {
+          "name": "payload",
+          "label": "Request Payload",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Request",
+          "description": "Bytes to send. Overridden by the payload input port.",
+          "overriddenByPorts": [
+            "payload"
+          ]
+        },
+        {
+          "name": "payloadEncoding",
+          "label": "Payload Encoding",
+          "type": "select",
+          "defaultValue": "text",
+          "options": [
+            {
+              "label": "Text (UTF-8)",
+              "value": "text"
+            },
+            {
+              "label": "Hex",
+              "value": "hex"
+            }
+          ],
+          "group": "Request",
+          "description": "text sends UTF-8 bytes; hex parses pairs such as '02 31 0D'."
+        },
+        {
+          "name": "sendTerminator",
+          "label": "Send Terminator",
+          "type": "select",
+          "defaultValue": "crlf",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "CR",
+              "value": "cr"
+            },
+            {
+              "label": "LF",
+              "value": "lf"
+            },
+            {
+              "label": "CRLF",
+              "value": "crlf"
+            }
+          ],
+          "group": "Request",
+          "description": "Bytes appended after the payload; CRLF matches most ASCII instruments."
+        },
+        {
+          "name": "readMode",
+          "label": "Read Mode",
+          "type": "select",
+          "defaultValue": "untilTerminator",
+          "options": [
+            {
+              "label": "Until terminator",
+              "value": "untilTerminator"
+            },
+            {
+              "label": "Fixed length",
+              "value": "fixedLength"
+            },
+            {
+              "label": "No reply",
+              "value": "none"
+            }
+          ],
+          "group": "Response",
+          "description": "How the reply is delimited."
+        },
+        {
+          "name": "readTerminator",
+          "label": "Read Terminator",
+          "type": "select",
+          "defaultValue": "crlf",
+          "options": [
+            {
+              "label": "CR",
+              "value": "cr"
+            },
+            {
+              "label": "LF",
+              "value": "lf"
+            },
+            {
+              "label": "CRLF",
+              "value": "crlf"
+            }
+          ],
+          "group": "Response",
+          "description": "Reply terminator; stripped from the response.",
+          "visibleWhen": {
+            "parameter": "readMode",
+            "values": [
+              "untilTerminator"
+            ]
+          }
+        },
+        {
+          "name": "readLength",
+          "label": "Read Length",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "group": "Response",
+          "description": "Exact reply length in bytes; must be greater than 0 in fixed-length mode.",
+          "visibleWhen": {
+            "parameter": "readMode",
+            "values": [
+              "fixedLength"
+            ]
+          }
+        },
+        {
+          "name": "maxResponseBytes",
+          "label": "Max Response Bytes",
+          "type": "number",
+          "defaultValue": 4096,
+          "min": 16,
+          "max": 1048576,
+          "step": 1,
+          "group": "Response",
+          "description": "Hard reply cap; exceeding it fails instead of truncating."
+        },
+        {
+          "name": "expectPattern",
+          "label": "Expect Pattern",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Validation",
+          "description": "Optional regular expression over the reply text; empty disables it."
+        },
+        {
+          "name": "requireMatch",
+          "label": "Require Match",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false."
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "Case-insensitive expectPattern matching."
+        }
+      ],
+      "description": "Talk to RS-232/485 devices that only speak a private ASCII or binary protocol (light controllers, handheld scanners, torque tools): open the port, send, read per readMode, close — the port is not held between requests so a stuck recipe cannot block the station. Same payload encoding, terminator and expectPattern semantics as TCP Request. UnauthorizedAccessException is reported as 'port held by another program'. Because the .NET serial stream ignores cancellation, replies are read byte by byte with ReadTimeout and a cancellation check between bytes.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      },
+      "actions": [
+        {
+          "kind": "DeviceWrite",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "device.tcpRequest",
+      "displayName": "TCP Request",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "payload",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "response",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "responseHex",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "bytesRead",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "elapsedMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "tcp-1",
+          "group": "Device",
+          "description": "Logical device name used for the dispatch permit and audit trail (max 128 chars); it is not the network address."
+        },
+        {
+          "name": "host",
+          "label": "Host",
+          "type": "text",
+          "defaultValue": "127.0.0.1",
+          "group": "Endpoint",
+          "description": "Peer host name or IPv4 address."
+        },
+        {
+          "name": "port",
+          "label": "Port",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 1,
+          "max": 65535,
+          "step": 1,
+          "group": "Endpoint",
+          "description": "Peer TCP port (1-65535)."
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 50,
+          "max": 60000,
+          "step": 50,
+          "unit": "ms",
+          "group": "Endpoint",
+          "description": "Overall budget for connect + send + read. On expiry the connection is closed and the node fails; the request may already have reached the peer, so verify device state before retrying."
+        },
+        {
+          "name": "payload",
+          "label": "Request Payload",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Request",
+          "description": "Bytes to send. Overridden by the payload input port. Compose dynamic payloads with value.string first.",
+          "overriddenByPorts": [
+            "payload"
+          ]
+        },
+        {
+          "name": "payloadEncoding",
+          "label": "Payload Encoding",
+          "type": "select",
+          "defaultValue": "text",
+          "options": [
+            {
+              "label": "Text (UTF-8)",
+              "value": "text"
+            },
+            {
+              "label": "Hex",
+              "value": "hex"
+            }
+          ],
+          "group": "Request",
+          "description": "text sends the UTF-8 bytes of the payload; hex parses pairs such as '02 31 0D' (spaces, '-' and ':' are ignored)."
+        },
+        {
+          "name": "sendTerminator",
+          "label": "Send Terminator",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "CR",
+              "value": "cr"
+            },
+            {
+              "label": "LF",
+              "value": "lf"
+            },
+            {
+              "label": "CRLF",
+              "value": "crlf"
+            }
+          ],
+          "group": "Request",
+          "description": "Bytes appended after the payload."
+        },
+        {
+          "name": "readMode",
+          "label": "Read Mode",
+          "type": "select",
+          "defaultValue": "untilTerminator",
+          "options": [
+            {
+              "label": "Until terminator",
+              "value": "untilTerminator"
+            },
+            {
+              "label": "Fixed length",
+              "value": "fixedLength"
+            },
+            {
+              "label": "No reply",
+              "value": "none"
+            }
+          ],
+          "group": "Response",
+          "description": "How the reply is delimited. No reply sends the request and returns immediately."
+        },
+        {
+          "name": "readTerminator",
+          "label": "Read Terminator",
+          "type": "select",
+          "defaultValue": "crlf",
+          "options": [
+            {
+              "label": "CR",
+              "value": "cr"
+            },
+            {
+              "label": "LF",
+              "value": "lf"
+            },
+            {
+              "label": "CRLF",
+              "value": "crlf"
+            }
+          ],
+          "group": "Response",
+          "description": "Reply terminator; it is stripped from the response before expectPattern is evaluated.",
+          "visibleWhen": {
+            "parameter": "readMode",
+            "values": [
+              "untilTerminator"
+            ]
+          }
+        },
+        {
+          "name": "readLength",
+          "label": "Read Length",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 65535,
+          "step": 1,
+          "group": "Response",
+          "description": "Exact reply length in bytes; must be greater than 0 in fixed-length mode. A short reply fails instead of returning half a frame.",
+          "visibleWhen": {
+            "parameter": "readMode",
+            "values": [
+              "fixedLength"
+            ]
+          }
+        },
+        {
+          "name": "maxResponseBytes",
+          "label": "Max Response Bytes",
+          "type": "number",
+          "defaultValue": 4096,
+          "min": 16,
+          "max": 1048576,
+          "step": 1,
+          "group": "Response",
+          "description": "Hard reply cap. Exceeding it fails the node instead of silently truncating."
+        },
+        {
+          "name": "expectPattern",
+          "label": "Expect Pattern",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Validation",
+          "description": "Optional .NET regular expression evaluated against the reply text (100 ms budget). Empty disables the check."
+        },
+        {
+          "name": "requireMatch",
+          "label": "Require Match",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "When true a reply that does not match expectPattern fails the node; when false it only sets matched=false."
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "Case-insensitive expectPattern matching."
+        }
+      ],
+      "description": "Talk to devices that only speak a private TCP protocol (scanners, light controllers, torque tools). One connection per request: connect, send, read per readMode, close. The request may be binary (payloadEncoding=hex) and the reply is exposed both as UTF-8 text and as hex. Responses are capped by maxResponseBytes; timeouts close the connection and fail with a message that states the request may already have reached the peer. The dispatch is guarded by the device ownership permit for deviceId, so a released lease blocks the send.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      },
+      "actions": [
+        {
+          "kind": "DeviceWrite",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "device.udpMessage",
+      "displayName": "UDP Message",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "payload",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "response",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "responseHex",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "bytesRead",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "matched",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "elapsedMs",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviceId",
+          "label": "Device ID",
+          "type": "text",
+          "defaultValue": "udp-1",
+          "group": "Device",
+          "description": "Logical device name used for the dispatch permit and audit trail (max 128 chars)."
+        },
+        {
+          "name": "host",
+          "label": "Host",
+          "type": "text",
+          "defaultValue": "127.0.0.1",
+          "group": "Endpoint",
+          "description": "Peer host name or IPv4 address."
+        },
+        {
+          "name": "port",
+          "label": "Port",
+          "type": "number",
+          "defaultValue": 5001,
+          "min": 1,
+          "max": 65535,
+          "step": 1,
+          "group": "Endpoint",
+          "description": "Peer UDP port (1-65535)."
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 50,
+          "max": 60000,
+          "step": 50,
+          "unit": "ms",
+          "group": "Endpoint",
+          "description": "Budget for sending and for waiting for the reply datagram."
+        },
+        {
+          "name": "payload",
+          "label": "Payload",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Request",
+          "description": "Datagram contents. Overridden by the payload input port.",
+          "overriddenByPorts": [
+            "payload"
+          ]
+        },
+        {
+          "name": "payloadEncoding",
+          "label": "Payload Encoding",
+          "type": "select",
+          "defaultValue": "text",
+          "options": [
+            {
+              "label": "Text (UTF-8)",
+              "value": "text"
+            },
+            {
+              "label": "Hex",
+              "value": "hex"
+            }
+          ],
+          "group": "Request",
+          "description": "text sends UTF-8 bytes; hex parses pairs such as '02 31 0D'."
+        },
+        {
+          "name": "sendTerminator",
+          "label": "Send Terminator",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "CR",
+              "value": "cr"
+            },
+            {
+              "label": "LF",
+              "value": "lf"
+            },
+            {
+              "label": "CRLF",
+              "value": "crlf"
+            }
+          ],
+          "group": "Request",
+          "description": "Bytes appended after the payload."
+        },
+        {
+          "name": "expectReply",
+          "label": "Expect Reply",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Response",
+          "description": "When true the node waits for one reply datagram within timeoutMs; when false it only sends."
+        },
+        {
+          "name": "expectPattern",
+          "label": "Expect Pattern",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Validation",
+          "description": "Optional regular expression over the reply text; empty disables it."
+        },
+        {
+          "name": "requireMatch",
+          "label": "Require Match",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false."
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Validation",
+          "description": "Case-insensitive expectPattern matching."
+        }
+      ],
+      "description": "Send one UDP datagram to a private-protocol device and optionally wait for a single reply datagram. Same payload encoding, terminator and expectPattern semantics as TCP Request, but no connection state: suitable for broadcast-style devices and simple ASCII protocols over Ethernet.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "Auto"
+      },
+      "actions": [
+        {
+          "kind": "DeviceWrite",
+          "completion": "Synchronous"
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device",
+          "parameter": "deviceId"
+        }
+      ],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,

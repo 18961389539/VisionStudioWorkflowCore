@@ -22,6 +22,8 @@
     <PackageReference Include="S7netplus" Version="0.20.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <!-- 串口私有协议（光源控制器/扫码枪/拧紧枪）：System.IO.Ports 8.0.0 已在本地缓存，离线可还原。 -->
+    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <PackageReference Include="TesseractOCR" Version="5.5.2" />
   </ItemGroup>

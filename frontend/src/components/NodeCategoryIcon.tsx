@@ -107,6 +107,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'coordinate.transformCoordinatePoint': 'crosshair', 'coordinate.transformCoordinatePose': 'robotPose',
   'coordinate.transformLine': 'line', 'coordinate.transformPoint': 'crosshair', 'coordinate.transformPose': 'robotPose',
   'device.readTag': 'deviceRead', 'device.waitTag': 'delay', 'device.writeTag': 'deviceWrite', 'device.writeVisionResult': 'deviceWrite',
+  'device.tcpRequest': 'deviceWrite', 'device.udpMessage': 'deviceWrite', 'device.serialPort': 'deviceWrite',
   'robot.executeTarget': 'robotMove', 'robot.currentPose': 'robotPose', 'robot.guidance2d': 'target',
   'robot.j4TcpCompensation': 'robot', 'flow.if': 'branch', 'flow.ifBoolean': 'branch', 'flow.switch': 'switch',
   'flow.join': 'merge', 'flow.merge': 'merge', 'flow.parallel': 'parallel', 'flow.forEach': 'loop',
