@@ -1467,6 +1467,42 @@ public static class BuiltInNodeCatalog
                 ],
             "Compose and reshape strings that other nodes already produce (barcode text, OCR text, timestamps, paths). Wire: optional string inputs a/b/c/d and optional number input value; textValue is the result, charCount its UTF-16 length, truncated reports clamped substrings, numberValue is emitted only by Text to number. Template mode assembles {a}..{d} and {value}; Join skips empty parts; Number to text uses an invariant-culture format; Text to number parses with NumberStyles.Float and fails on non-numeric or non-finite text; Substring clamps out-of-range indexes and sets truncated; Trim/Replace/Pad/Uppercase/Lowercase/Length operate on input a. Empty find text, multi-character pad characters, unknown placeholders and invalid number formats fail deterministically; missing string inputs are treated as empty.",
             "builtin"),
+        // ===== 通用列表类型配套（2026-10-26 · 缺口分析 P1-8）=====
+        new(
+            "value.numberList",
+            "Number List",
+            "Value",
+            [ExecIn,
+                new("a", VisionDataType.Double, Required: false), new("b", VisionDataType.Double, Required: false),
+                new("c", VisionDataType.Double, Required: false), new("d", VisionDataType.Double, Required: false),
+                new("e", VisionDataType.Double, Required: false), new("f", VisionDataType.Double, Required: false),
+                new("g", VisionDataType.Double, Required: false), new("h", VisionDataType.Double, Required: false)],
+            [new("numberList", VisionDataType.NumberList), new("count", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next],
+            [],
+            "Collect up to eight scalar measurements into one NumberList so value.statistics can summarize them. Only connected inputs are collected, in port order a..h: an unconnected input contributes nothing instead of a zero, because a silent zero would distort mean, range and CP/CPK. Non-finite inputs fail; connecting nothing fails with an explicit message rather than producing an empty list.",
+            "builtin"),
+        new(
+            "value.statistics",
+            "Statistics",
+            "Value",
+            [ExecIn, new("numberList", VisionDataType.NumberList)],
+            [new("count", VisionDataType.Integer), new("mean", VisionDataType.Double), new("std", VisionDataType.Double),
+                new("min", VisionDataType.Double), new("max", VisionDataType.Double), new("median", VisionDataType.Double),
+                new("range", VisionDataType.Double), new("sum", VisionDataType.Double),
+                new("cp", VisionDataType.Double, Required: false), new("cpk", VisionDataType.Double, Required: false),
+                new("pass", VisionDataType.Boolean, Required: false), new("diagnostics", VisionDataType.String), Next],
+            [
+                new("deviation", "Deviation", "select", "sample", Group: "Statistics", Options:
+                [
+                    new("Sample (n-1)", "sample"),
+                    new("Population (n)", "population")
+                ], Description: "Standard deviation divisor. Sample is the default for measured samples; population treats the list as the whole population."),
+                new("enableLimits", "Enable Spec Limits", "boolean", false, Group: "Capability", Description: "When false no cp/cpk/pass outputs are emitted, so downstream logic cannot mistake 'no specification' for 'in tolerance'."),
+                new("lsl", "LSL", "number", 0, -1000000000, 1000000000, 0.001, Group: "Capability", VisibleWhen: new("enableLimits", ["true"]), Description: "Lower specification limit; must be strictly below USL."),
+                new("usl", "USL", "number", 1, -1000000000, 1000000000, 0.001, Group: "Capability", VisibleWhen: new("enableLimits", ["true"]), Description: "Upper specification limit; must be strictly above LSL.")
+                ],
+            "Summarize a NumberList: count, mean, standard deviation, min, max, median, range and sum. Median averages the two middle samples for even counts. With spec limits enabled it also emits cp = (USL-LSL)/(6σ), cpk = min(USL-mean, mean-LSL)/(3σ) and pass = mean within [LSL, USL], using the selected deviation divisor; a zero standard deviation with limits enabled fails instead of returning infinity. Empty lists and non-finite samples fail.",
+            "builtin"),
         new(
             "logic.boolean",
             "Boolean Logic",

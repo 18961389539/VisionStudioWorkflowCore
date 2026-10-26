@@ -35,7 +35,10 @@ public enum VisionDataType
     DomainImage,
     Transform3D,
     CoordinatePoint3D,
-    MetrologyResults
+    MetrologyResults,
+    // 2026-10-26：通用列表类型。此前只有 DetectionList 一种集合，导致统计/点集类节点无法在图上传递多值。
+    NumberList,
+    PointList
 }
 
 /// <summary>
@@ -206,6 +209,12 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
 
     /// <summary>批次一：多目标检测列表（DetectionList）。</summary>
     public static VisionValue Detections(IReadOnlyList<VisionDetection> value) => new(VisionDataType.DetectionList, value);
+
+    /// <summary>2026-10-26：数值列表（测量值序列），供统计/趋势/报表类节点消费。</summary>
+    public static VisionValue NumberList(IReadOnlyList<double> value) => new(VisionDataType.NumberList, value);
+
+    /// <summary>2026-10-26：点集（二维点序列），供拟合/轮廓重建类节点消费。</summary>
+    public static VisionValue PointList(IReadOnlyList<VisionPoint2D> value) => new(VisionDataType.PointList, value);
 
     /// <summary>第五批：轮廓列表（contour.extract / contour.filter 输出）。</summary>
     public static VisionValue Contours(IReadOnlyList<VisionContour> value) => new(VisionDataType.Contour, value);

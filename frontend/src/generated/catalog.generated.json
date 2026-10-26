@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "30af4ab759149f3cd0da8849689cb0f957297507e089041029a3fb9f10622108",
+  "hash": "1a00aae4d7ba09637b79b82cbdd3f56b90ae30931b62c3a384a652a4b183a1a0",
   "items": [
     {
       "type": "image.acquire",
@@ -2574,6 +2574,158 @@
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "collection.detectionNumbers",
+      "displayName": "Detection Numbers",
+      "category": "Collection",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "numberList",
+          "dataType": "NumberList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "skipped",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "field",
+          "label": "Field",
+          "type": "select",
+          "defaultValue": "confidence",
+          "options": [
+            {
+              "label": "X",
+              "value": "x"
+            },
+            {
+              "label": "Y",
+              "value": "y"
+            },
+            {
+              "label": "Width",
+              "value": "width"
+            },
+            {
+              "label": "Height",
+              "value": "height"
+            },
+            {
+              "label": "Area",
+              "value": "area"
+            },
+            {
+              "label": "Perimeter",
+              "value": "perimeter"
+            },
+            {
+              "label": "Circularity",
+              "value": "circularity"
+            },
+            {
+              "label": "Confidence",
+              "value": "confidence"
+            },
+            {
+              "label": "Class ID",
+              "value": "classId"
+            },
+            {
+              "label": "Index",
+              "value": "index"
+            }
+          ],
+          "group": "Extraction",
+          "description": "Per-detection numeric column to extract. Optional columns (confidence, classId) count as skipped when absent instead of contributing a zero."
+        }
+      ],
+      "description": "Extract one numeric column from a DetectionList into a NumberList so it can be summarized by value.statistics. Optional fields that are absent on a detection are counted in skipped rather than treated as 0; non-finite values fail the node.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "collection.detectionPoints",
+      "displayName": "Detection Points",
+      "category": "Collection",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Collect the detection centres into a PointList for geometry.fitFromPoints. Points keep image pixel coordinates and the source frame of the detection list.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {
@@ -12013,6 +12165,83 @@
         "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "geometry.fitFromPoints",
+      "displayName": "Fit From Points",
+      "category": "Geometry",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "residualPx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operation",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "line",
+          "options": [
+            {
+              "label": "Line (total least squares)",
+              "value": "line"
+            },
+            {
+              "label": "Circle (algebraic fit)",
+              "value": "circle"
+            }
+          ],
+          "group": "Fit",
+          "description": "Line uses the principal direction of the point cloud, so vertical lines fit as well as horizontal ones. Circle uses a Kasa algebraic fit followed by a mean-radius pass."
+        }
+      ],
+      "description": "Fit a line or a circle through a PointList. Line fitting needs at least 2 points and returns the segment spanning all points along the principal direction; circle fitting needs at least 3 non-collinear points. residualPx is the RMS orthogonal distance to the fitted geometry and is reported for both modes. Collinear circle input fails instead of returning an arbitrary centre.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -39597,6 +39826,89 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "value.numberList",
+      "displayName": "Number List",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "b",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "c",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "d",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "e",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "f",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "g",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "h",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "numberList",
+          "dataType": "NumberList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [],
+      "description": "Collect up to eight scalar measurements into one NumberList so value.statistics can summarize them. Only connected inputs are collected, in port order a..h: an unconnected input contributes nothing instead of a zero, because a silent zero would distort mean, range and CP/CPK. Non-finite inputs fail; connecting nothing fails with an explicit message rather than producing an empty list.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "value.range",
       "displayName": "Range Check",
       "category": "Value",
@@ -39696,6 +40008,160 @@
         }
       ],
       "description": "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "value.statistics",
+      "displayName": "Statistics",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "numberList",
+          "dataType": "NumberList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "mean",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "std",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "min",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "max",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "median",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "range",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sum",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "cp",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "cpk",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "deviation",
+          "label": "Deviation",
+          "type": "select",
+          "defaultValue": "sample",
+          "options": [
+            {
+              "label": "Sample (n-1)",
+              "value": "sample"
+            },
+            {
+              "label": "Population (n)",
+              "value": "population"
+            }
+          ],
+          "group": "Statistics",
+          "description": "Standard deviation divisor. Sample is the default for measured samples; population treats the list as the whole population."
+        },
+        {
+          "name": "enableLimits",
+          "label": "Enable Spec Limits",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Capability",
+          "description": "When false no cp/cpk/pass outputs are emitted, so downstream logic cannot mistake 'no specification' for 'in tolerance'."
+        },
+        {
+          "name": "lsl",
+          "label": "LSL",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Capability",
+          "description": "Lower specification limit; must be strictly below USL.",
+          "visibleWhen": {
+            "parameter": "enableLimits",
+            "values": [
+              "true"
+            ]
+          }
+        },
+        {
+          "name": "usl",
+          "label": "USL",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -1000000000,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Capability",
+          "description": "Upper specification limit; must be strictly above LSL.",
+          "visibleWhen": {
+            "parameter": "enableLimits",
+            "values": [
+              "true"
+            ]
+          }
+        }
+      ],
+      "description": "Summarize a NumberList: count, mean, standard deviation, min, max, median, range and sum. Median averages the two middle samples for even counts. With spec limits enabled it also emits cp = (USL-LSL)/(6σ), cpk = min(USL-mean, mean-LSL)/(3σ) and pass = mean within [LSL, USL], using the selected deviation divisor; a zero standard deviation with limits enabled fails instead of returning infinity. Empty lists and non-finite samples fail.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,
