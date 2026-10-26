@@ -108,7 +108,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'robot.j4TcpCompensation': 'robot', 'flow.if': 'branch', 'flow.ifBoolean': 'branch', 'flow.switch': 'switch',
   'flow.join': 'merge', 'flow.merge': 'merge', 'flow.parallel': 'parallel', 'flow.forEach': 'loop',
   'flow.loopEnd': 'loop', 'flow.delay': 'delay', 'flow.try': 'retry', 'flow.result': 'check',
-  'value.number': 'number', 'value.arithmetic': 'number', 'value.range': 'check', 'logic.boolean': 'branch',
+  'value.number': 'number', 'value.arithmetic': 'number', 'value.range': 'check', 'value.string': 'text', 'logic.boolean': 'branch',
   'collection.detections.filter': 'sliders', 'collection.detections.sort': 'detections',
   'collection.detections.at': 'crosshair', 'collection.detections.count': 'histogram',
   'recognition.barcode': 'barcode', 'recognition.ocr': 'text', 'text.match': 'text', 'text.regex': 'text',

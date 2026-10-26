@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "14cd9e6cb9c630f0a5c94a167f15c15b1d56f6adec44f27ac7568498f30c4fa4",
+  "hash": "c56159c21f4562769aff700c80e4714875e7b798ed8392154e478e0d7c4cf238",
   "items": [
     {
       "type": "image.acquire",
@@ -38446,6 +38446,398 @@
         }
       ],
       "description": "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "value.string",
+      "displayName": "String Tool",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "String",
+          "required": false,
+          "requiredWhen": {
+            "parameter": "op",
+            "values": [
+              "join",
+              "tonumber",
+              "substring",
+              "trim",
+              "replace",
+              "pad",
+              "upper",
+              "lower",
+              "length"
+            ]
+          }
+        },
+        {
+          "name": "b",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "c",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "d",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "value",
+          "dataType": "Double",
+          "required": false,
+          "requiredWhen": {
+            "parameter": "op",
+            "values": [
+              "numbertostring"
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textValue",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "charCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "numberValue",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "op",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "template",
+          "options": [
+            {
+              "label": "Template (named placeholders)",
+              "value": "template"
+            },
+            {
+              "label": "Join with separator",
+              "value": "join"
+            },
+            {
+              "label": "Number to text",
+              "value": "numbertostring"
+            },
+            {
+              "label": "Text to number",
+              "value": "tonumber"
+            },
+            {
+              "label": "Substring",
+              "value": "substring"
+            },
+            {
+              "label": "Trim whitespace",
+              "value": "trim"
+            },
+            {
+              "label": "Replace",
+              "value": "replace"
+            },
+            {
+              "label": "Pad",
+              "value": "pad"
+            },
+            {
+              "label": "Uppercase",
+              "value": "upper"
+            },
+            {
+              "label": "Lowercase",
+              "value": "lower"
+            },
+            {
+              "label": "Length",
+              "value": "length"
+            }
+          ],
+          "description": "Strictly one of the listed operations; unknown operations fail instead of passing text through."
+        },
+        {
+          "name": "template",
+          "label": "String Template",
+          "type": "textarea",
+          "defaultValue": "{a}",
+          "group": "Template",
+          "description": "Placeholders {a} {b} {c} {d} {value} and aliases {0}..{3} are replaced; {{ and }} emit literal braces. Unknown placeholders, unclosed braces and a {value} placeholder without a connected value input fail. Unconnected string inputs expand to an empty string.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "template"
+            ]
+          }
+        },
+        {
+          "name": "separator",
+          "label": "Separator",
+          "type": "text",
+          "defaultValue": "_",
+          "group": "Join",
+          "description": "Inserted between the non-empty parts of a, b, c and d. Empty parts are skipped; an empty separator concatenates without gaps.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "join"
+            ]
+          }
+        },
+        {
+          "name": "format",
+          "label": "Number Format",
+          "type": "text",
+          "defaultValue": "0.###",
+          "group": "Number",
+          "description": ".NET custom or standard numeric format string applied with invariant culture (0.### drops trailing zeros, F3 fixes three decimals, D6 zero-pads integers). Invalid formats fail.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "numbertostring"
+            ]
+          }
+        },
+        {
+          "name": "startIndex",
+          "label": "Start Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Substring",
+          "description": "Zero-based UTF-16 index into input a. Values past the end are clamped and reported as truncated=true.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "substring"
+            ]
+          }
+        },
+        {
+          "name": "takeLength",
+          "label": "Take Length (0=to end)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Substring",
+          "description": "Number of UTF-16 code units to take. 0 takes the remainder of the string; values past the end are clamped and reported as truncated=true.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "substring"
+            ]
+          }
+        },
+        {
+          "name": "trimSide",
+          "label": "Trim Side",
+          "type": "select",
+          "defaultValue": "both",
+          "options": [
+            {
+              "label": "Both ends",
+              "value": "both"
+            },
+            {
+              "label": "Start only",
+              "value": "start"
+            },
+            {
+              "label": "End only",
+              "value": "end"
+            }
+          ],
+          "group": "Trim",
+          "description": "Which end of input a is stripped of Unicode whitespace.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "trim"
+            ]
+          }
+        },
+        {
+          "name": "find",
+          "label": "Find Text",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Replace",
+          "description": "Literal text, or a regular expression when Use Regex is enabled. Must not be empty; at most 4096 characters.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "replace"
+            ]
+          }
+        },
+        {
+          "name": "replaceWith",
+          "label": "Replace With",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Replace",
+          "description": "Written literally, with no $1 group expansion. May be empty to delete the matches.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "replace"
+            ]
+          }
+        },
+        {
+          "name": "replaceAll",
+          "label": "Replace All",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Replace",
+          "description": "When false only the first match is replaced; when true every match is replaced.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "replace"
+            ]
+          }
+        },
+        {
+          "name": "useRegex",
+          "label": "Use Regex",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Replace",
+          "description": "Treat Find Text as a .NET regular expression with a fixed 100 ms match timeout. Invalid patterns and timeouts fail the node.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "replace"
+            ]
+          }
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Replace",
+          "description": "Case-insensitive matching for both literal and regex modes.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "replace"
+            ]
+          }
+        },
+        {
+          "name": "padWidth",
+          "label": "Pad Width",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 0,
+          "max": 1048576,
+          "step": 1,
+          "group": "Pad",
+          "description": "Target total length in UTF-16 code units. Text that is already this long or longer is returned unchanged (never truncated).",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "pad"
+            ]
+          }
+        },
+        {
+          "name": "padChar",
+          "label": "Pad Character",
+          "type": "text",
+          "defaultValue": "0",
+          "group": "Pad",
+          "description": "Exactly one character used to fill the gap; longer or empty values fail.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "pad"
+            ]
+          }
+        },
+        {
+          "name": "padSide",
+          "label": "Pad Side",
+          "type": "select",
+          "defaultValue": "left",
+          "options": [
+            {
+              "label": "Left",
+              "value": "left"
+            },
+            {
+              "label": "Right",
+              "value": "right"
+            }
+          ],
+          "group": "Pad",
+          "description": "Side that receives the padding characters.",
+          "visibleWhen": {
+            "parameter": "op",
+            "values": [
+              "pad"
+            ]
+          }
+        },
+        {
+          "name": "maxLength",
+          "label": "Max Characters",
+          "type": "number",
+          "defaultValue": 65536,
+          "min": 16,
+          "max": 1048576,
+          "step": 1,
+          "group": "Limits",
+          "description": "Upper bound on the produced string in UTF-16 code units. Results above it fail instead of being stored truncated."
+        }
+      ],
+      "description": "Compose and reshape strings that other nodes already produce (barcode text, OCR text, timestamps, paths). Wire: optional string inputs a/b/c/d and optional number input value; textValue is the result, charCount its UTF-16 length, truncated reports clamped substrings, numberValue is emitted only by Text to number. Template mode assembles {a}..{d} and {value}; Join skips empty parts; Number to text uses an invariant-culture format; Text to number parses with NumberStyles.Float and fails on non-numeric or non-finite text; Substring clamps out-of-range indexes and sets truncated; Trim/Replace/Pad/Uppercase/Lowercase/Length operate on input a. Empty find text, multi-character pad characters, unknown placeholders and invalid number formats fail deterministically; missing string inputs are treated as empty.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,

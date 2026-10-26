@@ -1294,6 +1294,72 @@ public static class BuiltInNodeCatalog
             "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
             "builtin"),
         new(
+            "value.string",
+            "String Tool",
+            "Value",
+            [ExecIn,
+                new("a", VisionDataType.String, Required: false) { RequiredWhen = new("op", ["join", "tonumber", "substring", "trim", "replace", "pad", "upper", "lower", "length"]) },
+                new("b", VisionDataType.String, Required: false),
+                new("c", VisionDataType.String, Required: false),
+                new("d", VisionDataType.String, Required: false),
+                new("value", VisionDataType.Double, Required: false) { RequiredWhen = new("op", ["numbertostring"]) }],
+            [new("textValue", VisionDataType.String), new("charCount", VisionDataType.Integer), new("numberValue", VisionDataType.Double, Required: false), new("truncated", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
+            [
+                new("op", "Operation", "select", "template", Description: "Strictly one of the listed operations; unknown operations fail instead of passing text through.", Options:
+                [
+                    new("Template (named placeholders)", "template"),
+                    new("Join with separator", "join"),
+                    new("Number to text", "numbertostring"),
+                    new("Text to number", "tonumber"),
+                    new("Substring", "substring"),
+                    new("Trim whitespace", "trim"),
+                    new("Replace", "replace"),
+                    new("Pad", "pad"),
+                    new("Uppercase", "upper"),
+                    new("Lowercase", "lower"),
+                    new("Length", "length")
+                ]),
+                new("template", "String Template", "textarea", "{a}", Group: "Template", VisibleWhen: new("op", ["template"]),
+                    Description: "Placeholders {a} {b} {c} {d} {value} and aliases {0}..{3} are replaced; {{ and }} emit literal braces. Unknown placeholders, unclosed braces and a {value} placeholder without a connected value input fail. Unconnected string inputs expand to an empty string."),
+                new("separator", "Separator", "text", "_", Group: "Join", VisibleWhen: new("op", ["join"]),
+                    Description: "Inserted between the non-empty parts of a, b, c and d. Empty parts are skipped; an empty separator concatenates without gaps."),
+                new("format", "Number Format", "text", "0.###", Group: "Number", VisibleWhen: new("op", ["numbertostring"]),
+                    Description: ".NET custom or standard numeric format string applied with invariant culture (0.### drops trailing zeros, F3 fixes three decimals, D6 zero-pads integers). Invalid formats fail."),
+                new("startIndex", "Start Index", "number", 0, 0, 1000000, 1, Group: "Substring", VisibleWhen: new("op", ["substring"]),
+                    Description: "Zero-based UTF-16 index into input a. Values past the end are clamped and reported as truncated=true."),
+                new("takeLength", "Take Length (0=to end)", "number", 0, 0, 1000000, 1, Group: "Substring", VisibleWhen: new("op", ["substring"]),
+                    Description: "Number of UTF-16 code units to take. 0 takes the remainder of the string; values past the end are clamped and reported as truncated=true."),
+                new("trimSide", "Trim Side", "select", "both", Group: "Trim", VisibleWhen: new("op", ["trim"]), Options:
+                [
+                    new("Both ends", "both"),
+                    new("Start only", "start"),
+                    new("End only", "end")
+                ], Description: "Which end of input a is stripped of Unicode whitespace."),
+                new("find", "Find Text", "text", "", Group: "Replace", VisibleWhen: new("op", ["replace"]),
+                    Description: "Literal text, or a regular expression when Use Regex is enabled. Must not be empty; at most 4096 characters."),
+                new("replaceWith", "Replace With", "text", "", Group: "Replace", VisibleWhen: new("op", ["replace"]),
+                    Description: "Written literally, with no $1 group expansion. May be empty to delete the matches."),
+                new("replaceAll", "Replace All", "boolean", true, Group: "Replace", VisibleWhen: new("op", ["replace"]),
+                    Description: "When false only the first match is replaced; when true every match is replaced."),
+                new("useRegex", "Use Regex", "boolean", false, Group: "Replace", VisibleWhen: new("op", ["replace"]),
+                    Description: "Treat Find Text as a .NET regular expression with a fixed 100 ms match timeout. Invalid patterns and timeouts fail the node."),
+                new("ignoreCase", "Ignore Case", "boolean", false, Group: "Replace", VisibleWhen: new("op", ["replace"]),
+                    Description: "Case-insensitive matching for both literal and regex modes."),
+                new("padWidth", "Pad Width", "number", 8, 0, 1048576, 1, Group: "Pad", VisibleWhen: new("op", ["pad"]),
+                    Description: "Target total length in UTF-16 code units. Text that is already this long or longer is returned unchanged (never truncated)."),
+                new("padChar", "Pad Character", "text", "0", Group: "Pad", VisibleWhen: new("op", ["pad"]),
+                    Description: "Exactly one character used to fill the gap; longer or empty values fail."),
+                new("padSide", "Pad Side", "select", "left", Group: "Pad", VisibleWhen: new("op", ["pad"]), Options:
+                [
+                    new("Left", "left"),
+                    new("Right", "right")
+                ], Description: "Side that receives the padding characters."),
+                new("maxLength", "Max Characters", "number", 65536, 16, 1048576, 1, Group: "Limits",
+                    Description: "Upper bound on the produced string in UTF-16 code units. Results above it fail instead of being stored truncated.")
+                ],
+            "Compose and reshape strings that other nodes already produce (barcode text, OCR text, timestamps, paths). Wire: optional string inputs a/b/c/d and optional number input value; textValue is the result, charCount its UTF-16 length, truncated reports clamped substrings, numberValue is emitted only by Text to number. Template mode assembles {a}..{d} and {value}; Join skips empty parts; Number to text uses an invariant-culture format; Text to number parses with NumberStyles.Float and fails on non-numeric or non-finite text; Substring clamps out-of-range indexes and sets truncated; Trim/Replace/Pad/Uppercase/Lowercase/Length operate on input a. Empty find text, multi-character pad characters, unknown placeholders and invalid number formats fail deterministically; missing string inputs are treated as empty.",
+            "builtin"),
+        new(
             "logic.boolean",
             "Boolean Logic",
             "Logic",

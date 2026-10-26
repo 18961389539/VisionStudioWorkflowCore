@@ -58,7 +58,7 @@ const nodeNames: Record<string, string> = {
   'image.morphology': '形态学处理', 'image.threshold.adaptive': '自适应阈值',
   'image.threshold.otsu': 'Otsu 自动阈值', 'measure.blobs': '多斑点分析',
   'match.template': 'NCC 模板匹配',
-  'value.number': '数值常量', 'value.arithmetic': '数值运算', 'value.range': '数值区间判断', 'logic.boolean': '布尔运算',
+  'value.number': '数值常量', 'value.arithmetic': '数值运算', 'value.range': '数值区间判断', 'value.string': '字符串加工', 'logic.boolean': '布尔运算',
   'image.acquire': '采集图像', 'frameset.image': '帧组图像', 'camera.syncCapture': '同步采集', 'image.synthetic': '生成测试图像',
   'calibration.planar': '平面标定', 'coordinate.transformCompose': '组合坐标变换', 'coordinate.transformConstant': '固定坐标变换',
   'coordinate.distance': '坐标点距离', 'coordinate.point': '坐标点', 'coordinate.point3D': '三维坐标点', 'coordinate.pose': '坐标位姿', 'coordinate.frameTree': '坐标系树',
@@ -533,6 +533,20 @@ const parameterNames: Record<string, string> = {
   'Max Distance': '最大距离',
   'Min Overlap Ratio': '最小重叠比例',
   'Relative Direction': '相对方向',
+  'String Template': '字符串模板',
+  'Separator': '分隔符',
+  'Number Format': '数字格式',
+  'Start Index': '起始位置',
+  'Take Length (0=to end)': '截取长度（0 为到结尾）',
+  'Trim Side': '去空白方向',
+  'Find Text': '查找内容',
+  'Replace With': '替换为',
+  'Replace All': '全部替换',
+  'Use Regex': '使用正则',
+  'Pad Width': '补齐宽度',
+  'Pad Character': '补齐字符',
+  'Pad Side': '补齐方向',
+  'Max Characters': '最大字符数',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -560,7 +574,8 @@ const parameterGroups: Record<string, string> = {
   Coordinates: '坐标', Difference: '差分', Alignment: '对齐',
   Contours: '轮廓选择', Limits: '限值', 'Sort Keys': '排序字段', 'Binary Kernel': '二值核', 'Gray Kernel': '灰度核', Hysteresis: '迟滞',
   Views: '视图', 'Quality Gates': '质量门限', Failure: '失败处理', Completion: '完成等待',
-  'Top Left': '左上角', 'Top Right': '右上角', 'Bottom Right': '右下角', 'Bottom Left': '左下角'
+  'Top Left': '左上角', 'Top Right': '右上角', 'Bottom Right': '右下角', 'Bottom Left': '左下角',
+  Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐'
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
@@ -1275,12 +1290,25 @@ const optionNames: Record<string, string> = {
   'Region growing (regionGrowing)': '区域生长 (regionGrowing)',
   'Threshold (min/max) (threshold)': '阈值（最小/最大） (threshold)',
   'Variance threshold (varThreshold)': '方差阈值 (varThreshold)',
+  'Template (named placeholders)': '模板拼接（命名占位符）',
+  'Join with separator': '按分隔符拼接',
+  'Number to text': '数值转文本',
+  'Text to number': '文本转数值',
+  'Substring': '截取子串',
+  'Trim whitespace': '去除空白',
+  'Replace': '替换',
+  'Pad': '补齐',
+  'Uppercase': '转大写',
+  'Lowercase': '转小写',
+  'Length': '求长度',
+  'Start only': '仅开头',
+  'End only': '仅结尾',
 };
 
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
-  runId: '运行 ID', partId: '产品编号', fileName: '文件名',
+  runId: '运行 ID', partId: '产品编号', fileName: '文件名', charCount: '字符数',
   rawProjectionT: '原始投影参数 t', projectionClamped: '已裁剪至端点', projectedPoint: '直线垂足', lineDistance: '直线垂距',
   xWritten: 'X 已写入', yWritten: 'Y 已写入', rWritten: 'R 已写入', url: '请求地址', idempotencyKey: '幂等键',
   heightField: '相对高度场', shadingImage: '表面渲染图', resultKind: '结果含义',
@@ -1625,12 +1653,29 @@ const descriptions: Record<string, string> = {
   'jlvision.surface': '从灰度图估算相对高度，或渲染实数高度场。重建输出 heightField（resultKind=relativeHeight，unit=relative），渲染输出 shadingImage（resultKind=shading，unit=intensity）；image 保留兼容输出。梯度重建要求同尺寸单通道实数行/列梯度。高度输出不能直接作为毫米等绝对三维测量。',
   'jlvision.segmentation': '分水岭输出盆地区域，secondaryRegion 为分水岭边界；count/found 仅统计盆地区域。MSER 的 darkRegion/lightRegion 分别为暗/亮区域，兼容 region/secondaryRegion；darkCount/lightCount 分别计数，count/found 统计两组总结果。primaryCount/secondaryCount 始终对应两个原有端口。',
   'jlvision.regionAnalysis': '关系操作需连接同尺寸 region2，relations JSON 使用从零开始的区域对象序号。最近点变换同时输出距离图及最近点行/列坐标图。骨架拆分要求输入已细化为骨架的 region，输出开放线段轮廓。',
+  'value.string': '对条码文本、OCR 文本、时间戳等字符串做加工，补齐此前只能原样转交下发的空白。接线：可选字符串输入 a/b/c/d 与可选数值输入 value；textValue 为结果，charCount 是 UTF-16 码元长度，truncated 表示子串被裁剪，numberValue 仅由"文本转数值"输出。模板模式用 {a}..{d}、{value} 与 {0}..{3} 组装，{{ 与 }} 输出字面花括号；拼接跳过空段；数值转文本用固定区域性的格式串；文本转数值按浮点规则严格解析，非数字与非有限值直接失败；截取越界自动裁剪并置 truncated；去空白、替换、补齐、大小写与求长度都作用于输入 a。查找内容为空、补齐字符不是单字符、占位符未知、数字格式非法都会明确失败；未接线的字符串输入按空串处理。',
 };
 
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
 const parameterDescriptions: Record<string, string> = {
+  'value.string.op': '严格按所选运算执行；未知运算直接失败，不做透传兜底。仅拼接、文本转数值需要 A；数值转文本需要 value 输入。',
+  'value.string.template': '占位符 {a} {b} {c} {d} {value} 与序号别名 {0}..{3} 会被替换，{{ 和 }} 输出字面花括号。未知占位符、未闭合花括号、引用 {value} 却未接数值输入都会失败；未接线的字符串输入展开为空串。',
+  'value.string.separator': '插入到 a、b、c、d 的非空段之间。空段被跳过；分隔符为空时直接相连。',
+  'value.string.format': '使用固定区域性（invariant）的 .NET 数字格式串：0.### 去掉末尾零，F3 固定三位小数，D6 对整数补零。格式非法时失败。',
+  'value.string.startIndex': '输入 a 的零基 UTF-16 下标。超出长度时裁剪到末尾并置 truncated=true。',
+  'value.string.takeLength': '截取的 UTF-16 码元个数。0 表示取到结尾；超出剩余长度时裁剪并置 truncated=true。',
+  'value.string.trimSide': '去除输入 a 哪一端的 Unicode 空白字符。',
+  'value.string.find': '按字面量匹配；启用正则时作为 .NET 正则表达式。不能为空，最长 4096 个字符。',
+  'value.string.replaceWith': '按字面量写入，不做 $1 捕获组展开；留空表示删除匹配内容。',
+  'value.string.replaceAll': '关闭时只替换第一处匹配；开启时替换全部匹配。',
+  'value.string.useRegex': '把查找内容当作 .NET 正则，固定 100 毫秒匹配超时。模式非法或超时都会失败。',
+  'value.string.ignoreCase': '字面量与正则两种模式都按不区分大小写匹配。',
+  'value.string.padWidth': '以 UTF-16 码元计的目标总长度。文本已达到或超过该长度时原样返回，绝不截断。',
+  'value.string.padChar': '用于补齐的单个字符；长度不是 1 时失败。',
+  'value.string.padSide': '补齐字符加在哪一端。',
+  'value.string.maxLength': '结果字符串的 UTF-16 码元上限。超出时失败，而不是静默截断后存储。',
   'flow.try.failOnWarning': '执行体返回的 warningCount 大于 0 时按失败处理；由工作流运行时实现。',
   'coordinate.point.requireFinite': '拒绝非有限的 X/Y 坐标。',
   'coordinate.pose.requireFinite': '拒绝非有限的位姿分量。',
