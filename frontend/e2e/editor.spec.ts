@@ -93,6 +93,25 @@ test.describe('编辑器画布（真实浏览器）', () => {
     await expect.poll(async () => page.locator('.react-flow__node').count(), { timeout: 10_000 }).toBe(before + 1);
   });
 
+  test('大流程运行结果分页渲染，不把上百行一次塞进底部结果区', async ({ page }) => {
+    // 性能（2026-10-26）：RunPanel 此前 pagination={false}，200 条节点报告会一次渲染 200 行；
+    // 分页后首屏只渲染 50 行，且单页时不显示分页条。
+    const reports = Array.from({ length: 200 }, (_, i) => ({
+      nodeId: `n${i}`, nodeType: 'image.threshold', success: true, durationMs: i + 1, summary: { count: i }
+    }));
+    await stubApi(page);
+    await page.route('**/api/run', (route) => route.fulfill({
+      json: { runId: 'run-big', success: true, totalDurationMs: 5000, previewAvailable: false, nodeReports: reports }
+    }));
+    await page.goto('/');
+
+    await page.getByRole('button', { name: /^运\s*行$/ }).click();
+    await expect(page.getByText(/共 200 条报告/)).toBeVisible({ timeout: 15_000 });
+    const rows = await page.locator('.bottom-panel tbody tr.ant-table-row').count();
+    expect(rows).toBeGreaterThan(0);
+    expect(rows).toBeLessThanOrEqual(50);
+  });
+
   test('切换界面语言后 <html lang> 与工具箱文案同步（i18n 接线）', async ({ page }) => {
     // 这条用例守的是"Provider 真的挂上了"：词表与 Provider 早就存在，但 main.tsx 没挂、
     // 也没有切换入口，语言只能靠手改 localStorage。jsdom 里测不到 <html lang> 的副作用链。

@@ -235,9 +235,6 @@ function Editor() {
 
   // —— 运行/调试/图像域的输入：集中派生，供下方抽出的控制模块使用（useRunController / useRunImages）——
   const [bottomTab, setBottomTab] = useState<BottomTab>('result');
-  const nodeLabels = useMemo(
-    () => Object.fromEntries(nodes.map((node) => [node.id, String(node.data.label ?? node.id)])),
-    [nodes]);
   const breakpoints = useMemo(
     () => nodes.filter((n) => Boolean(n.data.breakpoint)).map((n) => n.id),
     [nodes]
@@ -285,6 +282,10 @@ function Editor() {
     if (!dragging) setSnapshotSource(workflowPayload);
   }, [workflowPayload, dragging]);
   const workflowSnapshot = useMemo(() => JSON.stringify(snapshotSource), [snapshotSource]);
+  // 拖拽时节点名不会变，从冻结快照派生可避免每帧重建 + 让 RunPanel 的 memo 生效
+  const nodeLabels = useMemo(
+    () => Object.fromEntries(snapshotSource.nodes.map((node) => [node.id, node.name])),
+    [snapshotSource]);
 
   // 底部结果区要按类型显示中文名：此前每次渲染都 Object.fromEntries 一遍 171 条目录。
   const nodeTypeLabels = useMemo(
@@ -656,15 +657,17 @@ function Editor() {
   }, [addNode, screenToFlowPosition]);
 
   // 运行结果点行定位：选中该节点并把画布居中过去
+  // 性能（2026-10-26）：focusNode 原来依赖 nodes，拖拽每个 pointermove 都换引用，
+  // 导致下游 memo 化组件（RunPanel）每帧失效。改用 nodesRef，引用保持稳定。
   const focusNode = useCallback((nodeId: string) => {
-    const node = nodes.find((item) => item.id === nodeId);
+    const node = nodesRef.current.find((item) => item.id === nodeId);
     if (!node) return;
     setSelectedId(nodeId);
     setNodes((current) => current.map((item) => (item.selected === (item.id === nodeId) ? item : { ...item, selected: item.id === nodeId })));
     const width = node.measured?.width ?? 200;
     const height = node.measured?.height ?? 120;
     setCenter(node.position.x + width / 2, node.position.y + height / 2, { zoom: 1.05, duration: 300 });
-  }, [nodes, setCenter, setNodes]);
+  }, [setCenter, setNodes]);
 
   // 校验问题定位：节点直接选中并居中；连线高亮并居中到两端中点
   const locateIssue = (issue: WorkflowIssue) => {

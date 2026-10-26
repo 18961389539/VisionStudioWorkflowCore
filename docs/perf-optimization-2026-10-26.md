@@ -52,3 +52,27 @@ per-frame saving (2 stringify/frame -> 0 while dragging): ~5.3 ms
 3. **后端 `RunStore` / `WorkflowStore` 仍是整份文件读写**：流程与报告变大后，单次保存/读取是 O(文档大小)。
    报警已按保留策略收敛，运行记录还没有（约 1–1.5 人日）。
 4. **编译期缓存**：同一份流程图重复校验/运行时都会重新编译，可在后端按 `workflowHash` 缓存编译产物（需失效策略）。
+
+---
+
+## 第二轮：渲染路径（2026-10-26 11:50）
+
+第一轮解决的是"每帧重复序列化"。顺着同一条链路还有一处：**拖拽时整块底部结果表在重渲染**。
+
+调用链：`pointermove` → `setNodes` → App 重渲染 → `nodeLabels`（依赖 `nodes`）重新生成 →
+`focusNode`（依赖 `nodes`）换引用 → `RunPanel` 收到全新 props → 上百行表格整体重渲染。
+
+| 改动 | 说明 |
+|---|---|
+| `focusNode` 改用 `nodesRef` | 依赖从 `[nodes, …]` 改为 `[setCenter, setNodes]`，拖拽期间引用稳定 |
+| `nodeLabels` 从冻结快照派生 | 用 `snapshotSource.nodes`（拖拽期间不变）；节点名在拖拽中本来就不会变 |
+| `RunPanel` 加 `memo` | props（result / nodeLabels / onSelectNode / stale / embedded）稳定时直接跳过 |
+| 结果表分页 | `pageSize: 50`、`hideOnSinglePage`、`scroll.y: 320`；此前 `pagination={false}` 全量渲染 |
+
+**可验证的数字**（e2e 用例「大流程运行结果分页渲染」）：用桩返回 **200 条节点报告**，
+底部结果区实际渲染的行数 **≤ 50**（`pageSize` 50，单页时不显示分页条），工具条显示"共 200 条报告"。
+也就是说，同样是打开结果区，DOM 行数从 200 降到 50。
+
+**注意**：分页不是"隐藏信息"——工具条仍显示总数，翻页可看全部；这与 P1-5 的表格统一方向一致。
+
+**验证**：`tsc -b` 通过；`vitest` 89 文件 / 1120 项全绿；`build` 通过；`e2e` **7 项**通过（新增 1 项）。

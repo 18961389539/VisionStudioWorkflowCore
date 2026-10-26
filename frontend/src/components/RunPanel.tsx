@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Alert, Button, Empty, Segmented, Table, Tag, Typography } from 'antd';
 import type { NodeRunReport, RunResult } from '../types';
 import ExecutionStatus from './ExecutionStatus';
@@ -40,7 +40,7 @@ function SummaryCell({ summary, typeKey }: { summary?: Record<string, unknown>; 
   );
 }
 
-export default function RunPanel({ result, nodeLabels = {}, onSelectNode, stale = false, embedded = false }: Props) {
+function RunPanel({ result, nodeLabels = {}, onSelectNode, stale = false, embedded = false }: Props) {
   if (!result) {
     return (
       <div className="run-panel">
@@ -172,7 +172,7 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
         )}
         <span className="run-toolbar-spacer" />
         <Typography.Text type="secondary" className="run-toolbar-hint">
-          共 {result.nodeReports.length} 条报告，当前显示 {rows.length} 条
+          共 {result.nodeReports.length} 条报告，当前筛选 {rows.length} 条
         </Typography.Text>
       </div>
 
@@ -208,7 +208,10 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
       ) : (
         <Table
           size="small"
-          pagination={false}
+          // 性能（2026-10-26）：大流程一次运行可能上百条节点报告，此前 pagination={false}
+          // 会把这些行全渲染进底部结果区；分页后每页 50 行，单页时不显示分页条。
+          pagination={{ pageSize: 50, hideOnSinglePage: true, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+          scroll={{ y: 320 }}
           rowKey="key"
           dataSource={rows}
           rowClassName={(record) => `${record.success ? '' : 'run-row-failed'}${record.key === slowest?.key ? ' run-row-slowest' : ''}`}
@@ -262,3 +265,6 @@ function RunPanelContent({ result, nodeLabels = {}, onSelectNode, stale = false,
     </div>
   );
 }
+
+/** 拖拽/选中节点等画布高频更新不应重渲染整张结果表：props 稳定时直接跳过（2026-10-26）。 */
+export default memo(RunPanel);
