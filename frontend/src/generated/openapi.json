@@ -5065,6 +5065,13 @@
               "type": "string",
               "format": "date-time"
             }
+          },
+          {
+            "name": "includeReports",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigProvider } from 'antd';
 import TracePanel from '../components/TracePanel';
+import type { RunTraceRecord } from '../types';
 import { useTraceQuery, type TraceQueryResult } from '../useTraceQuery';
 
 vi.mock('../useTraceQuery', () => ({ useTraceQuery: vi.fn() }));
@@ -26,6 +27,31 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('追溯查询反馈', () => {
+  it('列表不带节点报告时，选中后按需取详情并渲染报告表', async () => {
+    // 性能（2026-10-26）：列表默认 includeReports=false，报告只在选中后取一次。
+    const base = {
+      runId: 'run-detail', startedAt: new Date().toISOString(), source: 'job', jobId: 'job-1', jobVersion: 1,
+      workflowId: 'wf-1', workflowName: '流程', workflowHash: null, dependencyManifestHash: null,
+      executionStatus: 'Completed', disposition: 'OK', totalDurationMs: 12, nodeCount: 1, overlayCount: 0,
+      hasPreview: false, hasReplayInput: false, replaySourceNodeId: null, error: null, note: null,
+      nodeReports: []
+    };
+    const record = base as unknown as RunTraceRecord;
+    const detail = {
+      ...base,
+      nodeReports: [{ nodeId: 'n1', nodeType: 'image.threshold', success: true, durationMs: 1, summary: {} }]
+    } as unknown as RunTraceRecord;
+    // 面板内还有调查/观测等子面板会各自请求；只对追溯详情返回数据，其余一律 404，
+    // 避免用同一份假数据喂给形状不同的接口。
+    const fetchMock = vi.fn(async (url: string) => (String(url).includes('/api/traces/run-detail')
+      ? { ok: true, status: 200, json: async () => detail } as Response
+      : { ok: false, status: 404, json: async () => ({}) } as Response));
+    vi.stubGlobal('fetch', fetchMock);
+    mount({ data: { total: 1, offset: 0, limit: 50, items: [record] } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(await screen.findByText('image.threshold')).toBeTruthy();
+  });
+
   it('从运行结果跳转进来时直接筛到那次运行', () => {
     mount({}, { initialRunId: 'run-abc123' });
     expect(vi.mocked(useTraceQuery).mock.lastCall?.[1]).toMatchObject({ preset: 'week', runIdPrefix: 'run-abc123' });

@@ -82,15 +82,19 @@ test.describe('编辑器画布（真实浏览器）', () => {
   test('Ctrl+K 命令面板可直接加节点（真实画布命中链路）', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    const before = await page.locator('.react-flow__node').count();
-
     await page.keyboard.press('Control+KeyK');
     const search = page.getByLabel('命令面板搜索');
     await expect(search).toBeVisible();
     await search.fill('阈值');
     await page.keyboard.press('Enter');
 
-    await expect.poll(async () => page.locator('.react-flow__node').count(), { timeout: 10_000 }).toBe(before + 1);
+    // 不能再用"DOM 节点数 +1"断言：画布开了 onlyRenderVisibleElements，新节点若落在视口外就不在 DOM 里。
+    // 改用"最近使用"被写入（addNode 的必经副作用）——它不依赖视口，也不挑具体命中了哪个阈值节点。
+    await expect.poll(
+      async () => page.evaluate(() => JSON.parse(window.localStorage.getItem('visionstudio.recent-node-types') ?? '[]').length),
+      { timeout: 10_000 }
+    ).toBeGreaterThan(0);
+    await expect(search).toBeHidden();
   });
 
   test('大流程运行结果分页渲染，不把上百行一次塞进底部结果区', async ({ page }) => {

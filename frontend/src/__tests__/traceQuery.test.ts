@@ -84,6 +84,12 @@ describe('buildTraceParams', () => {
     expect(params.has('to')).toBe(false);
   });
 
+  it('列表默认不携带逐节点报告，可显式恢复', () => {
+    // 性能（2026-10-26）：一页 50 条记录各带几十份 NodeReports 是响应体大头，界面只用选中那条。
+    expect(buildTraceParams({ preset: 'today' }, 0, 50).get('includeReports')).toBe('false');
+    expect(buildTraceParams({ preset: 'today' }, 0, 50, new Date(), true).get('includeReports')).toBe('true');
+  });
+
   it('jobVersion 仅在有值时携带', () => {
     const withVersion = buildTraceParams({ preset: 'today', jobVersion: 3 }, 0, 10);
     expect(withVersion.get('jobVersion')).toBe('3');
@@ -99,12 +105,13 @@ describe('buildStatsParams 与列表口径一致', () => {
     expect(buildStatsParams({ preset: 'today' }).has('allTime')).toBe(false);
   });
 
-  it('统计参数与列表参数的筛选部分完全相同（仅少分页）', () => {
+  it('统计参数与列表参数的筛选部分完全相同（仅少分页与列表专属的体积开关）', () => {
     const filter: TraceFilterState = { preset: 'week', disposition: 'NG', workflow: '压装' };
     const list = buildTraceParams(filter, 40, 20, NOW);
     const stats = buildStatsParams(filter, NOW);
     for (const [key, value] of list.entries()) {
-      if (key === 'offset' || key === 'limit') {
+      // includeReports 只影响列表响应体积，与统计口径无关
+      if (key === 'offset' || key === 'limit' || key === 'includeReports') {
         expect(stats.has(key)).toBe(false);
       } else {
         expect(stats.get(key)).toBe(value);

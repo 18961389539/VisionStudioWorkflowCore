@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import type { RunTraceRecord } from '../types';
+import type { NodeRunReport, RunTraceRecord } from '../types';
 import { localizeStatus } from '../i18n';
 import {
   DISPOSITION_OPTIONS, EXECUTION_STATUS_OPTIONS, TRACE_TIME_PRESETS,
@@ -45,6 +45,10 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
   const [replayOpen, setReplayOpen] = useState(false);
   const [replayNodeId, setReplayNodeId] = useState<string>();
   const [messageApi, contextHolder] = message.useMessage();
+  // 列表默认不携带逐节点报告（见 traceQuery.buildTraceParams），选中后再取详情；
+  // 缓存按 runId 保存，翻页来回切换不会重复请求（2026-10-26 性能）。
+  const [reportCache, setReportCache] = useState<Record<string, NodeRunReport[]>>({});
+  const [reportLoading, setReportLoading] = useState(false);
 
   const { data, stats, storage, error, warnings, loading, stale, rangeDescription, loadedAt, reload } = useTraceQuery(open, appliedFilter, page);
   const filterError = validateTraceFilter(filter);
@@ -72,6 +76,31 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
     const fresh = data.items.find((x) => x.runId === selectedId);
     if (fresh) setSelectedRecord(fresh);
   }, [data, selectedId]);
+
+  const selectedRunId = selected?.runId;
+  const selectedReportCount = selected?.nodeReports.length ?? 0;
+  useEffect(() => {
+    if (!open || !selectedRunId || selectedReportCount > 0) return;
+    if (reportCache[selectedRunId]) return;
+    let active = true;
+    const controller = new AbortController();
+    setReportLoading(true);
+    void apiFetch(traces.detail(selectedRunId), { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json() as RunTraceRecord;
+      })
+      .then((detail) => {
+        if (!active) return;
+        setReportCache((current) => ({ ...current, [selectedRunId]: detail.nodeReports ?? [] }));
+      })
+      .catch(() => { /* 详情失败：报告表保持空态，错误由统计/列表区已有提示覆盖 */ })
+      .finally(() => { if (active) setReportLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [open, selectedRunId, selectedReportCount, reportCache]);
+  const selectedReports = selected
+    ? (selected.nodeReports.length > 0 ? selected.nodeReports : reportCache[selected.runId] ?? [])
+    : [];
 
   useEffect(() => {
     if (!data || selectedId) return;
@@ -265,7 +294,9 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
               <span>回放输入：{selected.hasReplayInput ? `有 · ${selected.replaySourceNodeId ?? '图像'}` : '无 / 不需要'}</span>
             </div>
             <Table
-              size="small" pagination={false} rowKey={(row) => row.nodeId} dataSource={selected.nodeReports}
+              size="small" pagination={false} rowKey={(row) => row.nodeId} dataSource={selectedReports}
+              loading={reportLoading}
+              locale={{ emptyText: reportLoading ? '正在加载节点报告…' : '该运行没有节点报告（可能在执行前失败）' }}
               columns={[
                 { title: '节点', dataIndex: 'nodeType', width: 150 },
                 { title: '阶段', dataIndex: 'phase', width: 80, render: (v: string) => v === 'Warmup' ? '预热' : '运行' },

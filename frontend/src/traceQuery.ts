@@ -102,11 +102,20 @@ function put(params: URLSearchParams, key: string, value: string | number | null
 }
 
 /** 列表查询参数：分页 + 全部筛选。now 可注入以获得确定性结果（测试 / 跨日边界）；生产调用走默认当前时间。 */
-export function buildTraceParams(filter: TraceFilterState, offset: number, limit: number, now = new Date()): URLSearchParams {
+export function buildTraceParams(
+  filter: TraceFilterState, offset: number, limit: number, now = new Date(),
+  /**
+   * 列表是否携带逐节点报告（2026-10-26 性能）。默认 false：
+   * 一页 50 条记录各带几十份报告是列表响应体的大头，而界面只渲染选中那一条，
+   * 选中后再按 runId 取详情。传 true 可恢复旧行为。
+   */
+  includeReports = false
+): URLSearchParams {
   const params = new URLSearchParams();
   params.set('offset', String(Math.max(0, offset)));
   params.set('limit', String(Math.max(1, limit)));
   applyFilterParams(params, filter, now);
+  params.set('includeReports', includeReports ? 'true' : 'false');
   return params;
 }
 

@@ -73,7 +73,12 @@ public sealed record TraceQuery(
     string? WorkflowKeyword = null,
     string? ErrorCode = null,
     DateTimeOffset? From = null,
-    DateTimeOffset? To = null);
+    DateTimeOffset? To = null,
+    /// <summary>
+    /// 是否在列表里带上逐节点报告（2026-10-26 性能）。默认 true 保持既有契约；
+    /// 追溯面板按页展示时传 false——50 条记录各带几十份报告，实际只用得到选中那一条。
+    /// </summary>
+    bool IncludeReports = true);
 
 public sealed class TraceRetentionOptions
 {
@@ -463,6 +468,8 @@ WHERE execution_status='Running' AND started_at < $cutoff;
         var items = new List<RunTraceRecord>();
         await using var reader = await list.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) items.Add(ReadRecord(reader));
+        if (!query.IncludeReports)
+            items = items.Select(item => item with { NodeReports = Array.Empty<NodeRunReport>() }).ToList();
         return new TracePage(offset, limit, total, items);
     }
 

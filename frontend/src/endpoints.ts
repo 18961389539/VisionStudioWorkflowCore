@@ -38,6 +38,8 @@ export const traces = {
   pageQuery: (query: string) => apiUrl(`traces/page?${query}`),
   stats: apiUrl('traces/stats'),
   statsQuery: (query: string) => apiUrl(`traces/stats?${query}`),
+  /** 单条运行的完整记录（含逐节点报告）：列表默认不携带，选中后按需取。 */
+  detail: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}`),
   observability: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/observability?days=7&history=100`),
   disposition: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/disposition`),
   compare: (runId: string) => apiUrl(`traces/${encodeURIComponent(runId)}/compare`),

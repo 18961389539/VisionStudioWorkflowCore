@@ -76,3 +76,33 @@ per-frame saving (2 stringify/frame -> 0 while dragging): ~5.3 ms
 **注意**：分页不是"隐藏信息"——工具条仍显示总数，翻页可看全部；这与 P1-5 的表格统一方向一致。
 
 **验证**：`tsc -b` 通过；`vitest` 89 文件 / 1120 项全绿；`build` 通过；`e2e` **7 项**通过（新增 1 项）。
+
+---
+
+## 第三轮：追溯列表瘦身（2026-10-26 13:30）
+
+**问题（结构性，不是常数级）**：`GET /api/traces/page` 每条 `RunTraceRecord` 都内嵌完整的
+`NodeReports`。一页 50 条 × 每条几十份报告，响应体随"历史条数 × 流程规模"双倍膨胀，
+而界面只用得到**选中那一条**的报告——典型的"列表当详情用"。
+
+| 层 | 改动 |
+|---|---|
+| 契约 | `TraceQuery.IncludeReports`（默认 true 保持兼容）；`/api/traces/page` 新增 `includeReports` 参数 |
+| 存储 | `PageAsync` 在 `IncludeReports=false` 时把 `NodeReports` 投影为空数组，`Total` 与排序不变 |
+| 前端查询 | `buildTraceParams` 默认 `includeReports=false`（可显式传 true 恢复旧行为） |
+| 前端交互 | 选中某条运行后按 `runId` 取详情（`/api/traces/{runId}` 早已存在），按 runId 缓存，翻页来回切不重复请求；报告表带 loading 与"该运行没有节点报告"的空态 |
+
+**为什么不做成"新接口"**：详情端点在 2026-10 之前就有了（追溯面板的预览/回放/依赖都用它），
+这次只是让列表不再越俎代庖，属于**契约收紧**而不是新增能力。
+
+**验证**
+- 后端新增用例 `Page_CanOmitNodeReports_WhileDetailStillCarriesThem`：
+  同一份数据下列表（含报告）2 条 → 列表（不含报告）0 条且 `Total` 一致 → 详情仍返回 2 条。
+  `VisionStudio.Api.Tests` **435 项全绿**（4m06s）。
+- 前端：`traceQuery` 用例锁定默认 `includeReports=false`；`tracePanel` 用例验证"选中后按需取详情并渲染报告表"。
+  全量 **89 文件 / 1122 项**通过；`build` 通过；`e2e` 7 项通过。
+- OpenAPI 快照已重导出（+7 行，含 `includeReports`）。
+
+**顺带修掉一个自己埋的坑**：上一轮开 `onlyRenderVisibleElements` 后，
+e2e「Ctrl+K 加节点」用"DOM 节点数 +1"断言会失效——新节点落在视口外就不在 DOM 里。
+改为断言"最近使用"被写入（`addNode` 的必经副作用），不依赖视口，也不挑具体命中哪个节点。

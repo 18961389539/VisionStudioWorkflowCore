@@ -17,12 +17,14 @@ public static class TraceEndpoints
             int? offset, int? limit,
             string? jobId, int? jobVersion, string? disposition, string? executionStatus,
             string? source, string? runIdPrefix, string? workflow, string? errorCode,
-            DateTimeOffset? from, DateTimeOffset? to,
+            DateTimeOffset? from, DateTimeOffset? to, bool? includeReports,
             TraceabilityStore traces, CancellationToken ct) =>
         {
+            // includeReports=false 时列表只返回元数据（逐节点报告另取详情），
+            // 50 条记录 × 每条的 NodeReports 是追溯面板最大的响应体来源。
             var query = new TraceQuery(
                 offset ?? 0, limit ?? 50, jobId, jobVersion, disposition,
-                executionStatus, source, runIdPrefix, workflow, errorCode, from, to);
+                executionStatus, source, runIdPrefix, workflow, errorCode, from, to, includeReports ?? true);
             return Results.Ok(await traces.PageAsync(query, ct));
         }).Produces<TracePage>();
 

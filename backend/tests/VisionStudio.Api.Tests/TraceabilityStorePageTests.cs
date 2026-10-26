@@ -11,6 +11,39 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class TraceabilityStorePageTests
 {
+    [Fact]
+    public async Task Page_CanOmitNodeReports_WhileDetailStillCarriesThem()
+    {
+        // 性能（2026-10-26）：列表默认可以不带逐节点报告（界面只渲染选中那一条），
+        // 但详情端点必须仍然拿得到报告——否则就是把信息弄丢了。
+        var (store, db) = await CreateAsync();
+        await using (var connection = await db.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+INSERT INTO run_traces(run_id, started_at, source, job_id, job_version, workflow_id, workflow_name,
+                       execution_status, disposition, total_duration_ms, node_count, overlay_count,
+                       has_preview, error_code, node_reports_json, overlays_json)
+VALUES('run-with-reports', $started, 'job', 'job-1', 2, 'wf-1', '流程', 'Completed', 'OK', 12.5, 2, 0, 0, NULL,
+       '[{"nodeId":"n1","nodeType":"image.threshold","success":true,"durationMs":1.5,"summary":{}},{"nodeId":"n2","nodeType":"image.blur","success":true,"durationMs":2.5,"summary":{}}]',
+       '[]');
+""";
+            command.Parameters.AddWithValue("$started", DateTimeOffset.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var full = await store.PageAsync(new TraceQuery(0, 50, JobId: "job-1"), default);
+        Assert.Equal(2, Assert.Single(full.Items).NodeReports.Count);
+
+        var compact = await store.PageAsync(new TraceQuery(0, 50, JobId: "job-1", IncludeReports: false), default);
+        Assert.Empty(Assert.Single(compact.Items).NodeReports);
+        Assert.Equal(full.Total, compact.Total);
+
+        var detail = await store.GetAsync("run-with-reports", default);
+        Assert.NotNull(detail);
+        Assert.Equal(2, detail!.NodeReports.Count);
+    }
+
     private static async Task<(TraceabilityStore Store, SqliteMetadataDatabase Db)> CreateAsync()
     {
         var env = new TempWebHostEnvironment();
