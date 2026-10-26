@@ -33,6 +33,12 @@ export type DebugSessionView = {
 
 type Params = {
   workflowPayload: WorkflowPayload;
+  /**
+   * 调用方已经序列化好的文档指纹（App 的 workflowSnapshot）。
+   * 传入后本模块不再自己 JSON.stringify：拖拽期间调用方会冻结快照，
+   * 这里也就不会每帧把整份文档序列化一遍（2026-10-26 性能优化）。
+   */
+  workflowFingerprint?: string;
   nodes: Node[];
   catalog: NodeCatalogItem[];
   selectedId: string;
@@ -55,6 +61,7 @@ type Operation = { kind: 'run' | 'preview' | 'debug' | 'close'; epoch: number; c
  */
 export function useRunController({
   workflowPayload,
+  workflowFingerprint,
   nodes,
   catalog,
   selectedId,
@@ -75,8 +82,15 @@ export function useRunController({
   const mounted = useRef(false);
   const detachedSessionRef = useRef(false);
   const releasePendingRef = useRef(false);
+  // 性能（2026-10-26）：原来在渲染期直接 JSON.stringify(workflowPayload)，等于每次渲染
+  // （含拖拽的每个 pointermove）都把整份文档序列化一遍；App 里 workflowSnapshot 已经序列化过一次。
+  // 这里改成随指针变化才重算一次，写入 ref 供异步回调读取。
+  const currentFingerprint = useMemo(
+    () => workflowFingerprint ?? JSON.stringify(workflowPayload),
+    [workflowFingerprint, workflowPayload]
+  );
   const currentWorkflowRef = useRef('');
-  currentWorkflowRef.current = JSON.stringify(workflowPayload);
+  currentWorkflowRef.current = currentFingerprint;
   // 调试会话（后端有状态会话）：启动到断点 / 继续 / 用缓存输入运行单节点 / 结束会话。
   // anyBusy 供界面禁用入口，operationRef 在事件内同步互斥，避免重渲染前重复提交。
   const [debugSession, setDebugSession] = useState<DebugSessionView>();

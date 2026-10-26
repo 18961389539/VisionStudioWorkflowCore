@@ -242,7 +242,15 @@ function Editor() {
     () => nodes.filter((n) => Boolean(n.data.breakpoint)).map((n) => n.id),
     [nodes]
   );
-  const workflowPayload = useMemo<WorkflowPayload>(() => ({
+  // 性能（2026-10-26）：拖拽时每个 pointermove 都会重建负载，原来每条边都 nodes.find + 端口 find，
+  // 复杂度 O(E×N×P)。改成先建 Map，整体 O(N+E)。200 节点 / 300 边的实测见 docs 性能记录。
+  const workflowPayload = useMemo<WorkflowPayload>(() => {
+    const outputsByNode = new Map<string, Map<string, ReturnType<typeof getPorts>[number]>>();
+    for (const node of nodes) {
+      const ports = getPorts(node, 'outputs');
+      outputsByNode.set(node.id, new Map(ports.map((port) => [port.name, port])));
+    }
+    return {
     id: designerWorkflowId,
     name: designerWorkflowName,
     nodes: nodes.map((node) => ({
@@ -253,8 +261,7 @@ function Editor() {
       parameters: (node.data.parameters ?? {}) as Record<string, unknown>
     })),
     edges: edges.map((edge) => {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      const sourcePort = getPorts(sourceNode, 'outputs').find((p) => p.name === edge.sourceHandle);
+      const sourcePort = outputsByNode.get(edge.source)?.get(edge.sourceHandle ?? '');
       const kind = String(edge.data?.kind ?? (sourcePort?.dataType === 'Control' ? 'control' : 'data'));
       return {
         id: edge.id,
@@ -265,7 +272,25 @@ function Editor() {
         kind
       };
     })
-  }), [designerWorkflowId, designerWorkflowName, nodes, edges]);
+    };
+  }, [designerWorkflowId, designerWorkflowName, nodes, edges]);
+
+  // 性能（2026-10-26）：整份文档 JSON.stringify 实测 3.6ms / 268 KB（200 节点）。拖拽时每个
+  // pointermove 都会改 position → 负载变化 → 每帧再序列化一次，16ms 的帧预算被吃掉近四分之一。
+  // 位置变化不影响执行语义，只有落点才需要重新判定 dirty / 版本，所以拖拽期间冻结快照源，
+  // 松手后再算一次（onNodeDragStop / onSelectionDragStop）。
+  const [dragging, setDragging] = useState(false);
+  const [snapshotSource, setSnapshotSource] = useState<WorkflowPayload>(workflowPayload);
+  useEffect(() => {
+    if (!dragging) setSnapshotSource(workflowPayload);
+  }, [workflowPayload, dragging]);
+  const workflowSnapshot = useMemo(() => JSON.stringify(snapshotSource), [snapshotSource]);
+
+  // 底部结果区要按类型显示中文名：此前每次渲染都 Object.fromEntries 一遍 171 条目录。
+  const nodeTypeLabels = useMemo(
+    () => Object.fromEntries(catalog.map((item) => [item.type, item.displayName])),
+    [catalog]
+  );
 
   // 运行 / 调试控制 + 图像资源管理（独立模块）：anyBusy 是全局唯一执行闸门；
   // 结果与图像以 result.runId 为代际统一管理（详见 useRunController.ts / useRunImages.ts）
@@ -275,7 +300,10 @@ function Editor() {
     debugSession, debugBusy, allowSideEffects, setAllowSideEffects, anyBusy,
     hasSideEffectNodes, hasModuleCalls,
     startDebugSession, continueDebugSession, runSelectedNodeInSession, endDebugSession, debugStatus
-  } = useRunController({ workflowPayload, nodes, catalog, selectedId, nodeLabels, breakpoints, setNodes, setEdges, setBottomTab, messageApi });
+  } = useRunController({
+    workflowPayload, workflowFingerprint: workflowSnapshot, nodes, catalog, selectedId, nodeLabels, breakpoints,
+    setNodes, setEdges, setBottomTab, messageApi
+  });
 
   // 校验问题列表 + 问题连线高亮（点击问题项定位节点或连线）
   const [highlightedEdgeId, setHighlightedEdgeId] = useState<string>();
@@ -734,7 +762,6 @@ function Editor() {
   };
 
   // 已保存 / 未保存：用「当前负载快照 vs 上次保存/加载快照」比对，避免在每个改动入口手动打脏标记
-  const workflowSnapshot = useMemo(() => JSON.stringify(workflowPayload), [workflowPayload]);
   const [savedSnapshot, setSavedSnapshot] = useState<string>();
   // 最近一次保存到后端的时间（仅保存成功时记录；批量加载/恢复草稿会清空）
   const [lastSavedAt, setLastSavedAt] = useState<Date>();
@@ -1455,7 +1482,10 @@ function Editor() {
                   onConnectEnd(event, state);
                 }}
                 onMoveStart={() => { setConnectionPicker(undefined); cancelLongPress(); }}
-                onNodeDragStart={() => { cancelLongPress(); pushHistory('移动节点'); }}
+                onNodeDragStart={() => { cancelLongPress(); setDragging(true); pushHistory('移动节点'); }}
+                onNodeDragStop={() => setDragging(false)}
+                onSelectionDragStart={() => setDragging(true)}
+                onSelectionDragStop={() => setDragging(false)}
                 onNodeClick={(_, node) => setSelectedId(node.id)}
                 onNodeDoubleClick={(_, node) => openNodeConfiguration(node.id)}
                 onMove={(_, viewport) => syncZoomLevel(viewport)}
@@ -1470,6 +1500,9 @@ function Editor() {
                 // P2：右下角是画布唯一“空白处”——隐藏 React Flow 水印，避免与小地图按钮叠压
                 //（@xyflow/react v12 免费支持 proOptions.hideAttribution）
                 proOptions={{ hideAttribution: true }}
+                // 性能（2026-10-26）：只渲染视口内的节点与连线。大流程（100+ 节点）平移到局部时，
+                // 不再为视口外的节点维护 DOM 与 Konva/React 更新。
+                onlyRenderVisibleElements
               >
                 <Background gap={18} size={1} />
                 <Controls />
@@ -1526,7 +1559,7 @@ function Editor() {
         focusNode={focusNode}
         onOpenTrace={(runId) => { setTraceRunId(runId); setTracesOpen(true); }}
         nodeLabels={nodeLabels}
-        nodeTypeLabels={Object.fromEntries(catalog.map((item) => [item.type, item.displayName]))}
+        nodeTypeLabels={nodeTypeLabels}
       />
 
       <Modal

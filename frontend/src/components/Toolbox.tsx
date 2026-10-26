@@ -81,6 +81,12 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
     return [...map.values()].sort((a, b) =>
       (categoryOrder.get(a.label) ?? Number.MAX_SAFE_INTEGER) - (categoryOrder.get(b.label) ?? Number.MAX_SAFE_INTEGER));
   }, [results, categoryOrder]);
+  // 收藏数量此前在渲染里直接 searchTools(catalog, '')（对 171 条目录做一遍打分排序），
+  // 每次输入框变化都要重跑；收藏集合与目录不变时没必要重算。
+  const favoriteCount = useMemo(
+    () => searchTools(catalog, '').filter((item) => favorites.includes(item.type)).length,
+    [catalog, favorites]
+  );
   const recentItems = recentTypes.map((type) => results.find((item) => item.type === type))
     .filter((item): item is NodeCatalogItem => Boolean(item));
   const favoriteItems = results.filter((item) => favorites.includes(item.type));
@@ -180,7 +186,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         onChange={(event) => { setQuery(event.target.value); setSelectedType(undefined); setSelectedPort(undefined); setFeedback(''); }} onKeyDown={onSearchKeyDown} /></div>
       {!connection && <div className="toolbox-tabs" role="group" aria-label={text('节点筛选', 'Filter nodes')}>
         <button type="button" aria-pressed={tab === 'all'} onClick={() => setTab('all')}>{text('全部', 'All')}</button>
-        <button type="button" aria-pressed={tab === 'favorites'} onClick={() => setTab('favorites')}>{text('收藏', 'Favorites')} <small>{searchTools(catalog, '').filter((item) => favorites.includes(item.type)).length}</small></button>
+        <button type="button" aria-pressed={tab === 'favorites'} onClick={() => setTab('favorites')}>{text('收藏', 'Favorites')} <small>{favoriteCount}</small></button>
       </div>}
       {!connection && !keyword && tab === 'all' && <div className="toolbox-category-actions">
         <button type="button" className="toolbox-link" onClick={() => setCollapsed(allGroupsCollapsed ? [] : groups.map((group) => group.key))}>
