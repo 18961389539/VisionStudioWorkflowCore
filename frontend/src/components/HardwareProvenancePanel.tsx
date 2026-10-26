@@ -3,7 +3,7 @@ import { Button, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Ta
 import type { HardwareProvenanceDeclaration, HardwareProvenanceSnapshot } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
-import { responseErrorMessage } from '../apiErrors';
+import { responseErrorMessage, apiErrorMessage } from '../apiErrors';
 import DataErrorAlert from './DataErrorAlert';
 import { apiUrl, hardwareProvenance } from '../endpoints';
 
@@ -82,7 +82,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.detail ?? data.error ?? '保存失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '保存失败'));
       setSelected(data);
       setEditing(false);
       await refresh();
@@ -98,7 +98,7 @@ export default function HardwareProvenancePanel({ open, onClose }: Props) {
       const response = await apiFetch(hardwareProvenance.byKindAndId(selected.kind, selected.id), { method: 'DELETE' });
       if (!response.ok && response.status !== 404) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail ?? '删除失败');
+        throw new Error(apiErrorMessage(data, '删除失败'));
       }
       setEditing(false);
       await refresh();

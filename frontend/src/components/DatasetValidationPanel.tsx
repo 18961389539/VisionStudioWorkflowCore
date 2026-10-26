@@ -3,7 +3,7 @@ import { Alert, Button, Card, Col, Divider, Input, Modal, Popconfirm, Progress, 
 import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, ValidationDatasetSummary, ValidationResultRecord, ValidationRunRecord, WorkflowPayload } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
-import { responseErrorMessage } from '../apiErrors';
+import { responseErrorMessage, apiErrorMessage } from '../apiErrors';
 import { validation, apiUrl } from '../endpoints';
 import DataErrorAlert from './DataErrorAlert';
 
@@ -106,7 +106,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const createDataset = async () => {
     const response = await apiFetch(validation.datasets, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, description: newDescription }) });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.detail ?? '创建数据集失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '创建数据集失败'));
     setCreateOpen(false); setDatasetId(data.dataset.id); await loadDatasets();
   };
   const addSelected = async () => {
@@ -114,7 +114,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     const items = selectedTraceIds.map((id) => { const t = traces.find((x) => x.runId === id); return { sourceKind: 'TRACE', sourceRef: id, expectedDisposition: t?.disposition === 'OK' ? 'OK' : 'NG' }; });
     const response = await apiFetch(validation.datasetItems(datasetId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '添加样本失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '添加样本失败'));
     setSelectedTraceIds([]); setDetail(data); await loadDatasets();
   };
   const addSelectedMedia = async () => {
@@ -126,7 +126,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     });
     const response = await apiFetch(validation.datasetItems(datasetId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '添加媒体样本失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '添加媒体样本失败'));
     setSelectedMediaRefs([]); setDetail(data); await loadDatasets();
   };
   const updateLabel = async (itemId: string, expectedDisposition: 'OK' | 'NG') => {
@@ -159,7 +159,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     try {
       const response = await apiFetch(validation.datasetRuns(datasetId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceWorkflowRunId: workflowSourceRunId ?? 'designer-current', workflow }) });
       const data = await response.json();
-      if (!response.ok) return messageApi.error(data.detail ?? data.error ?? '启动验证失败');
+      if (!response.ok) return messageApi.error(apiErrorMessage(data, '启动验证失败'));
       setSelectedRunId(data.runId); messageApi.success('批量验证已启动'); await loadDetail(datasetId);
     } finally { setBusy(false); }
   };

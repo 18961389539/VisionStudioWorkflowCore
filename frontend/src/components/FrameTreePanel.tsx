@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { apiErrorMessage } from '../apiErrors';
 import { Button, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { apiUrl } from '../endpoints';
@@ -52,7 +53,7 @@ export default function FrameTreePanel({ open, onClose }: { open: boolean; onClo
         body: JSON.stringify({ transforms: rows.map(({ key: _key, ...r }) => r), sourceFrame: source, targetFrame: target })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '坐标路径解析失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '坐标路径解析失败'));
       setResult(data);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '坐标路径解析失败');

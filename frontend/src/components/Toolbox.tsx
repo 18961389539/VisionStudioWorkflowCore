@@ -3,6 +3,7 @@ import { Input, Select, type InputRef } from 'antd';
 import type { NodeCatalogItem } from '../types';
 import { compatiblePorts, nodePresentation, searchTools, type PortRecommendation } from '../toolboxModel';
 import { useI18n } from '../i18n/provider';
+import { STORAGE_KEYS, readStoredJson, writeStoredJson } from '../storage';
 import { portDisplayName } from '../i18n/catalog';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
@@ -15,18 +16,14 @@ type Props = {
   onClose?: () => void;
 };
 
-const COLLAPSED_KEY = 'visionstudio.toolbox-collapsed';
-const FAVORITES_KEY = 'visionstudio.toolbox-favorites';
+const COLLAPSED_KEY = STORAGE_KEYS.toolboxCollapsed;
+const FAVORITES_KEY = STORAGE_KEYS.toolboxFavorites;
 const FAVORITES_EVENT = 'visionstudio:toolbox-favorites';
-function readList(key: string): string[] {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
-  } catch { return []; }
-}
-function persistList(key: string, value: string[]) {
-  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* Storage may be unavailable. */ }
-}
+const readList = (key: typeof COLLAPSED_KEY | typeof FAVORITES_KEY): string[] =>
+  readStoredJson(key, (value) => Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : undefined, []);
+const persistList = (key: typeof COLLAPSED_KEY | typeof FAVORITES_KEY, value: string[]) => writeStoredJson(key, value);
 function Highlight({ text, query }: { text: string; query: string }) {
   const keyword = query.trim().toLowerCase();
   const index = keyword ? text.toLowerCase().indexOf(keyword) : -1;

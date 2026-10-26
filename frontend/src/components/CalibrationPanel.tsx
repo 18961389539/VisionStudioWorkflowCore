@@ -13,7 +13,7 @@ import type {
   CalibrationWorkspaceResult
 } from '../types';
 import { apiFetch } from '../apiClient';
-import { responseErrorMessage } from '../apiErrors';
+import { responseErrorMessage, apiErrorMessage } from '../apiErrors';
 import { apiUrl, calibrations } from '../endpoints';
 
 type Props = {
@@ -96,7 +96,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workspace)
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '标定计算失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '标定计算失败'));
       setResult(data);
       messageApi.success(`已使用 ${data.usedPointCount} 个点完成计算 · RMSE ${data.rmse.toFixed(4)} ${targetUnit}`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '标定计算失败'); }
@@ -111,7 +111,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
         body: JSON.stringify({ providerId: 'virtual', columns: 3, rows: 3, originX: 0, originY: 0, stepX: 22, stepY: 14 })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '自动采集失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '自动采集失败'));
       setPoints(data);
       setWorkspaceDirty(true);
       setResult(undefined);
@@ -130,7 +130,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
         : { id: assetId, name: assetName, description: 'VisionStudio calibration workspace asset', workspace, note: 'Initial workspace version' };
       const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '保存标定版本失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '保存标定版本失败'));
       await refreshAssets();
       setSelectedAssetId(assetId);
       setLoadedAssetVersion(existing ? Number(data.version ?? existing.latestVersion + 1) : Number(data.latestVersion ?? 1));
@@ -146,7 +146,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
       : calibrations.publish(id, String(version));
     const response = await apiFetch(url, { method: 'POST' });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.error ?? '发布失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '发布失败'));
     await refreshAssets();
     messageApi.success(`${rollback ? '已回滚' : '已发布'}标定资产 ${id} V${version}`);
   };
@@ -154,7 +154,7 @@ export default function CalibrationPanel({ open, onClose, canApplyToSelectedNode
   const loadVersion = async (id: string, version: number) => {
     const response = await apiFetch(calibrations.version(id, String(version)));
     const data: CalibrationVersionSnapshot & { error?: string } = await response.json();
-    if (!response.ok) return messageApi.error(data.error ?? '加载标定版本失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '加载标定版本失败'));
     setSourceFrame(data.workspace.sourceFrame);
     setTargetFrame(data.workspace.targetFrame);
     setTargetUnit(data.workspace.targetUnit);

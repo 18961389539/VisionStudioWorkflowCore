@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import type { CalibrationHandEyeResidual } from '../types';
 import { apiFetch } from '../apiClient';
@@ -85,7 +86,7 @@ export default function CalibrationHandEyeWizard({ canApplyToSelectedNode, selec
         })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '手眼求解失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '手眼求解失败'));
       setResult(data);
       try {
         const rows = JSON.parse(String(data.sampleResidualsJson ?? '[]')) as CalibrationHandEyeResidual[];

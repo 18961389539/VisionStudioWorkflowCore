@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, Upload, message } from 'antd';
 import type { CameraIntrinsicAssetDescriptor, CameraIntrinsicVersionSnapshot, CalibrationWizardHint, CalibrationWizardSession } from '../types';
 import { apiFetch } from '../apiClient';
-import { responseErrorMessage } from '../apiErrors';
+import { responseErrorMessage, apiErrorMessage } from '../apiErrors';
 import DataErrorAlert from './DataErrorAlert';
 import { calibration, cameraIntrinsics, cameras as cameraEndpoints } from '../endpoints';
 
@@ -159,7 +159,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '创建向导会话失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '创建向导会话失败'));
       applySessionState(data);
       setSolveSummary(undefined);
       setViewStatsRows([]);
@@ -203,7 +203,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         body: JSON.stringify({ calibrationDataJson: importJson, label: 'import' })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '导入失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '导入失败'));
       await refresh(data);
       await loadHints(data.sessionId);
       setStep(2);
@@ -220,7 +220,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         body: JSON.stringify({ documentJson })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '会话文档导入失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '会话文档导入失败'));
       applySessionState(data);
       setSolveSummary((data.lastSolveSummary as Record<string, unknown> | null) ?? undefined);
       setStep(data.views?.length ? 2 : 1);
@@ -249,7 +249,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         body: JSON.stringify({ cameraId, addIfAccepted, label: `cam-${cameraId}` })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '相机预览检测失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '相机预览检测失败'));
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       if (typeof data.previewJpegBase64 === 'string') {
         const bytes = Uint8Array.from(atob(data.previewJpegBase64), (c) => c.charCodeAt(0));
@@ -272,7 +272,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '更新失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '更新失败'));
       await refresh(data);
       await loadHints(data.sessionId);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '更新失败'); }
@@ -285,7 +285,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await apiFetch(calibration.wizardSessionView(session.sessionId, index), { method: 'DELETE' });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '删除失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '删除失败'));
       await refresh(data);
       await loadHints(data.sessionId);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '删除失败'); }
@@ -300,7 +300,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ useSolveOutlier: true })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '禁用离群失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '禁用离群失败'));
       await refresh(data);
       messageApi.success('已禁用求解标记的离群/最差视图，请重新求解');
       setStep(3);
@@ -317,7 +317,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         body: JSON.stringify({ maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, cameraModel, telecentricMagnification, telecentricPixelSizeUm })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '标定求解失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '标定求解失败'));
       applySessionState(data.session);
       setSolveSummary(data.result);
       setPinnedAssetId(undefined);
@@ -340,7 +340,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await apiFetch(calibration.wizardSessionExport(session.sessionId));
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '导出失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '导出失败'));
       const sourceDocument = data.document && typeof data.document === 'object' ? data.document as Record<string, unknown> : {};
       const exportedDocument = {
         ...sourceDocument,
@@ -371,7 +371,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         : { sessionId: session.sessionId, id: intrinsicAssetId.trim(), name: intrinsicAssetName.trim(), description: 'Camera intrinsic model with source wizard views', note: 'Initial intrinsic calibration' };
       const response = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json() as Record<string, unknown>;
-      if (!response.ok) throw new Error(String(data.error ?? '保存相机内参资产失败'));
+      if (!response.ok) throw new Error(apiErrorMessage(data, '保存相机内参资产失败'));
       const version = Number(data.version ?? data.latestVersion ?? 0);
       if (!Number.isInteger(version) || version < 1) throw new Error('服务端未返回有效版本号');
       setPinnedAssetId(intrinsicAssetId.trim());
@@ -420,7 +420,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
         : cameraIntrinsics.publish(id, String(version));
       const response = await apiFetch(url, { method: 'POST' });
       const data = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? '发布相机内参版本失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '发布相机内参版本失败'));
       await refreshIntrinsicAssets();
       messageApi.success(`${rollback ? '已回滚' : '已发布'}相机内参资产 ${id} V${version}`);
     } catch (error) { messageApi.error(error instanceof Error ? error.message : '发布失败'); }
@@ -433,7 +433,7 @@ export default function CalibrationIntrinsicsWizard({ canApplyToSelectedNode, se
     try {
       const response = await apiFetch(calibration.wizardSessionExport(session.sessionId));
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '导出失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '导出失败'));
       if (selectedNodeType === 'calibration.cameraIntrinsics') {
         onApplyToSelectedNode({ calibrationDataJson: data.calibrationDataJson ?? '', cameraModel, maxViewRms, maxRms, maxPoseViewRms: cameraModel === 'telecentric' ? 0 : maxPoseViewRms, telecentricMagnification, telecentricPixelSizeUm });
         messageApi.success('已将视图 JSON 应用到相机内参节点');

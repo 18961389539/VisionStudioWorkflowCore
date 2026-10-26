@@ -3,6 +3,7 @@ import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import enUS from 'antd/locale/en_US';
 import { useI18n } from './i18n/provider';
+import { STORAGE_KEYS, readStored, writeStored } from './storage';
 
 export type ThemeMode = 'dark' | 'light';
 
@@ -11,15 +12,11 @@ type ThemeContextValue = {
   toggle: () => void;
 };
 
-const STORAGE_KEY = 'visionstudio.theme-mode';
+
 const ThemeContext = createContext<ThemeContextValue>({ mode: 'dark', toggle: () => undefined });
 
 function readStoredMode(): ThemeMode {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
-  } catch {
-    return 'dark';
-  }
+  return readStored(STORAGE_KEYS.themeMode) === 'light' ? 'light' : 'dark';
 }
 
 function applyMode(mode: ThemeMode) {
@@ -38,11 +35,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyMode(mode);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      // 隐私模式 / 禁用存储时忽略持久化失败
-    }
+    writeStored(STORAGE_KEYS.themeMode, mode);
   }, [mode]);
 
   const toggle = useCallback(() => setMode((current) => (current === 'dark' ? 'light' : 'dark')), []);

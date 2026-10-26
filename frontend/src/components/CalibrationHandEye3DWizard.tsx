@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Input, InputNumber, Select, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { apiUrl } from '../endpoints';
@@ -109,7 +110,7 @@ export default function CalibrationHandEye3DWizard({ canApplyToSelectedNode, sel
         body: JSON.stringify({ samplesJson, mode, method, maxTranslationError, maxRotationErrorDeg, rotationWeight, sourceFrame, targetFrame, unit })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? '三维手眼求解失败');
+      if (!response.ok) throw new Error(apiErrorMessage(data, '三维手眼求解失败'));
       setResult(data);
       try { setResiduals(JSON.parse(String(data.sampleResidualsJson ?? '[]')) as Residual[]); }
       catch { setResiduals([]); }

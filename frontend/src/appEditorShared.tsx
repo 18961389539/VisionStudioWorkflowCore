@@ -4,6 +4,7 @@
  * 从 App.tsx 拆出（巨型组件拆分，2026-10-23）；语义与归属注释保留原样。
  */
 import { Suspense, type ReactNode } from 'react';
+import { STORAGE_KEYS, readStored, readStoredJson, writeStored, writeStoredJson } from './storage';
 import { Skeleton } from 'antd';
 import type { Node } from '@xyflow/react';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -77,14 +78,9 @@ export const DEMO_GROUPS: { group: string; keys: DemoKey[] }[] = [
   { group: '流程结构', keys: ['linear', 'roi', 'if', 'parallel', 'nested', 'forEach'] }
 ];
 
-// 节点紧凑模式：全局显示偏好（压缩标题 / 端口间距 / 页脚），持久化在 localStorage
-const NODE_COMPACT_KEY = 'visionstudio.node-compact';
-export const readNodeCompact = () => {
-  try { return window.localStorage.getItem(NODE_COMPACT_KEY) === '1'; } catch { return false; }
-};
-export const persistNodeCompact = (value: boolean) => {
-  try { window.localStorage.setItem(NODE_COMPACT_KEY, value ? '1' : '0'); } catch { /* 忽略存储失败 */ }
-};
+// 节点紧凑模式：全局显示偏好（压缩标题 / 端口间距 / 页脚），持久化在统一存储层
+export const readNodeCompact = () => readStored(STORAGE_KEYS.nodeCompact) === '1';
+export const persistNodeCompact = (value: boolean) => writeStored(STORAGE_KEYS.nodeCompact, value ? '1' : '0');
 
 // 工具栏已移出画布，自动适配在四周使用相同内缩。
 // 类型对齐 @xyflow/react 的 PaddingWithUnit（number | `${number}px` | `${number}%`），避免任意 string 撞类型。
@@ -159,7 +155,6 @@ export function edgePresentation(kind: 'control' | 'data') {
     : { animated: false, data: { kind } };
 }
 
-const RECENT_NODES_KEY = 'visionstudio.recent-node-types';
 export const RECENT_NODES_LIMIT = 6;
 // 双击添加时的占位尺寸与最小间距（流程坐标）；实际渲染尺寸在 measured 中回读
 export const NEW_NODE_WIDTH = 220;
@@ -167,17 +162,11 @@ export const NEW_NODE_HEIGHT = 180;
 export const SPOT_GAP = 24;
 
 export function readRecentNodeTypes(): string[] {
-  try {
-    const raw = window.localStorage.getItem(RECENT_NODES_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === 'string').slice(0, RECENT_NODES_LIMIT)
-      : [];
-  } catch {
-    return [];
-  }
+  return readStoredJson(STORAGE_KEYS.recentNodeTypes, (value) => Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string').slice(0, RECENT_NODES_LIMIT)
+    : undefined, []);
 }
 
 export function persistRecentNodeTypes(types: string[]): void {
-  try { window.localStorage.setItem(RECENT_NODES_KEY, JSON.stringify(types)); } catch { /* 忽略存储失败 */ }
+  writeStoredJson(STORAGE_KEYS.recentNodeTypes, types);
 }

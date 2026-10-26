@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Checkbox, Col, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, OfflineReplayContext, OfflineReplayResult, WorkflowPayload } from '../types';
 import { apiFetch } from '../apiClient';
@@ -29,7 +30,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
     const response = await apiFetch(traces.replayContext(runId));
     const data = await response.json();
     if (!response.ok) {
-      messageApi.error(data.detail ?? data.error ?? '加载回放上下文失败');
+      messageApi.error(apiErrorMessage(data, '加载回放上下文失败'));
       return;
     }
     const next = data as OfflineReplayContext;
@@ -78,7 +79,7 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
       });
       const data = await response.json();
       setResult(data as OfflineReplayResult);
-      if (!response.ok) messageApi.error(data.error ?? data.detail ?? '回放失败');
+      if (!response.ok) messageApi.error(data.error ?? apiErrorMessage(data, '回放失败'));
       else messageApi.success(`${mode === 'Full' ? '完整回放' : mode === 'RunNode' ? '运行节点' : mode === 'RunFromNode' ? '从此处运行' : '运行到断点'}已完成 · ${Number(data.totalDurationMs).toFixed(2)} 毫秒`);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '回放失败');

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Select, Segmented, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { RunTraceRecord } from '../types';
 import { localizeStatus } from '../i18n';
@@ -102,7 +103,7 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
   const cleanup = async () => {
     const response = await apiFetch(apiUrl('storage/cleanup'), { method: 'POST' });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.error ?? '清理失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '清理失败'));
     messageApi.success(`保留策略清理了 ${data.changed ?? 0} 条记录 / 个文件`);
     reload();
   };
@@ -118,7 +119,7 @@ export default function TracePanel({ open, onClose, initialRunId }: Props) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disposition: value })
     });
     const data = await response.json();
-    if (!response.ok) return messageApi.error(data.error ?? '更新失败');
+    if (!response.ok) return messageApi.error(apiErrorMessage(data, '更新失败'));
     messageApi.success(`运行记录 ${selected.runId.slice(0, 8)} → ${localizeStatus(value)}`);
     reload();
   };
