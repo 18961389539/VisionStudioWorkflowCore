@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "1a00aae4d7ba09637b79b82cbdd3f56b90ae30931b62c3a384a652a4b183a1a0",
+  "hash": "2aab121b3c139897296c27868b8d903b71e0ba93bd61e56ea4c99a7c44a95fd9",
   "items": [
     {
       "type": "image.acquire",
@@ -289,6 +289,208 @@
         }
       ],
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.load",
+      "displayName": "Load Image",
+      "category": "Acquisition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "path",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "sequence",
+          "dataType": "Integer",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "bitDepth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "fileName",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "resolvedPath",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "sequence",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "frameCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "path",
+          "label": "Path",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Source",
+          "description": "Image file or folder. The path input overrides it. Reads are limited to the host-authorized read roots (data root, media root, VisionStudio:ReplayInputRoots).",
+          "overriddenByPorts": [
+            "path"
+          ]
+        },
+        {
+          "name": "pathMode",
+          "label": "Path Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Auto (detect)",
+              "value": "auto"
+            },
+            {
+              "label": "File",
+              "value": "file"
+            },
+            {
+              "label": "Folder",
+              "value": "directory"
+            }
+          ],
+          "group": "Source",
+          "description": "Auto treats an existing directory as a frame sequence and everything else as a single file."
+        },
+        {
+          "name": "index",
+          "label": "Frame Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Source",
+          "description": "Zero-based frame index used in folder mode; the sequence input overrides it. File mode requires 0.",
+          "integer": true
+        },
+        {
+          "name": "indexPolicy",
+          "label": "Index Policy",
+          "type": "select",
+          "defaultValue": "fail",
+          "options": [
+            {
+              "label": "Fail",
+              "value": "fail"
+            },
+            {
+              "label": "Wrap",
+              "value": "wrap"
+            }
+          ],
+          "group": "Source",
+          "description": "Out-of-range behaviour in folder mode: fail names the frame count, wrap takes index modulo the frame count."
+        },
+        {
+          "name": "recursive",
+          "label": "Recursive",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Source",
+          "description": "Include subfolders when enumerating a folder."
+        },
+        {
+          "name": "colorMode",
+          "label": "Color Mode",
+          "type": "select",
+          "defaultValue": "preserve",
+          "options": [
+            {
+              "label": "Preserve",
+              "value": "preserve"
+            },
+            {
+              "label": "Grayscale",
+              "value": "gray"
+            },
+            {
+              "label": "Color",
+              "value": "color"
+            }
+          ],
+          "group": "Decode",
+          "description": "preserve keeps the stored depth and channel count (16-bit stays 16-bit); gray converts to single channel; color forces 3 channels."
+        },
+        {
+          "name": "maxMegabytes",
+          "label": "Max File Size",
+          "type": "number",
+          "defaultValue": 64,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "unit": "MB",
+          "group": "Limits",
+          "description": "Reject files larger than this before decoding, so a wrong path cannot exhaust memory."
+        }
+      ],
+      "description": "Read one image from disk for offline validation, teaching and sample batches without registering a file camera. Folder mode enumerates png/bmp/jpg/jpeg/tif/tiff in natural order (img2 before img10) so a batch run is reproducible, and the sequence input selects the frame — typically wired from flow.repeat.index. Every read is authorized by the host replay resolver: paths outside the data root, media root or VisionStudio:ReplayInputRoots are rejected, because a workflow document is importable and must not be able to read arbitrary local files. Files above maxMegabytes are rejected before decoding; undecodable files fail with the file name.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,

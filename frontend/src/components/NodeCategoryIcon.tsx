@@ -76,6 +76,7 @@ const glyphs: Record<NodeIconName, string[]> = {
 
 const exactIcons: Record<string, NodeIconName> = {
   'image.filter': 'blur', 'text.validate': 'text',
+  'image.load': 'file',
   'image.acquire': 'camera', 'camera.syncCapture': 'camera', 'image.synthetic': 'sparkles', 'frameset.image': 'layers',
   'image.grayscale': 'image', 'image.channel': 'sliders', 'image.morphology': 'region',
   'image.threshold': 'threshold', 'image.threshold.adaptive': 'threshold', 'image.threshold.otsu': 'histogram',

@@ -499,7 +499,7 @@ public sealed class Batch2ImageNodeTests
     {
         var points = new Dictionary<string, VisionValue> { ["point1"] = VisionValue.Point(new(0, 0)), ["point2"] = VisionValue.Point(new(1, 1)), ["point3"] = VisionValue.Point(new(2, 2)) };
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await new FitCircleNode().ExecuteAsync(new(points), Node("measure.fitCircle", "{}"), default));
-        string[] expected = ["image.crop", "image.resize", "image.rotate", "image.perspective", "measure.pointLineDistance", "measure.circleSpacing", "measure.fitLine", "measure.fitCircle"];
+        string[] expected = ["image.crop", "image.resize", "image.rotate", "image.perspective", "measure.pointLineDistance", "measure.circleSpacing", "measure.fitLine", "measure.fitCircle", "image.load"];
         Assert.Equal(expected.Order(), Batch2ImageCatalog.Items.Select(x => x.Type).Order());
     }
 
