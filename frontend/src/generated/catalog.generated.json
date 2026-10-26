@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "83b7bb57ff2a84d7ebb53e80cad0440ffae8b974d3333234a2209f261c64f3b3",
+  "hash": "7a6ddbdaf46ae4b70cf5aaaaf4d72345b330d9936805077753ec905708def8c7",
   "items": [
     {
       "type": "image.acquire",
@@ -9773,6 +9773,74 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "flow.fail",
+      "displayName": "Fail",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "message",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "code",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "parameters": [
+        {
+          "name": "code",
+          "label": "Failure Code",
+          "type": "text",
+          "defaultValue": "NODE_FAILURE",
+          "group": "Failure",
+          "description": "Short machine-readable code prefixed to the failure message as [CODE]; 1-64 characters, must not be blank."
+        },
+        {
+          "name": "message",
+          "label": "Failure Message",
+          "type": "textarea",
+          "defaultValue": "Workflow stopped by flow.fail.",
+          "group": "Failure",
+          "description": "Reason reported as the run error. The message input overrides it; blank text falls back to the default sentence. At most 4096 characters."
+        }
+      ],
+      "description": "Stop the whole run with an explicit reason instead of waiting for some later node to fail by accident. The node always throws, so the run result reports this message as the error and the trace marks this node as failed; the next port exists only so the graph stays wireable (nothing after it executes). Use flow.result when you only need an OK/NG disposition that keeps running. Because flow.try bodies only accept deterministic pipeline nodes, Fail cannot be used inside a try body to reach the error branch.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "flow.merge",
       "displayName": "Flow Merge",
       "category": "Flow",
@@ -10324,6 +10392,107 @@
       "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
       "pluginId": "builtin",
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "flow.log",
+      "displayName": "Log",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "message",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "message",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "level",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "severity",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "logged",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "level",
+          "label": "Level",
+          "type": "select",
+          "defaultValue": "info",
+          "options": [
+            {
+              "label": "Debug",
+              "value": "debug"
+            },
+            {
+              "label": "Info",
+              "value": "info"
+            },
+            {
+              "label": "Warning",
+              "value": "warning"
+            },
+            {
+              "label": "Error",
+              "value": "error"
+            }
+          ],
+          "group": "Log",
+          "description": "Severity used for both the host log entry and the run report; unknown values fail instead of defaulting to info."
+        },
+        {
+          "name": "message",
+          "label": "Message",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Log",
+          "description": "Text recorded in the host log and the run report. The message input overrides it; empty text is logged as-is (observability must not stop the line). Compose strings with value.string when the text depends on measurements."
+        }
+      ],
+      "description": "Write a custom log line without leaving the workflow: the text goes to the host log (via Microsoft.Extensions.Logging, tagged with the run and node id) and into this node's run report so it is visible in the trace panel. Wire: exec in, next out; optional message input overrides the message parameter. Levels are debug/info/warning/error and map to host log levels plus a numeric severity (0-3). No template expansion — build the text with value.string first. Messages are capped at 4096 characters; oversized text fails instead of being silently cut. This node never fails on empty messages.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,

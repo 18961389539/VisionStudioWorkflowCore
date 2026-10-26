@@ -46,6 +46,7 @@ const nodeNames: Record<string, string> = {
   'inference.segmentation': '语义分割', 'inference.instanceSegmentation': '实例分割', 'inference.pose': '关键点检测', 'inference.anomaly': '图像异常检测',
   'flow.forEach': '逐目标执行', 'flow.loopEnd': '循环体结束', 'flow.try': '异常分支 / 重试',
   'flow.while': '条件循环', 'flow.repeat': '定次循环', 'flow.break': '跳出循环',
+  'flow.log': '流程日志', 'flow.fail': '主动失败',
   'calibration.cameraIntrinsics': '相机内参标定', 'image.undistort': '畸变校正', 'calibration.handEye2D': '二维手眼标定', 'calibration.handEye3D': '三维手眼标定',
   'collection.detections.filter': '筛选检测目标', 'collection.detections.sort': '目标排序',
   'collection.detections.at': '按索引提取目标', 'collection.detections.count': '目标计数',
@@ -549,6 +550,10 @@ const parameterNames: Record<string, string> = {
   'Pad Side': '补齐方向',
   'Max Characters': '最大字符数',
   'Max Iterations': '最大迭代次数',
+  'Message': '消息',
+  'Level': '级别',
+  'Failure Code': '失败代码',
+  'Failure Message': '失败消息',
   'Repeat Count': '重复次数',
   'Reason': '原因',
 };
@@ -579,7 +584,7 @@ const parameterGroups: Record<string, string> = {
   Contours: '轮廓选择', Limits: '限值', 'Sort Keys': '排序字段', 'Binary Kernel': '二值核', 'Gray Kernel': '灰度核', Hysteresis: '迟滞',
   Views: '视图', 'Quality Gates': '质量门限', Failure: '失败处理', Completion: '完成等待',
   'Top Left': '左上角', 'Top Right': '右上角', 'Bottom Right': '右下角', 'Bottom Left': '左下角',
-  Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐'
+  Log: '日志', Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐'
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
@@ -1307,6 +1312,10 @@ const optionNames: Record<string, string> = {
   'Length': '求长度',
   'Start only': '仅开头',
   'End only': '仅结尾',
+  'Debug': '调试',
+  'Info': '信息',
+  'Warning': '警告',
+  'Error': '错误',
 };
 
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
@@ -1314,6 +1323,7 @@ const optionNames: Record<string, string> = {
 export const portNames: Record<string, string> = {
   runId: '运行 ID', partId: '产品编号', fileName: '文件名', charCount: '字符数',
   iteration: '第几轮', total: '总轮数', isLast: '最后一轮', breakRequested: '请求跳出',
+  message: '消息', level: '级别', severity: '严重度', logged: '已记录', code: '代码',
   rawProjectionT: '原始投影参数 t', projectionClamped: '已裁剪至端点', projectedPoint: '直线垂足', lineDistance: '直线垂距',
   xWritten: 'X 已写入', yWritten: 'Y 已写入', rWritten: 'R 已写入', url: '请求地址', idempotencyKey: '幂等键',
   heightField: '相对高度场', shadingImage: '表面渲染图', resultKind: '结果含义',
@@ -1627,7 +1637,8 @@ const descriptions: Record<string, string> = {
   'flow.while': '先执行一轮循环体，再在每轮末尾重新采样条件：为真继续，为假走 done。接线：exec 进、body 出到循环体、done 出到后续，condition 接一个循环体内产生的布尔量（如 flow.result.pass）才能逐轮刷新；循环体必须以 flow.loopEnd 收尾并把 repeat 接回本节点。条件在循环体之后采样，因此首轮必然执行；接在循环之前的条件恒定不变，只能靠迭代预算退出；被 If 分支跳过的条件来源会沿用上一轮的值。循环体内可放 flow.break 提前退出；诊断记录循环种类、预算与条件接线情况。',
   'flow.repeat': '按固定次数执行循环体。接线：exec 进、body 出到循环体、done 出到后续，count 端口接线时优先于参数；循环体必须以 flow.loopEnd 收尾并把 repeat 接回本节点；循环体内可通过普通数据边读取 index（0 起）、iteration（1 起）、total 与 isLast。循环体内可放 flow.break 提前退出；次数为 0 或负数直接失败，不会静默跳过。',
   'flow.break': '提前退出当前 flow.while 或 flow.repeat。接线：exec 进、next 接本轮仍应执行的后续步骤。节点会置位循环中断标志，本轮剩余步骤被跳过，下一轮条件求值失败后走 done 路由。必须直接接在循环体主序列里：If/Switch/Try/Parallel 分支内的 break、以及 flow.forEach 内的 break 都会在编译期被拒绝，因为语义会误导。',
-  'jlvision.geometry': '几何与滤波信息计算；角度输出为弧度。point/points 为交点、投影点、椭圆点或直线中心等计算结果，count 为结果点数；inputPoints 仅供核对输入，componentCount 为标量分量数。',
+  'flow.log': '在流程内写一条自定义日志，同时送到宿主日志与本次运行报告（追溯面板按节点展开可见）。接线：exec 进、next 出；可选 message 端口优先于参数。级别 debug/info/warning/error 会映射到宿主日志级别并输出数值 severity（0-3）。不做模板插值——需要拼测量值时先用 value.string 组好文本。消息上限 4096 字符，超长直接失败而不是静默截断；空文本照常记录，不会把产线跑停。',
+  'flow.fail': '用明确原因终止整次运行，而不是等下游节点"碰巧"失败。节点必定抛错：运行结果以该消息作为错误，追溯里本节点标记为失败；next 端口仅为让图结构可连接而保留（其后的节点不会执行）。只需要判 OK/NG 且希望继续执行时用 flow.result。受 flow.try 执行体仅接受确定性流水线节点的限制，本节点不能放进 try 体去走错误分支。',  'jlvision.geometry': '几何与滤波信息计算；角度输出为弧度。point/points 为交点、投影点、椭圆点或直线中心等计算结果，count 为结果点数；inputPoints 仅供核对输入，componentCount 为标量分量数。',
   'jlvision.homMat': '由参数构建 JLVision JlHomMat2D，输出 3×3 矩阵和平台 Transform2D；支持平移、旋转、缩放、倾斜、反射、组合与求逆等。',
   'jlvision.matrixOp': '矩阵转置、求逆、行列式、加减乘除、范数、对称及广义对称特征值、线性求解等。matrix 可直接接到 matrixA/matrixB；未接线时用表格或 JSON。最多 100 万元素，热力图只预览左上 128×128，调试曲线最多 64 点并按幅值归一化；matrix 保留完整结果。',
   'jlvision.measure1d': 'JLVision 原生一维测量对象：矩形或弧形测量，执行 MeasurePos/Pairs/Thresh/Projection，输出边缘 JSON。',
@@ -1684,6 +1695,10 @@ const parameterDescriptions: Record<string, string> = {
   'value.string.padChar': '用于补齐的单个字符；长度不是 1 时失败。',
   'value.string.padSide': '补齐字符加在哪一端。',
   'value.string.maxLength': '结果字符串的 UTF-16 码元上限。超出时失败，而不是静默截断后存储。',
+  'flow.log.level': '宿主日志与运行报告共用的级别；未知级别直接失败，不会默默按 info 处理。',
+  'flow.log.message': '写入宿主日志与运行报告的文本；message 端口接线时覆盖此参数。文本为空也照常记录（观测手段不应中断产线）。需要拼测量值时先用 value.string 组好。',
+  'flow.fail.code': '拼在失败消息前的短代码，形如 [CODE]；1-64 字符，不能为空。',
+  'flow.fail.message': '作为运行错误上报的原因；message 端口接线时覆盖此参数，空白文本回退为默认句子。最长 4096 字符。',
   'flow.while.maxIterations': '迭代硬上限（1-10000）。即使条件恒为真，达到上限也会退出，避免接线错误把运行时挂死。',
   'flow.repeat.count': '循环体执行次数（1-100000），仅在 count 端口未接线时生效；端口接线时以端口值为准。',
   'flow.break.reason': '可选的跳出原因，写入诊断与运行报告（最长 512 字符）。',

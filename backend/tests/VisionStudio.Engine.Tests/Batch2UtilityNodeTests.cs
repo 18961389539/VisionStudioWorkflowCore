@@ -130,7 +130,7 @@ public sealed class Batch2UtilityNodeTests
     [Fact]
     public void Catalog_DeclaresWorkflowCoreOnlyIoAndNoHardwareActions()
     {
-        Assert.Equal(8, Batch2UtilityCatalog.Items.Count);
+        Assert.Equal(10, Batch2UtilityCatalog.Items.Count);
         Assert.All(Batch2UtilityCatalog.Items, item => Assert.Empty(item.Actions!));
         Assert.All(Batch2UtilityCatalog.Items, item => Assert.Equal(VisionExecutionMode.WorkflowCore, item.Capabilities!.ExecutionMode));
         Assert.False(Batch2UtilityCatalog.Items.Single(x => x.Type == "output.saveImage").Capabilities!.SupportsRunNode);

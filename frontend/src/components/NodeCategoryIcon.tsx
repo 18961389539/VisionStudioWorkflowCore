@@ -7,7 +7,8 @@ type NodeIconName =
   | 'ellipse' | 'corner' | 'crosshair' | 'compare' | 'barcode' | 'text' | 'inference' | 'contour'
   | 'region' | 'hull' | 'boundary' | 'skeleton' | 'detections' | 'grid' | 'axes' | 'transform'
   | 'branch' | 'switch' | 'merge' | 'parallel' | 'loop' | 'delay' | 'retry' | 'check' | 'number'
-  | 'device' | 'deviceRead' | 'deviceWrite' | 'robot' | 'robotPose' | 'robotMove' | 'puzzle' | 'file' | 'surface';
+  | 'device' | 'deviceRead' | 'deviceWrite' | 'robot' | 'robotPose' | 'robotMove' | 'puzzle' | 'file' | 'surface'
+  | 'log' | 'stop';
 
 const glyphs: Record<NodeIconName, string[]> = {
   camera: ['M3 7h4l2-3h6l2 3h4v13H3z', 'M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0'],
@@ -67,6 +68,8 @@ const glyphs: Record<NodeIconName, string[]> = {
   robotPose: ['M12 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', 'M6 21v-3a6 6 0 0 1 12 0v3', 'M2 12h3M19 12h3'],
   robotMove: ['M5 19h14M7 19v-5l5-4 3-6 4 2-2 5-5 3', 'M3 5h5M5 3v5'],
   puzzle: ['M9 3H3v6h3a3 3 0 0 1 0 6H3v6h6v-3a3 3 0 0 1 6 0v3h6v-6h-3a3 3 0 0 1 0-6h3V3h-6v3a3 3 0 0 1-6 0z'],
+  log: ['M4 5h16v14H4z', 'M7 9h10M7 13h10M7 17h6'],
+  stop: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18', 'm8.5 8.5 7 7m0-7-7 7'],
   file: ['M6 3h8l4 4v14H6z', 'M14 3v5h5', 'M9 13l2 2 4-4'],
   surface: ['M3 18 9 12l6 3 6-8', 'M3 18h18M9 12v6M15 15v4', 'M3 6l6 3M15 3l6 2']
 };
@@ -109,6 +112,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'flow.join': 'merge', 'flow.merge': 'merge', 'flow.parallel': 'parallel', 'flow.forEach': 'loop',
   'flow.loopEnd': 'loop', 'flow.while': 'loop', 'flow.repeat': 'loop', 'flow.break': 'branch',
   'flow.delay': 'delay', 'flow.try': 'retry', 'flow.result': 'check',
+  'flow.log': 'log', 'flow.fail': 'stop',
   'value.number': 'number', 'value.arithmetic': 'number', 'value.range': 'check', 'value.string': 'text', 'logic.boolean': 'branch',
   'collection.detections.filter': 'sliders', 'collection.detections.sort': 'detections',
   'collection.detections.at': 'crosshair', 'collection.detections.count': 'histogram',

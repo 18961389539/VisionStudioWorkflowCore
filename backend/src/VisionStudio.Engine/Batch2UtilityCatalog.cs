@@ -18,6 +18,26 @@ public static class Batch2UtilityCatalog
                 ],
             "Wait for the configured duration; cancellation stops the wait immediately. Reports requested and measured elapsed time in JSON diagnostics; out-of-range delays fail deterministically.", "builtin",
             new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: []),
+        new("flow.log", "Log", "Flow", [Exec, new("message", VisionDataType.String, Required: false)],
+            [new("message", VisionDataType.String), new("level", VisionDataType.String), new("severity", VisionDataType.Integer), new("logged", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
+            [new("level", "Level", "select", "info", Group: "Log", Description: "Severity used for both the host log entry and the run report; unknown values fail instead of defaulting to info.", Options:
+            [
+                new("Debug", "debug"),
+                new("Info", "info"),
+                new("Warning", "warning"),
+                new("Error", "error")
+            ]),
+                new("message", "Message", "textarea", "", Group: "Log", Description: "Text recorded in the host log and the run report. The message input overrides it; empty text is logged as-is (observability must not stop the line). Compose strings with value.string when the text depends on measurements.")
+                ],
+            "Write a custom log line without leaving the workflow: the text goes to the host log (via Microsoft.Extensions.Logging, tagged with the run and node id) and into this node's run report so it is visible in the trace panel. Wire: exec in, next out; optional message input overrides the message parameter. Levels are debug/info/warning/error and map to host log levels plus a numeric severity (0-3). No template expansion — build the text with value.string first. Messages are capped at 4096 characters; oversized text fails instead of being silently cut. This node never fails on empty messages.", "builtin",
+            new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: []),
+        new("flow.fail", "Fail", "Flow", [Exec, new("message", VisionDataType.String, Required: false)],
+            [Next, new("code", VisionDataType.String, Required: false), new("diagnostics", VisionDataType.String, Required: false)],
+            [new("code", "Failure Code", "text", "NODE_FAILURE", Group: "Failure", Description: "Short machine-readable code prefixed to the failure message as [CODE]; 1-64 characters, must not be blank."),
+                new("message", "Failure Message", "textarea", "Workflow stopped by flow.fail.", Group: "Failure", Description: "Reason reported as the run error. The message input overrides it; blank text falls back to the default sentence. At most 4096 characters.")
+                ],
+            "Stop the whole run with an explicit reason instead of waiting for some later node to fail by accident. The node always throws, so the run result reports this message as the error and the trace marks this node as failed; the next port exists only so the graph stays wireable (nothing after it executes). Use flow.result when you only need an OK/NG disposition that keeps running. Because flow.try bodies only accept deterministic pipeline nodes, Fail cannot be used inside a try body to reach the error branch.", "builtin",
+            new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: []),
         new("flow.ifBoolean", "Boolean If", "Flow", [Exec, new("condition", VisionDataType.Boolean)],
             [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean), new("branch", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("elapsedMs", VisionDataType.Double), new("label", VisionDataType.String)], [new("trueLabel", "True Branch Label", "text", "true", Description: "Label recorded in diagnostics when the boolean is true."),
                 new("falseLabel", "False Branch Label", "text", "false", Description: "Label recorded in diagnostics when the boolean is false."),
