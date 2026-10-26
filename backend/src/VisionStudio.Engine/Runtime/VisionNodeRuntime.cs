@@ -95,6 +95,19 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             if (node.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase))
                 data.MarkParallelBranches(node.Id);
 
+            // 通用循环：循环节点自身作为入口标记执行一次，在这里初始化跨迭代状态。
+            // while 的预算是参数；repeat 的总次数由执行器解析（端口优先）后随 total 输出回传。
+            if (node.Type.Equals("flow.while", StringComparison.OrdinalIgnoreCase))
+            {
+                data.BeginLoop(node.Id, "while", node.GetInt("maxIterations", 100));
+            }
+            else if (node.Type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!result.Outputs.TryGetValue("total", out var totalValue) || totalValue.Value is not long total || total is < 1)
+                    throw new InvalidOperationException($"flow.repeat '{node.Id}' did not publish a positive iteration total.");
+                data.BeginLoop(node.Id, "repeat", (int)total);
+            }
+
             if (node.Type.Equals("flow.result", StringComparison.OrdinalIgnoreCase) &&
                 result.Outputs.TryGetValue("disposition", out var disposition) &&
                 disposition.Type == VisionDataType.String && disposition.Value is string qualityDisposition)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "c56159c21f4562769aff700c80e4714875e7b798ed8392154e478e0d7c4cf238",
+  "hash": "83b7bb57ff2a84d7ebb53e80cad0440ffae8b974d3333234a2209f261c64f3b3",
   "items": [
     {
       "type": "image.acquire",
@@ -9609,6 +9609,65 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "flow.break",
+      "displayName": "Break Loop",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "breakRequested",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "reason",
+          "label": "Reason",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Diagnostics",
+          "description": "Optional free-form reason recorded in diagnostics and the run report (max 512 characters)."
+        }
+      ],
+      "description": "Exit the enclosing flow.while or flow.repeat early. Wire: exec in, next to whatever should still run in this iteration before the loop ends. The node sets the loop break flag, so the remaining steps of the current iteration are skipped and the next condition check ends the loop through the done route. This node must be wired directly in the loop body sequence: break inside If/Switch/Try/Parallel branches and break inside flow.forEach are rejected at compile time because the semantics would be misleading.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "flow.delay",
       "displayName": "Delay",
       "category": "Flow",
@@ -10317,7 +10376,7 @@
           "description": "When true, stamp an iteration-hint flag into diagnostics for host tooling."
         }
       ],
-      "description": "Marks the end of a forEach body and returns control to its paired flow.forEach node. It cannot be used as an arbitrary graph jump. Emits a JSON diagnostics boundary marker.",
+      "description": "Marks the end of a loop body (flow.forEach, flow.while or flow.repeat) and returns control to its paired loop node. It cannot be used as an arbitrary graph jump. Emits a JSON diagnostics boundary marker.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -10384,6 +10443,94 @@
       "parameters": [],
       "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
       "pluginId": "builtin",
+      "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "flow.repeat",
+      "displayName": "Repeat Loop",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "repeat",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "body",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "done",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "total",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "iteration",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "isLast",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "count",
+          "label": "Repeat Count",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 100000,
+          "step": 1,
+          "group": "Limits",
+          "description": "Number of body iterations (1-100000) used when the count input is not connected; a connected count input wins.",
+          "integer": true
+        }
+      ],
+      "description": "Fixed-count loop: run the body exactly count times. Wire: exec in, body out to the body sequence, done to the continuation, optional count input overrides the parameter; the body must end at flow.loopEnd wired back to the repeat input. Inside the body, index (0-based), iteration (1-based), total and isLast are available as ordinary data ports. flow.break inside the body exits early; a count of 0 or a negative count fails instead of silently skipping.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -10763,6 +10910,94 @@
       },
       "actions": [],
       "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "flow.while",
+      "displayName": "While Loop",
+      "category": "Flow",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "repeat",
+          "dataType": "Control",
+          "required": false
+        },
+        {
+          "name": "condition",
+          "dataType": "Boolean",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "body",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "done",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "condition",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "iteration",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "isLast",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "maxIterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 10000,
+          "step": 1,
+          "group": "Limits",
+          "description": "Hard iteration budget (1-10000). The loop exits once it is reached even if the condition stays true, so a mis-wired condition cannot hang the runtime.",
+          "integer": true
+        }
+      ],
+      "description": "Do-while condition loop: run the body once, then re-check the connected condition at the end of each iteration and repeat while it stays true. Wire: exec in, body out to the body sequence, done to the continuation, and the condition input to a Boolean produced inside the body (for example flow.result.pass) so it is re-sampled every iteration; the body must end at flow.loopEnd wired back to the repeat input. The condition is sampled after the body, so the first iteration always runs; a condition wired before the loop is constant and only the iteration budget can end it. A condition source that is skipped by an If branch keeps its previous value. flow.break inside the body exits early; diagnostics report kind, budget and condition wiring.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": false,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,

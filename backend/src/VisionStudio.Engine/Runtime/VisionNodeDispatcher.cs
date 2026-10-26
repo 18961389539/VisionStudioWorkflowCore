@@ -125,13 +125,22 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
 
         foreach (var edge in incomingDataEdges)
         {
-            if (!outputsByNode.TryGetValue(edge.SourceNodeId, out var sourceOutputs))
-                throw new InvalidOperationException($"Source node '{edge.SourceNodeId}' has not executed.");
-            if (!sourceOutputs.TryGetValue(edge.SourcePort, out var value))
-                throw new InvalidOperationException($"Output '{edge.SourcePort}' does not exist on '{edge.SourceNodeId}'.");
-
             var expected = targetCatalog.Inputs.FirstOrDefault(p => p.Name.Equals(edge.TargetPort, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException($"Input port '{edge.TargetPort}' does not exist on node type '{node.Type}'.");
+
+            if (!outputsByNode.TryGetValue(edge.SourceNodeId, out var sourceOutputs))
+            {
+                // 回边（loop condition）在首轮尚未执行：可选输入按"未接线"处理，
+                // 必填输入仍然报错，避免把真正的接线错误吞掉。
+                if (!expected.IsRequired(node, targetCatalog)) continue;
+                throw new InvalidOperationException($"Source node '{edge.SourceNodeId}' has not executed.");
+            }
+            if (!sourceOutputs.TryGetValue(edge.SourcePort, out var value))
+            {
+                if (!expected.IsRequired(node, targetCatalog)) continue;
+                throw new InvalidOperationException($"Output '{edge.SourcePort}' does not exist on '{edge.SourceNodeId}'.");
+            }
+
             if (!AreCompatible(value.Type, expected.DataType))
                 throw new InvalidOperationException($"Runtime type mismatch on {edge.SourceNodeId}.{edge.SourcePort} -> {node.Id}.{edge.TargetPort}: {value.Type} -> {expected.DataType}.");
 

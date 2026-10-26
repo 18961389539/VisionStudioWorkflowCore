@@ -138,7 +138,7 @@ public sealed class Batch4IterationTests
     [Fact]
     public void CatalogDeclaresForEachAndLoopEnd()
     {
-        Assert.Equal(new[]{"flow.forEach","flow.loopEnd"}.Order(),Batch4IterationCatalog.Items.Select(x=>x.Type).Order());
+        Assert.Equal(new[]{"flow.forEach","flow.loopEnd","flow.while","flow.repeat","flow.break"}.Order(),Batch4IterationCatalog.Items.Select(x=>x.Type).Order());
     }
 
     private static WorkflowDefinition Workflow(int count)=>new("foreach-"+count,"ForEach",

@@ -62,6 +62,10 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     private readonly string _pipelineStepType = typeof(VisionPipelineStep).AssemblyQualifiedName
         ?? throw new InvalidOperationException("Cannot resolve VisionPipelineStep assembly name.");
 
+    /// <summary>通用循环（flow.while / flow.repeat / flow.break）的迭代步类型。</summary>
+    private readonly string _loopStepType = typeof(VisionLoopStep).AssemblyQualifiedName
+        ?? throw new InvalidOperationException("Cannot resolve VisionLoopStep assembly name.");
+
     private readonly string _dataType = typeof(VisionWorkflowData).AssemblyQualifiedName
         ?? throw new InvalidOperationException("Cannot resolve VisionWorkflowData assembly name.");
 
@@ -1128,6 +1132,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     steps.AddRange(CompileForEach(loop, nextStepId, context, loopNodeId));
                     break;
 
+                case StructuredLoopIr loop:
+                    steps.AddRange(CompileLoop(loop, nextStepId, context, loopNodeId));
+                    break;
+
+                case StructuredBreakIr breakItem:
+                    steps.AddRange(CompileBreak(breakItem, nextStepId, context, loopNodeId));
+                    break;
+
                 case StructuredParallelIr parallel:
                     steps.AddRange(CompileParallel(parallel, nextStepId, context, loopNodeId));
                     break;
@@ -1261,6 +1273,102 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         return [marker, foreachPrimitive];
     }
 
+    /// <summary>
+    /// 通用循环编译：marker（循环节点自身执行一次，初始化循环状态）→ While 原语
+    /// （Do = [begin, 循环体..., end]）。条件表达式只用到 &amp;&amp; / == 与字典索引器，
+    /// 与既有 BranchConditions 表达式同一形态，不依赖求值器对比较运算符或方法调用的支持。
+    /// </summary>
+    private IReadOnlyList<Dictionary<string, object?>> CompileLoop(
+        StructuredLoopIr loop,
+        string? continuationStepId,
+        CompileContext context,
+        string? enclosingLoopNodeId)
+    {
+        var loopId = loop.Node.Id;
+        var whileId = $"{loopId}.__while";
+        var beginId = $"{loopId}.__loop_begin";
+        var endId = $"{loopId}.__loop_end";
+
+        var marker = CreateVisionStep(loopId, whileId, enclosingLoopNodeId);
+        // 循环体统一以 end 步收尾：break 守卫即使被跳过也要走到 end，
+        // 才能刷新条件并读到中断标志，从而在下一轮条件求值时退出。
+        var bodySteps = CompileSequence(loop.Body, continuationStepId: endId, context, loopId).ToList();
+        // begin 必须显式指向循环体第一步：Workflow Core 的容器从 Do 的第一个步骤开始，
+        // 之后只沿 NextStepId 前进，缺少链路的步骤会被直接跳过（body 永不执行）。
+        var firstBodyStepId = bodySteps.Count > 0 ? bodySteps[0]["Id"] as string : null;
+        bodySteps.Insert(0, CreateLoopStep(beginId, loopId, "begin", loop.Kind, source: null, nextStepId: firstBodyStepId ?? endId));
+        bodySteps.Add(CreateLoopStep(endId, loopId, "end", loop.Kind, loop.ConditionSource));
+
+        var whilePrimitive = new Dictionary<string, object?>
+        {
+            ["Id"] = whileId,
+            ["StepType"] = "WorkflowCore.Primitives.While, WorkflowCore",
+            ["Inputs"] = new Dictionary<string, string>
+            {
+                ["Condition"] = $"data.LoopConditions[{JsonSerializer.Serialize(loopId)}] && data.LoopBreaks[{JsonSerializer.Serialize(loopId)}] == false"
+            },
+            ["Do"] = new object[] { bodySteps.ToArray() },
+            ["ErrorBehavior"] = "Terminate"
+        };
+        if (continuationStepId is not null) whilePrimitive["NextStepId"] = continuationStepId;
+        return [marker, whilePrimitive];
+    }
+
+    /// <summary>
+    /// break 编译：节点本身先执行（记录原因）→ 置位中断标志 → 用 If 守卫本轮剩余步骤。
+    /// 守卫被跳过时直接接 continuation（循环末尾的 end 步），所以仍会刷新条件并正常退出。
+    /// </summary>
+    private IReadOnlyList<Dictionary<string, object?>> CompileBreak(
+        StructuredBreakIr breakItem,
+        string? continuationStepId,
+        CompileContext context,
+        string? loopNodeId)
+    {
+        if (loopNodeId is null)
+            throw new InvalidOperationException($"flow.break '{breakItem.Node.Id}' must be compiled inside a flow.while or flow.repeat body.");
+        var setBreakId = $"{breakItem.Node.Id}.__break";
+        var marker = CreateVisionStep(breakItem.Node.Id, setBreakId, loopNodeId);
+        var guardId = $"{breakItem.Node.Id}.__break_guard";
+        var setBreak = CreateLoopStep(setBreakId, loopNodeId, "break", "while", source: null, nextStepId: guardId);
+        var guard = new Dictionary<string, object?>
+        {
+            ["Id"] = guardId,
+            ["StepType"] = "WorkflowCore.Primitives.If, WorkflowCore",
+            ["Inputs"] = new Dictionary<string, string>
+            {
+                ["Condition"] = $"data.LoopBreaks[{JsonSerializer.Serialize(loopNodeId)}] == false"
+            },
+            ["Do"] = new object[] { CompileSequence(breakItem.Remaining, continuationStepId, context, loopNodeId).ToArray() },
+            ["ErrorBehavior"] = "Terminate"
+        };
+        if (continuationStepId is not null) guard["NextStepId"] = continuationStepId;
+        return [marker, setBreak, guard];
+    }
+
+    private Dictionary<string, object?> CreateLoopStep(string stepId, string loopNodeId, string action, string kind, LoopConditionSource? source, string? nextStepId = null)
+    {
+        var inputs = new Dictionary<string, string>
+        {
+            ["LoopNodeId"] = JsonSerializer.Serialize(loopNodeId),
+            ["Action"] = JsonSerializer.Serialize(action),
+            ["Kind"] = JsonSerializer.Serialize(kind)
+        };
+        if (source is not null)
+        {
+            inputs["SourceNodeId"] = JsonSerializer.Serialize(source.NodeId);
+            inputs["SourcePort"] = JsonSerializer.Serialize(source.Port);
+        }
+        var step = new Dictionary<string, object?>
+        {
+            ["Id"] = stepId,
+            ["StepType"] = _loopStepType,
+            ["Inputs"] = inputs,
+            ["ErrorBehavior"] = "Terminate"
+        };
+        if (nextStepId is not null) step["NextStepId"] = nextStepId;
+        return step;
+    }
+
     private void ValidateTryBody(StructuredTryIr attempt, IReadOnlyList<EdgeDefinition> edges)
     {
         if (attempt.Body.Items.Any(item => item is not StructuredNodeIr))
@@ -1377,6 +1485,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                     yield return loop.Node;
                     foreach (var child in EnumerateNodes(loop.Body)) yield return child;
                     break;
+                case StructuredLoopIr loop:
+                    yield return loop.Node;
+                    foreach (var child in EnumerateNodes(loop.Body)) yield return child;
+                    break;
+                case StructuredBreakIr breakItem:
+                    yield return breakItem.Node;
+                    foreach (var child in EnumerateNodes(breakItem.Remaining)) yield return child;
+                    break;
                 case StructuredParallelIr parallel:
                     yield return parallel.Node;
                     foreach (var child in EnumerateNodes(parallel.Branch1)) yield return child;
@@ -1393,6 +1509,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         StructuredSwitchIr branch => branch.Node.Id,
         StructuredTryIr attempt => attempt.Node.Id,
         StructuredForEachIr loop => loop.Node.Id,
+        StructuredLoopIr loop => loop.Node.Id,
+        StructuredBreakIr breakItem => breakItem.Node.Id,
         StructuredParallelIr parallel => parallel.Node.Id,
         _ => throw new InvalidOperationException($"Unsupported structured IR item '{item.GetType().Name}'.")
     };

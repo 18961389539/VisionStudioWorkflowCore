@@ -45,6 +45,7 @@ const nodeNames: Record<string, string> = {
   'inference.classification': '图像分类', 'inference.detection': '目标检测', 'inference.obb': '旋转框检测',
   'inference.segmentation': '语义分割', 'inference.instanceSegmentation': '实例分割', 'inference.pose': '关键点检测', 'inference.anomaly': '图像异常检测',
   'flow.forEach': '逐目标执行', 'flow.loopEnd': '循环体结束', 'flow.try': '异常分支 / 重试',
+  'flow.while': '条件循环', 'flow.repeat': '定次循环', 'flow.break': '跳出循环',
   'calibration.cameraIntrinsics': '相机内参标定', 'image.undistort': '畸变校正', 'calibration.handEye2D': '二维手眼标定', 'calibration.handEye3D': '三维手眼标定',
   'collection.detections.filter': '筛选检测目标', 'collection.detections.sort': '目标排序',
   'collection.detections.at': '按索引提取目标', 'collection.detections.count': '目标计数',
@@ -547,6 +548,9 @@ const parameterNames: Record<string, string> = {
   'Pad Character': '补齐字符',
   'Pad Side': '补齐方向',
   'Max Characters': '最大字符数',
+  'Max Iterations': '最大迭代次数',
+  'Repeat Count': '重复次数',
+  'Reason': '原因',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -1309,6 +1313,7 @@ const optionNames: Record<string, string> = {
  *  en 模式 localizeCatalog 直通原文，节点回落英文端口名。 */
 export const portNames: Record<string, string> = {
   runId: '运行 ID', partId: '产品编号', fileName: '文件名', charCount: '字符数',
+  iteration: '第几轮', total: '总轮数', isLast: '最后一轮', breakRequested: '请求跳出',
   rawProjectionT: '原始投影参数 t', projectionClamped: '已裁剪至端点', projectedPoint: '直线垂足', lineDistance: '直线垂距',
   xWritten: 'X 已写入', yWritten: 'Y 已写入', rWritten: 'R 已写入', url: '请求地址', idempotencyKey: '幂等键',
   heightField: '相对高度场', shadingImage: '表面渲染图', resultKind: '结果含义',
@@ -1618,7 +1623,10 @@ const descriptions: Record<string, string> = {
   'jlvision.contourOp': '对每条输入轮廓执行一个 JLVision XLD 轮廓算子（生成、闭合、平滑、分割、并/差/交、裁剪和选择等），每个结果转换为一个平台轮廓。',
   'image.flatFieldCorrect': '平场校正，支持增益+偏移、仅增益或仅偏移；可选暗场、百分位裁剪和增益保护，统计描述实际输出。',
   'flow.delay': '等待指定时长，取消会立即停止；输出请求与实际耗时诊断，超出范围的延时直接失败。',
-  'flow.loopEnd': '标记 forEach 循环体结束并返回配对节点，不能作为任意图跳转，输出 JSON 边界诊断。',
+  'flow.loopEnd': '标记循环体结束（flow.forEach / flow.while / flow.repeat）并返回配对节点，不能作为任意图跳转，输出 JSON 边界诊断。',
+  'flow.while': '先执行一轮循环体，再在每轮末尾重新采样条件：为真继续，为假走 done。接线：exec 进、body 出到循环体、done 出到后续，condition 接一个循环体内产生的布尔量（如 flow.result.pass）才能逐轮刷新；循环体必须以 flow.loopEnd 收尾并把 repeat 接回本节点。条件在循环体之后采样，因此首轮必然执行；接在循环之前的条件恒定不变，只能靠迭代预算退出；被 If 分支跳过的条件来源会沿用上一轮的值。循环体内可放 flow.break 提前退出；诊断记录循环种类、预算与条件接线情况。',
+  'flow.repeat': '按固定次数执行循环体。接线：exec 进、body 出到循环体、done 出到后续，count 端口接线时优先于参数；循环体必须以 flow.loopEnd 收尾并把 repeat 接回本节点；循环体内可通过普通数据边读取 index（0 起）、iteration（1 起）、total 与 isLast。循环体内可放 flow.break 提前退出；次数为 0 或负数直接失败，不会静默跳过。',
+  'flow.break': '提前退出当前 flow.while 或 flow.repeat。接线：exec 进、next 接本轮仍应执行的后续步骤。节点会置位循环中断标志，本轮剩余步骤被跳过，下一轮条件求值失败后走 done 路由。必须直接接在循环体主序列里：If/Switch/Try/Parallel 分支内的 break、以及 flow.forEach 内的 break 都会在编译期被拒绝，因为语义会误导。',
   'jlvision.geometry': '几何与滤波信息计算；角度输出为弧度。point/points 为交点、投影点、椭圆点或直线中心等计算结果，count 为结果点数；inputPoints 仅供核对输入，componentCount 为标量分量数。',
   'jlvision.homMat': '由参数构建 JLVision JlHomMat2D，输出 3×3 矩阵和平台 Transform2D；支持平移、旋转、缩放、倾斜、反射、组合与求逆等。',
   'jlvision.matrixOp': '矩阵转置、求逆、行列式、加减乘除、范数、对称及广义对称特征值、线性求解等。matrix 可直接接到 matrixA/matrixB；未接线时用表格或 JSON。最多 100 万元素，热力图只预览左上 128×128，调试曲线最多 64 点并按幅值归一化；matrix 保留完整结果。',
@@ -1676,6 +1684,9 @@ const parameterDescriptions: Record<string, string> = {
   'value.string.padChar': '用于补齐的单个字符；长度不是 1 时失败。',
   'value.string.padSide': '补齐字符加在哪一端。',
   'value.string.maxLength': '结果字符串的 UTF-16 码元上限。超出时失败，而不是静默截断后存储。',
+  'flow.while.maxIterations': '迭代硬上限（1-10000）。即使条件恒为真，达到上限也会退出，避免接线错误把运行时挂死。',
+  'flow.repeat.count': '循环体执行次数（1-100000），仅在 count 端口未接线时生效；端口接线时以端口值为准。',
+  'flow.break.reason': '可选的跳出原因，写入诊断与运行报告（最长 512 字符）。',
   'flow.try.failOnWarning': '执行体返回的 warningCount 大于 0 时按失败处理；由工作流运行时实现。',
   'coordinate.point.requireFinite': '拒绝非有限的 X/Y 坐标。',
   'coordinate.pose.requireFinite': '拒绝非有限的位姿分量。',

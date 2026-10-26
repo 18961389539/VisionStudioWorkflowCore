@@ -71,6 +71,37 @@ internal sealed record StructuredForEachIr(
     public override IReadOnlyList<string> NodeIds => [Node.Id, .. Body.NodeIds];
 }
 
+/// <summary>flow.while 的条件来源：循环体（或循环之前）某节点的一个 Boolean 输出端口。</summary>
+internal sealed record LoopConditionSource(string NodeId, string Port);
+
+/// <summary>
+/// 通用循环（flow.while / flow.repeat）。与 ForEach 的区别是迭代次数由条件或计数决定，
+/// 而不是由集合元素决定；两者共用 flow.loopEnd + repeat 回边的配对约定。
+/// </summary>
+internal sealed record StructuredLoopIr(
+    NodeDefinition Node,
+    string Kind,
+    StructuredSequenceIr Body,
+    string LoopEndNodeId,
+    int Depth,
+    LoopConditionSource? ConditionSource,
+    int MaxIterations) : StructuredIrItem
+{
+    public override IReadOnlyList<string> NodeIds => [Node.Id, .. Body.NodeIds];
+}
+
+/// <summary>
+/// flow.break：节点本身之后的本轮剩余步骤被包进 <c>If(!broken)</c> 守卫。
+/// Remaining 可以为空（break 正好是循环体最后一步）。
+/// </summary>
+internal sealed record StructuredBreakIr(
+    NodeDefinition Node,
+    StructuredSequenceIr Remaining,
+    int Depth) : StructuredIrItem
+{
+    public override IReadOnlyList<string> NodeIds => [Node.Id, .. Remaining.NodeIds];
+}
+
 internal sealed record StructuredSequenceIr(IReadOnlyList<StructuredIrItem> Items)
 {
     public IReadOnlyList<string> NodeIds => Items.SelectMany(x => x.NodeIds).ToArray();
@@ -124,7 +155,7 @@ internal sealed class StructuredWorkflowIrBuilder
             new Dictionary<string, IReadOnlyList<string>>(_tryBodies, StringComparer.OrdinalIgnoreCase));
     }
 
-    private StructuredSequenceIr BuildSequence(string startId, string? stopJoinId, string ownerId, int depth, string? stopLoopEndId = null)
+    private StructuredSequenceIr BuildSequence(string startId, string? stopJoinId, string ownerId, int depth, string? stopLoopEndId = null, string? enclosingLoopId = null, bool breakAllowed = false)
     {
         var items = new List<StructuredIrItem>();
         var currentId = startId;
@@ -138,7 +169,7 @@ internal sealed class StructuredWorkflowIrBuilder
             {
                 var loopEnd = _graph.Node(currentId);
                 if (!loopEnd.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"ForEach body '{ownerId}' expected flow.loopEnd '{stopLoopEndId}'.");
+                    throw new InvalidOperationException($"Loop body '{ownerId}' expected flow.loopEnd '{stopLoopEndId}'.");
                 Claim(loopEnd.Id, ownerId);
                 _visualOrder.Add(loopEnd.Id);
                 items.Add(new StructuredNodeIr(loopEnd));
@@ -158,13 +189,39 @@ internal sealed class StructuredWorkflowIrBuilder
             Claim(node.Id, ownerId);
             _visualOrder.Add(node.Id);
 
-            if (node.Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase))
+            if (node.Type.Equals("flow.break", StringComparison.OrdinalIgnoreCase))
             {
+                // break 只支持直接写在 while/repeat 的循环体主序列里：它把"本轮剩余步骤"整体包进守卫，
+                // 若出现在 If/Switch/Try/Parallel 分支内，分支退出后外层还有步骤会继续执行，语义不成立，
+                // 因此明确拒绝而不是给出半正确的行为。forEach 没有提前退出语义，同样拒绝。
+                if (enclosingLoopId is null)
+                    throw new InvalidOperationException($"flow.break '{node.Id}' must be placed inside a flow.while or flow.repeat body.");
+                if (!breakAllowed)
+                    throw new InvalidOperationException($"flow.break '{node.Id}' cannot be used inside this loop kind; only flow.while and flow.repeat support early exit (forEach has no break).");
+                if (stopLoopEndId is null)
+                    throw new InvalidOperationException($"flow.break '{node.Id}' must be wired directly in the loop body sequence; break inside If/Switch/Try/Parallel branches is not supported.");
+
+                var breakOutgoing = _graph.Outgoing(node.Id);
+                if (breakOutgoing.Count != 1)
+                    throw new InvalidOperationException($"flow.break '{node.Id}' requires exactly one 'next' control edge; found {breakOutgoing.Count}.");
+                if (breakOutgoing[0].SourcePort.Equals("exec", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"flow.break '{node.Id}' must use its 'next' control output.");
+
+                var remaining = BuildSequence(breakOutgoing[0].TargetNodeId, stopJoinId, $"{ownerId}.afterBreak", depth + 1,
+                    stopLoopEndId, enclosingLoopId, breakAllowed);
+                items.Add(new StructuredBreakIr(node, remaining, depth));
+                return new StructuredSequenceIr(items);
+            }
+
+            if (IsLoopNode(node))
+            {
+                var kind = LoopKindOf(node.Type);
+                var label = LoopLabel(kind);
                 var outgoing = _graph.Outgoing(node.Id);
                 var expectedPorts = new[] { "body", "done" };
                 var unexpected = outgoing.Where(e => !expectedPorts.Contains(e.SourcePort, StringComparer.OrdinalIgnoreCase)).ToArray();
                 if (unexpected.Length > 0)
-                    throw new InvalidOperationException($"ForEach '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
+                    throw new InvalidOperationException($"{label} '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
                 var bodyEdge = SinglePort(outgoing, "body", node.Id);
                 var doneEdge = SinglePort(outgoing, "done", node.Id);
                 var pairedEnds = _graph.Workflow.Nodes.Where(candidate => candidate.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase) &&
@@ -172,30 +229,51 @@ internal sealed class StructuredWorkflowIrBuilder
                     _graph.Outgoing(candidate.Id)[0].SourcePort.Equals("repeat", StringComparison.OrdinalIgnoreCase) &&
                     _graph.Outgoing(candidate.Id)[0].TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
                 if (pairedEnds.Length != 1)
-                    throw new InvalidOperationException($"ForEach '{node.Id}' requires exactly one paired flow.loopEnd repeat edge; found {pairedEnds.Length}.");
+                    throw new InvalidOperationException($"{label} '{node.Id}' requires exactly one paired flow.loopEnd repeat edge; found {pairedEnds.Length}.");
                 var loopEndId = pairedEnds[0].Id;
                 var loopEndIncoming = _graph.Incoming(loopEndId);
                 if (loopEndIncoming.Count != 1 || !_graph.Outgoing(loopEndId).Single().TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' must have exactly one body predecessor and one repeat edge to ForEach '{node.Id}'.");
+                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' must have exactly one body predecessor and one repeat edge to {label} '{node.Id}'.");
                 if (!_pairedLoopEnds.Add(loopEndId))
-                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' is paired with more than one ForEach.");
+                    throw new InvalidOperationException($"flow.loopEnd '{loopEndId}' is paired with more than one loop node.");
 
-                var body = BuildSequence(bodyEdge.TargetNodeId, stopJoinId: null, ownerId: $"{node.Id}.body", depth: depth + 1, stopLoopEndId: loopEndId);
+                // 循环体内允许 flow.break 的只有 while/repeat（forEach 没有提前退出语义）。
+                var body = BuildSequence(bodyEdge.TargetNodeId, stopJoinId: null, ownerId: $"{node.Id}.body", depth: depth + 1,
+                    stopLoopEndId: loopEndId, enclosingLoopId: node.Id, breakAllowed: kind != "forEach");
                 if (body.Items.Count == 0 || !body.NodeIds.Contains(loopEndId, StringComparer.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"ForEach '{node.Id}' body does not reach paired flow.loopEnd '{loopEndId}'.");
+                    throw new InvalidOperationException($"{label} '{node.Id}' body does not reach paired flow.loopEnd '{loopEndId}'.");
                 var doneStart = _graph.Node(doneEdge.TargetNodeId);
                 if (_claimed.Contains(doneStart.Id))
-                    throw new InvalidOperationException($"ForEach '{node.Id}' done route overlaps an already claimed node '{doneStart.Id}'.");
-                ValidateDynamicLoopOutputs(node, body.NodeIds);
-                items.Add(new StructuredForEachIr(node, body, loopEndId, depth));
-                _regions.Add(new StructuredControlRegion(node.Id, "ForEach", loopEndId, depth,
+                    throw new InvalidOperationException($"{label} '{node.Id}' done route overlaps an already claimed node '{doneStart.Id}'.");
+
+                LoopConditionSource? conditionSource = null;
+                var maxIterations = 0;
+                switch (kind)
+                {
+                    case "forEach":
+                        ValidateDynamicLoopOutputs(node, body.NodeIds);
+                        break;
+                    case "while":
+                        conditionSource = ResolveWhileConditionSource(node);
+                        maxIterations = node.GetInt("maxIterations", 100);
+                        break;
+                    default:
+                        // count 走端口时编译期拿不到值，用上限作为迭代预算；实际次数由运行时 total 决定。
+                        maxIterations = HasConnectedDataInput(node.Id, "count") ? RepeatLoopNode.MaxCountCeiling : node.GetInt("count", 3);
+                        break;
+                }
+
+                items.Add(kind == "forEach"
+                    ? new StructuredForEachIr(node, body, loopEndId, depth)
+                    : new StructuredLoopIr(node, kind, body, loopEndId, depth, conditionSource, maxIterations));
+                _regions.Add(new StructuredControlRegion(node.Id, LoopRegionKind(kind), loopEndId, depth,
                     new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase) { ["body"] = body.NodeIds, ["done"] = [] }));
                 currentId = doneEdge.TargetNodeId;
                 continue;
             }
 
             if (node.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"flow.loopEnd '{node.Id}' is not paired with its active flow.forEach body.");
+                throw new InvalidOperationException($"flow.loopEnd '{node.Id}' is not paired with its active flow.forEach / flow.while / flow.repeat body.");
 
             if (IsIfNode(node))
             {
@@ -210,8 +288,8 @@ internal sealed class StructuredWorkflowIrBuilder
                 EnsureNonEmptyBranch(node.Id, "true", trueEdge.TargetNodeId, joinId);
                 EnsureNonEmptyBranch(node.Id, "false", falseEdge.TargetNodeId, joinId);
 
-                var trueBranch = BuildSequence(trueEdge.TargetNodeId, joinId, $"{node.Id}.true", depth + 1);
-                var falseBranch = BuildSequence(falseEdge.TargetNodeId, joinId, $"{node.Id}.false", depth + 1);
+                var trueBranch = BuildSequence(trueEdge.TargetNodeId, joinId, $"{node.Id}.true", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                var falseBranch = BuildSequence(falseEdge.TargetNodeId, joinId, $"{node.Id}.false", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
                 ValidateNoCrossBranchData(node.Id, trueBranch.NodeIds, falseBranch.NodeIds);
 
                 items.Add(new StructuredIfIr(node, trueBranch, falseBranch, joinId, depth));
@@ -256,7 +334,7 @@ internal sealed class StructuredWorkflowIrBuilder
                     var edge = branchEdges[index];
                     var port = expectedPorts[index];
                     EnsureNonEmptyBranch(node.Id, port, edge.TargetNodeId, joinId);
-                    var branch = BuildSequence(edge.TargetNodeId, joinId, $"{node.Id}.{port}", depth + 1);
+                    var branch = BuildSequence(edge.TargetNodeId, joinId, $"{node.Id}.{port}", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
                     var matchingMergeEdge = mergeEdges.Single(x => x.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
                     if (!branch.NodeIds.Contains(matchingMergeEdge.SourceNodeId, StringComparer.OrdinalIgnoreCase))
                         throw new InvalidOperationException($"Switch '{node.Id}' branch '{port}' must converge through the matching flow.merge input '{port}'.");
@@ -294,9 +372,9 @@ internal sealed class StructuredWorkflowIrBuilder
                     incoming.Any(edge => !targetPorts.Contains(edge.TargetPort, StringComparer.OrdinalIgnoreCase)))
                     throw new InvalidOperationException($"Try '{node.Id}' requires exactly one matching merge input per configured branch: case1/body, case2/success, and default/error when routing failures.");
 
-                var body = BuildSequence(edges[0].TargetNodeId, joinId, $"{node.Id}.body", depth + 1);
-                var success = BuildSequence(edges[1].TargetNodeId, joinId, $"{node.Id}.success", depth + 1);
-                var error = needsError ? BuildSequence(edges[2].TargetNodeId, joinId, $"{node.Id}.error", depth + 1) : new StructuredSequenceIr([]);
+                var body = BuildSequence(edges[0].TargetNodeId, joinId, $"{node.Id}.body", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                var success = BuildSequence(edges[1].TargetNodeId, joinId, $"{node.Id}.success", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                var error = needsError ? BuildSequence(edges[2].TargetNodeId, joinId, $"{node.Id}.error", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed) : new StructuredSequenceIr([]);
                 ValidateNoCrossBranchData(node.Id, body.NodeIds, error.NodeIds);
                 ValidateNoCrossBranchData(node.Id, success.NodeIds, error.NodeIds);
                 var branches = needsError ? new[] { body, success, error } : [body, success];
@@ -332,8 +410,8 @@ internal sealed class StructuredWorkflowIrBuilder
                 EnsureNonEmptyBranch(node.Id, "branch1", branch1Edge.TargetNodeId, joinId);
                 EnsureNonEmptyBranch(node.Id, "branch2", branch2Edge.TargetNodeId, joinId);
 
-                var branch1 = BuildSequence(branch1Edge.TargetNodeId, joinId, $"{node.Id}.branch1", depth + 1);
-                var branch2 = BuildSequence(branch2Edge.TargetNodeId, joinId, $"{node.Id}.branch2", depth + 1);
+                var branch1 = BuildSequence(branch1Edge.TargetNodeId, joinId, $"{node.Id}.branch1", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
+                var branch2 = BuildSequence(branch2Edge.TargetNodeId, joinId, $"{node.Id}.branch2", depth + 1, enclosingLoopId: enclosingLoopId, breakAllowed: breakAllowed);
                 ValidateNoCrossBranchData(node.Id, branch1.NodeIds, branch2.NodeIds);
 
                 items.Add(new StructuredParallelIr(node, branch1, branch2, joinId, depth));
@@ -413,6 +491,51 @@ internal sealed class StructuredWorkflowIrBuilder
     private static bool IsIfNode(NodeDefinition node) =>
         node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) ||
         node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLoopNode(NodeDefinition node) =>
+        node.Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase) ||
+        node.Type.Equals("flow.while", StringComparison.OrdinalIgnoreCase) ||
+        node.Type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase);
+
+    private static string LoopKindOf(string type) =>
+        type.Equals("flow.while", StringComparison.OrdinalIgnoreCase) ? "while"
+        : type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase) ? "repeat"
+        : "forEach";
+
+    private static string LoopLabel(string kind) => kind switch
+    {
+        "while" => "flow.while",
+        "repeat" => "flow.repeat",
+        _ => "ForEach"
+    };
+
+    private static string LoopRegionKind(string kind) => kind switch
+    {
+        "while" => "While",
+        "repeat" => "Repeat",
+        _ => "ForEach"
+    };
+
+    /// <summary>
+    /// flow.while 的条件来源必须是一条数据边接到它的 condition 输入。
+    /// 该来源通常在循环体内部（本轮结果），也可以在循环之前（此时条件恒定，靠迭代预算兜底）。
+    /// </summary>
+    private LoopConditionSource ResolveWhileConditionSource(NodeDefinition node)
+    {
+        var edge = _graph.Workflow.Edges.SingleOrDefault(candidate => !WorkflowGraph.IsControlEdge(candidate)
+            && candidate.TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)
+            && candidate.TargetPort.Equals("condition", StringComparison.OrdinalIgnoreCase));
+        if (edge is null)
+            throw new InvalidOperationException(
+                $"flow.while '{node.Id}' requires its 'condition' input to be connected. Wire a boolean that must be re-checked each iteration " +
+                "(for example flow.result.pass, value.range.pass or logic.boolean.result) instead of relying on a constant.");
+        return new LoopConditionSource(edge.SourceNodeId, edge.SourcePort);
+    }
+
+    private bool HasConnectedDataInput(string nodeId, string port) =>
+        _graph.Workflow.Edges.Any(edge => !WorkflowGraph.IsControlEdge(edge)
+            && edge.TargetNodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)
+            && edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsMergeNode(NodeDefinition node) =>
         node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) ||

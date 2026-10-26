@@ -20,6 +20,13 @@ public sealed class VisionWorkflowData : IDisposable
     private readonly ConcurrentQueue<VisionOverlay> _overlays = new();
     private readonly ConcurrentDictionary<string, bool> _branchConditions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _switchSelections = new(StringComparer.OrdinalIgnoreCase);
+    // 通用循环（flow.while / flow.repeat / flow.break）的跨迭代状态：
+    // 条件槽由循环末尾的采样步写入，Workflow Core 的 While 原语每轮重新求值 Condition 表达式。
+    private readonly ConcurrentDictionary<string, bool> _loopConditions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _loopBreaks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _loopCounters = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _loopTotals = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _loopKinds = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _trySucceeded = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _tryRegionGate = new();
     private readonly object _tryAttemptGate = new();
@@ -134,6 +141,67 @@ public sealed class VisionWorkflowData : IDisposable
         : throw new InvalidOperationException($"Branch selection for Switch node '{nodeId}' has not been evaluated.");
 
     public IReadOnlyDictionary<string, string> SwitchSelections => _switchSelections;
+
+    // ===== 通用循环（flow.while / flow.repeat / flow.break，2026-10-26） =====
+
+    /// <summary>
+    /// 循环条件槽。编译期把 flow.while 编译成 Workflow Core 的 While 原语，Condition 表达式为
+    /// <c>data.LoopConditions[id] &amp;&amp; data.LoopBreaks[id] == false &amp;&amp; 迭代预算</c>；
+    /// 每轮循环体末尾由采样步写入本轮条件，因此 Condition 每轮都会被重新求值。
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> LoopConditions => _loopConditions;
+
+    /// <summary>中断标志：flow.break 置位后，本轮剩余步骤被跳过，下一轮条件求值直接失败从而退出循环。</summary>
+    public IReadOnlyDictionary<string, bool> LoopBreaks => _loopBreaks;
+
+    public IReadOnlyDictionary<string, int> LoopCounters => _loopCounters;
+
+    public IReadOnlyDictionary<string, int> LoopTotals => _loopTotals;
+
+    /// <summary>循环种类（while / repeat），仅用于诊断与追溯。</summary>
+    public IReadOnlyDictionary<string, string> LoopKinds => _loopKinds;
+
+    /// <summary>
+    /// 循环开始前重置状态。条件槽初始为 true —— flow.while 是 **do-while** 语义
+    /// （先执行循环体再判断），这与"先拍一次、不 OK 就重拍"的产线用法一致，
+    /// 也避开了"条件来自循环体、首轮却还没有值"的求值死区。
+    /// </summary>
+    public void BeginLoop(string nodeId, string kind, int total = 0)
+    {
+        _loopKinds[nodeId] = kind;
+        _loopConditions[nodeId] = true;
+        _loopBreaks[nodeId] = false;
+        _loopCounters[nodeId] = 0;
+        _loopTotals[nodeId] = total;
+    }
+
+    public void SetLoopCondition(string nodeId, bool condition) => _loopConditions[nodeId] = condition;
+
+    public void RequestLoopBreak(string nodeId) => _loopBreaks[nodeId] = true;
+
+    public int IncrementLoopCounter(string nodeId) => _loopCounters.AddOrUpdate(nodeId, 1, (_, value) => value + 1);
+
+    public int GetLoopCounter(string nodeId) => _loopCounters.TryGetValue(nodeId, out var value) ? value : 0;
+
+    public int GetLoopTotal(string nodeId) => _loopTotals.TryGetValue(nodeId, out var value) ? value : 0;
+
+    public bool IsLoopBroken(string nodeId) => _loopBreaks.TryGetValue(nodeId, out var value) && value;
+
+    /// <summary>
+    /// 把本轮序号写入循环节点的输出，供循环体内的节点通过 index/total/isLast 端口读取。
+    /// 与 ForEach 把当前 detection 写进 OutputsByNode 的做法一致，因此数据边解析路径不变。
+    /// </summary>
+    public void PublishLoopIteration(string nodeId, int index, int total)
+    {
+        var outputs = OutputsByNode.TryGetValue(nodeId, out var existing)
+            ? new Dictionary<string, VisionValue>(existing, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase);
+        outputs["index"] = VisionValue.Integer(index);
+        outputs["total"] = VisionValue.Integer(total);
+        outputs["isLast"] = VisionValue.Boolean(total > 0 && index >= total - 1);
+        outputs["iteration"] = VisionValue.Integer(index + 1);
+        OutputsByNode[nodeId] = outputs;
+    }
 
     public IReadOnlyDictionary<string, bool> TrySucceeded => _trySucceeded;
 

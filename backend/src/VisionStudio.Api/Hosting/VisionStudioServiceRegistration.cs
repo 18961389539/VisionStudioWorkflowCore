@@ -284,6 +284,8 @@ public static class VisionStudioServiceRegistration
             configuration.GetValue("WorkflowPlanCache:Capacity", 128)));
         services.AddTransient<VisionNodeStep>();
         services.AddTransient<VisionPipelineStep>();
+        // 通用循环（flow.while / flow.repeat / flow.break）的迭代步：由编译器生成，需可被 DI 解析。
+        services.AddTransient<VisionLoopStep>();
         // R10：统一运行边界的原始异常日志观察者——用户侧结果只保留简洁诊断，日志保留完整异常链。
         services.AddSingleton<IVisionRunExceptionObserver, VisionRunExceptionLogObserver>();
         services.AddTransient<WorkflowCoreVisionRunner>();
