@@ -1,5 +1,6 @@
 using VisionStudio.Api.Infrastructure;
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using VisionStudio.Engine;
 
@@ -34,6 +35,15 @@ public sealed class WorkflowStore
     /// <summary>F04：保存与一致性读取的进程内临界区（单宿主部署的并发契约）。</summary>
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    /// <summary>
+    /// 列表摘要缓存（2026-10-26）：ListAsync 原来对每个文件做一次完整 JSON 反序列化，只为了拿
+    /// 名称 / 节点数 / 连线数。工作流一多（数百份、每份上百 KB），打开"打开已有流程"就是几十 MB 的解析。
+    /// 以 (文件长度, 最后写入时间) 作为失效条件；保存时主动失效，避免同一秒内改写命中旧值。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SummaryCacheEntry> _summaryCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly record struct SummaryCacheEntry(long Length, DateTime MtimeUtc, WorkflowDocumentSummary Summary);
+
     public WorkflowStore(IWebHostEnvironment env)
     {
         _root = Path.Combine(VisionStudioDataRoot.Resolve(env.ContentRootPath), "workflows");
@@ -46,29 +56,45 @@ public sealed class WorkflowStore
         try
         {
             var documents = new List<WorkflowDocumentSummary>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in Directory.EnumerateFiles(_root, "*.json", SearchOption.TopDirectoryOnly))
             {
                 var fileName = Path.GetFileName(path);
                 if (fileName.EndsWith(".revision.json", StringComparison.OrdinalIgnoreCase)) continue;
+                seen.Add(path);
 
                 var id = Path.GetFileNameWithoutExtension(path);
                 try
                 {
+                    var info = new FileInfo(path);
+                    var mtime = info.LastWriteTimeUtc;
+                    if (_summaryCache.TryGetValue(path, out var cached) && cached.Length == info.Length && cached.MtimeUtc == mtime)
+                    {
+                        documents.Add(cached.Summary);
+                        continue;
+                    }
+
                     await using var stream = File.OpenRead(path);
                     var workflow = await JsonSerializer.DeserializeAsync<WorkflowDefinition>(stream, _json, cancellationToken);
                     if (workflow is null) continue;
-                    documents.Add(new WorkflowDocumentSummary(
+                    var summary = new WorkflowDocumentSummary(
                         id,
                         string.IsNullOrWhiteSpace(workflow.Name) ? id : workflow.Name,
                         workflow.Nodes.Count,
                         workflow.Edges.Count,
-                        new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero)));
+                        new DateTimeOffset(mtime, TimeSpan.Zero));
+                    _summaryCache[path] = new SummaryCacheEntry(info.Length, mtime, summary);
+                    documents.Add(summary);
                 }
                 catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
                 {
                     // A damaged document should not prevent other saved workflows from being listed.
                 }
             }
+
+            // 已删除的文件不进结果，缓存条目同时清掉，避免长期占用
+            foreach (var key in _summaryCache.Keys)
+                if (!seen.Contains(key)) _summaryCache.TryRemove(key, out _);
 
             return documents
                 .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -162,6 +188,7 @@ public sealed class WorkflowStore
                     await stream.WriteAsync(payload, cancellationToken);
                 }
                 File.Move(tempPath, finalPath, overwrite: true);
+                _summaryCache.TryRemove(finalPath, out _);
                 // 修订落定：失败（文件被占用/权限）时内容与版本事实均已成立——读取路径会按
                 // "内容为权威"把修订对齐到内容哈希。此时如实报告"延迟"而不是谎报失败。
                 try

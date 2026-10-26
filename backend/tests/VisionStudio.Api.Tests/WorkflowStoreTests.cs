@@ -33,6 +33,38 @@ public sealed class WorkflowStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task List_ReflectsSaveAndExternalChange_WithoutStaleCache()
+    {
+        // 性能优化（2026-10-26）后 ListAsync 会缓存摘要：必须保证三条失效路径都真的生效，
+        // 否则"打开已有流程"会显示旧名称/旧节点数。
+        var workflow = new WorkflowDefinition("wf-cache", "原始名称", [new("n1", "image.threshold", null, null, null)], []);
+        await _store.SaveAsync(workflow.Id, workflow, CancellationToken.None);
+
+        var first = Assert.Single(await _store.ListAsync(CancellationToken.None));
+        Assert.Equal("原始名称", first.Name);
+        Assert.Equal(1, first.NodeCount);
+
+        // ① 再次保存（名称变化）→ 缓存必须失效
+        var renamed = new WorkflowDefinition("wf-cache", "改名后", [new("n1", "image.threshold", null, null, null), new("n2", "image.blur", null, null, null)], []);
+        await _store.SaveAsync(renamed.Id, renamed, CancellationToken.None);
+        var afterSave = Assert.Single(await _store.ListAsync(CancellationToken.None));
+        Assert.Equal("改名后", afterSave.Name);
+        Assert.Equal(2, afterSave.NodeCount);
+
+        // ② 外部直接改文件（绕过 store）→ 依赖 (长度, mtime) 失效
+        var path = Path.Combine(_storeRoot, "wf-cache.json");
+        var external = new WorkflowDefinition("wf-cache", "外部改写", [], []);
+        await File.WriteAllTextAsync(path, System.Text.Json.JsonSerializer.Serialize(external));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));
+        var afterExternal = Assert.Single(await _store.ListAsync(CancellationToken.None));
+        Assert.Equal("外部改写", afterExternal.Name);
+
+        // ③ 文件被删除 → 结果与缓存条目都不再保留
+        File.Delete(path);
+        Assert.Empty(await _store.ListAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task SavedRoiReferenceImageAndPoseSurviveReloadTogether()
     {
         var parameters = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
