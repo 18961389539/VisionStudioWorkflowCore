@@ -6,6 +6,7 @@ import type { NodeCatalogItem, NodeFrameRule, PortDescriptor, RunResult, VisionO
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
 import PropertyPanel from './PropertyPanel';
+import type { ScriptPreviewReport } from './ScriptEditor';
 import MatchingAutoTunePanel from './MatchingAutoTunePanel';
 import ImageViewer, { buildCaliperCircleAngles, type MeasurementGeometry } from './ImageViewer';
 import NodeExecutionResult from './NodeExecutionResult';
@@ -333,11 +334,13 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   // P1（评审）：新的“运行此节点”结果落地后自动展开结果并滚入视口——此前值表格在首屏外
   //（被页脚裁切，需滚动整个弹窗体），参数少时右列还有大片空白。
   useEffect(() => {
-    if (!preview || preview.preserveTrainingWorkspace) return;
+    // script.csharp 的结果已经内联在编辑器下方；再滚到页面底部的通用结果区会把
+    // 用户刚看的脚本和预览一起顶出视口。
+    if (!preview || preview.preserveTrainingWorkspace || catalogItem.type === 'script.csharp') return;
     setResultExpanded(true);
     const frame = requestAnimationFrame(() => resultRef.current?.scrollIntoView?.({ block: 'nearest' }));
     return () => cancelAnimationFrame(frame);
-  }, [preview]);
+  }, [catalogItem.type, preview]);
   const receivedAt = preview?.receivedAt ?? resultReceivedAt;
   const stale = Boolean(previewError) || (preview ? preview.fingerprint !== draftFingerprint : resultStale || dirty);
   const showCaliperDiagnostics = (isCaliperCircle || isCaliperEdge) && caliperDiagnosticMode;
@@ -370,6 +373,31 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       ? legacyCropRectangle(draft, imageViewerSource.width, imageViewerSource.height) : undefined)
     : undefined;
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
+  // script.csharp：把节点测试结果压缩成编辑器内联预览（输出/日志/预算/图像）。
+  const scriptPreviewReport: ScriptPreviewReport | undefined = catalogItem.type !== 'script.csharp' ? undefined
+    : previewError ? { success: false, error: previewError, durationMs: 0, summary: {}, receivedAt, stale: true, draft: true }
+    : (() => {
+      const report = displayedResult?.nodeReports.filter(item => item.nodeId === node.id).slice(-1)[0];
+      if (!report) return undefined;
+      const outputImage = typeof report.summary.outputImage === 'string' && report.summary.outputImage !== 'none'
+        ? report.summary.outputImage : undefined;
+      return {
+        success: report.success,
+        error: report.error ?? undefined,
+        durationMs: report.durationMs,
+        summary: report.summary,
+        inputs: report.inputs,
+        outputs: report.outputs,
+        imageUrl: outputImage && displayedResult ? runs.nodeImage(displayedResult.runId, node.id, 'image') : undefined,
+        receivedAt,
+        stale,
+        draft: Boolean(preview)
+      };
+    })();
+  const scriptPreviewBlockedReason = catalogItem.type !== 'script.csharp' ? undefined
+    : previewBlockedReason
+      ?? (issues.length > 0 ? '请先修正参数问题' : undefined)
+      ?? (externalChange ? '流程中的节点参数已更新，请关闭后重新打开' : undefined);
   // match.shape 工作区（按节点类型分块）：训练/搜索页签状态、模型训练与图像获取处理器。
   const {
     shapeWorkspaceTab, setShapeWorkspaceTab, changeShapeWorkspaceTab,
@@ -1394,6 +1422,10 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           && connectedInputPorts.some(port => ['x', 'y', 'z', 'thetaDeg'].includes(port))
           && <Alert type="info" showIcon title="已接线的坐标分量使用上游输入，未接线分量使用本地参数。" style={{ marginBottom: 10 }} />}
         <PropertyPanel node={draftNode} catalogItem={shapePanelCatalogItem} onChange={changeParameter} disabled={locked || referenceMismatch}
+          connectedInputPorts={connectedInputPorts}
+          onRunPreview={catalogItem.type === 'script.csharp' ? () => void runPreview() : undefined}
+          previewBusy={previewBusy} scriptPreview={scriptPreviewReport}
+          scriptPreviewBlockedReason={scriptPreviewBlockedReason}
           hiddenParameterNames={[
             ...((['coordinate.point', 'coordinate.point3D', 'coordinate.pose'].includes(catalogItem.type) ? connectedInputPorts.filter(port => ['x', 'y', 'z', 'thetaDeg'].includes(port))
             : catalogItem.type === 'device.writeTag' && connectedInputPorts.includes('value') ? ['valueType', 'fallbackValue']

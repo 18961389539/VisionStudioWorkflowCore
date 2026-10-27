@@ -1599,6 +1599,10 @@ public static class BuiltInNodeCatalog
         .. DefectCatalog.Items,
         .. AlignmentRegionCatalog.Items,
         .. ColorTextCatalog.Items,
+        .. OpenCvExtraCatalog.Items,
+        .. TextureFilterCatalog.Items,
+        .. CharucoCatalog.Items,
+        .. CSharpScriptCatalog.Items,
         .. GeometryToleranceCatalog.Items,
         .. FeatureRegionCatalog.Items,
         new(
@@ -1637,6 +1641,8 @@ public static class BuiltInNodeCatalog
             names.AddRange(["searchRoi", "templateRoi", "clutterRoi"]);
         if (type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
             names.AddRange(["searchRoi", "templateRoi", "ignoreRoi"]);
+        if (type.Equals("match.feature", StringComparison.OrdinalIgnoreCase))
+            names.Add("templateRoi");
         return names;
     }
 
@@ -1666,6 +1672,8 @@ public static class BuiltInNodeCatalog
             "Canvas-authored scene ignore region. Hard mode ReduceDomains the search image; soft mode mean-lerps (approximate — not soft scene-weighted NCC). Distinct from templateRoi.",
         ("match.template", "searchRoi") =>
             "Canvas-authored search window in full-image coordinates. Edited through the ROI overlay, not as a form field.",
+        ("match.feature", "templateRoi") =>
+            "Canvas-authored template mask for feature extraction. Keypoints/descriptors are computed only inside it, so background texture next to the part cannot pull the estimated transform. Distinct from the scene roi port.",
         _ => "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field."
     };
 

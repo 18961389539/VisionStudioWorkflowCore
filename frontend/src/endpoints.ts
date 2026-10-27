@@ -50,6 +50,13 @@ export const traces = {
   preview: (runId: string, query: string) => apiUrl(`traces/${encodeURIComponent(runId)}/preview?${query}`)
 } as const;
 
+// ── scripts ───────────────────────────────────────────────────────────────────
+export const scripts = {
+  validate: apiUrl('scripts/validate'),
+  complete: apiUrl('scripts/complete'),
+  format: apiUrl('scripts/format')
+} as const;
+
 // ── validation ────────────────────────────────────────────────────────────────
 export const validation = {
   datasets: apiUrl('validation/datasets'),

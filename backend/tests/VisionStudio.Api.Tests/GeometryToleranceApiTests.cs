@@ -24,10 +24,11 @@ public sealed class GeometryToleranceApiTests(VisionStudioApiFactory factory) : 
     private static JsonElement Report(JsonElement[] reports, string id) => Assert.Single(reports, r => r.GetProperty("nodeId").GetString() == id);
 
     [Fact]
-    public async Task HostRegistersAllEightGeometryTools()
+    public async Task HostRegistersAllGeometryTools()
     {
         var catalog = await _client.GetFromJsonAsync<JsonElement>("/api/catalog"); var registry = factory.Services.GetRequiredService<VisionNodeRegistry>();
-        Assert.Equal(8, GeometryToleranceCatalog.Items.Count);
+        // 目录条目数随 GD&T 三件套（tolerance.datum/position/runout）增长；这里锁定"全量注册 + pipeline 执行 + 无副作用"三条契约。
+        Assert.Equal(11, GeometryToleranceCatalog.Items.Count);
         foreach (var item in GeometryToleranceCatalog.Items)
         {
             var actual = Assert.Single(catalog.EnumerateArray(), entry => entry.GetProperty("type").GetString() == item.Type);

@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VisionStudio.Abstractions\VisionStudio.Abstractions.csproj" />
+    <ProjectReference Include="..\VisionStudio.Scripting\VisionStudio.Scripting.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />

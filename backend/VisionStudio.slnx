@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="src/VisionStudio.Abstractions/VisionStudio.Abstractions.csproj" />
   <Project Path="src/VisionStudio.Engine/VisionStudio.Engine.csproj" />
+  <Project Path="src/VisionStudio.Scripting/VisionStudio.Scripting.csproj" />
   <Project Path="src/VisionStudio.Camera.Basler/VisionStudio.Camera.Basler.csproj" />
   <Project Path="src/VisionStudio.Camera.Hikrobot/VisionStudio.Camera.Hikrobot.csproj" />
   <Project Path="src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj" />

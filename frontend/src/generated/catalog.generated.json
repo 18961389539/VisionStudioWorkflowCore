@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "714ef797f4d6f7df613dc6f6f38b65b4a0e74f1a937e971cd75af20e3e743d22",
+  "hash": "ce6b97e95c067acb2229d82c4cb193507bcb0fc57c2472b8480e21fdc0123da8",
   "items": [
     {
       "type": "image.acquire",
@@ -1842,6 +1842,277 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "calibration.charuco",
+      "displayName": "ChArUco Board Detection",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "calibrationDataJson",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "charucoCorners",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "charucoIds",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "markerCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "calibrationDataJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "viewJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "blurVariance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "coverageX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "coverageY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "quality",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "squaresX",
+          "label": "Squares X",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 2,
+          "max": 30,
+          "step": 1,
+          "group": "Board",
+          "description": "Number of chessboard squares along X. The board size must match the printed ChArUco board."
+        },
+        {
+          "name": "squaresY",
+          "label": "Squares Y",
+          "type": "number",
+          "defaultValue": 7,
+          "min": 2,
+          "max": 30,
+          "step": 1,
+          "group": "Board",
+          "description": "Number of chessboard squares along Y. The board size must match the printed ChArUco board."
+        },
+        {
+          "name": "squareLengthMm",
+          "label": "Square Length",
+          "type": "number",
+          "defaultValue": 30,
+          "min": 0.1,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "mm",
+          "group": "Board",
+          "description": "Physical side length of one chessboard square. Used for the board coordinate system and calibration object points."
+        },
+        {
+          "name": "markerLengthMm",
+          "label": "Marker Length",
+          "type": "number",
+          "defaultValue": 15,
+          "min": 0.1,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "mm",
+          "group": "Board",
+          "description": "Physical side length of each ArUco marker. Must be strictly smaller than Square Length."
+        },
+        {
+          "name": "dictionary",
+          "label": "ArUco Dictionary",
+          "type": "select",
+          "defaultValue": "Dict4X4_50",
+          "options": [
+            {
+              "label": "4x4, 50 markers",
+              "value": "Dict4X4_50"
+            },
+            {
+              "label": "5x5, 100 markers",
+              "value": "Dict5X5_100"
+            },
+            {
+              "label": "6x6, 250 markers",
+              "value": "Dict6X6_250"
+            },
+            {
+              "label": "7x7, 50 markers",
+              "value": "Dict7X7_50"
+            },
+            {
+              "label": "ArUco original",
+              "value": "DictArucoOriginal"
+            },
+            {
+              "label": "AprilTag 36h10",
+              "value": "DictAprilTag_36h10"
+            },
+            {
+              "label": "AprilTag 36h11",
+              "value": "DictAprilTag_36h11"
+            }
+          ],
+          "group": "Board",
+          "description": "Marker dictionary printed on the board. A mismatch produces no marker IDs instead of wrong IDs."
+        },
+        {
+          "name": "legacyPattern",
+          "label": "Legacy Pattern",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Board",
+          "description": "Use the pre-4.6 ChArUco layout when the printed board was generated by an older OpenCV version."
+        },
+        {
+          "name": "minCorners",
+          "label": "Minimum ChArUco Corners",
+          "type": "number",
+          "defaultValue": 6,
+          "min": 3,
+          "max": 1000,
+          "step": 1,
+          "group": "Detection",
+          "description": "Minimum interpolated corners required to accept the view. Lower values accept partial boards but weaken calibration."
+        },
+        {
+          "name": "refineMarkers",
+          "label": "Refine Markers",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Detection",
+          "description": "Run marker-corner refinement before ChArUco interpolation. Improves subpixel accuracy at extra cost."
+        },
+        {
+          "name": "minMarkers",
+          "label": "Minimum Markers",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "group": "Detection",
+          "description": "Minimum detected ArUco markers required by the detector; 0 disables the gate."
+        },
+        {
+          "name": "minBlurVariance",
+          "label": "Minimum Blur Variance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.1,
+          "group": "Quality",
+          "description": "Laplacian variance gate for sharpness. 0 disables the gate; raise it to reject blurred views."
+        },
+        {
+          "name": "minCoverage",
+          "label": "Minimum Coverage",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Quality",
+          "description": "Minimum corner coverage of the image area. 0 disables the gate; raise it to reject views clustered in one corner."
+        },
+        {
+          "name": "rejectWeakViews",
+          "label": "Reject Weak Views",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Quality",
+          "description": "When true, a view that fails the blur/coverage quality gates is not appended to calibrationDataJson."
+        }
+      ],
+      "description": "Detect a ChArUco board with OpenCV 5 CharucoDetector: ArUco markers locate chessboard corners, then corners are interpolated and mapped to board coordinates. Wire: image + optional accumulated calibrationDataJson -> charucoCorners/charucoIds, marker count, viewJson and an appended calibrationDataJson view for calibration.cameraIntrinsics. Quality gates reuse calibration.detectBoard semantics. Failures: invalid board geometry, marker length not smaller than square length, too few corners, collinear corners, or more than 100 accumulated views. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
@@ -3700,6 +3971,159 @@
         "executionMode": "Auto"
       },
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "contour.fromMask",
+      "displayName": "Contour From Mask",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "threshold",
+          "label": "Mask Threshold",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Mask",
+          "description": "Pixels at or above this level belong to the region; 1 means any non-zero pixel.",
+          "integer": true
+        },
+        {
+          "name": "invert",
+          "label": "Invert Mask",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Mask",
+          "description": "Swap foreground and background."
+        },
+        {
+          "name": "retrieval",
+          "label": "Retrieval",
+          "type": "select",
+          "defaultValue": "external",
+          "options": [
+            {
+              "label": "External only",
+              "value": "external"
+            },
+            {
+              "label": "With holes",
+              "value": "all"
+            }
+          ],
+          "group": "Contour",
+          "description": "External keeps outer contours only (usual for measurement); With holes keeps nesting so ParentIndex points at the retained parent contour."
+        },
+        {
+          "name": "approximation",
+          "label": "Approximation",
+          "type": "select",
+          "defaultValue": "simple",
+          "options": [
+            {
+              "label": "Simple",
+              "value": "simple"
+            },
+            {
+              "label": "None",
+              "value": "none"
+            }
+          ],
+          "group": "Contour",
+          "description": "Simple compresses collinear points, None keeps every boundary pixel."
+        },
+        {
+          "name": "minArea",
+          "label": "Minimum Area",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 1,
+          "group": "Filter",
+          "description": "Drop contours whose area is below this value; filters segmentation speckle."
+        },
+        {
+          "name": "maxContours",
+          "label": "Max Contours",
+          "type": "number",
+          "defaultValue": 512,
+          "min": 1,
+          "max": 4096,
+          "step": 1,
+          "group": "Limits",
+          "description": "Hard budget; exceeding it fails instead of silently truncating the list.",
+          "integer": true
+        },
+        {
+          "name": "maxPoints",
+          "label": "Max Points Per Contour",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 3,
+          "max": 200000,
+          "step": 1,
+          "group": "Limits",
+          "description": "Hard budget per contour; exceeding it fails so a noisy mask cannot blow up downstream measurement.",
+          "integer": true
+        }
+      ],
+      "description": "Extract contours straight from a mask image, so a segmentation mask can feed measurement and fitting without going through region.toDetections. Threshold and invert match region.fromMask exactly, so the same mask behaves identically on both outputs. External retrieval drops holes; With holes keeps parent links between retained contours. Speckle is removed by minArea; maxContours and maxPoints are hard budgets that fail loudly instead of truncating.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -18106,6 +18530,353 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "match.feature",
+      "displayName": "Feature Point Match",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "template",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "score",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "angle",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "scale",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "matchCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inlierRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "reprojErrorPx",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "templateKeypoints",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sceneKeypoints",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "transformJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "inlierPoints",
+          "dataType": "PointList",
+          "required": false
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "templatePath",
+          "label": "Template File",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Template",
+          "description": "Used when the template input port is not connected (absolute path, or relative to the host working directory). A connected template port overrides it.",
+          "overriddenByPorts": [
+            "template"
+          ]
+        },
+        {
+          "name": "detector",
+          "label": "Detector",
+          "type": "select",
+          "defaultValue": "sift",
+          "options": [
+            {
+              "label": "SIFT (rotation + scale, float descriptors)",
+              "value": "sift"
+            },
+            {
+              "label": "ORB (fast, binary descriptors)",
+              "value": "orb"
+            }
+          ],
+          "group": "Detector",
+          "description": "SIFT tolerates large rotation, scale change and mild occlusion at higher cost. ORB is several times faster and suits high-rate lines with mostly planar, well-textured parts."
+        },
+        {
+          "name": "maxFeatures",
+          "label": "Maximum Keypoints",
+          "type": "number",
+          "defaultValue": 2000,
+          "min": 100,
+          "max": 20000,
+          "step": 100,
+          "group": "Detector",
+          "description": "Upper bound on keypoints kept per image. Higher values help on large images and repeated textures but cost time and memory."
+        },
+        {
+          "name": "contrastThreshold",
+          "label": "Contrast Threshold",
+          "type": "number",
+          "defaultValue": 0.04,
+          "min": 0.001,
+          "max": 1,
+          "step": 0.001,
+          "group": "Detector",
+          "description": "SIFT contrast gate. Lower it (0.01) for low-contrast parts, raise it (0.08) to drop noise keypoints. ORB ignores this value.",
+          "visibleWhen": {
+            "parameter": "detector",
+            "values": [
+              "sift"
+            ]
+          }
+        },
+        {
+          "name": "matchRatio",
+          "label": "Lowe Ratio",
+          "type": "number",
+          "defaultValue": 0.75,
+          "min": 0,
+          "max": 0.95,
+          "step": 0.01,
+          "group": "Matching",
+          "description": "Nearest-neighbour ratio test: a match is kept only when its distance is below ratio times the second-best distance. 0 disables the test; lower values keep fewer but cleaner matches."
+        },
+        {
+          "name": "transformType",
+          "label": "Transform Type",
+          "type": "select",
+          "defaultValue": "similarity",
+          "options": [
+            {
+              "label": "Similarity (rotation + uniform scale)",
+              "value": "similarity"
+            },
+            {
+              "label": "Affine (adds anisotropic scale and shear)",
+              "value": "affine"
+            },
+            {
+              "label": "Homography (planar perspective)",
+              "value": "homography"
+            }
+          ],
+          "group": "Matching",
+          "description": "Similarity needs the fewest inliers and is the most stable for pick-and-place. Affine handles stretched parts; homography handles oblique views but amplifies noise."
+        },
+        {
+          "name": "ransacReprojThresholdPx",
+          "label": "RANSAC Reprojection Threshold",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0.1,
+          "max": 50,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Matching",
+          "description": "A correspondence within this distance of the model counts as an inlier. Keep it near the expected keypoint localisation error (2-4 px typical)."
+        },
+        {
+          "name": "minMatches",
+          "label": "Minimum Matches",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 3,
+          "max": 500,
+          "step": 1,
+          "group": "Gates",
+          "description": "Minimum ratio-test matches required before RANSAC runs. Below it the node returns found=false with reason=too-few-matches."
+        },
+        {
+          "name": "minInliers",
+          "label": "Minimum Inliers",
+          "type": "number",
+          "defaultValue": 6,
+          "min": 3,
+          "max": 500,
+          "step": 1,
+          "group": "Gates",
+          "description": "Minimum RANSAC inliers for a valid result. Too low a value lets accidental alignments pass; 6-10 is typical for textured parts."
+        },
+        {
+          "name": "minInlierRatio",
+          "label": "Minimum Inlier Ratio",
+          "type": "number",
+          "defaultValue": 0.2,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Gates",
+          "description": "Minimum inliers/matches. Low ratios mean the matches disagreed, which usually indicates a repeated texture rather than a real target."
+        },
+        {
+          "name": "angleRangeDeg",
+          "label": "Angle Range (±deg)",
+          "type": "number",
+          "defaultValue": 180,
+          "min": 0,
+          "max": 180,
+          "step": 1,
+          "unit": "deg",
+          "group": "Gates",
+          "description": "Reject results whose rotation exceeds this half-width. 180 disables the gate."
+        },
+        {
+          "name": "scaleMinPercent",
+          "label": "Minimum Scale",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 10,
+          "max": 400,
+          "step": 1,
+          "unit": "%",
+          "group": "Gates",
+          "description": "Lower accepted scale bound relative to the template. Results below it return found=false with reason=scale-out-of-range."
+        },
+        {
+          "name": "scaleMaxPercent",
+          "label": "Maximum Scale",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 10,
+          "max": 400,
+          "step": 1,
+          "unit": "%",
+          "group": "Gates",
+          "description": "Upper accepted scale bound relative to the template. Must be at least Minimum Scale."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        },
+        {
+          "name": "templateRoi",
+          "label": "Template ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored template mask for feature extraction. Keypoints/descriptors are computed only inside it, so background texture next to the part cannot pull the estimated transform. Distinct from the scene roi port.",
+          "internal": true
+        }
+      ],
+      "description": "Descriptor-based alignment for the cases gray-edge shape match cannot hold: large rotation, noticeable scale change, weak edges with rich texture, or partial occlusion. SIFT/ORB keypoints are matched with KNN plus a Lowe ratio test, then RANSAC estimates the template-pixel to scene-pixel transform. Outputs the mapped template centre as x/y/pose plus angle (deg), scale, inlier statistics and a 3x3 transformJson that can feed jlvision.homMat. Insufficient matches return found=false with a reason in diagnostics instead of failing the run; configuration errors (no template descriptors, out-of-range parameters) fail hard. Single-target only, no rotation-trained multi-target search - use match.shape for that. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
+    },
+    {
       "type": "image.register",
       "displayName": "Register Image",
       "category": "Matching",
@@ -22093,6 +22864,167 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "tolerance.runout",
+      "displayName": "Circular / Total Runout",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "samples",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "datum",
+          "dataType": "Pose2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "runout",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "minValue",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxValue",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "meanValue",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "highPoint",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "lowPoint",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "highAngleDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "lowAngleDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Runout Mode",
+          "type": "select",
+          "defaultValue": "radial",
+          "options": [
+            {
+              "label": "Radial (cylindrical surface)",
+              "value": "radial"
+            },
+            {
+              "label": "Axial (face surface)",
+              "value": "axial"
+            }
+          ],
+          "group": "Measurement",
+          "description": "Radial measures distance to the datum axis (cylindrical surface, circular runout). Axial measures the coordinate along the datum axis (face surface, total runout)."
+        },
+        {
+          "name": "tolerance",
+          "label": "Runout Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Limits",
+          "description": "Maximum allowed FIM (max reading minus min reading). 0 disables the gate."
+        },
+        {
+          "name": "minCoverageDeg",
+          "label": "Minimum Angular Coverage",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Limits",
+          "description": "Radial mode only: reject the result when the sampled arc covers less than this. Coverage is 360 deg minus the largest angular gap; 0 disables the check. A half-measured circle always looks better than it is."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Reporting",
+          "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."
+        }
+      ],
+      "description": "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required). radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg. Fewer than 3 samples or insufficient angular coverage returns found=false. The datum axis is 2D: this is a planar projection of the real 3D runout, so spindle tilt and axis straightness are not modelled.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "measure.wallThickness",
       "displayName": "Circular Wall Thickness",
       "category": "Measurement",
@@ -23097,6 +24029,117 @@
         }
       ],
       "description": "Measure two simple closed subpixel contours in the same image pixel frame, with the inner boundary strictly inside the outer. Shortest mode samples the outer boundary to inner contour segments and provides an exact segment-to-segment global minimum over both complete contours. Normal mode samples outward inner-boundary normals (vertex bisectors at corners) and provides sampled extrema. Connections crossing the hole or leaving the outer shell are rejected. Every original vertex of the sampled boundary is retained; extra samples limit arc spacing. Means/std dev are arc-length weighted; maxima and thin counts are sampled. Missing/open/self-intersecting/touching/noncontained contours, unreliable pairs or sampling/work budget overflow return found=false and omit measurement values. Limits: 20000 points per contour, 4096 samples per measured boundary and 50 million geometry operations. Optional image passes through for overlay inspection. Red lines mark sampled tolerance failures. Units: px.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "tolerance.datum",
+      "displayName": "Datum Reference Frame",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "primary",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "secondary",
+          "dataType": "Point2D",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "origin",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "axisAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "secondaryOffset",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "datumJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "datumName",
+          "label": "Datum Name",
+          "type": "text",
+          "defaultValue": "A",
+          "group": "Datum",
+          "description": "Label written into datumJson, the overlay and downstream reports; drawings usually use A/B/C."
+        },
+        {
+          "name": "flipAxis",
+          "label": "Flip Axis",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Datum",
+          "description": "Reverse the +X direction. Fitted lines carry no polarity, so set this when the drawing's X points the other way."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Datum",
+          "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are already calibrated, so reports and traces read correctly."
+        }
+      ],
+      "description": "Builds a 2D datum reference frame from a primary datum line (A) plus an optional secondary point (B). Origin is B projected onto A, or the line midpoint when B is absent; the X axis follows A and can be flipped. Wire: primary (and secondary) → pose/origin/axisAngleDeg, then into tolerance.position / tolerance.runout / coordinate.* which expect a Pose2D. secondaryOffset is the signed perpendicular distance of B from datum A, which is the form error the datum feature itself contributes. Units follow the input coordinates; no conversion is applied. Zero-length lines fail. Image-plane (2D) only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -26602,6 +27645,266 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "tolerance.position",
+      "displayName": "True Position",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "datum",
+          "dataType": "Pose2D",
+          "required": false
+        },
+        {
+          "name": "size",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "deviationX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "deviationY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "radialDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diametralDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "positionDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "effectiveTolerance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "bonus",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "utilization",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "basicX",
+          "label": "Basic X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Basic Dimension",
+          "description": "The boxed basic dimension along the datum X axis. Basic dimensions are theoretically exact, so they carry no tolerance themselves."
+        },
+        {
+          "name": "basicY",
+          "label": "Basic Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Basic Dimension",
+          "description": "The boxed basic dimension along the datum Y axis."
+        },
+        {
+          "name": "zoneType",
+          "label": "Tolerance Zone",
+          "type": "select",
+          "defaultValue": "diameter",
+          "options": [
+            {
+              "label": "Diametral zone (⌖ Ø)",
+              "value": "diameter"
+            },
+            {
+              "label": "Rectangular zone (±X/±Y)",
+              "value": "rectangular"
+            }
+          ],
+          "group": "Tolerance",
+          "description": "Diametral is the standard for hole/pin position: the zone is a circle and the reported deviation is 2x the radial error. Rectangular checks each axis against its own half-width."
+        },
+        {
+          "name": "diameterTolerance",
+          "label": "Zone Diameter",
+          "type": "number",
+          "defaultValue": 0.2,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Tolerance",
+          "description": "Full diameter of the circular tolerance zone (the Ø value in the feature control frame). 0 disables the gate and reports utilization 0.",
+          "visibleWhen": {
+            "parameter": "zoneType",
+            "values": [
+              "diameter"
+            ]
+          }
+        },
+        {
+          "name": "toleranceX",
+          "label": "± X Tolerance",
+          "type": "number",
+          "defaultValue": 0.1,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Tolerance",
+          "description": "Half-width of the rectangular zone along X. 0 leaves the X axis unchecked.",
+          "visibleWhen": {
+            "parameter": "zoneType",
+            "values": [
+              "rectangular"
+            ]
+          }
+        },
+        {
+          "name": "toleranceY",
+          "label": "± Y Tolerance",
+          "type": "number",
+          "defaultValue": 0.1,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Tolerance",
+          "description": "Half-width of the rectangular zone along Y. 0 leaves the Y axis unchecked.",
+          "visibleWhen": {
+            "parameter": "zoneType",
+            "values": [
+              "rectangular"
+            ]
+          }
+        },
+        {
+          "name": "mmcBonus",
+          "label": "MMC Bonus",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "MMC",
+          "description": "Add the maximum-material bonus (actual size deviation from MMC) to the tolerance. Requires a measured size: the size port, or a circle input."
+        },
+        {
+          "name": "mmcSize",
+          "label": "MMC Size",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "MMC",
+          "description": "Feature size at maximum material condition: smallest allowed hole diameter or largest allowed pin diameter. Must be > 0 when the bonus is enabled.",
+          "visibleWhen": {
+            "parameter": "mmcBonus",
+            "values": [
+              "true"
+            ]
+          }
+        },
+        {
+          "name": "featureType",
+          "label": "Feature Type",
+          "type": "select",
+          "defaultValue": "hole",
+          "options": [
+            {
+              "label": "Hole / internal (bonus grows with size)",
+              "value": "hole"
+            },
+            {
+              "label": "Pin / external (bonus shrinks with size)",
+              "value": "pin"
+            }
+          ],
+          "group": "MMC",
+          "description": "Decides the sign of the bonus: holes gain tolerance as they get larger, pins as they get smaller.",
+          "visibleWhen": {
+            "parameter": "mmcBonus",
+            "values": [
+              "true"
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Reporting",
+          "description": "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."
+        }
+      ],
+      "description": "True position (position tolerance) of a feature centre against basic dimensions in a datum frame. Wire exactly one of point or circle, plus an optional datum Pose2D from tolerance.datum (identity when absent); size overrides the circle diameter for MMC. Outputs deviationX/deviationY in datum coordinates, radialDeviation, diametralDeviation (2x radial, the value on the drawing), positionDeviation and utilization for SPC. MMC bonus requires a measured size and a positive mmcSize. 0 tolerance disables the gate (withinTolerance stays true). Both or neither of point/circle fails hard. Image-plane (2D) only; true 3D position needs a 3D datum.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "output.exportResult",
       "displayName": "Export Result",
       "category": "Output",
@@ -28320,6 +29623,384 @@
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
       "declaresRoiImageBindings": true
+    },
+    {
+      "type": "image.convolve",
+      "displayName": "Custom Convolution",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "kernelWidth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "kernelHeight",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "kernelSum",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "kernelJson",
+          "label": "Kernel JSON",
+          "type": "textarea",
+          "defaultValue": "[[0,-1,0],[-1,5,-1],[0,-1,0]]",
+          "group": "Kernel",
+          "description": "Kernel as a JSON array of rows, for example [[-1,-1,-1],[-1,8,-1],[-1,-1,-1]] for an edge kernel. Up to 31x31, values within +/-10000, every row must have the same length."
+        },
+        {
+          "name": "normalize",
+          "label": "Normalize Kernel",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Kernel",
+          "description": "Divide the kernel by the sum of its values so a uniform area keeps its brightness. Edge/difference kernels usually sum to 0 and must turn this off, otherwise the node fails instead of producing a black image."
+        },
+        {
+          "name": "delta",
+          "label": "Delta",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100000,
+          "max": 100000,
+          "step": 0.5,
+          "group": "Kernel",
+          "description": "Constant added to every filtered pixel after convolution. Use a positive value to lift an edge image out of negative clipping."
+        },
+        {
+          "name": "anchorX",
+          "label": "Anchor X",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 30,
+          "step": 1,
+          "group": "Anchor",
+          "description": "Kernel column aligned with the output pixel. -1 means the geometric center; set an explicit anchor for asymmetric kernels (for example a directional ridge detector)."
+        },
+        {
+          "name": "anchorY",
+          "label": "Anchor Y",
+          "type": "number",
+          "defaultValue": -1,
+          "min": -1,
+          "max": 30,
+          "step": 1,
+          "group": "Anchor",
+          "description": "Kernel row aligned with the output pixel. -1 means the geometric center."
+        },
+        {
+          "name": "borderType",
+          "label": "Border Type",
+          "type": "select",
+          "defaultValue": "reflect101",
+          "options": [
+            {
+              "label": "Reflect 101 (default)",
+              "value": "reflect101"
+            },
+            {
+              "label": "Reflect",
+              "value": "reflect"
+            },
+            {
+              "label": "Replicate edge",
+              "value": "replicate"
+            },
+            {
+              "label": "Constant zero",
+              "value": "constant"
+            }
+          ],
+          "group": "Anchor",
+          "description": "How pixels outside the image are extrapolated. Reflect 101 is the least biased for measurement edges; constant zero darkens the border and should only be used for explicitly padded work."
+        }
+      ],
+      "description": "Convolve the image with a user-supplied kernel. Wire: image -> filtered image. Computation runs in float32 and is converted back to the source depth with saturation, so negative side lobes clip to 0 instead of wrapping to 255. Covers kernels that the fixed blur/sharpen/morphology nodes cannot express (asymmetric, directional, ridge, custom sharpening). Failures: non-rectangular or oversized kernel, non-finite values, normalize with a zero-sum kernel, anchor out of range, unsupported depth. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.fftFilter",
+      "displayName": "Frequency Filter (FFT)",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maskPassRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "paddedWidth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "paddedHeight",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "filter",
+          "label": "Filter Type",
+          "type": "select",
+          "defaultValue": "bandstop",
+          "options": [
+            {
+              "label": "Band stop (remove one period)",
+              "value": "bandstop"
+            },
+            {
+              "label": "Band pass (keep only one period)",
+              "value": "bandpass"
+            },
+            {
+              "label": "Low pass (keep coarse structure)",
+              "value": "lowpass"
+            },
+            {
+              "label": "High pass (keep fine detail)",
+              "value": "highpass"
+            }
+          ],
+          "group": "Band",
+          "description": "Band stop is the texture/moiré workhorse: it removes a periodic pattern whose spacing falls inside the wavelength band while leaving everything else untouched."
+        },
+        {
+          "name": "wavelengthMinPx",
+          "label": "Minimum Wavelength",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 100000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Band",
+          "description": "Shortest period (in pixels) in the band — the feature period that should be removed or kept. 3 px means 'one cycle every 3 pixels', that is 1/3 cycles per pixel.",
+          "visibleWhen": {
+            "parameter": "filter",
+            "values": [
+              "lowpass",
+              "bandpass",
+              "bandstop"
+            ]
+          }
+        },
+        {
+          "name": "wavelengthMaxPx",
+          "label": "Maximum Wavelength",
+          "type": "number",
+          "defaultValue": 30,
+          "min": 1,
+          "max": 100000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Band",
+          "description": "Longest period (in pixels) in the band. Must be >= Minimum Wavelength for band pass/stop; larger values reach closer to the DC (coarse) end of the spectrum.",
+          "visibleWhen": {
+            "parameter": "filter",
+            "values": [
+              "highpass",
+              "bandpass",
+              "bandstop"
+            ]
+          }
+        },
+        {
+          "name": "directionDeg",
+          "label": "Band Direction",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -360,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Direction",
+          "description": "Center direction of the band in image coordinates (0 = horizontal stripes, 90 = vertical). Frequencies are symmetric, so 0 and 180 describe the same band."
+        },
+        {
+          "name": "directionWidthDeg",
+          "label": "Direction Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1,
+          "unit": "deg",
+          "group": "Direction",
+          "description": "Angular width of the band. 0 removes the direction window and treats the band as rotationally symmetric; 15-30 deg targets brushed, turned or woven textures that only run one way."
+        },
+        {
+          "name": "maskBlurPx",
+          "label": "Mask Softness",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 8,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Mask",
+          "description": "Gaussian softening of the frequency mask in spectrum pixels. 0 gives a hard edge (sharpest result, most ringing); 0.5-2 trades a little selectivity for far fewer ringing artifacts around strong edges."
+        },
+        {
+          "name": "keepDc",
+          "label": "Keep DC (preserve brightness)",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Mask",
+          "description": "Force the zero-frequency gain back to 1 so the mean brightness survives high pass and band stop. Turn off only when the absolute brightness level is irrelevant and a zero-mean result is wanted."
+        },
+        {
+          "name": "outputMode",
+          "label": "Output",
+          "type": "select",
+          "defaultValue": "filtered",
+          "options": [
+            {
+              "label": "Filtered image",
+              "value": "filtered"
+            },
+            {
+              "label": "Removed component (input - filtered)",
+              "value": "removed"
+            }
+          ],
+          "group": "Output",
+          "description": "Filtered is the cleaned result used for inspection. Removed isolates the pattern that was filtered out, which is the fastest way to tune the wavelength band. The removed component is zero-mean, so for 8/16-bit output the node adds each channel's mean back (float32 input keeps the pure difference); otherwise half of the residual would clip to black."
+        },
+        {
+          "name": "maxPixels",
+          "label": "Maximum Padded Pixels",
+          "type": "number",
+          "defaultValue": 16000000,
+          "min": 1000,
+          "max": 64000000,
+          "step": 1000000,
+          "group": "Limits",
+          "description": "Budget on the padded FFT size (width and height are rounded up to a fast DFT size). FFT memory grows with the padded area and runs per channel; exceeding the budget fails with a size message instead of exhausting memory."
+        }
+      ],
+      "description": "Frequency-domain filtering by feature period. The image is padded to a fast DFT size, transformed, multiplied by a gain mask, and transformed back; DC sits at (0,0) and wrap-around is handled by distance to the nearest corner, so no shift is needed. Wavelengths are given in pixels (period), not normalized frequency. Optional direction window turns a rotationally symmetric band into a directional notch for brushed/woven/turned textures. maskPassRatio exposes how much of the spectrum survived, which makes an over-wide or over-narrow band obvious in the trace. Failures: unsupported depth, wavelengthMin > wavelengthMax, empty mask (band rejects every frequency), or a padded size above maxPixels. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
     },
     {
       "type": "image.blur.gaussian",
@@ -31415,6 +33096,150 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "image.stitch",
+      "displayName": "Image Stitch",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image1",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "image2",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "image3",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image4",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image5",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image6",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image7",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image8",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Stitch Mode",
+          "type": "select",
+          "defaultValue": "panorama",
+          "options": [
+            {
+              "label": "Panorama",
+              "value": "panorama"
+            },
+            {
+              "label": "Document scans",
+              "value": "scans"
+            }
+          ],
+          "group": "Stitching",
+          "description": "Panorama handles arbitrary overlapping views; Document scans assumes ordered, mostly translation-only scans and is usually more stable for conveyor/line-scan images."
+        },
+        {
+          "name": "maxInputPixels",
+          "label": "Maximum Input Pixels",
+          "type": "number",
+          "defaultValue": 64000000,
+          "min": 1,
+          "max": 500000000,
+          "step": 1000000,
+          "group": "Stitching",
+          "description": "Total pixel budget across all connected inputs. Exceeding it fails before cloning or stitching, so a mistaken full-resolution batch cannot exhaust memory."
+        }
+      ],
+      "description": "Stitch 2..8 overlapping 8-bit images into one panorama with OpenCV Stitcher (features, homography, bundle adjustment, seam and blend). Inputs must share the same channel count. A stitch failure returns the OpenCV status in the error instead of a half-composed image. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image1",
+          "frameLabel": "stitched frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "jlvision.surface",
       "displayName": "Intensity Surface Reconstruction",
       "category": "Preprocess",
@@ -32072,6 +33897,172 @@
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.denoise",
+      "displayName": "Non-Local Means Denoise",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Denoise Mode",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Automatic (by channels)",
+              "value": "auto"
+            },
+            {
+              "label": "Grayscale",
+              "value": "gray"
+            },
+            {
+              "label": "Color (BGR)",
+              "value": "color"
+            }
+          ],
+          "group": "Denoising",
+          "description": "auto chooses grayscale for 1-channel input and colour for 3-channel input; gray and color require the matching channel count."
+        },
+        {
+          "name": "h",
+          "label": "Luminance Strength",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0,
+          "max": 100,
+          "step": 0.5,
+          "group": "Denoising",
+          "description": "Luminance noise strength. Higher values remove more noise but also flatten fine texture; 3..10 is the usual range and 0 disables the filter."
+        },
+        {
+          "name": "hColor",
+          "label": "Color Strength",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0,
+          "max": 100,
+          "step": 0.5,
+          "group": "Denoising",
+          "description": "Colour-channel noise strength, used only when the effective mode is colour.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "auto",
+              "color"
+            ]
+          }
+        },
+        {
+          "name": "templateWindowSize",
+          "label": "Template Window Size",
+          "type": "number",
+          "defaultValue": 7,
+          "min": 3,
+          "max": 99,
+          "step": 2,
+          "group": "Neighborhood",
+          "description": "Odd patch size used for similarity. 7 is the OpenCV default; larger patches are slower and smooth more."
+        },
+        {
+          "name": "searchWindowSize",
+          "label": "Search Window Size",
+          "type": "number",
+          "defaultValue": 21,
+          "min": 3,
+          "max": 255,
+          "step": 2,
+          "group": "Neighborhood",
+          "description": "Odd search window for similar patches. 21 is the OpenCV default; larger windows cost more time."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Fast non-local means denoising for low-light or high-gain images before measurement. Requires an 8-bit 1 or 3 channel image; 16-bit/float inputs must be converted first. ROI only replaces pixels inside the selection, leaving the rest of the image untouched. Failures: non-8-bit input, channel/mode mismatch, even window sizes, or out-of-range strengths. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "image.contrastNormalize",
@@ -33893,6 +35884,300 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "recognition.aruco",
+      "displayName": "ArUco Marker",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "calibrationJson",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "markerIds",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "corners",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "poses",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "pose",
+          "dataType": "Transform3D",
+          "required": false
+        },
+        {
+          "name": "poseAvailable",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "rejectedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "overlay",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "dictionary",
+          "label": "ArUco Dictionary",
+          "type": "select",
+          "defaultValue": "Dict4X4_50",
+          "options": [
+            {
+              "label": "4x4, 50 markers",
+              "value": "Dict4X4_50"
+            },
+            {
+              "label": "5x5, 100 markers",
+              "value": "Dict5X5_100"
+            },
+            {
+              "label": "6x6, 250 markers",
+              "value": "Dict6X6_250"
+            },
+            {
+              "label": "7x7, 50 markers",
+              "value": "Dict7X7_50"
+            },
+            {
+              "label": "ArUco original",
+              "value": "DictArucoOriginal"
+            },
+            {
+              "label": "AprilTag 36h10",
+              "value": "DictAprilTag_36h10"
+            },
+            {
+              "label": "AprilTag 36h11",
+              "value": "DictAprilTag_36h11"
+            }
+          ],
+          "group": "Dictionary",
+          "description": "Marker family used at the station. The dictionary must match the printed/engraved markers; a mismatch produces no IDs rather than wrong IDs."
+        },
+        {
+          "name": "maxMarkers",
+          "label": "Maximum Markers",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1,
+          "group": "Dictionary",
+          "description": "Hard cap on detected markers. Exceeding it fails instead of silently dropping markers."
+        },
+        {
+          "name": "cornerRefinement",
+          "label": "Corner Refinement",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None",
+              "value": "none"
+            },
+            {
+              "label": "Subpixel",
+              "value": "subpix"
+            },
+            {
+              "label": "Contour",
+              "value": "contour"
+            }
+          ],
+          "group": "Detection",
+          "description": "Optional subpixel corner refinement. Subpixel improves pose stability on clean markers; contour can recover blurred edges at extra cost."
+        },
+        {
+          "name": "adaptiveThreshWinSizeMin",
+          "label": "Adaptive Threshold Min Window",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 3,
+          "max": 101,
+          "step": 2,
+          "group": "Detection",
+          "description": "Smallest adaptive-threshold window. Windows are compared from min to max in steps; keep min small for small markers."
+        },
+        {
+          "name": "adaptiveThreshWinSizeMax",
+          "label": "Adaptive Threshold Max Window",
+          "type": "number",
+          "defaultValue": 23,
+          "min": 3,
+          "max": 201,
+          "step": 2,
+          "group": "Detection",
+          "description": "Largest adaptive-threshold window. Must be at least the minimum; larger values accept markers with broad lighting gradients."
+        },
+        {
+          "name": "adaptiveThreshWinSizeStep",
+          "label": "Adaptive Threshold Window Step",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 50,
+          "step": 1,
+          "group": "Detection",
+          "description": "Step between adaptive-threshold windows. Smaller steps are slower but more tolerant of marker size changes."
+        },
+        {
+          "name": "adaptiveThreshConstant",
+          "label": "Adaptive Threshold Constant",
+          "type": "number",
+          "defaultValue": 7,
+          "min": -100,
+          "max": 100,
+          "step": 0.5,
+          "group": "Detection",
+          "description": "Constant subtracted from the local threshold. Raise it for low-contrast markers; lower it for washed-out backgrounds."
+        },
+        {
+          "name": "minMarkerPerimeterRate",
+          "label": "Minimum Marker Perimeter Rate",
+          "type": "number",
+          "defaultValue": 0.03,
+          "min": 0,
+          "max": 1,
+          "step": 0.005,
+          "group": "Detection",
+          "description": "Minimum marker perimeter as a fraction of the larger image dimension. Lower it for small markers; raise it to reject noise."
+        },
+        {
+          "name": "minDistanceToBorder",
+          "label": "Minimum Distance to Border",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0,
+          "max": 200,
+          "step": 1,
+          "group": "Detection",
+          "description": "Markers closer than this many pixels to the image border are rejected. Keep a quiet zone around the marker."
+        },
+        {
+          "name": "errorCorrectionRate",
+          "label": "Error Correction Rate",
+          "type": "number",
+          "defaultValue": 0.6,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Detection",
+          "description": "Fraction of erroneous bits the decoder may correct. Higher values tolerate damaged markers but increase false IDs."
+        },
+        {
+          "name": "markerSize",
+          "label": "Marker Size",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 1000000,
+          "step": 0.1,
+          "group": "Pose",
+          "description": "Physical marker side length used by solvePnP. Only read when calibrationJson is connected or filled."
+        },
+        {
+          "name": "markerSizeUnit",
+          "label": "Marker Size Unit",
+          "type": "text",
+          "defaultValue": "mm",
+          "group": "Pose",
+          "description": "Unit of Marker Size and of the emitted 3D transform. 1..16 characters, for example mm or m."
+        },
+        {
+          "name": "calibrationJson",
+          "label": "Calibration JSON",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "group": "Pose",
+          "description": "Optional CameraCalibrationModel JSON from calibration.cameraIntrinsics. Connected calibrationJson takes precedence. Without calibration the node still detects markers but poseAvailable=false; fisheye and telecentric models are rejected for pose.",
+          "overriddenByPorts": [
+            "calibrationJson"
+          ]
+        }
+      ],
+      "description": "Detect ArUco/AprilTag markers and optionally solve their 3D pose. Outputs marker IDs, typed detections, corner JSON and, when calibrationJson is available, a marker-to-camera Transform3D plus poses JSON. Pose uses a pinhole Brown-Conrady model; fisheye and telecentric models are rejected because their Z interpretation differs. Failures: empty image, unknown dictionary, too many markers, invalid calibration JSON or pose-only parameters. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "outputFrames": [
+        {
+          "source": "ImageInput",
+          "outputPort": "detections",
+          "inputPort": "image"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "recognition.barcode",
       "displayName": "Barcode / QR Decode",
       "category": "Recognition",
@@ -34329,6 +36614,227 @@
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
+    },
+    {
+      "type": "color.classify",
+      "displayName": "Color Cluster / Classify",
+      "category": "Recognition",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "classCounts",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "dominantClass",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "unmatchedPixels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Color Mode",
+          "type": "select",
+          "defaultValue": "cluster",
+          "options": [
+            {
+              "label": "K-means clustering",
+              "value": "cluster"
+            },
+            {
+              "label": "Reference colors",
+              "value": "reference"
+            }
+          ],
+          "group": "Mode",
+          "description": "cluster learns the dominant colours in the ROI; reference assigns every pixel to the nearest configured colour within its tolerance."
+        },
+        {
+          "name": "colorSpace",
+          "label": "Color Space",
+          "type": "select",
+          "defaultValue": "lab",
+          "options": [
+            {
+              "label": "CIELAB (L*, a*, b*)",
+              "value": "lab"
+            },
+            {
+              "label": "RGB (0-255)",
+              "value": "rgb"
+            }
+          ],
+          "group": "Mode",
+          "description": "Working space for distances and cluster centres. Lab is perceptual, so a fixed tolerance behaves more evenly across colours; RGB is easier to copy from a colour picker."
+        },
+        {
+          "name": "clusterCount",
+          "label": "Cluster Count",
+          "type": "number",
+          "defaultValue": 4,
+          "min": 2,
+          "max": 32,
+          "step": 1,
+          "group": "Clustering",
+          "description": "Number of K-means clusters (2..32). Output labels use 1..N; 0 stays background.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "cluster"
+            ]
+          }
+        },
+        {
+          "name": "sampleStride",
+          "label": "Sample Stride",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 1,
+          "max": 32,
+          "step": 1,
+          "group": "Clustering",
+          "description": "K-means sees every Nth pixel in X and Y. 1 uses every pixel; larger values lower fit cost without changing the final per-pixel label assignment.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "cluster"
+            ]
+          }
+        },
+        {
+          "name": "maxSamples",
+          "label": "Maximum Samples",
+          "type": "number",
+          "defaultValue": 1000000,
+          "min": 1000,
+          "max": 4000000,
+          "step": 1000,
+          "group": "Clustering",
+          "description": "Hard cap on sampled pixels. Exceeding it fails instead of silently truncating the colour distribution; raise it or increase Sample Stride.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "cluster"
+            ]
+          }
+        },
+        {
+          "name": "referenceColorsJson",
+          "label": "Reference Colors JSON",
+          "type": "textarea",
+          "defaultValue": "[{\"name\":\"red\",\"r\":255,\"g\":0,\"b\":0,\"tolerance\":30},{\"name\":\"green\",\"r\":0,\"g\":255,\"b\":0,\"tolerance\":30}]",
+          "group": "Reference",
+          "description": "JSON array of reference colours. In lab mode provide {name,l,a,b,tolerance}; in rgb mode provide {name,r,g,b,tolerance}. Tolerance is the maximum distance in the selected space; omitted values use Default Tolerance.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "reference"
+            ]
+          }
+        },
+        {
+          "name": "defaultTolerance",
+          "label": "Default Tolerance",
+          "type": "number",
+          "defaultValue": 30,
+          "min": 0,
+          "max": 500,
+          "step": 0.1,
+          "group": "Reference",
+          "description": "Tolerance used when a reference entry omits its own tolerance. Lab values are Delta E 76 distances; RGB values are Euclidean distances in 0..255.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "reference"
+            ]
+          }
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Cluster or classify colours in an 8-bit 1/3/4-channel image. cluster runs deterministic K-means on ROI pixels and emits a 1..N label map, class counts and dominant class; reference assigns pixels to configured colours within their tolerance and marks the rest as 0. Output image is a single-channel label map. Use ROI to exclude background. Failures: non-8-bit image, too few samples, empty reference list, duplicate names or invalid tolerances. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "PreserveInput",
+          "inputPort": "image",
+          "transform": "None"
+        }
+      ],
+      "roiImageBindings": [
+        {
+          "roiPort": "roi",
+          "imagePort": "image"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": true
     },
     {
       "type": "text.match",
@@ -36635,6 +39141,97 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "region.fromMask",
+      "displayName": "Region From Mask",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "threshold",
+          "label": "Mask Threshold",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Mask",
+          "description": "Pixels at or above this level belong to the region; 1 means any non-zero pixel, which is the usual case for segmentation masks.",
+          "integer": true
+        },
+        {
+          "name": "invert",
+          "label": "Invert Mask",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Mask",
+          "description": "Swap foreground and background, for models or defects that encode the object as dark instead of bright."
+        }
+      ],
+      "description": "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromThreshold. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": false,
+        "executionMode": "WorkflowCore"
       },
       "actions": [],
       "declaresActions": true,
@@ -40021,6 +42618,186 @@
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "script.csharp",
+      "displayName": "C# Script",
+      "category": "Script",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "a",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "b",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "c",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "d",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "e",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "f",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "g",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "h",
+          "dataType": "Any",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "number",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "boolean",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "json",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "source",
+          "label": "Script Source",
+          "type": "textarea",
+          "defaultValue": "var a = Input.Number(\"a\");\nOutput.Number = a * 2;",
+          "group": "Script",
+          "description": "C# script body. Use Input.Number/Integer/Boolean/Text/Numbers/Points, Image (Mat), Output.Result/Number/Text/Boolean/Json/Image, Log and Fail. Top-level return also becomes result when Output.Result is not set. Use a using block or explicit Dispose for working Mats; top-level 'using var' declarations are not accepted by the Roslyn script parser in this build."
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout (ms)",
+          "type": "number",
+          "defaultValue": 250,
+          "min": 10,
+          "max": 10000,
+          "step": 10,
+          "unit": "ms",
+          "group": "Limits",
+          "description": "Wall-clock budget checked at injected loop/function ticks. Native OpenCV calls and BCL calls that do not yield cannot be interrupted."
+        },
+        {
+          "name": "maxTicks",
+          "label": "Maximum Ticks",
+          "type": "number",
+          "defaultValue": 1000000,
+          "min": 100,
+          "max": 100000000,
+          "step": 1000,
+          "group": "Limits",
+          "description": "Maximum loop/function ticks before the script is stopped. The rewriter inserts a tick at every loop body and function entry."
+        },
+        {
+          "name": "maxOutputBytes",
+          "label": "Maximum Output Bytes",
+          "type": "number",
+          "defaultValue": 65536,
+          "min": 1,
+          "max": 1048576,
+          "step": 1,
+          "unit": "bytes",
+          "group": "Limits",
+          "description": "Maximum UTF-8 size of Output.Text/Output.Json; structured data must use valid JSON."
+        },
+        {
+          "name": "maxImagePixels",
+          "label": "Maximum Image Pixels",
+          "type": "number",
+          "defaultValue": 16777216,
+          "min": 1,
+          "max": 100000000,
+          "step": 1,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Maximum input/output image pixel count. Reject oversized Mat objects before they can exhaust the host."
+        }
+      ],
+      "description": "Run trusted C# code with typed inputs and an optional OpenCV Mat image. Image input is cloned; image output is owned by the result. The runtime references only a minimal BCL surface plus OpenCvSharp and VisionStudio.Scripting; file/network/reflection/process/threading APIs and #r/#load directives are rejected by a syntax-tree allowlist. Loops and function entries receive a cooperative tick budget. Set Output.Result/Number/Text/Boolean/Json/Image or return a primitive value; at least one output is required. This is a trusted-engineer runtime, not a hard OS sandbox; imported workflows containing scripts require approval. algorithmBackend=roslyn.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "frames": [
+        {
+          "policy": "NewSpatialFrame",
+          "inputPort": "image",
+          "frameLabel": "script output frame",
+          "transform": "None"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": true,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": false

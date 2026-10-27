@@ -34,6 +34,7 @@ public static class EndpointMapping
         app.MapParameterTuningEndpoints();
         app.MapWorkflowModuleEndpoints();
         app.MapWorkflowStoreEndpoints();
+        app.MapScriptEndpoints();
         return app;
     }
 }

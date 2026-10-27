@@ -1,7 +1,7 @@
 import type { NodeCatalogItem, PortDescriptor } from './types';
 import { portsCompatible } from './validation';
 
-export type NodeCategory = 'acquisition' | 'preprocess' | 'feature' | 'measurement' | 'geometry' | 'calibration' | 'coordinate' | 'flow' | 'device' | 'robot' | 'plugin';
+export type NodeCategory = 'acquisition' | 'preprocess' | 'feature' | 'measurement' | 'geometry' | 'calibration' | 'coordinate' | 'flow' | 'device' | 'robot' | 'script' | 'plugin';
 export type PortRecommendation = { dataType: string; direction: 'source' | 'target' };
 const categories: Record<NodeCategory, { order: number; color: string }> = {
   acquisition: { order: 0, color: '#52a9dc' }, preprocess: { order: 1, color: '#54b6ad' },
@@ -9,7 +9,7 @@ const categories: Record<NodeCategory, { order: number; color: string }> = {
   geometry: { order: 4, color: '#c49a54' }, calibration: { order: 5, color: '#b48ad7' },
   coordinate: { order: 6, color: '#b48ad7' }, flow: { order: 7, color: '#9e8cde' },
   device: { order: 8, color: '#cd8d73' }, robot: { order: 9, color: '#cd8d73' },
-  plugin: { order: 10, color: '#8e9baa' }
+  script: { order: 10, color: '#c9a86a' }, plugin: { order: 11, color: '#8e9baa' }
 };
 export function nodeCategory(type: string): NodeCategory {
   const normalized = type.trim().toLowerCase();
@@ -21,8 +21,8 @@ export function nodeCategory(type: string): NodeCategory {
   if (normalized.startsWith('jlvision.')) return 'feature';
   if (normalized.startsWith('defect.')) return 'measurement';
   const prefix = normalized.split('.')[0];
-  return ({ image: 'preprocess', feature: 'feature', measure: 'measurement', geometry: 'geometry',
-    calibration: 'calibration', coordinate: 'coordinate', flow: 'flow', device: 'device', robot: 'robot',
+  return ({ image: 'preprocess', color: 'preprocess', feature: 'feature', measure: 'measurement', geometry: 'geometry',
+    calibration: 'calibration', coordinate: 'coordinate', flow: 'flow', device: 'device', robot: 'robot', script: 'script',
     match: 'feature', value: 'flow', logic: 'flow', output: 'device', http: 'device',
     recognition: 'feature', text: 'feature', ai: 'feature', inference: 'feature', contour: 'feature', region: 'feature', roi: 'measurement', collection: 'flow' } as Record<string, NodeCategory>)[prefix] ?? 'plugin';
 }
@@ -46,7 +46,12 @@ const aliases: Record<string, string[]> = {
   'flow.if': ['条件', '分支', 'if'], 'flow.parallel': ['并行', 'parallel'],
   'flow.join': ['汇合', '合并', 'join'], 'flow.result': ['判定', '结果', 'ok', 'ng'],
   'device.readTag': ['plc', '读取', 'read'], 'device.writeTag': ['plc', '写入', 'write'],
-  'camera.syncCapture': ['多相机', '同步', 'sync'], 'calibration.planar': ['标定', 'calibrate']
+  'camera.syncCapture': ['多相机', '同步', 'sync'], 'calibration.planar': ['标定', 'calibrate'],
+  'color.classify': ['颜色', '色彩', '聚类', '分类', 'color', 'kmeans'],
+  'image.denoise': ['降噪', '去噪', 'denoise', 'nlm'],
+  'image.stitch': ['拼接', '全景', 'stitch', 'panorama'],
+  'recognition.aruco': ['aruco', '标记', '定位标记', 'apriltag'],
+  'script.csharp': ['脚本', 'script', 'c#', '代码', 'code']
 };
 const mergedLegacyTypes = new Set([
   'image.blur.gaussian', 'image.blur.median', 'image.topHat', 'image.bottomHat', 'image.morphGradient',

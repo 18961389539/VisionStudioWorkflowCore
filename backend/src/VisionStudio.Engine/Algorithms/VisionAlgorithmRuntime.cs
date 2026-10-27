@@ -34,6 +34,10 @@ public static class VisionAlgorithmRuntime
         if (type.StartsWith("inference.", StringComparison.OrdinalIgnoreCase)) return "onnx";
         if (type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase)) return "zxing";
         if (type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase)) return "tesseract";
+        if (type.Equals("recognition.aruco", StringComparison.OrdinalIgnoreCase)) return "opencv";
+        if (type is "color.classify" or "image.denoise" or "image.stitch" or "match.feature") return "opencv";
+        if (type.Equals("calibration.charuco", StringComparison.OrdinalIgnoreCase)) return "opencv";
+        if (type.Equals("script.csharp", StringComparison.OrdinalIgnoreCase)) return "roslyn";
         if (type.Equals("calibration.handEye3D", StringComparison.OrdinalIgnoreCase)) return "opencv";
         if (type.Equals("calibration.dualCameraExtrinsics", StringComparison.OrdinalIgnoreCase)) return "opencv";
         if (type.Equals("calibration.handEye2D", StringComparison.OrdinalIgnoreCase)) return "managed";
@@ -59,6 +63,12 @@ public static class VisionAlgorithmRuntime
         { domainKey = "recognitionBackend"; domainValue = "zxing"; }
         else if (type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase))
         { domainKey = "recognitionBackend"; domainValue = "tesseract"; }
+        else if (type.Equals("recognition.aruco", StringComparison.OrdinalIgnoreCase))
+        { domainKey = "recognitionBackend"; domainValue = "opencv"; }
+        else if (type.Equals("calibration.charuco", StringComparison.OrdinalIgnoreCase))
+        { domainKey = "calibrationBackend"; domainValue = "opencv"; }
+        else if (type.Equals("script.csharp", StringComparison.OrdinalIgnoreCase))
+        { domainKey = "scriptBackend"; domainValue = "csharp"; }
         else if (type.Equals("calibration.handEye3D", StringComparison.OrdinalIgnoreCase) ||
                  type.Equals("calibration.dualCameraExtrinsics", StringComparison.OrdinalIgnoreCase))
         { domainKey = "calibrationBackend"; domainValue = "opencv"; }
@@ -70,6 +80,9 @@ public static class VisionAlgorithmRuntime
             if (summary.TryGetValue("algorithmBackend", out var ab) && ab is string s &&
                 s.Equals("managed", StringComparison.OrdinalIgnoreCase))
                 domainValue = "managed";
+            else if (summary.TryGetValue("algorithmBackend", out var ob) && ob is string o &&
+                o.Equals("opencv", StringComparison.OrdinalIgnoreCase))
+                domainValue = "opencv";
             else
                 domainValue = "jlvision";
         }

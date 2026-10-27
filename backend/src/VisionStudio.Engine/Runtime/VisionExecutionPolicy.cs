@@ -45,6 +45,7 @@ public static class VisionExecutionPolicy
             type.StartsWith("collection.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("feature.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("measure.", StringComparison.OrdinalIgnoreCase) ||
+            type.StartsWith("tolerance.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("geometry.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("calibration.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("coordinate.", StringComparison.OrdinalIgnoreCase) ||

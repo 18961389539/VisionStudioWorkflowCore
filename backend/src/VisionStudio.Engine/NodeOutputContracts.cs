@@ -21,6 +21,7 @@ internal static class NodeOutputContracts
     private static readonly HashSet<string> OverlayProducers = new(StringComparer.OrdinalIgnoreCase)
     {
         "inference.obb", "inference.segmentation", "inference.instanceSegmentation", "inference.pose",
+        "recognition.aruco", "calibration.charuco",
         "jlvision.contourOp", "jlvision.contourFeature", "jlvision.geometry", "jlvision.homMat",
         "jlvision.matrixOp", "jlvision.measure1d", "jlvision.imageOp", "jlvision.regionFeature",
         "jlvision.regionOp", "jlvision.threshold"

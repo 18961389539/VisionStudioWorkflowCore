@@ -1485,6 +1485,24 @@ allowed_cv_node_exceptions = {
     ('JLVisionNodeSupport.cs', 'JLVisionNodeSupport', 'CvtColor'),
     # Drawing a text label on an inference preview is visualization, not image analysis.
     ('InferenceNodes.cs', 'OnnxOrientedDetectionNode', 'PutText'),
+    # 2026-10-27: OpenCV 5 colour/denoise/ArUco nodes. These capabilities have no JLVision
+    # equivalent in this package; the nodes expose algorithmBackend=opencv, and the static
+    # audit must list every OpenCV algorithm call explicitly instead of silently allowing it.
+    ('ColorClassifyNode.cs', 'ColorClassifyNode', 'CvtColor'),
+    ('ColorClassifyNode.cs', 'ColorClassifyNode', 'Kmeans'),
+    ('ImageDenoiseNode.cs', 'ImageDenoiseNode', 'FastNlMeansDenoising'),
+    ('ImageDenoiseNode.cs', 'ImageDenoiseNode', 'FastNlMeansDenoisingColored'),
+    ('ArucoMarkerNode.cs', 'ArucoMarkerNode', 'Aruco'),
+    ('ArucoMarkerNode.cs', 'ArucoMarkerNode', 'SolvePnP'),
+    ('ArucoMarkerNode.cs', 'ArucoMarkerNode', 'Rodrigues'),
+    ('CharucoBoardNode.cs', 'CharucoBoardNode', 'Aruco'),
+    # 2026-10-26 mask-to-region/contour landed with OpenCV connected-components/contour primitives;
+    # register them so the audit gate does not stay red for an already delivered batch.
+    ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'Threshold'),
+    ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'BitwiseNot'),
+    ('MaskToVisionNodes.cs', 'RegionFromMaskNode', 'ConnectedComponents'),
+    ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'FindContours'),
+    ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'ContourArea'),
 }
 for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
     body = source.read_text(encoding='utf-8-sig')

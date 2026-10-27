@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { AutoComplete, Button, Empty, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd';
 import type { Node } from '@xyflow/react';
 import type { NodeCatalogItem, ParameterDescriptor, VisionRoi } from '../types';
@@ -7,6 +7,9 @@ import { MAX_ROI_POLYGON_POINTS, roiConfigurationIssue } from '../nodeConfigurat
 import MatrixEditor from './MatrixEditor';
 import JsonTextarea from './JsonTextarea';
 import { isJsonParameter, jsonExampleFor } from '../jsonExamples';
+import type { ScriptPreviewReport } from './ScriptEditor';
+
+const ScriptEditor = lazy(() => import('./ScriptEditor'));
 
 type Props = {
   node?: Node;
@@ -19,6 +22,13 @@ type Props = {
   roiFields?: { key: string; label: string; emptyText?: string; showEmpty?: boolean }[];
   /** Hide controls rendered in a specialized editor while keeping validation and reset behavior. */
   hiddenParameterNames?: readonly string[];
+  /** Data ports currently connected to this node; script completion uses them for Input("..."). */
+  connectedInputPorts?: readonly string[];
+  /** script.csharp：用暂存参数测试当前节点。 */
+  onRunPreview?: () => void;
+  previewBusy?: boolean;
+  scriptPreview?: ScriptPreviewReport;
+  scriptPreviewBlockedReason?: string;
 };
 
 /** 参数表格超过这个数量才提供筛选框，短表单直接浏览更快。 */
@@ -164,7 +174,8 @@ function buildSections(catalogItem?: NodeCatalogItem): Section[] {
   return sections;
 }
 
-export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields, hiddenParameterNames }: Props) {
+export default function PropertyPanel({ node, catalogItem, onChange, disabled = false, onLocateRoi, roiFields, hiddenParameterNames, connectedInputPorts,
+  onRunPreview, previewBusy, scriptPreview, scriptPreviewBlockedReason }: Props) {
   const sections = useMemo(() => buildSections(catalogItem ? { ...catalogItem,
     parameters: catalogItem.parameters.map(parameter => parameterPresentation(parameter, catalogItem.parameters,
       (node?.data.parameters ?? {}) as Record<string, unknown>)) } : undefined), [catalogItem, node?.data.parameters]);
@@ -207,6 +218,14 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   const resetAll = () => modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
 
   const renderControl = (parameter: ParameterDescriptor) => {
+    if (catalogItem.type === 'script.csharp' && parameter.name === 'source')
+      return <Suspense fallback={<div className="script-editor-loading">加载脚本编辑器…</div>}>
+        <ScriptEditor value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
+          disabled={disabled} connectedInputPorts={connectedInputPorts ?? []}
+          onRunPreview={onRunPreview} previewBusy={previewBusy} preview={scriptPreview}
+          previewBlockedReason={scriptPreviewBlockedReason}
+          onChange={next => onChange(parameter.name, next)} />
+      </Suspense>;
     if (catalogItem.type === 'jlvision.matrixOp' && ['matrixA', 'matrixB'].includes(parameter.name))
       return <MatrixEditor label={parameter.label} disabled={disabled} value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
         onChange={value => onChange(parameter.name, value)} />;

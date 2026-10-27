@@ -69,6 +69,90 @@ public static class GeometryToleranceCatalog
         new("measure.perpendicularity", "Line Perpendicularity", "Measurement", [Exec, new("a", VisionDataType.Line2D), new("b", VisionDataType.Line2D)],
             [new("angleError", VisionDataType.Double), new("deviation", VisionDataType.Double), new("measuredLength", VisionDataType.Double), new("measuredAngleDeg", VisionDataType.Double), new("withinTolerance", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next], [new("maxAngleErrorDeg", "Max Angle Error deg (0=off)", "number", 0, 0, 90, 0.1, Description: "Optional perpendicularity tolerance; withinTolerance reports |angleError| <= limit."),
                 ],
-            "Perpendicularity of two fitted line segments. Wire: lines a + b → angleError from 90°, measured angle, endpoint drift of B along datum A, withinTolerance. Key params: maxAngleErrorDeg. Geometry-only on supplied fitted lines; reversing endpoints does not change results.", "builtin", new VisionToolCapabilities(EmitsOverlay: true))
+            "Perpendicularity of two fitted line segments. Wire: lines a + b → angleError from 90°, measured angle, endpoint drift of B along datum A, withinTolerance. Key params: maxAngleErrorDeg. Geometry-only on supplied fitted lines; reversing endpoints does not change results.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+
+        new("tolerance.datum", "Datum Reference Frame", "Measurement",
+            [Exec, new("primary", VisionDataType.Line2D), new("secondary", VisionDataType.Point2D, Required: false)],
+            [Found, new("pose", VisionDataType.Pose2D), new("origin", VisionDataType.Point2D),
+             new("axisAngleDeg", VisionDataType.Double), new("length", VisionDataType.Double),
+             new("secondaryOffset", VisionDataType.Double, Required: false), new("datumJson", VisionDataType.String),
+             new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [
+                new("datumName", "Datum Name", "text", "A", Group: "Datum",
+                    Description: "Label written into datumJson, the overlay and downstream reports; drawings usually use A/B/C."),
+                new("flipAxis", "Flip Axis", "boolean", false, Group: "Datum",
+                    Description: "Reverse the +X direction. Fitted lines carry no polarity, so set this when the drawing's X points the other way."),
+                new("unit", "Unit Label", "text", "px", Group: "Datum",
+                    Description: "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are already calibrated, so reports and traces read correctly."),
+            ],
+            "Builds a 2D datum reference frame from a primary datum line (A) plus an optional secondary point (B). Origin is B projected onto A, or the line midpoint when B is absent; the X axis follows A and can be flipped. Wire: primary (and secondary) → pose/origin/axisAngleDeg, then into tolerance.position / tolerance.runout / coordinate.* which expect a Pose2D. secondaryOffset is the signed perpendicular distance of B from datum A, which is the form error the datum feature itself contributes. Units follow the input coordinates; no conversion is applied. Zero-length lines fail. Image-plane (2D) only.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
+
+        new("tolerance.position", "True Position", "Measurement",
+            [Exec, new("point", VisionDataType.Point2D, Required: false), new("circle", VisionDataType.Circle, Required: false),
+             new("datum", VisionDataType.Pose2D, Required: false), new("size", VisionDataType.Double, Required: false)],
+            [Found, new("withinTolerance", VisionDataType.Boolean), new("deviationX", VisionDataType.Double),
+             new("deviationY", VisionDataType.Double), new("radialDeviation", VisionDataType.Double),
+             new("diametralDeviation", VisionDataType.Double), new("positionDeviation", VisionDataType.Double),
+             new("effectiveTolerance", VisionDataType.Double), new("bonus", VisionDataType.Double),
+             new("utilization", VisionDataType.Double), new("diagnostics", VisionDataType.String),
+             new("overlay", VisionDataType.Image, Required: false), Next],
+            [
+                new("basicX", "Basic X", "number", 0, -1000000, 1000000, 0.001, Group: "Basic Dimension",
+                    Description: "The boxed basic dimension along the datum X axis. Basic dimensions are theoretically exact, so they carry no tolerance themselves."),
+                new("basicY", "Basic Y", "number", 0, -1000000, 1000000, 0.001, Group: "Basic Dimension",
+                    Description: "The boxed basic dimension along the datum Y axis."),
+                new("zoneType", "Tolerance Zone", "select", "diameter", Group: "Tolerance", Options:
+                [
+                    new("Diametral zone (⌖ Ø)", "diameter"),
+                    new("Rectangular zone (±X/±Y)", "rectangular")
+                ], Description: "Diametral is the standard for hole/pin position: the zone is a circle and the reported deviation is 2x the radial error. Rectangular checks each axis against its own half-width."),
+                new("diameterTolerance", "Zone Diameter", "number", 0.2, 0, 1000000, 0.001, Group: "Tolerance",
+                    VisibleWhen: new("zoneType", ["diameter"]),
+                    Description: "Full diameter of the circular tolerance zone (the Ø value in the feature control frame). 0 disables the gate and reports utilization 0."),
+                new("toleranceX", "± X Tolerance", "number", 0.1, 0, 1000000, 0.001, Group: "Tolerance",
+                    VisibleWhen: new("zoneType", ["rectangular"]),
+                    Description: "Half-width of the rectangular zone along X. 0 leaves the X axis unchecked."),
+                new("toleranceY", "± Y Tolerance", "number", 0.1, 0, 1000000, 0.001, Group: "Tolerance",
+                    VisibleWhen: new("zoneType", ["rectangular"]),
+                    Description: "Half-width of the rectangular zone along Y. 0 leaves the Y axis unchecked."),
+                new("mmcBonus", "MMC Bonus", "boolean", false, Group: "MMC",
+                    Description: "Add the maximum-material bonus (actual size deviation from MMC) to the tolerance. Requires a measured size: the size port, or a circle input."),
+                new("mmcSize", "MMC Size", "number", 0, 0, 1000000, 0.001, Group: "MMC",
+                    VisibleWhen: new("mmcBonus", ["true"]),
+                    Description: "Feature size at maximum material condition: smallest allowed hole diameter or largest allowed pin diameter. Must be > 0 when the bonus is enabled."),
+                new("featureType", "Feature Type", "select", "hole", Group: "MMC", Options:
+                [
+                    new("Hole / internal (bonus grows with size)", "hole"),
+                    new("Pin / external (bonus shrinks with size)", "pin")
+                ], VisibleWhen: new("mmcBonus", ["true"]),
+                    Description: "Decides the sign of the bonus: holes gain tolerance as they get larger, pins as they get smaller."),
+                new("unit", "Unit Label", "text", "px", Group: "Reporting",
+                    Description: "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."),
+            ],
+            "True position (position tolerance) of a feature centre against basic dimensions in a datum frame. Wire exactly one of point or circle, plus an optional datum Pose2D from tolerance.datum (identity when absent); size overrides the circle diameter for MMC. Outputs deviationX/deviationY in datum coordinates, radialDeviation, diametralDeviation (2x radial, the value on the drawing), positionDeviation and utilization for SPC. MMC bonus requires a measured size and a positive mmcSize. 0 tolerance disables the gate (withinTolerance stays true). Both or neither of point/circle fails hard. Image-plane (2D) only; true 3D position needs a 3D datum.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
+
+        new("tolerance.runout", "Circular / Total Runout", "Measurement",
+            [Exec, new("samples", VisionDataType.PointList), new("datum", VisionDataType.Pose2D)],
+            [Found, Samples, new("runout", VisionDataType.Double, Required: false),
+             new("minValue", VisionDataType.Double, Required: false), new("maxValue", VisionDataType.Double, Required: false),
+             new("meanValue", VisionDataType.Double, Required: false), new("coverageDeg", VisionDataType.Double, Required: false),
+             new("highPoint", VisionDataType.Point2D, Required: false), new("lowPoint", VisionDataType.Point2D, Required: false),
+             new("highAngleDeg", VisionDataType.Double, Required: false), new("lowAngleDeg", VisionDataType.Double, Required: false),
+             new("withinTolerance", VisionDataType.Boolean, Required: false),
+             new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [
+                new("mode", "Runout Mode", "select", "radial", Group: "Measurement", Options:
+                [
+                    new("Radial (cylindrical surface)", "radial"),
+                    new("Axial (face surface)", "axial")
+                ], Description: "Radial measures distance to the datum axis (cylindrical surface, circular runout). Axial measures the coordinate along the datum axis (face surface, total runout)."),
+                new("tolerance", "Runout Tolerance", "number", 0, 0, 1000000, 0.001, Group: "Limits",
+                    Description: "Maximum allowed FIM (max reading minus min reading). 0 disables the gate."),
+                new("minCoverageDeg", "Minimum Angular Coverage", "number", 0, 0, 360, 1, Unit: "deg", Group: "Limits",
+                    Description: "Radial mode only: reject the result when the sampled arc covers less than this. Coverage is 360 deg minus the largest angular gap; 0 disables the check. A half-measured circle always looks better than it is."),
+                new("unit", "Unit Label", "text", "px", Group: "Reporting",
+                    Description: "Label only, no conversion (1..16 chars). Use mm when the upstream coordinates are calibrated."),
+            ],
+            "Circular or total runout as the full indicator movement (max minus min) of sampled surface points, measured in the datum frame from tolerance.datum. Wire: samples PointList + datum Pose2D (both required). radial mode evaluates distance to the datum axis; axial mode evaluates the coordinate along it. Outputs runout, min/max/mean reading, the high/low points (and their angles in radial mode) and coverageDeg. Fewer than 3 samples or insufficient angular coverage returns found=false. The datum axis is 2D: this is a planar projection of the real 3D runout, so spindle tilt and axis straightness are not modelled.", "builtin", new VisionToolCapabilities(EmitsOverlay: true), Actions: [])
     ];
 }

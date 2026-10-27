@@ -1,8 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Node } from '@xyflow/react';
 import PropertyPanel from '../components/PropertyPanel';
 import type { NodeCatalogItem, VisionRoi } from '../types';
+
+// 脚本编辑器的预览面板逻辑与 CodeMirror 无关：用 textarea 替身避免 jsdom 缺少编辑器的
+// DOM 测量 API（ResizeObserver/布局），同时保留 value/onChange 契约。
+vi.mock('@uiw/react-codemirror', () => ({
+  default: ({ value, onChange, editable }: { value?: string; onChange?: (value: string) => void; editable?: boolean }) => (
+    <textarea aria-label="脚本代码" readOnly={editable === false} value={value ?? ''}
+      onChange={(event) => onChange?.(event.target.value)} />
+  )
+}));
 
 const catalog: NodeCatalogItem = {
   type: 'image.crop', displayName: '图像裁剪', category: 'Preprocess', pluginId: 'builtin',
@@ -161,5 +170,87 @@ describe('PropertyPanel JSON fields', () => {
     expect(screen.getByRole('button', { name: '格式化 JSON' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: '位姿对 JSON' })).toBeTruthy();
     expect(screen.getByText('位姿字段说明')).toBeTruthy();
+  });
+});
+
+describe('PropertyPanel script editor preview', () => {
+  it('runs the node preview and renders inputs, outputs, logs and budgets inline', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ valid: true, diagnostics: [] }) })));
+    const scriptCatalog: NodeCatalogItem = { ...catalog, type: 'script.csharp', parameters: [
+      { name: 'source', label: '脚本源码', type: 'textarea', defaultValue: 'Output.Number = 2;' }
+    ] };
+    const node: Node = { id: 'script', position: { x: 0, y: 0 }, data: { parameters: { source: 'Output.Number = 2;' } } };
+    const onRunPreview = vi.fn();
+    render(<PropertyPanel node={node} catalogItem={scriptCatalog} onChange={vi.fn()} connectedInputPorts={['a']}
+      onRunPreview={onRunPreview} previewBusy={false} scriptPreview={{
+        success: true, durationMs: 12.5, receivedAt: '2026-10-27T09:00:00Z', stale: false, draft: true,
+        summary: { compileMs: 8.25, executeMs: 1.5, ticks: 42, sourceHash: 'abcdef0123456789', outputImage: 'none', logs: ['info: ok'] },
+        inputs: { a: { type: 'Double', display: '1.5' } },
+        outputs: { number: { type: 'Double', display: '2' } }
+      }} />);
+
+    expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '运行预览' }));
+    expect(onRunPreview).toHaveBeenCalledTimes(1);
+
+    const panel = screen.getByRole('region', { name: '脚本运行预览' });
+    expect(within(panel).getByText('本次输入')).toBeTruthy();
+    expect(within(panel).getByText('脚本输出')).toBeTruthy();
+    expect(within(panel).getByText(/8.25 ms/)).toBeTruthy();
+    expect(within(panel).getByText(/42/)).toBeTruthy();
+    expect(within(panel).getByText(/abcdef012345/)).toBeTruthy();
+    expect(within(panel).getByText('info: ok')).toBeTruthy();
+    expect(within(panel).queryByText('图像')).toBeNull();
+  });
+
+  it('keeps the source and shows diagnostics when formatting finds syntax errors', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/scripts/format')) {
+        return { ok: true, status: 200, json: async () => ({ valid: false, formatted: 'var broken = ;', diagnostics: [
+          { line: 1, column: 1, severity: 'Error', code: 'CS1002', message: '; expected' }
+        ] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ valid: true, diagnostics: [] }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onChange = vi.fn();
+    const scriptCatalog: NodeCatalogItem = { ...catalog, type: 'script.csharp', parameters: [
+      { name: 'source', label: '脚本源码', type: 'textarea', defaultValue: 'var broken = ;' }
+    ] };
+    render(<PropertyPanel node={{ id: 'script', position: { x: 0, y: 0 }, data: { parameters: { source: 'var broken = ;' } } }}
+      catalogItem={scriptCatalog} onChange={onChange} />);
+
+    expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '格式化' }));
+    expect(await screen.findByText('脚本存在语法错误，已保留原内容。')).toBeTruthy();
+    expect(screen.getByText('CS1002')).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('offers a jump action when a runtime error carries a mapped line', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ valid: true, diagnostics: [] }) })));
+    const scriptCatalog: NodeCatalogItem = { ...catalog, type: 'script.csharp', parameters: [
+      { name: 'source', label: '脚本源码', type: 'textarea', defaultValue: 'Output.Number = 1;' }
+    ] };
+    render(<PropertyPanel node={{ id: 'script', position: { x: 0, y: 0 }, data: { parameters: { source: 'Output.Number = 1;' } } }}
+      catalogItem={scriptCatalog} onChange={vi.fn()} scriptPreview={{
+        success: false, error: 'C# script failed at line 7: boom', durationMs: 2, summary: {}
+      }} />);
+
+    expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /跳转到第 7 行/ })).toBeTruthy();
+  });
+
+  it('disables the preview action with the blocked reason from the dialog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ valid: true, diagnostics: [] }) })));
+    const scriptCatalog: NodeCatalogItem = { ...catalog, type: 'script.csharp', parameters: [
+      { name: 'source', label: '脚本源码', type: 'textarea', defaultValue: 'Output.Number = 2;' }
+    ] };
+    render(<PropertyPanel node={{ id: 'script', position: { x: 0, y: 0 }, data: { parameters: {} } }}
+      catalogItem={scriptCatalog} onChange={vi.fn()} onRunPreview={vi.fn()}
+      scriptPreviewBlockedReason="请先结束当前调试会话，再测试暂存参数。" />);
+
+    expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: '运行预览' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

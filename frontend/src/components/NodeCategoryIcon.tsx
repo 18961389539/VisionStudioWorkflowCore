@@ -8,7 +8,7 @@ type NodeIconName =
   | 'region' | 'hull' | 'boundary' | 'skeleton' | 'detections' | 'grid' | 'axes' | 'transform'
   | 'branch' | 'switch' | 'merge' | 'parallel' | 'loop' | 'delay' | 'retry' | 'check' | 'number'
   | 'device' | 'deviceRead' | 'deviceWrite' | 'robot' | 'robotPose' | 'robotMove' | 'puzzle' | 'file' | 'surface'
-  | 'log' | 'stop';
+  | 'log' | 'stop' | 'stitch' | 'marker' | 'denoise' | 'cluster' | 'code';
 
 const glyphs: Record<NodeIconName, string[]> = {
   camera: ['M3 7h4l2-3h6l2 3h4v13H3z', 'M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0'],
@@ -71,7 +71,12 @@ const glyphs: Record<NodeIconName, string[]> = {
   log: ['M4 5h16v14H4z', 'M7 9h10M7 13h10M7 17h6'],
   stop: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18', 'm8.5 8.5 7 7m0-7-7 7'],
   file: ['M6 3h8l4 4v14H6z', 'M14 3v5h5', 'M9 13l2 2 4-4'],
-  surface: ['M3 18 9 12l6 3 6-8', 'M3 18h18M9 12v6M15 15v4', 'M3 6l6 3M15 3l6 2']
+  surface: ['M3 18 9 12l6 3 6-8', 'M3 18h18M9 12v6M15 15v4', 'M3 6l6 3M15 3l6 2'],
+  stitch: ['M3 8l6-3 6 3 6-3v12l-6 3-6-3-6 3z', 'M9 5v12M15 8v12'],
+  marker: ['M8 4h8v8zM8 10l4-4 4 4-4 8z', 'M12 10h.01M7 21h10'],
+  denoise: ['M4 4h16v16H4z', 'M6 6h12v12H6z', 'M8 8h.01M16 16h.01'],
+  cluster: ['M12 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 9a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4z', 'M12 7c3 0 5 2 7 6M5 13c2 1 4 1 7 0M20 17c-2 1-4 1-6 1'],
+  code: ['M8 6 3 12l5 6', 'M16 6l5 6-5 6', 'M14 4l-4 16']
 };
 
 const exactIcons: Record<string, NodeIconName> = {
@@ -84,15 +89,20 @@ const exactIcons: Record<string, NodeIconName> = {
   'image.rotate': 'rotate', 'image.perspective': 'perspective', 'image.register': 'target', 'image.warpAffine': 'transform',
   'image.undistort': 'lens', 'image.reduceDomain': 'mask', 'image.difference': 'difference', 'image.flatFieldCorrect': 'light',
   'image.dynamicThreshold': 'threshold', 'image.colorConvert': 'palette', 'image.contrastNormalize': 'histogram',
+  'image.denoise': 'denoise', 'image.stitch': 'stitch', 'color.classify': 'cluster', 'recognition.aruco': 'marker',
+  'image.convolve': 'grid', 'image.fftFilter': 'histogram',
+  'script.csharp': 'code',
   'image.illuminationNormalize': 'light', 'image.sharpen': 'sharpen', 'image.topHat': 'sparkles',
   'image.bottomHat': 'blur', 'image.morphGradient': 'edge',
+  'region.fromMask': 'mask', 'contour.fromMask': 'contour',
   'region.fromRange': 'palette', 'region.fromThreshold': 'threshold', 'region.fromColorRange': 'palette', 'region.fromRoi': 'region',
   'region.connectedComponents': 'detections', 'region.filter': 'sliders', 'region.boolean': 'merge', 'region.fillHoles': 'region',
   'region.morphology': 'region', 'region.properties': 'histogram', 'region.toDetections': 'detections',
   'region.transform': 'transform', 'region.convexHull': 'hull', 'region.boundary': 'boundary', 'region.skeleton': 'skeleton',
   'contour.extract': 'contour', 'contour.fromPoints': 'line', 'contour.filter': 'sliders', 'contour.properties': 'histogram',
   'feature.edge': 'edge', 'feature.edgeSubpixel': 'edge', 'feature.circle': 'circle', 'feature.line': 'line',
-  'match.template': 'target', 'match.shape': 'target', 'roi.transform': 'transform',
+  'match.template': 'target', 'match.shape': 'target', 'match.feature': 'target', 'roi.transform': 'transform',
+  'tolerance.datum': 'axes', 'tolerance.position': 'crosshair', 'tolerance.runout': 'rotate',
   'measure.blob': 'detections', 'measure.blobs': 'detections', 'measure.caliper': 'caliper',
   'measure.caliperWidth': 'caliper', 'measure.caliperLine': 'caliper', 'measure.caliperCircle': 'caliper', 'measure.pointLineDistance': 'ruler',
   'measure.circleSpacing': 'rings', 'measure.lineSpacing': 'ruler', 'measure.fitLine': 'line', 'measure.fitCircle': 'circle',
@@ -102,7 +112,7 @@ const exactIcons: Record<string, NodeIconName> = {
   'measure.colorDifference': 'palette', 'measure.regionIntensity': 'histogram', 'measure.grayHistogram': 'histogram',
   'geometry.angle': 'corner', 'geometry.intersection': 'crosshair', 'geometry.distance': 'ruler',
   'calibration.planar': 'grid', 'calibration.cameraIntrinsics': 'lens', 'calibration.handEye2D': 'robotPose', 'calibration.handEye3D': 'robotPose',
-  'calibration.detectBoard': 'grid', 'coordinate.transformCompose': 'transform', 'coordinate.transformConstant': 'transform',
+  'calibration.detectBoard': 'grid', 'calibration.charuco': 'grid', 'coordinate.transformCompose': 'transform', 'coordinate.transformConstant': 'transform',
   'coordinate.distance': 'ruler', 'coordinate.point': 'crosshair', 'coordinate.point3D': 'crosshair', 'coordinate.transformPoint3D': 'transform', 'coordinate.pose': 'robotPose', 'coordinate.frameTree': 'axes',
   'coordinate.transformInverse': 'transform', 'coordinate.poseToTransform': 'transform', 'coordinate.frameResolve': 'axes',
   'coordinate.transformCoordinatePoint': 'crosshair', 'coordinate.transformCoordinatePose': 'robotPose',
@@ -140,14 +150,14 @@ const normalizedExactIcons = Object.fromEntries(
 
 const prefixIcons: Array<[string, NodeIconName]> = [
   ['device.', 'device'], ['camera.', 'camera'], ['robot.', 'robot'], ['calibration.', 'grid'], ['coordinate.', 'axes'], ['geometry.', 'corner'],
-  ['measure.', 'ruler'], ['region.', 'region'], ['contour.', 'contour'], ['feature.', 'edge'], ['match.', 'target'],
+  ['measure.', 'ruler'], ['tolerance.', 'ruler'], ['region.', 'region'], ['contour.', 'contour'], ['feature.', 'edge'], ['match.', 'target'],
   ['recognition.', 'text'], ['inference.', 'inference'], ['collection.', 'detections'], ['flow.', 'branch'],
-  ['logic.', 'branch'], ['value.', 'number'], ['output.', 'image'], ['image.', 'image']
+  ['logic.', 'branch'], ['value.', 'number'], ['output.', 'image'], ['image.', 'image'], ['script.', 'code']
 ];
 
 const categoryIcons: Record<string, NodeIconName> = {
   acquisition: 'camera', preprocess: 'sliders', feature: 'edge', measurement: 'ruler', geometry: 'corner',
-  calibration: 'grid', coordinate: 'axes', flow: 'branch', device: 'device', robot: 'robot', plugin: 'puzzle'
+  calibration: 'grid', coordinate: 'axes', flow: 'branch', device: 'device', robot: 'robot', script: 'code', plugin: 'puzzle'
 };
 
 export function iconForNodeType(type: string): NodeIconName {
