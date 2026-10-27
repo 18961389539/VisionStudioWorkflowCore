@@ -105,6 +105,8 @@ const exactIcons: Record<string, NodeIconName> = {
   'tolerance.datum': 'axes', 'tolerance.position': 'crosshair', 'tolerance.runout': 'rotate',
   'value.jsonBuild': 'code', 'value.jsonParse': 'code', 'device.readTable': 'file',
   'output.notify': 'log', 'value.counter': 'number',
+  'defect.cluster': 'cluster', 'defect.classify': 'detections', 'image.fuse': 'layers',
+  'calibration.conveyor': 'transform', 'tolerance.profile': 'compare',
   'measure.blob': 'detections', 'measure.blobs': 'detections', 'measure.caliper': 'caliper',
   'measure.caliperWidth': 'caliper', 'measure.caliperLine': 'caliper', 'measure.caliperCircle': 'caliper', 'measure.pointLineDistance': 'ruler',
   'measure.circleSpacing': 'rings', 'measure.lineSpacing': 'ruler', 'measure.fitLine': 'line', 'measure.fitCircle': 'circle',

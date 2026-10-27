@@ -100,6 +100,11 @@ const nodeNames: Record<string, string> = {
   'device.readTable': '读取表格行',
   'output.notify': '发送告警通知',
   'value.counter': '跨轮计数',
+  'defect.cluster': '缺陷聚类',
+  'defect.classify': '缺陷分级',
+  'image.fuse': '多帧融合',
+  'calibration.conveyor': '传送带跟踪换算',
+  'tolerance.profile': '轮廓度',
 };
 
 const categories: Record<string, string> = {
@@ -648,6 +653,17 @@ const parameterNames: Record<string, string> = {
   'Scope': '作用域',
   'Reset On Pass': '合格时复位',
   'Reset On Fail': '不合格时复位',
+  'Link Distance': '关联距离',
+  'Maximum Input Detections': '最大输入检测数',
+  'Rules JSON': '分级规则 JSON',
+  'Reject Unclassified': '未分类计为 NG',
+  'Fusion Mode': '融合模式',
+  'Encoder Count': '编码器计数',
+  'Counts Per Unit': '每单位计数',
+  'Line Speed': '线速度',
+  'Trigger Delay': '触发延迟',
+  'Compensation Direction': '补偿方向',
+  'Profile Tolerance': '轮廓度公差',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -687,6 +703,11 @@ const parameterGroups: Record<string, string> = {
   'SMTP': '邮件',
   'Counter': '计数',
   'Reset': '复位',
+  'Rules': '分级规则',
+  'Fusion': '融合',
+  'Encoder': '编码器',
+  'Trigger': '触发',
+  'Zone': '公差带',
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
@@ -1473,6 +1494,15 @@ const optionNames: Record<string, string> = {
   'SMTP mail': 'SMTP 邮件',
   'Workflow (survives across runs)': '工作流（跨 run 保留）',
   'Run (resets every run)': '单次运行（每轮重置）',
+  'Mean (random noise / sqrt(N))': '均值（随机噪声 / √N）',
+  'Median (removes transient specks)': '中值（去掉瞬时亮点）',
+  'Minimum (darkest pixel)': '最小值（最暗）',
+  'Maximum (brightest pixel)': '最大值（最亮）',
+  'Add (part advanced)': '相加（工件继续前进）',
+  'Subtract (reverse running line)': '相减（线体反向）',
+  'Bilateral (zone straddles nominal)': '双侧（公差带跨理论轮廓）',
+  'Unilateral outside (material side)': '单侧外侧（材料侧）',
+  'Unilateral inside (cavity side)': '单侧内侧（型腔侧）',
 };
 
 /** 端口显示名（zh）：覆盖内置目录的全部端口。Handle id 仍用英文 name，映射只影响显示；
@@ -1662,6 +1692,22 @@ export const portNames: Record<string, string> = {
   'failCount': '不合格数',
   'rate': '合格率',
   'reset': '复位',
+  'mergedCount': '合并掉的数量',
+  'largestArea': '最大面积',
+  'ngCount': '不合格数',
+  'ok': '整体合格',
+  'unclassifiedCount': '未分类数',
+  'classCountsJson': '分类统计 JSON',
+  'position': '位置',
+  'triggerOffset': '触发偏移',
+  'compensatedPosition': '补偿后位置',
+  'profile': '轮廓度',
+  'maxDeviation': '最大偏差',
+  'minDeviation': '最小偏差',
+  'meanDeviation': '平均偏差',
+  'rmsDeviation': '偏差 RMS',
+  'crossedSampleCount': '跨侧样本数',
+  'worstPoint': '最差点',
 };
 
 const descriptions: Record<string, string> = {
@@ -1894,6 +1940,11 @@ const descriptions: Record<string, string> = {
   'device.readTable': '按 sequence 逐行读取 CSV/TSV，让流程被工单表驱动（一行一个 SN）。RFC4180 引号规则、空行跳过、按（路径+修改时间+长度+编码+分隔符）缓存，一次跑批只解析一次。读盘必须经宿主授权（IReplayInputResolver），越界不循环时返回 found=false。编码支持 UTF-8 / GB18030（中文 Excel 默认 GBK）/ Latin-1。文件可能在两次运行之间被改动，因此声明为不确定结果，不进自动重试。',
   'output.notify': '把告警送出流程：Webhook（结构化 JSON POST）、企业微信群机器人（文本）、SMTP 邮件。接了 value 会一并序列化进 webhook 载荷（图像降级成宽高）。只对可恢复错误重试（超时/连接失败/5xx），4xx 立即失败；默认发不出去就让流程失败——静默成功会让"告警已上报"变成假象。本节点声明外部副作用，调试运行需要审批。',
   'value.counter': '跨轮计数器与良率统计：可接 pass / reset，输出 count/total/passCount/failCount/rate。复位在累加之前求值，所以触发复位的那一件算第 1 件而不是第 0 件——连续 NG 门限的差一件问题就出在这里。状态按 workflow（默认，跨 run 保留）或 run（每轮重置）隔离，并行分支下线程安全，进程内存储，重启清零。',
+  'defect.cluster': '把相邻的检测并成一个缺陷：两个外接矩形的间隙 ≤ linkDistancePx 就连成一簇。现场意义很直接——聚类前几百个斑点是几百条 NG，聚类后是两条划痕，人工复判量差两个数量级。合并面积取成员之和，合并周长也取成员之和，因此簇的圆度只能作粗筛；需要真实轮廓请回 region/contour 节点重算。只有成员类别完全一致时才保留类别。按 x 扫描线实现，结果与输入顺序无关。',
+  'defect.classify': '按有序规则表给每个检测打类别：面积、长宽比、圆度，首条命中生效。规则字段 name/classId/minArea/maxArea/minAspect/maxAspect/minCircularity/maxCircularity，0 或省略表示该边界不生效。未命中记为未分类（ClassId=0），默认计为 NG；调规则时可关掉 rejectUnclassified 避免误判停机。重名、classId 重复、区间倒置都会直接报错，而不是静默永不匹配。灰度类分级需要源图，另配节点。',
+  'image.fuse': '把 2~8 帧逐像素融合：均值（随机噪声压到 1/√N）、中值（去掉只在单帧出现的亮点）、最小/最大值（多曝光融合或明暗场参考）。所有输入必须同尺寸、同通道数、同位深，否则直接失败——尺寸不一致的"平均"没有意义。float32 累加后按源位深饱和回写。中值仅支持 8 位，且比均值慢一个数量级：瞬时亮点比节拍更重要时才用。多相机同步帧先用 frameset.image 拆。',
+  'calibration.conveyor': '传送带跟踪换算：编码器计数 → 工程位置，并补上触发延迟期间工件继续前进的距离。position = counts/countsPerUnit；triggerOffset = 线速度 × 触发延迟；compensatedPosition = position ± offset（反向线体用 subtract）。本节点不读任何硬件：编码器计数由宿主锁存，标定参数因此能进配方、能追溯，也不会因为换相机品牌而重写。countsPerUnit ≤ 0、延迟或线速为负都会报错。',
+  'tolerance.profile': '轮廓度：逐点算实测轮廓到理论轮廓的有符号法向距离。直线正值在 +90° 法向侧（右向线的图像下方），圆正值在圆外。双侧模式取 max−min（公差带总宽）；单侧外侧/内侧只取允许侧，且有任何点跨到另一侧就判不合格并在 crossedSampleCount 里写明——这是计量室的口径。少于 3 个样本返回 found=false。单位跟随输入坐标，理论轮廓必须是图纸值而不是金标件拟合值。',
 };
 
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
@@ -3296,6 +3347,20 @@ const parameterDescriptions: Record<string, string> = {
   'value.counter.scope': '工作流作用域跨 run 累计，用于班次良率与连续 NG；run 作用域每轮重置，适合单件内的多次采样。',
   'value.counter.resetOnPass': 'pass 为真时清零，并把这次执行算作第 1 件。这是连续 NG 计数器的复位点。',
   'value.counter.resetOnFail': 'pass 为假时清零，并把这次执行算作第 1 件。用于连续 OK / 无故障连击。',
+  'defect.cluster.linkDistancePx': '两个检测外接矩形的间隙 ≤ 该值时并成一个缺陷。0 只合并重叠框。用间隙而不是圆心距，是为了不把同一条长划痕拆成两段。',
+  'defect.cluster.maxDetections': '输入列表超过该数量直接拒绝，避免在噪声阈值下产生几千个点时白等一遍两两比较。',
+  'defect.classify.rulesJson': '有序规则表，首条命中生效。字段：name、classId、minArea、maxArea、minAspect、maxAspect、minCircularity、maxCircularity；0 或省略表示不限制。长宽比 = 长边/短边。',
+  'defect.classify.rejectUnclassified': '未命中任何规则的检测计为 NG（默认）。调一套新规则时关掉它，避免未命中斑点导致整件判废。',
+  'image.fuse.mode': '均值是降噪的快速默认；中值能剔掉只在单帧出现的亮点，但每像素 O(N)；最小/最大值适合多曝光融合与明暗场参考构建。',
+  'image.fuse.maxPixels': '输入面积的硬上限。中值要同时持有全部输入加输出，全分辨率叠图很容易把内存吃满。',
+  'calibration.conveyor.encoder': 'encoder 端口未连接时的备用计数；连了端口以端口为准，可由触发时刻锁存的计数驱动。',
+  'calibration.conveyor.countsPerUnit': '每工程单位的编码器计数（每毫米计数）。每条线体测一次：走一段已知距离，用计数差除以距离。',
+  'calibration.conveyor.unit': '位置输出的单位标注（1..16 字符）。不做换算，比例已经在 countsPerUnit 里。',
+  'calibration.conveyor.lineSpeedUnitPerSec': '投产节拍下的带速。把触发延迟折成位移需要它；填 0 表示不做补偿。',
+  'calibration.conveyor.triggerDelayMs': '从触发信号（或编码器锁存）到真正抓取/判定的时间：相机延迟、处理耗时、PLC 扫描与夹爪闭合的总和。',
+  'calibration.conveyor.compensationSign': '延迟期间工件还在走，所以它后来的位置比触发位置更靠前。线体反向时改成相减。',
+  'tolerance.profile.mode': '双侧报的是 max−min 的整条带宽；单侧只报允许侧，并且任一点跨到另一侧即判不合格。',
+  'tolerance.profile.tolerance': '轮廓度公差带的**总宽**（框格里的那个值）。填 0 关闭判定；节点不输出利用率，直接比较 profile。',
 };
 
 const statusNames: Record<string, string> = {

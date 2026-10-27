@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b70f2125c3cf75fde917966cb5bf6449cc1a88fa93b48edb5c4a801dd7c2f3f2",
+  "hash": "d6a0b4ae8e54a2b3a4c591e5bb9401ad1b79114ce5a580c34dbc0a1341802372",
   "items": [
     {
       "type": "image.acquire",
@@ -2113,6 +2113,145 @@
       ],
       "declaresActions": true,
       "declaresFrames": true,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "calibration.conveyor",
+      "displayName": "Conveyor Tracking",
+      "category": "Calibration",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "encoder",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "position",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "triggerOffset",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "compensatedPosition",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "encoder",
+          "label": "Encoder Count",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000000000000,
+          "max": 1000000000000000,
+          "step": 1,
+          "group": "Encoder",
+          "description": "Fallback count when the encoder port is disconnected. A connected encoder input wins, so the latched count at trigger time can drive the node."
+        },
+        {
+          "name": "countsPerUnit",
+          "label": "Counts Per Unit",
+          "type": "number",
+          "defaultValue": 1000,
+          "min": 1E-06,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Encoder",
+          "description": "Encoder counts per engineering unit (counts per millimetre). Measure it once per conveyor: move a known distance and divide the count difference."
+        },
+        {
+          "name": "unit",
+          "label": "Unit",
+          "type": "text",
+          "defaultValue": "mm",
+          "group": "Encoder",
+          "description": "Label for the emitted positions (1..16 characters). No conversion is applied; the scale already lives in Counts Per Unit."
+        },
+        {
+          "name": "lineSpeedUnitPerSec",
+          "label": "Line Speed",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "unit/s",
+          "group": "Trigger",
+          "description": "Belt speed at production rate. Needed to convert the trigger delay into a travel distance; 0 disables the compensation."
+        },
+        {
+          "name": "triggerDelayMs",
+          "label": "Trigger Delay",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 60000,
+          "step": 1,
+          "unit": "ms",
+          "group": "Trigger",
+          "description": "Time between the trigger signal (or the encoder latch) and the moment the part is actually picked or inspected: camera latency, processing time, PLC scan and gripper closure combined."
+        },
+        {
+          "name": "compensationSign",
+          "label": "Compensation Direction",
+          "type": "select",
+          "defaultValue": "add",
+          "options": [
+            {
+              "label": "Add (part advanced)",
+              "value": "add"
+            },
+            {
+              "label": "Subtract (reverse running line)",
+              "value": "subtract"
+            }
+          ],
+          "group": "Trigger",
+          "description": "The part keeps moving during the delay, so its later position is ahead of the trigger position. Flip it for a line running the other way."
+        }
+      ],
+      "description": "Conveyor tracking math: encoder counts to engineering position, plus the travel distance accumulated during the trigger delay. Wire: encoder -> position/triggerOffset/compensatedPosition/unit. compensatedPosition = counts/countsPerUnit +/- lineSpeed*triggerDelayMs/1000 and is the value a robot target or a camera-to-robot transform should use. This node reads no hardware: the host latches the encoder count, which keeps the calibration in the recipe and out of the camera driver. Failures: countsPerUnit <= 0, negative delay or speed.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
@@ -7452,6 +7591,194 @@
       "parameters": [],
       "description": "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.classify",
+      "displayName": "Classify Defects",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "ngCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "ok",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "unclassifiedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "classCountsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "rulesJson",
+          "label": "Rules JSON",
+          "type": "textarea",
+          "defaultValue": "[{\"name\":\"scratch\",\"classId\":1,\"minAspect\":3,\"minArea\":50},{\"name\":\"pit\",\"classId\":2,\"maxArea\":500,\"minCircularity\":0.6},{\"name\":\"stain\",\"classId\":3,\"minArea\":500}]",
+          "group": "Rules",
+          "description": "Ordered rule list; the first matching rule wins. Fields: name, classId, minArea, maxArea, minAspect, maxAspect, minCircularity, maxCircularity. 0 or an omitted field disables that bound. Aspect is long side over short side."
+        },
+        {
+          "name": "rejectUnclassified",
+          "label": "Reject Unclassified",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Rules",
+          "description": "Count detections that match no rule as NG (default). Turn it off while tuning a new rule set so unmatched blobs do not fail the part."
+        }
+      ],
+      "description": "Grade each detection by an ordered rule table and stamp its class id. Wire: detections -> detections (ClassId set)/ngCount/ok/classCountsJson. Rules are matched on area, aspect ratio and circularity only - intensity-based grading needs a separate node because it requires the source image. Unmatched detections get ClassId=0 (unclassified) and count as NG unless rejectUnclassified is off. Duplicate names, duplicate class ids and inverted ranges fail loudly instead of silently never matching.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.cluster",
+      "displayName": "Cluster Defects",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "mergedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "largestArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "linkDistancePx",
+          "label": "Link Distance",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0,
+          "max": 10000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Clustering",
+          "description": "Bounding-box gap at or below this distance joins two detections into one defect. 0 only merges overlapping boxes. Gap (not centroid distance) is what keeps one long scratch from being split into two."
+        },
+        {
+          "name": "maxDetections",
+          "label": "Maximum Input Detections",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 1,
+          "max": 50000,
+          "step": 100,
+          "group": "Limits",
+          "description": "Refuse oversized input lists instead of spending minutes in the pairwise pass. Cluster or filter upstream when a noisy threshold produces thousands of specks."
+        }
+      ],
+      "description": "Merge nearby detections into one defect each: two boxes join when the gap between them is at most linkDistancePx. Wire: detections -> detections/count/mergedCount. The merged area is the sum of member areas and the merged perimeter is the sum of member perimeters, so circularity of a cluster is a coarse filter only - rebuild the true outline with region/contour nodes when the shape matters. A cluster keeps its class id only when every member shares it. Deterministic and order-independent (union-find over a spatial bucket grid).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -26094,6 +26421,146 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "tolerance.profile",
+      "displayName": "Profile of a Line",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "samples",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "nominalLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "nominalCircle",
+          "dataType": "Circle",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "profile",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rmsDeviation",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "crossedSampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "worstPoint",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Tolerance Zone",
+          "type": "select",
+          "defaultValue": "bilateral",
+          "options": [
+            {
+              "label": "Bilateral (zone straddles nominal)",
+              "value": "bilateral"
+            },
+            {
+              "label": "Unilateral outside (material side)",
+              "value": "unilateralOutside"
+            },
+            {
+              "label": "Unilateral inside (cavity side)",
+              "value": "unilateralInside"
+            }
+          ],
+          "group": "Zone",
+          "description": "Bilateral reports the full band width max-min. Unilateral reports only the allowed side and fails when any sample crosses to the other side - the metrology-room reading."
+        },
+        {
+          "name": "tolerance",
+          "label": "Profile Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Limits",
+          "description": "Total width of the profile zone (the value in the feature control frame). 0 disables the gate; utilization is not reported, compare profile directly."
+        }
+      ],
+      "description": "Profile of a line against a theoretical nominal: signed normal distance from every sample point to the nominal line or circle. Wire: samples PointList + exactly one of nominalLine/nominalCircle -> profile/max/min/mean/rms/crossedSampleCount. Positive deviation means the +90 degree side of the line (below a left-to-right line) or outside the circle. Bilateral profile is max-min; unilateral modes report the allowed side only and count samples that crossed over. Fewer than 3 samples returns found=false. Units follow the input coordinates; the nominal must be theoretical, not a golden-part fit.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "measure.fitRectangle",
       "displayName": "Rectangle Contour Fit",
       "category": "Measurement",
@@ -30502,6 +30969,150 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.fuse",
+      "displayName": "Fuse Frames",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image1",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "image2",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "image3",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image4",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image5",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image6",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image7",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "image8",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Fusion Mode",
+          "type": "select",
+          "defaultValue": "mean",
+          "options": [
+            {
+              "label": "Mean (random noise / sqrt(N))",
+              "value": "mean"
+            },
+            {
+              "label": "Median (removes transient specks)",
+              "value": "median"
+            },
+            {
+              "label": "Minimum (darkest pixel)",
+              "value": "min"
+            },
+            {
+              "label": "Maximum (brightest pixel)",
+              "value": "max"
+            }
+          ],
+          "group": "Fusion",
+          "description": "Mean is the fast default for noise averaging. Median rejects a bright speck that only appears in one frame but costs O(N) per pixel. Min/max suit multi-exposure fusion and dark/bright reference building."
+        },
+        {
+          "name": "maxPixels",
+          "label": "Maximum Input Pixels",
+          "type": "number",
+          "defaultValue": 16000000,
+          "min": 1000,
+          "max": 200000000,
+          "step": 1000000,
+          "group": "Limits",
+          "description": "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."
+        }
+      ],
+      "description": "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time. For synchronized multi-camera frames use frameset.image first.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
       },
       "actions": [],
       "declaresActions": true,

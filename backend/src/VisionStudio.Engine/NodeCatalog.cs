@@ -1602,6 +1602,7 @@ public static class BuiltInNodeCatalog
         .. OpenCvExtraCatalog.Items,
         .. TextureFilterCatalog.Items,
         .. P0CompletionCatalog.Items,
+        .. P1CompletionCatalog.Items,
         .. CharucoCatalog.Items,
         .. CSharpScriptCatalog.Items,
         .. GeometryToleranceCatalog.Items,
