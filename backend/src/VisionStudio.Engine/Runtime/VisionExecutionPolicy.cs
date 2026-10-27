@@ -38,6 +38,8 @@ public static class VisionExecutionPolicy
             type.Equals("image.perspective", StringComparison.OrdinalIgnoreCase) ||
             type is "image.register" or "image.warpAffine" ||
             type is "image.colorConvert" or "image.contrastNormalize" or "image.illuminationNormalize" or "image.sharpen" ||
+            type is "image.clahe" or "image.polarUnwrap" or "image.bilateral" or "image.whiteBalance"
+                or "image.qualityMetrics" or "image.depthScale" or "image.channelMix" ||
             type.StartsWith("text.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.undistort", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("match.", StringComparison.OrdinalIgnoreCase) ||

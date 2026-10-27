@@ -1607,6 +1607,7 @@ public static class BuiltInNodeCatalog
         .. CSharpScriptCatalog.Items,
         .. GeometryToleranceCatalog.Items,
         .. MeasurementGapCatalog.Items,
+        .. PreprocessGapCatalog.Items,
         .. FeatureRegionCatalog.Items,
         new(
             "flow.join",

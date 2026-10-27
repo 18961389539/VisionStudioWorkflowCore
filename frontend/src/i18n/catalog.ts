@@ -3595,6 +3595,110 @@ Object.assign(parameterDescriptions, {
   'coordinate.transformAffine.targetUnit': '目标坐标的单位标签。'
 } as Record<string, string>);
 
+/** 图像预处理补全批（7 个节点，node-gap-analysis.md 第九节）。
+ *  同样用 Object.assign 追加，参数/选项按节点限定：Interpolation、Direction、Offset 这类词
+ *  在不同节点里的中文措辞不一样，走全局映射会串味。 */
+Object.assign(nodeNames, {
+  'image.clahe': 'CLAHE 局部对比度',
+  'image.polarUnwrap': '极坐标展开',
+  'image.bilateral': '双边滤波',
+  'image.whiteBalance': '白平衡',
+  'image.qualityMetrics': '图像质量指标',
+  'image.depthScale': '位深映射',
+  'image.channelMix': '通道混合'
+} as Record<string, string>);
+
+Object.assign(descriptions, {
+  'image.clahe': '分块自适应直方图均衡（带 clip limit）：全局拉伸救不回光照梯度，这一档可以。',
+  'image.polarUnwrap': '把环带按极坐标展开成直线条带（X=角度，Y=半径），圆件、齿轮、轴承的齿距与划痕才可测。',
+  'image.bilateral': '保边平滑：只平均灰度相近的邻域，压平拉丝纹理但保住划痕边缘。',
+  'image.whiteBalance': '灰度世界 / 白块分位 / 手动增益三种白平衡估计，输出增益便于复用。',
+  'image.qualityMetrics': '一次给出亮度、对比度、清晰度、噪声 σ、饱和占比、暗部占比与熵，供自动曝光/对焦闭环。',
+  'image.depthScale': '显式的 8/16 位映射（位深、缩放、偏置都进 trace），替代隐式 1/257 压缩。',
+  'image.channelMix': '通道线性加权成单通道灰度，权重可为负（红减蓝之类的色向增强）。'
+} as Record<string, string>);
+
+Object.assign(nodeParameterLabels, {
+  'image.clahe': {
+    'Clip Limit': '对比度上限', 'Tile Columns': '分块列数', 'Tile Rows': '分块行数', 'Color Handling': '颜色处理'
+  },
+  'image.polarUnwrap': {
+    'Center X': '中心 X', 'Center Y': '中心 Y',
+    'Inner Radius (0=auto)': '内半径（0=自动）', 'Outer Radius (0=auto)': '外半径（0=自动）',
+    'Start Angle': '起始角', 'Sweep Angle': '展开角度', 'Angular Samples (0=auto)': '角向采样数（0=自动）',
+    'Radial Samples (0=auto)': '径向采样数（0=自动）', 'Interpolation': '插值方式', 'Direction': '展开方向'
+  },
+  'image.bilateral': {
+    'Diameter (0=auto)': '邻域直径（0=自动）', 'Sigma Color': '灰度差 sigma', 'Sigma Space': '空间 sigma'
+  },
+  'image.whiteBalance': {
+    'Estimation Mode': '估计方式', 'White Patch Percentile': '白块分位', 'Manual Gain R': '手动增益 R',
+    'Manual Gain G': '手动增益 G', 'Manual Gain B': '手动增益 B', 'Preserve Brightness': '保持亮度'
+  },
+  'image.qualityMetrics': { 'Saturation Threshold': '饱和阈值', 'Dark Threshold': '暗部阈值' },
+  'image.depthScale': {
+    'Input Bits (0=auto)': '输入位深（0=自动）', 'Output Bits': '输出位深',
+    'Scale (0=auto)': '缩放（0=自动）', 'Offset': '偏置'
+  },
+  'image.channelMix': {
+    'Weight 1 (B / gray)': '权重 1（B / 灰度）', 'Weight 2 (G)': '权重 2（G）', 'Weight 3 (R)': '权重 3（R）',
+    'Weight 4 (A)': '权重 4（A）', 'Normalize Weights': '归一化权重', 'Offset': '偏置'
+  }
+} as Record<string, Record<string, string>>);
+
+Object.assign(nodeOptionLabels, {
+  'image.clahe': {
+    'Luminance only (keep color)': '仅亮度（保留彩色）', 'Grayscale output': '输出灰度'
+  },
+  'image.polarUnwrap': {
+    'Nearest': '最近邻', 'Linear': '双线性', 'Cubic': '三次插值',
+    'Counter-clockwise': '逆时针', 'Clockwise': '顺时针'
+  },
+  'image.whiteBalance': {
+    'Gray world (channel means)': '灰度世界（通道均值）',
+    'White patch (bright percentile)': '白块（亮部分位）',
+    'Manual gains': '手动增益'
+  }
+} as Record<string, Record<string, string>>);
+
+Object.assign(parameterDescriptions, {
+  'image.clahe.clipLimit': '每个分块直方图的截断倍数，正是它阻止 CLAHE 在平坦区把噪声放大。1 几乎不增强，4 以上很激进。',
+  'image.clahe.tilesX': '横向分块数：块越小越贴合局部阴影，但开销更大且可能出现块状痕迹。',
+  'image.clahe.tilesY': '纵向分块数：一块里要留出真实背景，块比缺陷还小就会把缺陷本身当直方图。',
+  'image.clahe.colorMode': 'luminance 在 Lab 的 L 通道上做，颜色不漂移（彩色缺陷要这个）；gray 直接塌成单通道。',
+  'image.polarUnwrap.centerX': '未接 circle 时的展开中心 X；接了圆则以圆心为准。',
+  'image.polarUnwrap.centerY': '未接 circle 时的展开中心 Y。',
+  'image.polarUnwrap.innerRadius': '参与展开的第一个半径，0 从圆心开始；用来跳过轮毂或内孔。',
+  'image.polarUnwrap.outerRadius': '最后一个半径，0 取圆半径或到图像边界的最短距离。',
+  'image.polarUnwrap.angleStartDeg': '映射到条带左边缘的角度，图像坐标下从 +X 逆时针量。',
+  'image.polarUnwrap.angleSweepDeg': '条带覆盖的角度范围，360 为整圈，更小只展开一个扇区。',
+  'image.polarUnwrap.angularSamples': '条带宽度（像素），0 按中间半径周长推导，保持近似方形像素。',
+  'image.polarUnwrap.radialSamples': '条带高度（像素），0 表示每个半径单位一个像素。',
+  'image.polarUnwrap.interpolation': '极坐标重映射的插值方式，硬边掩膜用最近邻，常规用双线性。',
+  'image.polarUnwrap.direction': '角度在条带上的增长方向，图像坐标 y 向下。',
+  'image.bilateral.diameter': '邻域直径，0 按 sigmaSpace 推导（小 sigma 取 5，大 sigma 取 9）。',
+  'image.bilateral.sigmaColor': '灰度差大到多少就不再参与平均：这条决定了"压纹理"还是"抹掉划痕"。',
+  'image.bilateral.sigmaSpace': '空间作用范围，越大越慢，但能把低频纹理压得更平。',
+  'image.whiteBalance.mode': '灰度世界假设全场景平均为灰；白块假设最亮分位是白参考；手动直接套下面三个增益。',
+  'image.whiteBalance.percentile': '每个通道当作白参考的分位，99 忽略最亮 1%（高光），仍能抓到亮参考面。',
+  'image.whiteBalance.manualR': '红色通道增益，原样施加。',
+  'image.whiteBalance.manualG': '绿色通道增益，原样施加。',
+  'image.whiteBalance.manualB': '蓝色通道增益，原样施加。',
+  'image.whiteBalance.preserveBrightness': '把三个增益整体缩放回原亮度，避免白平衡把整幅图推向过曝。',
+  'image.qualityMetrics.saturationThreshold': '灰度达到该值算削顶，254 能抓到"已经量化死亡"但不到 255 的像素。',
+  'image.qualityMetrics.darkThreshold': '灰度低于该值算压黑。',
+  'image.depthScale.inputBits': '当前样本值的位深，0 从 Mat 类型读（8 或 16）。10/12/14 位装在 16 位容器里时要显式给，否则自动缩放会把图压暗。',
+  'image.depthScale.outputBits': '下游容器深度：8 位是多数测量节点的期望，16 位用于累加或导出。',
+  'image.depthScale.scale': '显式倍数，0 取 (2^out-1)/(2^in-1)，把输入满量程映射到输出满量程而不削顶。',
+  'image.depthScale.offset': '缩放后相加，负值可把高于零的黑电平拉下来。',
+  'image.channelMix.weight1': '通道 1 的权重：BGR 输入为蓝，灰度输入为唯一通道。默认值取 Rec.601 亮度系数。',
+  'image.channelMix.weight2': '通道 2（绿）权重，通道数不足时忽略。',
+  'image.channelMix.weight3': '通道 3（红）权重，允许负值：红减蓝是让色向缺陷变亮的廉价做法。',
+  'image.channelMix.weight4': '通道 4（Alpha）权重，非 BGRA 输入时为 0。',
+  'image.channelMix.normalize': '按权重和归一化，保持源亮度；关掉用于"绝对幅度有意义"的差分式混合。',
+  'image.channelMix.offset': '混合后、饱和前的偏移，用来把有符号结果搬回可见范围。'
+} as Record<string, string>);
+
 export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): NodeCatalogItem[] {
   if (lang === 'en') return items;
   return items.map((item) => ({

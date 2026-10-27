@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "72dc1ffde341d3f4a856138f5534324ad4d8462e26c5074701675ef62bf17238",
+  "hash": "a97f69e968dcc5216411719efecc41de61cc2398b805f0dae93a121645648b3b",
   "items": [
     {
       "type": "image.acquire",
@@ -32255,6 +32255,126 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "image.bilateral",
+      "displayName": "Bilateral Filter",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sigmaColor",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sigmaSpace",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diameter",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "diameter",
+          "label": "Diameter (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 31,
+          "step": 1,
+          "group": "Kernel",
+          "description": "Neighbourhood diameter in pixels. 0 derives it from sigmaSpace (5 for small sigmas, up to 9), which is what OpenCV documents as the sane default."
+        },
+        {
+          "name": "sigmaColor",
+          "label": "Sigma Color",
+          "type": "number",
+          "defaultValue": 25,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "group": "Kernel",
+          "description": "How different a neighbour's gray level may be and still be averaged. Smaller keeps edges harder and removes less texture; this is the parameter that separates 'smooth the brushed surface' from 'erase the scratch'."
+        },
+        {
+          "name": "sigmaSpace",
+          "label": "Sigma Space",
+          "type": "number",
+          "defaultValue": 25,
+          "min": 1,
+          "max": 500,
+          "step": 1,
+          "group": "Kernel",
+          "description": "Spatial extent of the kernel in pixels. Large values average far-away similar pixels, which is slow but flattens low-frequency texture."
+        }
+      ],
+      "description": "Edge-preserving smoothing (OpenCV bilateral filter) for 8-bit 1/3 channel images. Gaussian blur averages across edges and non-local means denoises; neither separates 'brushed texture' from 'a scratch', which is what sigmaColor does here: only neighbours with a similar gray level are averaged. Wire: image -> image; ROI only replaces pixels inside the selection. Failures: non-8-bit input, or a channel count other than 1 or 3. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "image.bottomHat",
       "displayName": "Black Bottom Hat",
       "category": "Preprocess",
@@ -32456,6 +32576,269 @@
         }
       ],
       "description": "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image. Color channels require color input; unknown channels fail deterministically.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.channelMix",
+      "displayName": "Channel Mix",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "weightsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "weight1",
+          "label": "Weight 1 (B / gray)",
+          "type": "number",
+          "defaultValue": 0.114,
+          "min": -10,
+          "max": 10,
+          "step": 0.001,
+          "group": "Weights",
+          "description": "Weight of channel 1: blue for BGR input, the only channel for grayscale. Defaults follow the Rec.601 luma coefficients."
+        },
+        {
+          "name": "weight2",
+          "label": "Weight 2 (G)",
+          "type": "number",
+          "defaultValue": 0.587,
+          "min": -10,
+          "max": 10,
+          "step": 0.001,
+          "group": "Weights",
+          "description": "Weight of channel 2 (green). Ignored when the input has fewer channels."
+        },
+        {
+          "name": "weight3",
+          "label": "Weight 3 (R)",
+          "type": "number",
+          "defaultValue": 0.299,
+          "min": -10,
+          "max": 10,
+          "step": 0.001,
+          "group": "Weights",
+          "description": "Weight of channel 3 (red). Negative weights are allowed on purpose: red-minus-blue is a cheap way to make a chromatic defect pop."
+        },
+        {
+          "name": "weight4",
+          "label": "Weight 4 (A)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -10,
+          "max": 10,
+          "step": 0.001,
+          "group": "Weights",
+          "description": "Weight of channel 4 (alpha). Zero unless the input is BGRA."
+        },
+        {
+          "name": "normalize",
+          "label": "Normalize Weights",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Weights",
+          "description": "Divides the weights by their sum so the result keeps the source brightness. Turn it off when the absolute scale matters (for example a difference-style mix)."
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -255,
+          "max": 255,
+          "step": 1,
+          "group": "Weights",
+          "description": "Added after the mix and before saturation, useful to re-center a signed mix into the visible range."
+        }
+      ],
+      "description": "Weighted linear mix of the input channels into one 8-bit gray image. image.grayscale offers three fixed luma presets; when a defect is only visible in one color direction you need arbitrary (including negative) coefficients, which previously took jlvision.imageOp imageToChannels + scale + add. Wire: image -> image. Channels beyond the input count are ignored; all-zero weights fail.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.clahe",
+      "displayName": "CLAHE (Local Contrast)",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "clipLimit",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "tilesX",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "tilesY",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "clipLimit",
+          "label": "Clip Limit",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.1,
+          "max": 40,
+          "step": 0.1,
+          "group": "CLAHE",
+          "description": "Contrast amplification ceiling. The histogram of each tile is clipped at this multiple of the uniform level, which is exactly what stops CLAHE from exploding noise in flat areas. 1 is almost no enhancement; 4+ is aggressive."
+        },
+        {
+          "name": "tilesX",
+          "label": "Tile Columns",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 1,
+          "max": 64,
+          "step": 1,
+          "group": "CLAHE",
+          "description": "Horizontal tile count. Each tile is equalised independently and then bilinearly blended, so smaller tiles follow local shading more closely but cost more and can create blocky artefacts."
+        },
+        {
+          "name": "tilesY",
+          "label": "Tile Rows",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 1,
+          "max": 64,
+          "step": 1,
+          "group": "CLAHE",
+          "description": "Vertical tile count. Pick tiles so one tile still contains a real background patch — a tile smaller than the defect turns the defect itself into the local histogram."
+        },
+        {
+          "name": "colorMode",
+          "label": "Color Handling",
+          "type": "select",
+          "defaultValue": "luminance",
+          "options": [
+            {
+              "label": "Luminance only (keep color)",
+              "value": "luminance"
+            },
+            {
+              "label": "Grayscale output",
+              "value": "gray"
+            }
+          ],
+          "group": "CLAHE",
+          "description": "luminance applies CLAHE to the Lab L channel and converts back, so color stays intact (what color defects need). gray collapses to single channel — use it when the next node thresholds grayscale anyway."
+        }
+      ],
+      "description": "Contrast Limited Adaptive Histogram Equalization on 8-bit input. Unlike image.contrastNormalize (one global stretch) and jlvision.imageOp equHisto (one global histogram), CLAHE equalises per tile with a clip limit, so a part lit from one side keeps detail in both the bright and the dark half. Key params: clipLimit, tilesX/tilesY, colorMode. ROI only replaces pixels inside the selection. algorithmBackend=opencv.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -32877,6 +33260,129 @@
         "supportsRunNode": true,
         "supportsParallel": true,
         "executionMode": "WorkflowCore"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.depthScale",
+      "displayName": "Depth Scale",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "inputBits",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "outputBits",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "scaleUsed",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "offsetUsed",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "inputBits",
+          "label": "Input Bits (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16,
+          "step": 1,
+          "group": "Mapping",
+          "description": "Bit depth of the current sample values. 0 reads it from the Mat type (8 or 16). Set it to 10/12/14 when a 16-bit container carries a narrower camera range, so the auto scale does not darken the image."
+        },
+        {
+          "name": "outputBits",
+          "label": "Output Bits",
+          "type": "select",
+          "defaultValue": "8",
+          "options": [
+            {
+              "label": "8-bit",
+              "value": "8"
+            },
+            {
+              "label": "16-bit",
+              "value": "16"
+            }
+          ],
+          "group": "Mapping",
+          "description": "Container depth written downstream. 8-bit is what most measurement nodes expect; 16-bit keeps headroom for accumulation or a later Python/CSV export."
+        },
+        {
+          "name": "scale",
+          "label": "Scale (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.0001,
+          "group": "Mapping",
+          "description": "Explicit multiplier. 0 derives (2^out-1)/(2^in-1), which maps the full input range onto the full output range without clipping."
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 1,
+          "group": "Mapping",
+          "description": "Added after scaling. Negative offsets are useful to lift a black level that sits above zero."
+        }
+      ],
+      "description": "Explicit, auditable bit-depth conversion between 8 and 16 bits. Today the only conversions are implicit: threshold nodes scale UInt16 by 1/257, and jlvision.imageOp convertType/scale can do it in two steps with the parameters spread out. This node makes the mapping (inputBits, scale, offset) visible in the trace, which matters for 10/12/16-bit cameras. Rejects float input instead of guessing.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
       },
       "actions": [],
       "declaresActions": true,
@@ -35879,6 +36385,125 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "image.qualityMetrics",
+      "displayName": "Image Quality Metrics",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "brightness",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "contrast",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sharpness",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "noiseSigma",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "saturationRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "darkRatio",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "entropy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pixelCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "saturationThreshold",
+          "label": "Saturation Threshold",
+          "type": "number",
+          "defaultValue": 254,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Thresholds",
+          "description": "Gray level at or above which a pixel counts as clipped. 254 catches pixels that are already quantisation-dead even if they are not exactly 255."
+        },
+        {
+          "name": "darkThreshold",
+          "label": "Dark Threshold",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 254,
+          "step": 1,
+          "group": "Thresholds",
+          "description": "Gray level at or below which a pixel counts as crushed black."
+        }
+      ],
+      "description": "One call, one row of numbers an auto-exposure or auto-focus loop can act on: brightness (masked mean), contrast (P95-P5), sharpness (mean squared Sobel gradient), noiseSigma (high-pass residual estimate), saturationRatio, darkRatio, entropy and pixelCount. Every value is derivable from existing nodes, but it takes 3-5 of them wired together and the saturated-pixel fraction has no direct source at all. Values are comparable across frames of the same scene, not calibrated physical units. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "jlvision.restoration",
       "displayName": "Image Restoration",
       "category": "Preprocess",
@@ -37825,6 +38450,235 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "image.polarUnwrap",
+      "displayName": "Polar Unwrap",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "centerX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "centerY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "innerRadius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "outerRadius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleStartDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleSweepDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "centerX",
+          "label": "Center X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "group": "Center",
+          "description": "Unwrap center X when the circle input is disconnected. A connected circle overrides both center coordinates."
+        },
+        {
+          "name": "centerY",
+          "label": "Center Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "group": "Center",
+          "description": "Unwrap center Y when the circle input is disconnected."
+        },
+        {
+          "name": "innerRadius",
+          "label": "Inner Radius (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Radial Band",
+          "description": "First radius included in the strip. 0 starts at the center; use it to skip the hub of a gear or the hole of a ring."
+        },
+        {
+          "name": "outerRadius",
+          "label": "Outer Radius (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Radial Band",
+          "description": "Last radius included. 0 derives it from the connected circle radius, or from the distance to the nearest image border."
+        },
+        {
+          "name": "angleStartDeg",
+          "label": "Start Angle",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Angular",
+          "description": "Angle mapped to the left edge of the strip, measured CCW from +X in image coordinates."
+        },
+        {
+          "name": "angleSweepDeg",
+          "label": "Sweep Angle",
+          "type": "number",
+          "defaultValue": 360,
+          "min": 1,
+          "max": 360,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Angular",
+          "description": "Angular span covered by the strip. 360 wraps the full circle; a smaller sweep inspects one sector only."
+        },
+        {
+          "name": "angularSamples",
+          "label": "Angular Samples (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 8192,
+          "step": 1,
+          "group": "Sampling",
+          "description": "Strip width in pixels. 0 derives it from the mid-band circumference, so the unwrapped image keeps roughly square pixels."
+        },
+        {
+          "name": "radialSamples",
+          "label": "Radial Samples (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 4096,
+          "step": 1,
+          "group": "Sampling",
+          "description": "Strip height in pixels. 0 corresponds to one pixel per radius unit of the band."
+        },
+        {
+          "name": "interpolation",
+          "label": "Interpolation",
+          "type": "select",
+          "defaultValue": "linear",
+          "options": [
+            {
+              "label": "Nearest",
+              "value": "nearest"
+            },
+            {
+              "label": "Linear",
+              "value": "linear"
+            },
+            {
+              "label": "Cubic",
+              "value": "cubic"
+            }
+          ],
+          "group": "Sampling",
+          "description": "Resampling used by the polar remap. Linear is the usual choice; nearest is only sensible when the source is a hard-edged mask."
+        },
+        {
+          "name": "direction",
+          "label": "Direction",
+          "type": "select",
+          "defaultValue": "counterClockwise",
+          "options": [
+            {
+              "label": "Counter-clockwise",
+              "value": "counterClockwise"
+            },
+            {
+              "label": "Clockwise",
+              "value": "clockwise"
+            }
+          ],
+          "group": "Angular",
+          "description": "Which way the angle grows across the strip. Image coordinates are y-down, so clockwise here means increasing image angle."
+        }
+      ],
+      "description": "Maps an annular band onto a straight strip: X = angle, Y = radius. Straightening is what lets calipers, FFT filters and thread/gear nodes work on round parts (gears, bearings, O-rings, bores) whose features are periodic in angle. Neither a homography (image.perspective) nor an affine warp can express this. Wire: image + optional circle -> strip image. Auto radii keep the band inside the image; the pixel budget is rejected instead of allocating a huge Mat.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "image.resize",
       "displayName": "Resize Image",
       "category": "Preprocess",
@@ -39023,6 +39877,187 @@
       "declaresFrames": true,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.whiteBalance",
+      "displayName": "White Balance",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "gainR",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "gainG",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "gainB",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "channelMeansJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Estimation Mode",
+          "type": "select",
+          "defaultValue": "grayWorld",
+          "options": [
+            {
+              "label": "Gray world (channel means)",
+              "value": "grayWorld"
+            },
+            {
+              "label": "White patch (bright percentile)",
+              "value": "whitePatch"
+            },
+            {
+              "label": "Manual gains",
+              "value": "manual"
+            }
+          ],
+          "group": "Gains",
+          "description": "Gray world assumes the scene averages to gray (good for mixed product shots). White patch assumes the brightest percentile is a white reference (better when one dominant material fills the frame). Manual applies the three gains below unchanged."
+        },
+        {
+          "name": "percentile",
+          "label": "White Patch Percentile",
+          "type": "number",
+          "defaultValue": 99,
+          "min": 50,
+          "max": 100,
+          "step": 0.5,
+          "unit": "%",
+          "group": "Gains",
+          "description": "Percentile of each channel treated as the white reference. 99 ignores the top 1% (specular highlights) while still catching the bright reference surface.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "whitePatch"
+            ]
+          }
+        },
+        {
+          "name": "manualR",
+          "label": "Manual Gain R",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.1,
+          "max": 10,
+          "step": 0.01,
+          "group": "Gains",
+          "description": "Red channel multiplier applied as-is.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "manual"
+            ]
+          }
+        },
+        {
+          "name": "manualG",
+          "label": "Manual Gain G",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.1,
+          "max": 10,
+          "step": 0.01,
+          "group": "Gains",
+          "description": "Green channel multiplier applied as-is.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "manual"
+            ]
+          }
+        },
+        {
+          "name": "manualB",
+          "label": "Manual Gain B",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.1,
+          "max": 10,
+          "step": 0.01,
+          "group": "Gains",
+          "description": "Blue channel multiplier applied as-is.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "manual"
+            ]
+          }
+        },
+        {
+          "name": "preserveBrightness",
+          "label": "Preserve Brightness",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Gains",
+          "description": "Rescales all three gains so the mean brightness stays where it was. Without it a white balance can silently push the whole image toward clipping."
+        }
+      ],
+      "description": "Estimates and applies per-channel gains on a 3-channel 8-bit image. The apply step is already expressible with jlvision.imageOp (split, scale, compose3); what was missing is the estimation, which is why this node exists. Outputs the applied gains for traceability, so a later run or recipe can reuse them. Requires a 3-channel image; grayscale input fails instead of pretending. algorithmBackend=managed.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {
