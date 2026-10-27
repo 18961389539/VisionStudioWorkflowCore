@@ -142,7 +142,13 @@ public enum NodeActionKind
     /// <summary>下发机器人运动指令。</summary>
     RobotCommand,
     /// <summary>触发相机快门/采集动作。</summary>
-    CameraTrigger
+    CameraTrigger,
+    /// <summary>
+    /// 向外部系统发出一次可见的外部调用（告警通知：Webhook / 企业微信机器人 / SMTP）。
+    /// 不驱动物理设备，但消息一旦发出无法回收，因此与设备动作同等对待：调试运行需要审批，
+    /// 由 <c>DeviceSideEffectClassifier</c> 的“已声明动作 ⇒ 有副作用”规则统一覆盖。
+    /// </summary>
+    ExternalCall
 }
 
 /// <summary>

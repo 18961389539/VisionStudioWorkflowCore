@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "ce6b97e95c067acb2229d82c4cb193507bcb0fc57c2472b8480e21fdc0123da8",
+  "hash": "b70f2125c3cf75fde917966cb5bf6449cc1a88fa93b48edb5c4a801dd7c2f3f2",
   "items": [
     {
       "type": "image.acquire",
@@ -8857,6 +8857,216 @@
         }
       ],
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "device.readTable",
+      "displayName": "Read Table Row",
+      "category": "Device",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "path",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "sequence",
+          "dataType": "Integer",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "total",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "cellCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "header",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "columnsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "row",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "rowJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "rowObjectJson",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "path",
+          "label": "Table File",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Source",
+          "description": "CSV/TSV file to read, relative to an authorized read root. Reads go through the host IReplayInputResolver, so arbitrary paths are rejected.",
+          "overriddenByPorts": [
+            "path"
+          ]
+        },
+        {
+          "name": "delimiter",
+          "label": "Delimiter",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Auto (from the header line)",
+              "value": "auto"
+            },
+            {
+              "label": "Comma",
+              "value": "comma"
+            },
+            {
+              "label": "Tab",
+              "value": "tab"
+            },
+            {
+              "label": "Semicolon",
+              "value": "semicolon"
+            },
+            {
+              "label": "Pipe",
+              "value": "pipe"
+            }
+          ],
+          "group": "Source",
+          "description": "Auto counts each candidate in the first line and keeps the widest split. Set it explicitly when a column legitimately contains commas in quotes."
+        },
+        {
+          "name": "encoding",
+          "label": "Encoding",
+          "type": "select",
+          "defaultValue": "utf8",
+          "options": [
+            {
+              "label": "UTF-8 (with BOM detection)",
+              "value": "utf8"
+            },
+            {
+              "label": "GB18030 (Excel China default)",
+              "value": "gb18030"
+            },
+            {
+              "label": "Latin-1",
+              "value": "latin1"
+            }
+          ],
+          "group": "Source",
+          "description": "Excel on a Chinese Windows saves CSV as GBK; read it as gb18030 or the SN column comes back as mojibake."
+        },
+        {
+          "name": "hasHeader",
+          "label": "First Row Is Header",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Source",
+          "description": "When on, row 0 becomes the column names and is excluded from the data rows; rowObjectJson is only produced when the header width matches the row width."
+        },
+        {
+          "name": "index",
+          "label": "Row Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Selection",
+          "description": "0-based data row to read when no sequence input is connected. Connect sequence to drive one row per part."
+        },
+        {
+          "name": "wrap",
+          "label": "Wrap Around",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Selection",
+          "description": "Cycle back to row 0 after the last row. Lines that run the whole table repeatedly usually want this on; a fixed run wants it off so an exhausted table fails loudly."
+        },
+        {
+          "name": "maxRows",
+          "label": "Maximum Rows",
+          "type": "number",
+          "defaultValue": 100000,
+          "min": 1,
+          "max": 1000000,
+          "step": 1000,
+          "group": "Limits",
+          "description": "Refuse tables above this many rows instead of silently truncating the list the line is indexing into."
+        },
+        {
+          "name": "maxMegabytes",
+          "label": "Maximum File Size",
+          "type": "number",
+          "defaultValue": 16,
+          "min": 1,
+          "max": 512,
+          "step": 1,
+          "unit": "MB",
+          "group": "Limits",
+          "description": "Refuse files above this size before reading. A production table is kilobytes; a runaway log should not be swallowed as a table."
+        }
+      ],
+      "description": "Read one data row out of a CSV/TSV table so the flow can be driven by a work order list (one SN per part). Wire: path + optional sequence -> row/rowJson/rowObjectJson plus index/total for loop control. Parsing follows RFC4180 quoting, empty lines are skipped, and the parsed table is cached by (path, mtime, size, encoding, delimiter) so a batch run parses the file once. Reading requires host authorization (IReplayInputResolver). Out-of-range index with wrap off returns found=false. Deterministic=false: the file may change between runs.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -28941,6 +29151,304 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "output.notify",
+      "displayName": "Send Notification",
+      "category": "Output",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "message",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "url",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "delivered",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "attempts",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "statusCode",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "responseBody",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "channel",
+          "label": "Channel",
+          "type": "select",
+          "defaultValue": "webhook",
+          "options": [
+            {
+              "label": "Webhook (structured JSON POST)",
+              "value": "webhook"
+            },
+            {
+              "label": "WeCom group robot (text)",
+              "value": "wecom"
+            },
+            {
+              "label": "SMTP mail",
+              "value": "smtp"
+            }
+          ],
+          "group": "Channel",
+          "description": "Webhook for MES or your own alarm platform, WeCom for the on-call group chat, SMTP when quality or maintenance needs a written record."
+        },
+        {
+          "name": "url",
+          "label": "Webhook URL",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Channel",
+          "description": "Absolute http/https endpoint. A connected url port overrides it, so the address can come from a recipe or a device tag.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "webhook",
+              "wecom"
+            ]
+          }
+        },
+        {
+          "name": "subject",
+          "label": "Subject",
+          "type": "text",
+          "defaultValue": "VisionStudio alarm",
+          "group": "Message",
+          "description": "First line of the notification and the mail subject. Keep it short: the on-call engineer reads the subject on a lock screen."
+        },
+        {
+          "name": "message",
+          "label": "Message",
+          "type": "textarea",
+          "defaultValue": "",
+          "group": "Message",
+          "description": "Body text. A connected message port overrides it. Empty body plus a value input still sends the serialized value.",
+          "overriddenByPorts": [
+            "message"
+          ]
+        },
+        {
+          "name": "failOnError",
+          "label": "Fail When Undelivered",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Delivery",
+          "description": "Fail the run when the notification cannot be delivered (default). Silent success makes 'the alarm was sent' a false claim that only surfaces during the post-mortem."
+        },
+        {
+          "name": "timeoutMs",
+          "label": "Timeout",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 200,
+          "max": 120000,
+          "step": 100,
+          "unit": "ms",
+          "group": "Delivery",
+          "description": "Per-attempt timeout. A notification must never hold the line: keep it well below the takt time."
+        },
+        {
+          "name": "retries",
+          "label": "Retries",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 5,
+          "step": 1,
+          "group": "Delivery",
+          "description": "Extra attempts for recoverable failures only (timeout, connection error, 5xx). 4xx is a configuration error and never retried."
+        },
+        {
+          "name": "retryDelayMs",
+          "label": "Retry Delay",
+          "type": "number",
+          "defaultValue": 500,
+          "min": 0,
+          "max": 10000,
+          "step": 100,
+          "unit": "ms",
+          "group": "Delivery",
+          "description": "Wait between attempts so a briefly unavailable endpoint has time to come back."
+        },
+        {
+          "name": "maxPayloadBytes",
+          "label": "Maximum Payload",
+          "type": "number",
+          "defaultValue": 32768,
+          "min": 256,
+          "max": 1048576,
+          "step": 1024,
+          "group": "Delivery",
+          "description": "Reject oversized notifications before sending. WeCom text is additionally capped at 2048 bytes and truncated with truncated=true."
+        },
+        {
+          "name": "smtpHost",
+          "label": "SMTP Host",
+          "type": "text",
+          "defaultValue": "",
+          "group": "SMTP",
+          "description": "Mail server host name or IP.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpPort",
+          "label": "SMTP Port",
+          "type": "number",
+          "defaultValue": 587,
+          "min": 1,
+          "max": 65535,
+          "step": 1,
+          "group": "SMTP",
+          "description": "Submission port: 587 with STARTTLS is the common default, 465 for implicit TLS.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpFrom",
+          "label": "From",
+          "type": "text",
+          "defaultValue": "",
+          "group": "SMTP",
+          "description": "Sender address. Many servers reject a From that does not match the authenticated account.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpTo",
+          "label": "To",
+          "type": "text",
+          "defaultValue": "",
+          "group": "SMTP",
+          "description": "Recipients separated by comma or semicolon.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpUser",
+          "label": "SMTP User",
+          "type": "text",
+          "defaultValue": "",
+          "group": "SMTP",
+          "description": "Login name. Leave empty only for an anonymous relay inside the plant network.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpPassword",
+          "label": "SMTP Password",
+          "type": "text",
+          "defaultValue": "",
+          "group": "SMTP",
+          "description": "Password for the SMTP account. It is stored in plain text inside the workflow, so keep such recipes out of shared exports and restrict who can edit them; an anonymous relay inside the plant network avoids the problem entirely.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        },
+        {
+          "name": "smtpSsl",
+          "label": "SMTP TLS",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "SMTP",
+          "description": "Enable TLS. Turn off only for a local relay that does not offer it.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "smtp"
+            ]
+          }
+        }
+      ],
+      "description": "Send an alarm out of the flow: Webhook (structured JSON POST), WeCom group robot (text message) or SMTP mail. Wire: optional message/value/url -> delivered/attempts/statusCode. A connected value is serialized into the webhook payload (images degrade to width/height). Only recoverable failures are retried; 4xx fails immediately. Undelivered notifications fail the run unless failOnError is off. This node declares an external side effect, so debug runs require approval. Failures: bad URL, missing SMTP fields, payload above maxPayloadBytes, or an undelivered message.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": false,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [
+        {
+          "kind": "ExternalCall",
+          "completion": "Synchronous"
+        }
+      ],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "output.database",
       "displayName": "Write Result Record",
       "category": "Output",
@@ -42984,6 +43492,138 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "value.jsonBuild",
+      "displayName": "Build JSON",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "b",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "c",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "d",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "e",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "f",
+          "dataType": "Any",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "json",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "fieldCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "bytes",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "keys",
+          "label": "Field Keys",
+          "type": "text",
+          "defaultValue": "sn,result,x,y,z,ts",
+          "group": "Fields",
+          "description": "Comma-separated key names in port order: the first key names a, the second b, and so on. Empty or '-' skips that port. Ignored in array mode."
+        },
+        {
+          "name": "mode",
+          "label": "Output Shape",
+          "type": "select",
+          "defaultValue": "object",
+          "options": [
+            {
+              "label": "Object (key: value)",
+              "value": "object"
+            },
+            {
+              "label": "Array (values in port order)",
+              "value": "array"
+            }
+          ],
+          "group": "Fields",
+          "description": "Object is what MES/HTTP endpoints expect. Array keeps the order and drops the keys, which is handy for positional protocols."
+        },
+        {
+          "name": "pretty",
+          "label": "Pretty Print",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Fields",
+          "description": "Indent the JSON for logs and reports. Leave off for transport: every space costs bytes on a line running 60 parts per minute."
+        },
+        {
+          "name": "maxBytes",
+          "label": "Maximum Payload",
+          "type": "number",
+          "defaultValue": 65536,
+          "min": 64,
+          "max": 4194304,
+          "step": 1024,
+          "group": "Limits",
+          "description": "Hard cap on the produced UTF-8 payload. Exceeding it fails instead of sending a truncated packet that the receiver will reject later."
+        }
+      ],
+      "description": "Pack up to six scalar values into one JSON document. Wire: a..f -> json/fieldCount/bytes. Number, integer, boolean and text are packed with their own JSON type; images, regions and detection lists are rejected so a payload never silently becomes a wall of internal fields. Duplicate or over-long keys fail. Use it for the classic 'SN + OK/NG + X/Y + timestamp' message that device.writeVisionResult cannot express. Text mode consumes the json port directly; for nested objects chain value.jsonParse/jsonBuild or script.csharp.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "value.number",
       "displayName": "Number Constant",
       "category": "Value",
@@ -43191,6 +43831,152 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "value.jsonParse",
+      "displayName": "Parse JSON",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "json",
+          "dataType": "String",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "value",
+          "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "number",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "text",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "boolean",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "kind",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "json",
+          "label": "JSON Text",
+          "type": "textarea",
+          "defaultValue": "{}",
+          "group": "Source",
+          "description": "Fallback payload when the json port is disconnected. A connected json port wins.",
+          "overriddenByPorts": [
+            "json"
+          ]
+        },
+        {
+          "name": "path",
+          "label": "Path",
+          "type": "text",
+          "defaultValue": "$",
+          "group": "Source",
+          "description": "Dot path with optional [n] indexes, for example data.items[0].code. $ or empty reads the whole document. Wildcards and filters are not supported on purpose: an industrial response is read, not queried."
+        },
+        {
+          "name": "type",
+          "label": "Value Type",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Auto (keep the JSON type)",
+              "value": "auto"
+            },
+            {
+              "label": "Number",
+              "value": "number"
+            },
+            {
+              "label": "Text",
+              "value": "text"
+            },
+            {
+              "label": "Boolean",
+              "value": "boolean"
+            }
+          ],
+          "group": "Result",
+          "description": "Auto returns text/number/boolean as-is and gives objects/arrays back as raw JSON text (parse them again). Forcing number or boolean converts numeric/boolean-looking text and fails when it cannot."
+        },
+        {
+          "name": "required",
+          "label": "Require The Path",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Result",
+          "description": "When the path is missing: true fails the run (default, a silent null always explodes three nodes later); false returns found=false for flow.if to branch on."
+        },
+        {
+          "name": "maxBytes",
+          "label": "Maximum Payload",
+          "type": "number",
+          "defaultValue": 1048576,
+          "min": 64,
+          "max": 16777216,
+          "step": 1024,
+          "group": "Result",
+          "description": "Reject oversized payloads before parsing. A 100 MB HTML error page should not become a JSON parse attempt."
+        }
+      ],
+      "description": "Read one field out of a JSON response. Wire: json -> found/value/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text so a second node can drill further. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "value.range",
       "displayName": "Range Check",
       "category": "Value",
@@ -43291,6 +44077,136 @@
       ],
       "description": "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "value.counter",
+      "displayName": "Run Counter",
+      "category": "Value",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pass",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "reset",
+          "dataType": "Boolean",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "total",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "passCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "failCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "rate",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "counterId",
+          "label": "Counter Id",
+          "type": "text",
+          "defaultValue": "counter",
+          "group": "Counter",
+          "description": "Name of this counter inside its scope. Two nodes sharing the id share state, which is exactly how 'consecutive NG' and 'shift total' are wired on the same branch."
+        },
+        {
+          "name": "step",
+          "label": "Step",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 1,
+          "group": "Counter",
+          "description": "Added to count on every execution; use -1 for a remaining-parts countdown."
+        },
+        {
+          "name": "scope",
+          "label": "Scope",
+          "type": "select",
+          "defaultValue": "workflow",
+          "options": [
+            {
+              "label": "Workflow (survives across runs)",
+              "value": "workflow"
+            },
+            {
+              "label": "Run (resets every run)",
+              "value": "run"
+            }
+          ],
+          "group": "Counter",
+          "description": "Workflow keeps counting across parts for shift yield and consecutive-NG rules. Run restarts with every run and suits per-part sampling."
+        },
+        {
+          "name": "resetOnPass",
+          "label": "Reset On Pass",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reset",
+          "description": "Clear the counter when the pass input is true, then count this execution as the first one. This is the reset point of a consecutive-NG counter."
+        },
+        {
+          "name": "resetOnFail",
+          "label": "Reset On Fail",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Reset",
+          "description": "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."
+        }
+      ],
+      "description": "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is process-local: restarting the host clears it. Deterministic=false because the result depends on execution history.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,

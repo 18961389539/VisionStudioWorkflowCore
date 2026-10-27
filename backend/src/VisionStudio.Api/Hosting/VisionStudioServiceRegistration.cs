@@ -209,6 +209,10 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<SqliteMetadataDatabase>();
         // 结果落库：output.database 节点通过 IResultRecordStore 写 result_records 表（migration 23）。
         services.AddSingleton<IResultRecordStore, SqliteResultRecordStore>();
+
+        // 跨轮计数：value.counter 通过 IRunCounterStore 记住 total/pass/fail（进程内，重启清零）。
+        // 注册为单例，否则每次解析执行器都会得到一份新状态，"连续 NG"永远停在 1。
+        services.AddSingleton<IRunCounterStore, InMemoryRunCounterStore>();
         services.AddSingleton<LegacyStorageMigrationService>();
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
