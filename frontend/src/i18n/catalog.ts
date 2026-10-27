@@ -3426,6 +3426,175 @@ const nodeOptionLabels: Record<string, Record<string, string>> = {
   'jlvision.regionAnalysis': { Chessboard: '棋盘距离' }
 };
 
+/** 测量与几何专项补全批（13 个节点，node-gap-analysis.md 第八节）。
+ *  用 Object.assign 覆盖而不是改上面的巨型字面量：这批是独立批次，合并上游时冲突面最小；
+ *  参数/选项译法按节点限定，不复用全局映射——"Operation" "Offset" "Method" 这类词在不同节点含义不同。 */
+Object.assign(nodeNames, {
+  'contour.toPoints': '轮廓转点集',
+  'measure.arcFit': '圆弧拟合',
+  'measure.mzCircle': '最小区域圆',
+  'measure.curvature': '轮廓曲率',
+  'measure.profileFilter': '轮廓滤波（波纹 / 残余）',
+  'measure.roughness': '轮廓粗糙度',
+  'measure.contourDistance': '轮廓间距',
+  'measure.thread': '螺纹测量',
+  'measure.gear': '直齿轮几何',
+  'tolerance.stackup': '公差叠加',
+  'tolerance.drf': '双基准基准系（A|B）',
+  'geometry.lineConstruct': '线段构造',
+  'coordinate.transformAffine': '仿射变换'
+} as Record<string, string>);
+
+Object.assign(descriptions, {
+  'contour.toPoints': '把一条轮廓转成点集，喂给轮廓度 / 跳动 / 点集拟合节点；等弧长、按序号抽稀或保留全部点三档。',
+  'measure.arcFit': '弧段拟合：半径、圆心角、弧长、弦长与径向偏差，用于 R 角与圆弧标注。',
+  'measure.mzCircle': '最小区域 / 最小外接 / 最大内切圆，按通止规口径给出极限圆与区域宽度。',
+  'measure.curvature': '沿轮廓的滑动局部圆拟合，输出最小半径、位置与圆角数量。',
+  'measure.profileFilter': 'ISO 16610-21 高斯滤波，把剖面拆成波纹度与残余，并给出幅值标量。',
+  'measure.roughness': '轮廓幅值粗糙度 Ra / Rq / Rz / Rp / Rv / Rmax，含截止波长与评定长度。',
+  'measure.contourDistance': '两条任意轮廓的最近 / 最远距离以及最近点对，补上点线距与圆间距之间的空白。',
+  'measure.thread': '影像法螺纹：齿距、大径 / 小径、牙型角与牙深，需要给定轴线。',
+  'measure.gear': '直齿轮几何：分度圆、基圆、公法线长度、跨棒距，纯算量无输入端口。',
+  'tolerance.stackup': '尺寸链公差叠加：最坏情况与 RSS 统计极限、闭合余量与各贡献占比。',
+  'tolerance.drf': '双基准基准系：A|B 交点作原点，输出基准正交误差与位姿。',
+  'geometry.lineConstruct': '构造线段：过点垂线、平行偏置、中线、角平分线、过点切线。',
+  'coordinate.transformAffine': '非刚体仿射变换：缩放、剪切、旋转、平移，行列式可追溯。'
+} as Record<string, string>);
+
+Object.assign(nodeParameterLabels, {
+  'contour.toPoints': {
+    'Resample Mode': '重采样方式', 'Sample Step': '采样步距', 'Maximum Samples': '最大点数',
+    'Closed Contour': '闭合轮廓', 'Zero-based Index': '轮廓序号（0 起）'
+  },
+  'measure.arcFit': {
+    'Minimum Arc Coverage': '最小弧覆盖角', 'Max Radial Deviation (0=off)': '最大径向偏差（0=关）',
+    'Zero-based Index': '轮廓序号（0 起）'
+  },
+  'measure.mzCircle': {
+    'Extremum Mode': '极限圆模式', 'Search Precision': '搜索精度', 'Max Iterations': '最大迭代次数',
+    'Max Zone Width (0=off)': '最大区域宽度（0=关）'
+  },
+  'measure.curvature': {
+    'Fitting Window': '拟合窗口', 'Corner Radius Threshold (0=off)': '圆角阈值（0=关）',
+    'Closed Contour': '闭合轮廓', 'Zero-based Index': '轮廓序号（0 起）'
+  },
+  'measure.profileFilter': {
+    'Cutoff Wavelength (0=auto)': '截止波长（0=自动）', 'Sample Step': '采样步距',
+    'End Handling': '端部处理', 'Closed Contour': '闭合轮廓'
+  },
+  'measure.roughness': {
+    'Cutoff Wavelength (0=auto)': '截止波长（0=自动）', 'Evaluation Length (0=all)': '评定长度（0=全长）',
+    'Sample Step': '采样步距', 'Max Ra (0=off)': 'Ra 上限（0=关）', 'Zero-based Index': '轮廓序号（0 起）'
+  },
+  'measure.contourDistance': {
+    'Reference Contour Index': '参考轮廓序号', 'Reported Distance': '输出距离', 'Sample Step': '采样步距',
+    'Maximum Samples': '最大采样数', 'Limit (0=off)': '限值（0=关）', 'Closed Contour': '闭合轮廓'
+  },
+  'measure.thread': {
+    'Crest Polarity': '牙顶朝向', 'Pitch Tolerance (0=off)': '齿距公差（0=关）',
+    'Minimum Crests': '最少牙顶数', 'Sample Step': '采样步距'
+  },
+  'measure.gear': {
+    'Module': '模数', 'Tooth Count': '齿数', 'Pressure Angle': '压力角',
+    'Profile Shift Coefficient': '变位系数', 'Pin Diameter (0=auto)': '量棒直径（0=自动）'
+  },
+  'tolerance.stackup': {
+    'Contributions JSON': '尺寸链 JSON', 'Method': '计算方法',
+    'Target Nominal (0=off)': '目标名义值（0=关）', 'Tolerance': '公差', 'Unit Label': '单位标签'
+  },
+  'tolerance.drf': {
+    'Datum Name': '基准名', 'Max Orthogonality Error (0=off)': '最大正交误差（0=关）',
+    'Flip Axis': '翻转轴向', 'Unit Label': '单位标签'
+  },
+  'geometry.lineConstruct': {
+    'Operation': '构造方式', 'Offset': '偏置量', 'Length Scale': '长度倍数'
+  },
+  'coordinate.transformAffine': {
+    'Scale X': 'X 缩放', 'Scale Y': 'Y 缩放', 'Rotation': '旋转', 'Shear': '剪切',
+    'Translate X': 'X 平移', 'Translate Y': 'Y 平移', 'Source Frame': '源坐标系',
+    'Target Frame': '目标坐标系', 'Source Unit': '源单位', 'Target Unit': '目标单位'
+  }
+} as Record<string, Record<string, string>>);
+
+Object.assign(nodeOptionLabels, {
+  'contour.toPoints': {
+    'Arc-length spacing': '等弧长间隔', 'Uniform index spacing': '按序号均匀抽稀', 'Every contour point': '保留全部点'
+  },
+  'measure.mzCircle': {
+    'Minimum zone (MZ)': '最小区域（MZ）', 'Minimum circumscribed (MCCI)': '最小外接（MCCI）',
+    'Maximum inscribed (MIC)': '最大内切（MIC）'
+  },
+  'measure.profileFilter': { 'Reflect ends': '端部镜像', 'Discard ends': '丢弃端部' },
+  'measure.contourDistance': { 'Gap (nearest distance)': '间隙（最近距离）', 'Deviation (farthest distance)': '偏差（最远距离）' },
+  'measure.thread': { 'Crest on the input side': '牙顶在输入侧', 'Crest on the opposite side': '牙顶在对侧' },
+  'tolerance.stackup': { 'Worst case (arithmetic)': '最坏情况（算术）', 'Statistical (RSS)': '统计法（RSS）' },
+  'geometry.lineConstruct': {
+    'Perpendicular through point': '过点作垂线', 'Parallel offset': '平行偏置', 'Midline': '中线',
+    'Angle bisector': '角平分线', 'Tangent from point': '过点作切线'
+  }
+} as Record<string, Record<string, string>>);
+
+Object.assign(parameterDescriptions, {
+  'contour.toPoints.resample': '等弧长给出等距样本（轮廓度/跳动要的就是这种）；按序号抽稀不插值；保留全部点用于回放原始折线。',
+  'contour.toPoints.sampleStep': '等弧长采样的间距；其它两档忽略。',
+  'contour.toPoints.maxPoints': '硬预算，超限直接失败而不是静默截断剖面。',
+  'contour.toPoints.closed': '按闭合折线采样（隐式补回首点）。',
+  'measure.arcFit.minCoverageDeg': '弧段覆盖角小于该值返回 found=false：半径不可观测。',
+  'measure.arcFit.maxDeviation': '形位门限：withinTolerance 判断（最大半径−最小半径）是否超限。0 关闭。',
+  'measure.mzCircle.mode': 'MZ 最小化径向带（ISO 1101 圆度）；MCCI 是包容轴的最小圆；MIC 是内切孔的最大圆。',
+  'measure.mzCircle.precision': '模式搜索的步长下限。过小只会增加迭代，不会增加有效位数。',
+  'measure.mzCircle.maxIterations': '每轮半径的迭代预算，超限报错而不是返回未收敛结果。',
+  'measure.mzCircle.maxZoneWidth': '区域宽度门限，通止规就是这一条。0 关闭。',
+  'measure.curvature.fittingWindow': '两侧各取多少个点做局部圆拟合：窗口越大越抑噪，但会糊掉短圆角。',
+  'measure.curvature.cornerRadius': '局部半径低于该值且为局部极小才算一个圆角；0 表示不统计。',
+  'measure.curvature.closed': '闭合轮廓时窗口跨首尾环绕。',
+  'measure.profileFilter.cutoffWavelength': 'ISO 16610-21 高斯截止波长；0 取长度的 1/5。',
+  'measure.profileFilter.sampleStep': '滤波前的轴向重采样间距，必须远小于截止波长。',
+  'measure.profileFilter.endEffect': '镜像是保留全长（端部被反射污染）；丢弃是按实情裁掉两端。',
+  'measure.profileFilter.closed': '闭合剖面的处理方式；一般剖面用不到。',
+  'measure.roughness.cutoffWavelength': '粗糙度与波纹度的分界波长；0 取长度的 1/5。',
+  'measure.roughness.evaluationLength': '实际参与统计的尾段长度；0 用全长。Rz 按 5 段取样长度平均。',
+  'measure.roughness.sampleStep': '轴向重采样间距，必须远小于截止波长。',
+  'measure.roughness.maxRa': '可选门限：withinTolerance 判断 Ra 是否超限。0 关闭。',
+  'measure.contourDistance.referenceIndex': '参考轮廓列表中的序号（0 起）。',
+  'measure.contourDistance.mode': '间隙取最近距离（缝宽）；偏差取最远距离（形位失配）。min/max/mean 始终输出。',
+  'measure.contourDistance.sampleStep': '两条折线的等弧长采样间距，比较复杂度是 O(n·m)。',
+  'measure.contourDistance.maxSamples': '每条轮廓的采样预算，超限报错而不是拖死运行。',
+  'measure.contourDistance.limit': '可选门限，间隙与偏差都用"距离 ≤ 限值"这一条。0 关闭。',
+  'measure.contourDistance.closed': '两条折线都按闭合处理。',
+  'measure.thread.polarity': '牙顶在轴线的哪一侧；朝向选反会把峰谷对调、齿顶数骤降，用叠加层确认。',
+  'measure.thread.pitchTolerance': '齿距一致性门限：任一跨距超出容差即判 NG。0 关闭。',
+  'measure.thread.minCrests': '检出的牙顶少于该值返回 found=false：两个牙顶只够算一个齿距，不算测量。',
+  'measure.thread.sampleStep': '沿轴线方向的采样间距。',
+  'measure.gear.module': '齿轮模数 m，所有直径与同一单位。',
+  'measure.gear.teeth': '齿数 z，必须是 ≥3 的整数。',
+  'measure.gear.pressureAngleDeg': '基准压力角：20° 为标准，14.5° 为老标准；影响基圆与公法线。',
+  'measure.gear.profileShift': '变位系数 x：0 为标准齿轮，会改变齿顶圆/齿根圆与公法线。',
+  'measure.gear.pinDiameter': '量棒直径；0 取常用的 1.728m。仅跨棒距用到。',
+  'tolerance.stackup.contributionsJson': '尺寸链：每项 {name, nominal, plus, minus, sign}；sign=+1 为增环，−1 为减环。端口 a..f 覆盖前六项的名义值。',
+  'tolerance.stackup.method': '最坏情况把公差全部相加（100% 互换）；RSS 假设各环独立 ±3σ，给统计极限。',
+  'tolerance.stackup.targetNominal': '图样要求闭合到的名义值；与 tolerance 一起构成门限。',
+  'tolerance.stackup.tolerance': '名义值相对目标值的允许绝对偏差。0 关闭门限。',
+  'tolerance.stackup.unit': '仅作标签，不做换算。',
+  'tolerance.drf.datumName': '写进 datumJson 与叠加层的基准标签，如 A|B。',
+  'tolerance.drf.maxOrthogonalityErrorDeg': '次基准与主基准偏离 90° 的上限。0 关闭。',
+  'tolerance.drf.flipAxis': '反转 +X 方向：拟合线本身没有极性。',
+  'tolerance.drf.unit': '仅作标签，不做换算。',
+  'geometry.lineConstruct.operation': '垂线/平行/中线/角平分线/切线五选一，缺对应输入会直接报错而不是给退化线。',
+  'geometry.lineConstruct.offset': '平行偏置的有符号法向距离（正值偏左）。接线给出点时忽略。',
+  'geometry.lineConstruct.spanScale': '构造线段相对源线的长度倍数，只影响长度不影响方向。',
+  'coordinate.transformAffine.scaleX': 'X 缩放，端口优先；0 会被拒绝（塌陷的轴不可逆）。',
+  'coordinate.transformAffine.scaleY': 'Y 缩放，端口优先。',
+  'coordinate.transformAffine.rotationDeg': '平移前施加的逆时针旋转角。',
+  'coordinate.transformAffine.shear': 'x′ = x + shear·y，在旋转前施加；行列式仍为 scaleX·scaleY。',
+  'coordinate.transformAffine.translateX': '沿源 X 轴平移，单位为目标单位。',
+  'coordinate.transformAffine.translateY': '沿源 Y 轴平移，单位为目标单位。',
+  'coordinate.transformAffine.sourceFrame': '本变换的源坐标系名（非空，≤64 字符）。',
+  'coordinate.transformAffine.targetFrame': '本变换的目标坐标系名。',
+  'coordinate.transformAffine.sourceUnit': '源坐标的单位标签。',
+  'coordinate.transformAffine.targetUnit': '目标坐标的单位标签。'
+} as Record<string, string>);
+
 export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): NodeCatalogItem[] {
   if (lang === 'en') return items;
   return items.map((item) => ({

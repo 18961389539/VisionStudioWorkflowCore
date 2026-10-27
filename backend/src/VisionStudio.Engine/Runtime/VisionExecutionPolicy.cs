@@ -19,6 +19,7 @@ public static class VisionExecutionPolicy
         var type = catalog.Type;
         if (type.Equals("image.synthetic", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("contour.fromPoints", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("contour.toPoints", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("region.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.reduceDomain", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("defect.", StringComparison.OrdinalIgnoreCase) ||

@@ -77,14 +77,26 @@ public sealed class ContourFromPointsNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-var json = context.TryGetValue("pointsJson", out var input) ? input.Require<string>("pointsJson") : node.GetString("pointsJson", "[[100,100],[200,100],[200,200],[100,200]]");
-        if (json.Length > 2_097_152) throw new InvalidOperationException("Contour JSON exceeds 2 MiB of text.");
-        List<double[]> data;
-        try { data = JsonSerializer.Deserialize<List<double[]>>(json) ?? throw new JsonException("null points"); }
-        catch (JsonException ex) { throw new InvalidOperationException("Contour points JSON must be an array of [x,y] pairs.", ex); }
-        if (data.Count > ToleranceGeometry.MaxPoints || data.Any(p => p is null || p.Length != 2)) throw new InvalidOperationException("Contour requires at most 20000 [x,y] pairs.");
         var closed = node.GetBool("closed", true);
-        var points = ToleranceGeometry.Points(data.Select(p => new VisionPoint2D(p[0], p[1])).ToArray(), closed);
+        VisionPoint2D[] raw;
+        if (context.TryGetValue("pointList", out var wired))
+        {
+            // 断链修复：轮廓/检测点集可以直连，不再强制走 JSON 文本
+            var list = wired.Require<IReadOnlyList<VisionPoint2D>>("pointList");
+            if (list.Count > ToleranceGeometry.MaxPoints) throw new InvalidOperationException("Contour requires at most 20000 points.");
+            raw = list.ToArray();
+        }
+        else
+        {
+            var json = context.TryGetValue("pointsJson", out var input) ? input.Require<string>("pointsJson") : node.GetString("pointsJson", "[[100,100],[200,100],[200,200],[100,200]]");
+            if (json.Length > 2_097_152) throw new InvalidOperationException("Contour JSON exceeds 2 MiB of text.");
+            List<double[]> data;
+            try { data = JsonSerializer.Deserialize<List<double[]>>(json) ?? throw new JsonException("null points"); }
+            catch (JsonException ex) { throw new InvalidOperationException("Contour points JSON must be an array of [x,y] pairs.", ex); }
+            if (data.Count > ToleranceGeometry.MaxPoints || data.Any(p => p is null || p.Length != 2)) throw new InvalidOperationException("Contour requires at most 20000 [x,y] pairs.");
+            raw = data.Select(p => new VisionPoint2D(p[0], p[1])).ToArray();
+        }
+        var points = ToleranceGeometry.Points(raw, closed);
         if (points.Distinct().Count() < 2)
             return ValueTask.FromResult(ToleranceGeometry.Missing(points.Length, "insufficient-points", new() { ["contours"] = VisionValue.Contours([]), ["count"] = VisionValue.Integer(0) }, nodeType: Type));
         using var curve = ToleranceGeometry.Curve(points, closed);

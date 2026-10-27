@@ -10,11 +10,11 @@ public static class GeometryToleranceCatalog
         Description: "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false.");
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
-        new("contour.fromPoints", "Contour from Points", "Contour", [new("exec", VisionDataType.Control, Required: false), new("pointsJson", VisionDataType.String, Required: false)],
+        new("contour.fromPoints", "Contour from Points", "Contour", [new("exec", VisionDataType.Control, Required: false), new("pointsJson", VisionDataType.String, Required: false), new("pointList", VisionDataType.PointList, Required: false)],
             [new("contours", VisionDataType.Contour), Found, new("count", VisionDataType.Integer), Samples, new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), Next],
-            [new("pointsJson", "Contour Points JSON", "textarea", "[[100,100],[200,100],[200,200],[100,200]]", Description: "Fallback [x,y] pairs when pointsJson input is disconnected. Max 2 MiB / 20000 points."),
+            [new("pointsJson", "Contour Points JSON", "textarea", "[[100,100],[200,100],[200,200],[100,200]]", Description: "Fallback [x,y] pairs when neither pointList nor pointsJson input is connected. Max 2 MiB / 20000 points."),
              new("closed", "Closed Contour", "boolean", true, Description: "Treat the polyline as closed (repeat first point for length/area).")],
-            "Create one subpixel contour from [x,y] pairs, preserving point order. Connected JSON overrides the parameter. Empty or singleton input returns found=false. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px. Consecutive duplicates, and repeated endpoints for closed contours, are removed.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
+            "Create one subpixel contour from [x,y] pairs, preserving point order. Wire pointList (from contour.toPoints or collection.detectionPoints) to skip the JSON step entirely; pointsJson input overrides the parameter. Empty or singleton input returns found=false. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px. Consecutive duplicates, and repeated endpoints for closed contours, are removed.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("measure.wallThickness", "Circular Wall Thickness", "Measurement", [Exec, new("inner", VisionDataType.Circle), new("outer", VisionDataType.Circle)],
             [Found, new("contained", VisionDataType.Boolean), Samples, new("centerDistance", VisionDataType.Double), new("samplesJson", VisionDataType.String),
              new("minThickness", VisionDataType.Double, Required: false), new("maxThickness", VisionDataType.Double, Required: false), new("meanThickness", VisionDataType.Double, Required: false),

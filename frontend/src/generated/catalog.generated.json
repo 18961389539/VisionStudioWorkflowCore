@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "d6a0b4ae8e54a2b3a4c591e5bb9401ad1b79114ce5a580c34dbc0a1341802372",
+  "hash": "72dc1ffde341d3f4a856138f5534324ad4d8462e26c5074701675ef62bf17238",
   "items": [
     {
       "type": "image.acquire",
@@ -4282,6 +4282,11 @@
           "name": "pointsJson",
           "dataType": "String",
           "required": false
+        },
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": false
         }
       ],
       "outputs": [
@@ -4327,7 +4332,7 @@
           "label": "Contour Points JSON",
           "type": "textarea",
           "defaultValue": "[[100,100],[200,100],[200,200],[100,200]]",
-          "description": "Fallback [x,y] pairs when pointsJson input is disconnected. Max 2 MiB / 20000 points."
+          "description": "Fallback [x,y] pairs when neither pointList nor pointsJson input is connected. Max 2 MiB / 20000 points."
         },
         {
           "name": "closed",
@@ -4337,7 +4342,7 @@
           "description": "Treat the polyline as closed (repeat first point for length/area)."
         }
       ],
-      "description": "Create one subpixel contour from [x,y] pairs, preserving point order. Connected JSON overrides the parameter. Empty or singleton input returns found=false. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px. Consecutive duplicates, and repeated endpoints for closed contours, are removed.",
+      "description": "Create one subpixel contour from [x,y] pairs, preserving point order. Wire pointList (from contour.toPoints or collection.detectionPoints) to skip the JSON step entirely; pointsJson input overrides the parameter. Empty or singleton input returns found=false. Limits: 2 MiB JSON, 20000 points, finite coordinates within +/-100000000 px. Consecutive duplicates, and repeated endpoints for closed contours, are removed.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -5396,6 +5401,146 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "contour.toPoints",
+      "displayName": "Contour to Point List",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "stepUsed",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "resample",
+          "label": "Resample Mode",
+          "type": "select",
+          "defaultValue": "arcLength",
+          "options": [
+            {
+              "label": "Arc-length spacing",
+              "value": "arcLength"
+            },
+            {
+              "label": "Uniform index spacing",
+              "value": "uniform"
+            },
+            {
+              "label": "Every contour point",
+              "value": "everyPoint"
+            }
+          ],
+          "group": "Sampling",
+          "description": "arcLength gives equidistant samples (what profile/runout need); uniform keeps the source point order but thins by index; everyPoint copies the contour verbatim."
+        },
+        {
+          "name": "sampleStep",
+          "label": "Sample Step",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Sampling",
+          "description": "Arc-length spacing between samples. Ignored by uniform and everyPoint.",
+          "visibleWhen": {
+            "parameter": "resample",
+            "values": [
+              "arcLength"
+            ]
+          }
+        },
+        {
+          "name": "maxPoints",
+          "label": "Maximum Samples",
+          "type": "number",
+          "defaultValue": 5000,
+          "min": 2,
+          "max": 20000,
+          "step": 1,
+          "group": "Sampling",
+          "description": "Hard budget. Exceeding it fails instead of silently truncating the profile."
+        },
+        {
+          "name": "closed",
+          "label": "Closed Contour",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
+        }
+      ],
+      "description": "Converts one contour into a PointList so tolerance.profile / tolerance.runout / geometry.fitFromPoints stop being limited to detection centres. Wire: contours -> pointList. resample=arcLength emits equidistant samples at sampleStep; uniform thins the existing points by index; everyPoint copies them all. Budget overflow fails hard. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "jlvision.dxf",
       "displayName": "DXF Contour I/O",
       "category": "Contour",
@@ -6078,6 +6223,232 @@
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "coordinate.transformAffine",
+      "displayName": "Affine Transform",
+      "category": "Coordinate",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "scaleX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "scaleY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rotationDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "translateX",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "translateY",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "shear",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "determinant",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scaleX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scaleY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rotationDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "translateX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "translateY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "shear",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sourceFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "targetFrame",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "unit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "scaleX",
+          "label": "Scale X",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.0001,
+          "group": "Transform",
+          "description": "Fallback X scale when the port is disconnected. 0 is rejected: a collapsed axis is not a transform."
+        },
+        {
+          "name": "scaleY",
+          "label": "Scale Y",
+          "type": "number",
+          "defaultValue": 1,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.0001,
+          "group": "Transform",
+          "description": "Fallback Y scale when the port is disconnected."
+        },
+        {
+          "name": "rotationDeg",
+          "label": "Rotation",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -3600,
+          "max": 3600,
+          "step": 0.01,
+          "unit": "deg",
+          "group": "Transform",
+          "description": "CCW rotation applied before translation."
+        },
+        {
+          "name": "shear",
+          "label": "Shear",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -100,
+          "max": 100,
+          "step": 0.0001,
+          "group": "Transform",
+          "description": "x' = x + shear*y applied before rotation. Use it for skewed axes; it keeps the determinant at scaleX*scaleY."
+        },
+        {
+          "name": "translateX",
+          "label": "Translate X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Transform",
+          "description": "Translation along the source X axis, in target units."
+        },
+        {
+          "name": "translateY",
+          "label": "Translate Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Transform",
+          "description": "Translation along the source Y axis, in target units."
+        },
+        {
+          "name": "sourceFrame",
+          "label": "Source Frame",
+          "type": "text",
+          "defaultValue": "Image",
+          "group": "Frames",
+          "description": "Name of the frame this transform maps FROM (non-empty, max 64 chars)."
+        },
+        {
+          "name": "targetFrame",
+          "label": "Target Frame",
+          "type": "text",
+          "defaultValue": "World",
+          "group": "Frames",
+          "description": "Name of the frame this transform maps TO."
+        },
+        {
+          "name": "sourceUnit",
+          "label": "Source Unit",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Frames",
+          "description": "Unit label of the source coordinates."
+        },
+        {
+          "name": "targetUnit",
+          "label": "Target Unit",
+          "type": "text",
+          "defaultValue": "mm",
+          "group": "Frames",
+          "description": "Unit label of the target coordinates."
+        }
+      ],
+      "description": "Affine (non-rigid) transform between named frames: scale, shear, rotation and translation, with the determinant exposed for downstream validation. coordinate.transformConstant is rigid-only and coordinate.transformCompose rejects non-rigid input, so anisotropic or skewed mapping had no entry point. Pixel-to-mm anisotropy is already covered by calibration.planar's homography; this node is for engineering-frame scaling and skew. A zero scale on either axis fails hard.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {
@@ -13328,6 +13699,157 @@
         "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "geometry.lineConstruct",
+      "displayName": "Construct Line",
+      "category": "Geometry",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "line2",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "point",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "line",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "line2",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "offset",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operation",
+          "label": "Operation",
+          "type": "select",
+          "defaultValue": "perpendicular",
+          "options": [
+            {
+              "label": "Perpendicular through point",
+              "value": "perpendicular"
+            },
+            {
+              "label": "Parallel offset",
+              "value": "parallel"
+            },
+            {
+              "label": "Midline",
+              "value": "midline"
+            },
+            {
+              "label": "Angle bisector",
+              "value": "bisector"
+            },
+            {
+              "label": "Tangent from point",
+              "value": "tangent"
+            }
+          ],
+          "group": "Construction",
+          "description": "perpendicular: line + point. parallel: line + point, or line + offset. midline/bisector: line + line2. tangent: circle + point, emits both tangents."
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Construction",
+          "description": "Signed normal offset for the parallel operation. Positive offsets to the left of the source line. Ignored when a point is wired.",
+          "visibleWhen": {
+            "parameter": "operation",
+            "values": [
+              "parallel"
+            ]
+          }
+        },
+        {
+          "name": "spanScale",
+          "label": "Length Scale",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.01,
+          "max": 100,
+          "step": 0.01,
+          "group": "Construction",
+          "description": "Length multiplier for the constructed segment relative to the source line, so the result is visible and overlappable. Does not change its direction."
+        }
+      ],
+      "description": "Builds a Line2D from existing geometry: perpendicular through a point, parallel offset, midline, angle bisector, or the two tangents from a point to a circle. Without it, parallel/perpendicular relationships can only be measured, never constructed — genParallelContour offsets a contour but never yields a Line2D. Missing inputs for the selected operation fail hard instead of emitting a degenerate line.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -21554,6 +22076,167 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "measure.arcFit",
+      "displayName": "Arc Fit",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "startAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "endAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sweepDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "arcLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "chordLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minRadius",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxRadius",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "deviation",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "minCoverageDeg",
+          "label": "Minimum Arc Coverage",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 0,
+          "max": 359,
+          "step": 1,
+          "unit": "deg",
+          "group": "Arc",
+          "description": "Reject arcs spanning less than this. Coverage is the angular span of the sampled points; below it returns found=false because the radius is not observable."
+        },
+        {
+          "name": "maxDeviation",
+          "label": "Max Radial Deviation (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional form gate: withinTolerance reports (maxRadius-minRadius) <= limit. 0 disables the gate."
+        }
+      ],
+      "description": "Fits a circular arc to one contour and reports it in arc terms: sweepDeg, arcLength, chordLength and the start/end angles — what a fillet or a radius callout needs, and what measure.fitCircle (whole-circle least squares) does not give. Wire: contours -> circle/radius/sweepDeg/arcLength. Coverage below minCoverageDeg returns found=false. Units: pixels, angles in degrees CCW.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "measure.caliperArray",
       "displayName": "Caliper Array",
       "category": "Measurement",
@@ -23846,6 +24529,315 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "measure.curvature",
+      "displayName": "Contour Curvature",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "minRadius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minRadiusPoint",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "maxCurvature",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanCurvature",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "cornerCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "cornerJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "fittingWindow",
+          "label": "Fitting Window",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "group": "Curvature",
+          "description": "Points on each side used for the local circle fit. Larger windows smooth noise and blur short fillets; smaller windows follow noise."
+        },
+        {
+          "name": "cornerRadius",
+          "label": "Corner Radius Threshold (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.01,
+          "unit": "px",
+          "group": "Curvature",
+          "description": "Local minima of the radius below this value count as corners. 0 counts none, so cornerCount stays 0 while minRadius is still reported."
+        },
+        {
+          "name": "closed",
+          "label": "Closed Contour",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
+        }
+      ],
+      "description": "Sliding local circle fit along one contour: radius series, global minimum radius and its location, plus corners wherever the radius dips below cornerRadius. Wire: contours -> minRadius/minRadiusPoint/cornerCount. This is how a fillet radius or a bend line is located; segmentContours only splits the contour and never reports radii. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.contourDistance",
+      "displayName": "Contour Distance",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "referenceContours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "distance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "closestPointA",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "closestPointB",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "referenceIndex",
+          "label": "Reference Contour Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in referenceContours to measure against (0-based)."
+        },
+        {
+          "name": "mode",
+          "label": "Reported Distance",
+          "type": "select",
+          "defaultValue": "gap",
+          "options": [
+            {
+              "label": "Gap (nearest distance)",
+              "value": "gap"
+            },
+            {
+              "label": "Deviation (farthest distance)",
+              "value": "deviation"
+            }
+          ],
+          "group": "Distance",
+          "description": "gap reports the closest approach (a slit width); deviation reports the farthest stray (a form error). min/max/mean are always emitted regardless of mode."
+        },
+        {
+          "name": "sampleStep",
+          "label": "Sample Step",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Distance",
+          "description": "Arc-length spacing of the samples compared. Both polylines are resampled with it."
+        },
+        {
+          "name": "maxSamples",
+          "label": "Maximum Samples",
+          "type": "number",
+          "defaultValue": 1500,
+          "min": 2,
+          "max": 4000,
+          "step": 1,
+          "group": "Distance",
+          "description": "Per-contour budget; the comparison is O(n*m), so overflow fails instead of stalling the run."
+        },
+        {
+          "name": "limit",
+          "label": "Limit (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate. gap mode requires distance <= limit; deviation mode requires distance <= limit as well, so one parameter covers both."
+        },
+        {
+          "name": "closed",
+          "label": "Closed Contour",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat both polylines as closed when sampling."
+        }
+      ],
+      "description": "Nearest and farthest distance between two polylines, with the actual closest point pair. Wire: contours + referenceContours -> distance/closestPointA/closestPointB. Fills the gap between point-to-line (measure.pointLineDistance) and circle-to-circle (measure.circleSpacing): an arbitrary edge against an arbitrary edge. Samples are equidistant, so features between samples can be missed. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "jlvision.contourFeature",
       "displayName": "Contour Feature Extraction",
       "category": "Measurement",
@@ -24677,6 +25669,144 @@
         }
       ],
       "description": "Builds a 2D datum reference frame from a primary datum line (A) plus an optional secondary point (B). Origin is B projected onto A, or the line midpoint when B is absent; the X axis follows A and can be flipped. Wire: primary (and secondary) → pose/origin/axisAngleDeg, then into tolerance.position / tolerance.runout / coordinate.* which expect a Pose2D. secondaryOffset is the signed perpendicular distance of B from datum A, which is the form error the datum feature itself contributes. Units follow the input coordinates; no conversion is applied. Zero-length lines fail. Image-plane (2D) only.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "tolerance.drf",
+      "displayName": "Datum Reference Frame (A|B)",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "primary",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "secondary",
+          "dataType": "Line2D",
+          "required": true
+        },
+        {
+          "name": "tertiary",
+          "dataType": "Point2D",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pose",
+          "dataType": "Pose2D",
+          "required": true
+        },
+        {
+          "name": "origin",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "primaryAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "secondaryAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "orthogonalityErrorDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "originOffset",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "datumJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "datumName",
+          "label": "Datum Name",
+          "type": "text",
+          "defaultValue": "A|B",
+          "group": "Datum",
+          "description": "Label written into datumJson and the overlay, e.g. A|B or A-B."
+        },
+        {
+          "name": "maxOrthogonalityErrorDeg",
+          "label": "Max Orthogonality Error (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 90,
+          "step": 0.001,
+          "unit": "deg",
+          "group": "Limits",
+          "description": "Gate on how far the secondary datum is from 90 deg to the primary. 0 disables the gate."
+        },
+        {
+          "name": "flipAxis",
+          "label": "Flip Axis",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Datum",
+          "description": "Reverse the +X direction. Fitted lines carry no polarity; set this when the drawing's X points the other way."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "px",
+          "group": "Reporting",
+          "description": "Label only, no conversion (1..16 chars)."
+        }
+      ],
+      "description": "Two-datum reference frame: the origin is the A|B intersection (not a projected point), X follows datum A, and the orthogonality error of B is reported as the datum's own contribution. Wire: primary + secondary (secondary optional) -> pose/origin/orthogonalityErrorDeg. tolerance.datum stays the single-datum case; use this when the drawing names two datums and the origin has to be their intersection. Image-plane (2D) only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -26004,6 +27134,170 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "measure.mzCircle",
+      "displayName": "Minimum Zone Circle",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "zoneWidth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lsqRadius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "centerShift",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "mode",
+          "label": "Extremum Mode",
+          "type": "select",
+          "defaultValue": "minZone",
+          "options": [
+            {
+              "label": "Minimum zone (MZ)",
+              "value": "minZone"
+            },
+            {
+              "label": "Minimum circumscribed (MCCI)",
+              "value": "minimumCircumscribed"
+            },
+            {
+              "label": "Maximum inscribed (MIC)",
+              "value": "maximumInscribed"
+            }
+          ],
+          "group": "Circle",
+          "description": "MZ minimizes the radial zone (ISO 1101 roundness), MCCI is the smallest circle containing the points (shaft), MIC the largest circle inside them (hole)."
+        },
+        {
+          "name": "precision",
+          "label": "Search Precision",
+          "type": "number",
+          "defaultValue": 0.0001,
+          "min": 1E-06,
+          "max": 1,
+          "step": 0.0001,
+          "unit": "px",
+          "group": "Circle",
+          "description": "Pattern-search step floor. Smaller values cost more iterations and give no more digits than the input resolution."
+        },
+        {
+          "name": "maxIterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "defaultValue": 400,
+          "min": 10,
+          "max": 10000,
+          "step": 10,
+          "group": "Circle",
+          "description": "Hard iteration budget per radius. Exceeding it fails instead of returning an unrefined circle."
+        },
+        {
+          "name": "maxZoneWidth",
+          "label": "Max Zone Width (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.0001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate on zoneWidth. 0 disables it; a go/no-go ring gauge is exactly this gate."
+        }
+      ],
+      "description": "Extremal circle fits that a least-squares fit cannot give: minimum zone (ISO 1101), minimum circumscribed (shaft limit) and maximum inscribed (hole limit). Wire: contours -> circle/zoneWidth/lsqRadius. Starts from the least-squares centre and refines with a deterministic pattern search, so the result never depends on point order. withinTolerance gates zoneWidth. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "measure.blobs",
       "displayName": "Multi Blob",
       "category": "Measurement",
@@ -26421,6 +27715,162 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "measure.profileFilter",
+      "displayName": "Profile Filter",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "cutoff",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "waviness",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "residual",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "residualPeak",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "wavinessPeak",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "residualRms",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "length",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "removedPointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "cutoffWavelength",
+          "label": "Cutoff Wavelength (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "ISO 16610-21 Gaussian cutoff. 0 derives cutoff = length/5, the usual evaluation-length rule."
+        },
+        {
+          "name": "sampleStep",
+          "label": "Sample Step",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Arc-length resampling before filtering. The cutoff must stay well above this step or the filter cannot resolve the wavelength."
+        },
+        {
+          "name": "endEffect",
+          "label": "End Handling",
+          "type": "select",
+          "defaultValue": "reflect",
+          "options": [
+            {
+              "label": "Reflect ends",
+              "value": "reflect"
+            },
+            {
+              "label": "Discard ends",
+              "value": "discard"
+            }
+          ],
+          "group": "Filter",
+          "description": "Gaussian filtering shortens the usable profile by half a cutoff at each end. Reflect keeps the full length; discard drops the ends honestly instead of inventing data."
+        },
+        {
+          "name": "closed",
+          "label": "Closed Contour",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
+        }
+      ],
+      "description": "Splits a sampled profile into waviness and residual with an ISO 16610-21 Gaussian filter, emitting both as PointLists so downstream roughness or tolerance.profile can consume them. Wire: contours -> waviness/residual. The mean line is the least-squares axis, so the input must be a nominally straight edge; curved surfaces need a nominal first. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "tolerance.profile",
       "displayName": "Profile of a Line",
       "category": "Measurement",
@@ -26548,6 +27998,176 @@
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.roughness",
+      "displayName": "Profile Roughness",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": false
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "evaluationLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "cutoff",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "ra",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rq",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rz",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rp",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rv",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rmax",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "zeroCrossings",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Contour index used when the pointList port is disconnected. Ignored when points are wired directly."
+        },
+        {
+          "name": "cutoffWavelength",
+          "label": "Cutoff Wavelength (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Gaussian cutoff separating roughness from waviness. 0 derives length/5."
+        },
+        {
+          "name": "evaluationLength",
+          "label": "Evaluation Length (0=all)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Trailing window actually evaluated; 0 uses the whole profile. Rz averages 5 sampling lengths, so shorter windows report fewer sub-lengths."
+        },
+        {
+          "name": "sampleStep",
+          "label": "Sample Step",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Filter",
+          "description": "Arc-length resampling before filtering. Must stay well below cutoffWavelength."
+        },
+        {
+          "name": "maxRa",
+          "label": "Max Ra (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate: withinTolerance reports ra <= limit. 0 disables it."
+        }
+      ],
+      "description": "Amplitude roughness parameters of a sampled profile: Ra, Rq, Rz, Rp, Rv and Rmax after an ISO 16610-21 Gaussian mean-line removal. Wire: contours (or pointList) -> ra/rz/rmax. Rz averages the 5 sampling lengths required by ISO 4287; with a shorter window it averages what fits. Image-based values are only as good as the edge sampling, so report them as a trend, not a substitute for a stylus. Units follow the input coordinates.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -28305,6 +29925,515 @@
         }
       ],
       "description": "Select one typed metrology result by name or authored index. Connect circle/line/center/pose directly to downstream measurements. Missing or failed objects return found=false and no geometry. Reject duplicate object indices, lists over 512 objects, and invalid geometry or residuals in a successful selected result. Diagnostics record the selector, matched index/kind and object count.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.gear",
+      "displayName": "Spur Gear Geometry",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pitchDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "baseDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "outsideDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rootDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "circularPitch",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "spanTeeth",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "spanLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pinDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "measurementOverPins",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "baseToothThickness",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "module",
+          "label": "Module",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.001,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "mm",
+          "description": "Gear module m. All diameters come out in the same unit."
+        },
+        {
+          "name": "teeth",
+          "label": "Tooth Count",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 3,
+          "max": 2000,
+          "step": 1,
+          "group": "Gear",
+          "description": "Number of teeth z. Must be a whole number >= 3.",
+          "integer": true
+        },
+        {
+          "name": "pressureAngleDeg",
+          "label": "Pressure Angle",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 10,
+          "max": 35,
+          "step": 0.5,
+          "unit": "deg",
+          "group": "Gear",
+          "description": "Reference pressure angle: 20 deg is standard, 14.5 deg is legacy. Drives base diameter and span length."
+        },
+        {
+          "name": "profileShift",
+          "label": "Profile Shift Coefficient",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -2,
+          "max": 2,
+          "step": 0.01,
+          "group": "Gear",
+          "description": "x coefficient for corrected gears. 0 is an uncorrected gear; it shifts outside/root diameters and the span length."
+        },
+        {
+          "name": "pinDiameter",
+          "label": "Pin Diameter (0=auto)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.001,
+          "unit": "mm",
+          "group": "Gear",
+          "description": "Measuring pin diameter. 0 derives the usual 1.728*m. Only used for measurement over pins."
+        }
+      ],
+      "description": "Closed-form spur-gear geometry from module, tooth count and pressure angle: pitch/base/outside/root diameters, circular pitch, span length W_k with its k, and measurement over pins. This is arithmetic, not vision — no input ports, deterministic output, so it can drive a recipe or a report row directly. Helical gears are out of scope (helix angle assumed 0). All lengths in the module's unit.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.thread",
+      "displayName": "Thread Measurement",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "axis",
+          "dataType": "Line2D",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "crestCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "pitch",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "majorDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "minorDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pitchDiameter",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "threadAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "threadDepth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "polarity",
+          "label": "Crest Polarity",
+          "type": "select",
+          "defaultValue": "profile",
+          "options": [
+            {
+              "label": "Crest on the input side",
+              "value": "profile"
+            },
+            {
+              "label": "Crest on the opposite side",
+              "value": "inverted"
+            }
+          ],
+          "group": "Thread",
+          "description": "Which side of the axis the crests sit on. Wrong polarity turns peaks into valleys and the pitch count collapses; check with the overlay."
+        },
+        {
+          "name": "pitchTolerance",
+          "label": "Pitch Tolerance (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate on the measured pitch. 0 disables the gate."
+        },
+        {
+          "name": "minCrests",
+          "label": "Minimum Crests",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 2,
+          "max": 500,
+          "step": 1,
+          "group": "Thread",
+          "description": "Fewer detected crests than this returns found=false: two crests give one pitch, which is not a measurement."
+        },
+        {
+          "name": "sampleStep",
+          "label": "Sample Step",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Thread",
+          "description": "Arc-length resampling along the profile before crest detection."
+        }
+      ],
+      "description": "Image-based thread inspection against a supplied axis: pitch from crest spacing, major/minor diameter from the radial extrema, average thread angle from the flank slopes. Wire: contours + axis Line2D -> pitch/majorDiameter/threadAngleDeg. Optically this is a silhouette measurement: it cannot see the pitch diameter root, so pitchDiameter is the (major+minor)/2 estimate. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "tolerance.stackup",
+      "displayName": "Tolerance Stack-Up",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "a",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "b",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "c",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "d",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "e",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "f",
+          "dataType": "Double",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "contributorCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "nominal",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstCaseMax",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "worstCaseMin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rssTolerance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "upperLimit",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lowerLimit",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "margin",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "utilization",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "contributionsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "contributionsJson",
+          "label": "Contributions JSON",
+          "type": "textarea",
+          "defaultValue": "[{\"name\":\"pin\",\"nominal\":10,\"plus\":0.02,\"minus\":0.02,\"sign\":1},{\"name\":\"hole\",\"nominal\":10.05,\"plus\":0.03,\"minus\":0,\"sign\":-1}]",
+          "group": "Chain",
+          "description": "Dimension chain: each entry is {name, nominal, plus, minus, sign}. plus/minus are magnitudes >= 0; sign is +1 to add the feature, -1 to subtract it. Ports a..f override nominal of entries 1..6."
+        },
+        {
+          "name": "method",
+          "label": "Method",
+          "type": "select",
+          "defaultValue": "worstCase",
+          "options": [
+            {
+              "label": "Worst case (arithmetic)",
+              "value": "worstCase"
+            },
+            {
+              "label": "Statistical (RSS)",
+              "value": "rss"
+            }
+          ],
+          "group": "Chain",
+          "description": "Worst case adds every tolerance (100% interchangeability). RSS assumes independent +-3 sigma contributors and gives the statistical limit, which is what a process capability claim needs."
+        },
+        {
+          "name": "targetNominal",
+          "label": "Target Nominal (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Limits",
+          "description": "Drawing nominal the chain should close at. The gate compares nominal against it; left at 0 with tolerance 0 the gate stays open."
+        },
+        {
+          "name": "tolerance",
+          "label": "Tolerance",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Allowed absolute gap between nominal and targetNominal. 0 disables the gate."
+        },
+        {
+          "name": "unit",
+          "label": "Unit Label",
+          "type": "text",
+          "defaultValue": "mm",
+          "group": "Reporting",
+          "description": "Label only, no conversion (1..16 chars). Set it to whatever unit the contributions are in."
+        }
+      ],
+      "description": "Closes a 1D dimension chain: worst-case (arithmetic) or statistical (RSS, +-3 sigma) limits, the resulting upper/lower limit, closure margin against a target and per-contributor share. Wire: optional a..f to replace the first six nominals. Every existing tolerance.* node evaluates ONE feature against ONE tolerance; this node is the only place where several contributions are combined.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
