@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "a97f69e968dcc5216411719efecc41de61cc2398b805f0dae93a121645648b3b",
+  "hash": "c6b0df809327dcb20bb81d34cf025779d1b6a0945808c314badb976ccec2f213",
   "items": [
     {
       "type": "image.acquire",
@@ -3733,6 +3733,149 @@
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "contour.convexity",
+      "displayName": "Contour Convexity",
+      "category": "Contour",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "hullPointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "hullArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "convexity",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxDefectDepth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxDefectPoint",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "defectCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "defectsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "withinTolerance",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which object in the connected list to use (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "closed",
+          "label": "Closed Contour",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat the polyline as closed. An open contour has no interior, so convexity is meaningless and the node returns found=false."
+        },
+        {
+          "name": "minDefectDepth",
+          "label": "Minimum Defect Depth",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Depressions shallower than this are ignored when counting defects. Below roughly one pixel you are counting contour sampling noise."
+        },
+        {
+          "name": "maxDefectDepth",
+          "label": "Max Defect Depth (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.1,
+          "unit": "px",
+          "group": "Limits",
+          "description": "Optional gate: withinTolerance reports maxDefectDepth <= limit. 0 disables it."
+        }
+      ],
+      "description": "Convexity of one closed contour: area / hullArea, the deepest dent and how many dents there are. A dent (chipped edge, notch, burr pocket) is a stretch of contour that sits inside the convex hull; the node measures each sample's distance to the hull boundary and groups consecutive samples above minDefectDepth into one defect. jlvision.contourOp has no convexity operator, and building the same result from regions required region.fromContour first. Units: pixels.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {
@@ -12048,6 +12191,120 @@
       "declaresRoiImageBindings": true
     },
     {
+      "type": "feature.superpixel",
+      "displayName": "Superpixel Segmentation",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "labels",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "boundary",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "meanSize",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "regionSize",
+          "label": "Region Size",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 2,
+          "max": 200,
+          "step": 1,
+          "unit": "px",
+          "group": "SLIC",
+          "description": "Target superpixel edge length in pixels. Pick it a few times the texture cell size: too small fragments every grain, too large merges the defect into its background."
+        },
+        {
+          "name": "ruler",
+          "label": "Compactness",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "group": "SLIC",
+          "description": "Balance between color similarity and spatial compactness. High values give square-ish tiles, low values follow color edges (what texture segmentation usually wants)."
+        },
+        {
+          "name": "iterations",
+          "label": "Iterations",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "group": "SLIC",
+          "description": "SLIC refinement passes. 5 is the OpenCV default; more changes little and costs linearly."
+        },
+        {
+          "name": "enforceConnectivity",
+          "label": "Enforce Connectivity",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "SLIC",
+          "description": "Merges tiny disconnected label fragments after refinement, so every emitted region is a real connected component. Turn it off only when you want the raw label map."
+        }
+      ],
+      "description": "SLIC/SLICO superpixel segmentation: each superpixel comes out as one Region component, plus the raw label map and the boundary mask. Wire: image -> region/count, then region.filter / region.properties / region.toDetections. This is the texture pre-segmentation that MSER (unstable-region detection) cannot give; image.partitionDynamic is a regular grid and ignores gray values entirely. Region components follow 8-connectivity and the label order, so two runs produce the same component order. algorithmBackend=opencv.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "flow.ifBoolean",
       "displayName": "Boolean If",
       "category": "Flow",
@@ -19581,6 +19838,138 @@
       ],
       "description": "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
       "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "contour.matchXld",
+      "displayName": "Contour Shape Match",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "templateContours",
+          "dataType": "Contour",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "score",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rotationDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scale",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": true
+        },
+        {
+          "name": "sampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in the connected list to match (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "templateIndex",
+          "label": "Template Contour Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which contour in templateContours is the model (0-based)."
+        },
+        {
+          "name": "samples",
+          "label": "Signature Samples",
+          "type": "number",
+          "defaultValue": 256,
+          "min": 64,
+          "max": 2048,
+          "step": 32,
+          "group": "Matching",
+          "description": "Points sampled around each contour for the radius signature. Higher resolves finer shape detail and costs linearly; 256 is enough for a polygon with tens of vertices."
+        },
+        {
+          "name": "minScore",
+          "label": "Minimum Score",
+          "type": "number",
+          "defaultValue": 0.7,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Limits",
+          "description": "Score floor for found. The score is 1 minus the RMS difference of the normalised radius signatures, so 0.9 means the shapes agree within about 10% of the mean radius."
+        },
+        {
+          "name": "allowRotation",
+          "label": "Allow Rotation",
+          "type": "boolean",
+          "defaultValue": true,
+          "group": "Matching",
+          "description": "Search all cyclic shifts of the signature. Turn it off when the part orientation is already known, which makes the match stricter and faster."
+        }
+      ],
+      "description": "Shape matching on contours: both the scene and the template are resampled by arc length, reduced to a centroid-radius signature normalised by mean radius, then correlated over cyclic shifts. That makes the score invariant to translation, rotation and scale — which is exactly what match.shape (gray-edge template) cannot do on transparent or printed parts with almost no gray contrast. Outputs score, rotationDeg and scale relative to the template. Reflection is not distinguished from rotation. Units: pixels for center, degrees for rotation.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -29246,6 +29635,7 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
+      "actions": [],
       "frames": [
         {
           "policy": "InputFrame",
@@ -29267,7 +29657,7 @@
           "imagePort": "debugImage"
         }
       ],
-      "declaresActions": false,
+      "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
@@ -43433,6 +43823,121 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "region.fromContour",
+      "displayName": "Region from Contour",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which object in the connected list to use (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "allContours",
+          "label": "Fill All Contours",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Selection",
+          "description": "Fill every contour in the list into one region instead of only index. Use it when the measured feature is made of several segments (an interrupted edge)."
+        },
+        {
+          "name": "expand",
+          "label": "Expand (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 50,
+          "step": 1,
+          "unit": "px",
+          "group": "Raster",
+          "description": "Dilates the filled polygon by an elliptical kernel of this radius, which compensates half-pixel contour sampling and hairline gaps."
+        },
+        {
+          "name": "invert",
+          "label": "Invert",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Raster",
+          "description": "Fill everything outside the polygon instead of inside. Useful to build a background region for region.boolean."
+        }
+      ],
+      "description": "Rasterizes one contour (or all of them) into a pixel region. jlvision.regionOp only accepts 11 scalar parameters, so genRegionPolygon can never receive a fitted contour; region.fromMask needs a mask image and contour.fromMask goes the other way. This closes contour -> area / IoU / morphology / convexity. Wire: contours (+ optional image for the canvas size) -> region + mask image. Components are split by 8-connectivity, so region.properties and region.filter see real objects.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "region.fromMask",
       "displayName": "Region From Mask",
       "category": "Region",
@@ -45938,6 +46443,517 @@
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "region.toMask",
+      "displayName": "Region to Mask",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "area",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "foreground",
+          "label": "Foreground Value",
+          "type": "number",
+          "defaultValue": 255,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Values",
+          "description": "Gray value written inside the region. 255 is what region.fromMask and contour.fromMask expect; 1 keeps it usable as a weight map."
+        },
+        {
+          "name": "background",
+          "label": "Background Value",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 255,
+          "step": 1,
+          "group": "Values",
+          "description": "Gray value outside the region."
+        }
+      ],
+      "description": "Renders a pixel region into an 8-bit mask image. Every mask consumer in the catalog (region.fromMask, contour.fromMask, image.reduceDomain, inference) had no producer, so a region could not be fed back as a mask, exported, or handed to a model. Wire: region -> image. Region dimensions are carried by the region itself, so no canvas image is needed. algorithmBackend=managed.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "roi.fromDetection",
+      "displayName": "ROI from Detection",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": true
+        },
+        {
+          "name": "index",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "index",
+          "label": "Zero-based Index",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1999,
+          "step": 1,
+          "description": "Which object in the connected list to use (0-based). Out of range returns found=false."
+        },
+        {
+          "name": "shape",
+          "label": "Shape",
+          "type": "select",
+          "defaultValue": "rectangle",
+          "options": [
+            {
+              "label": "Rectangle (bounding box)",
+              "value": "rectangle"
+            },
+            {
+              "label": "Circle (fitted circle)",
+              "value": "circle"
+            }
+          ],
+          "group": "Geometry",
+          "description": "Rectangle uses the detection bounding box; circle uses the fitted circle and falls back to half the larger box side when the detection carries no radius."
+        },
+        {
+          "name": "expand",
+          "label": "Expand (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Adjust",
+          "description": "Grows the ROI on every side (negative shrinks). Leaves margin for the caliper search that follows a detection."
+        }
+      ],
+      "description": "Turns one detection into a runtime ROI. This is the piece that makes per-object measurement possible before flow.forEach is generalised: region.toDetections -> flow.forEach -> roi.fromDetection -> region.fromRoi -> measure.regionIntensity runs once per object instead of duplicating the measurement chain. Detection X/Y is the centroid, so the rectangle is centred on it. Out-of-range index returns found=false.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "roi.fromGeometry",
+      "displayName": "ROI from Geometry",
+      "category": "Region",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "rectangle",
+          "dataType": "Rectangle2D",
+          "required": false
+        },
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": false
+        },
+        {
+          "name": "pointList",
+          "dataType": "PointList",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "roi",
+          "dataType": "Roi",
+          "required": true
+        },
+        {
+          "name": "shape",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "shape",
+          "label": "Shape",
+          "type": "select",
+          "defaultValue": "rectangle",
+          "options": [
+            {
+              "label": "Rectangle",
+              "value": "rectangle"
+            },
+            {
+              "label": "Circle",
+              "value": "circle"
+            },
+            {
+              "label": "Polygon",
+              "value": "polygon"
+            }
+          ],
+          "group": "Geometry",
+          "description": "Which ROI to build. A connected port of the same shape overrides the numeric fallbacks below, so a located rectangle or fitted circle can drive the ROI directly."
+        },
+        {
+          "name": "x",
+          "label": "X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Left edge of the fallback rectangle, in image pixels.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "rectangle"
+            ]
+          }
+        },
+        {
+          "name": "y",
+          "label": "Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Top edge of the fallback rectangle.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "rectangle"
+            ]
+          }
+        },
+        {
+          "name": "width",
+          "label": "Width",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0.5,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Rectangle width; must be positive.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "rectangle"
+            ]
+          }
+        },
+        {
+          "name": "height",
+          "label": "Height",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 0.5,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Rectangle height; must be positive.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "rectangle"
+            ]
+          }
+        },
+        {
+          "name": "rectangleAnchor",
+          "label": "Rectangle Anchor",
+          "type": "select",
+          "defaultValue": "topLeft",
+          "options": [
+            {
+              "label": "Top-left (X/Y is the corner)",
+              "value": "topLeft"
+            },
+            {
+              "label": "Center (X/Y is the middle)",
+              "value": "center"
+            }
+          ],
+          "group": "Geometry",
+          "description": "Where the rectangle's X/Y points. The catalog is not consistent here: box outputs from matching/aruco are top-left, rotated-rectangle outputs are the centre. Pick the one that matches the producer you wired.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "rectangle"
+            ]
+          }
+        },
+        {
+          "name": "centerX",
+          "label": "Center X",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Center of the fallback circle.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "circle"
+            ]
+          }
+        },
+        {
+          "name": "centerY",
+          "label": "Center Y",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000000,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Center of the fallback circle.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "circle"
+            ]
+          }
+        },
+        {
+          "name": "radius",
+          "label": "Radius",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.5,
+          "max": 1000000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Geometry",
+          "description": "Circle radius; must be positive.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "circle"
+            ]
+          }
+        },
+        {
+          "name": "pointsJson",
+          "label": "Polygon Points JSON",
+          "type": "textarea",
+          "defaultValue": "[[20,20],[120,20],[120,120]]",
+          "group": "Geometry",
+          "description": "Fallback [x,y] pairs when no pointList is wired. At least three points, at most 20000, finite and within +/-100000000 px.",
+          "visibleWhen": {
+            "parameter": "shape",
+            "values": [
+              "polygon"
+            ]
+          }
+        },
+        {
+          "name": "expand",
+          "label": "Expand (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -1000,
+          "max": 1000,
+          "step": 0.5,
+          "unit": "px",
+          "group": "Adjust",
+          "description": "Grows the ROI on every side; negative values shrink it. Use it to leave margin for a following caliper search, or to tighten a located box."
+        }
+      ],
+      "description": "Builds a runtime ROI from geometry. Until now Roi had only two producers (roi.transform, image.crop) while 15 nodes consume it, so a located box or a fitted circle could not become a search region. Wire: rectangle / circle / pointList (any one) -> roi, then into the calipers, match.template, region.fromRoi or image.crop. ROI rectangles are axis-aligned; a rotated rectangle input is reduced to its axis-aligned bounds and the rotation is reported in diagnostics.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {

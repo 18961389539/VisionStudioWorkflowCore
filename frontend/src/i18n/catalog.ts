@@ -3699,6 +3699,97 @@ Object.assign(parameterDescriptions, {
   'image.channelMix.offset': '混合后、饱和前的偏移，用来把有符号结果搬回可见范围。'
 } as Record<string, string>);
 
+/** 分割·轮廓·特征补全批（7 个节点，node-gap-analysis.md 第十节）。
+ *  这批补的是数据形态（Roi 生产者、Region⇄掩膜、轮廓→区域），译名要贴住"形态"而不是算法。 */
+Object.assign(nodeNames, {
+  'roi.fromGeometry': 'ROI 由几何生成',
+  'roi.fromDetection': 'ROI 由检测生成',
+  'region.fromContour': '轮廓转区域',
+  'region.toMask': '区域转掩膜',
+  'contour.convexity': '轮廓凸性',
+  'feature.superpixel': '超像素分割',
+  'contour.matchXld': '轮廓形状匹配'
+} as Record<string, string>);
+
+Object.assign(descriptions, {
+  'roi.fromGeometry': '把矩形 / 圆 / 多边形变成运行时 ROI，接到卡尺、模板、提取区或 region.fromRoi。',
+  'roi.fromDetection': '把列表里的一个检测变成 ROI：逐目标测量的关键一环。',
+  'region.fromContour': '把轮廓填充成像素区域，补上"任意轮廓回不了区域"的断链。',
+  'region.toMask': '把区域渲染成 8 位掩膜图，供 region.fromMask / contour.fromMask / 推理使用。',
+  'contour.convexity': '轮廓凸性：面积比凸包、最深凹陷与缺陷个数，用于缺口/啃边判定。',
+  'feature.superpixel': 'SLIC 超像素分割，每个超像素一个区域对象，纹理件预分割用。',
+  'contour.matchXld': '轮廓形状匹配：半径签名 + 切线角，对平移/旋转/缩放不变。'
+} as Record<string, string>);
+
+Object.assign(nodeParameterLabels, {
+  'roi.fromGeometry': {
+    'Shape': '形状', 'X': '左上角 X', 'Y': '左上角 Y', 'Width': '宽度', 'Height': '高度',
+    'Rectangle Anchor': '矩形锚点', 'Center X': '中心 X', 'Center Y': '中心 Y',
+    'Radius': '半径', 'Polygon Points JSON': '多边形点 JSON', 'Expand (px)': '外扩（px）'
+  },
+  'roi.fromDetection': { 'Shape': '形状', 'Expand (px)': '外扩（px）', 'Zero-based Index': '检测序号（0 起）' },
+  'region.fromContour': {
+    'Zero-based Index': '轮廓序号（0 起）', 'Fill All Contours': '填充全部轮廓',
+    'Expand (px)': '外扩（px）', 'Invert': '取反'
+  },
+  'region.toMask': { 'Foreground Value': '前景值', 'Background Value': '背景值' },
+  'contour.convexity': {
+    'Zero-based Index': '轮廓序号（0 起）', 'Closed Contour': '闭合轮廓',
+    'Minimum Defect Depth': '最小缺陷深度', 'Max Defect Depth (0=off)': '最大缺陷深度（0=关）'
+  },
+  'feature.superpixel': {
+    'Region Size': '超像素尺寸', 'Compactness': '紧凑度', 'Iterations': '迭代次数', 'Enforce Connectivity': '强制连通'
+  },
+  'contour.matchXld': {
+    'Zero-based Index': '轮廓序号（0 起）', 'Template Contour Index': '模板轮廓序号',
+    'Signature Samples': '签名采样数', 'Minimum Score': '最低分数', 'Allow Rotation': '允许旋转'
+  }
+} as Record<string, Record<string, string>>);
+
+Object.assign(nodeOptionLabels, {
+  'roi.fromGeometry': {
+    'Rectangle': '矩形', 'Circle': '圆形', 'Polygon': '多边形',
+    'Top-left (X/Y is the corner)': '左上角（X/Y 为角点）',
+    'Center (X/Y is the middle)': '中心（X/Y 为居中点）'
+  },
+  'roi.fromDetection': { 'Rectangle (bounding box)': '矩形（外接框）', 'Circle (fitted circle)': '圆形（拟合圆）' }
+} as Record<string, Record<string, string>>);
+
+Object.assign(parameterDescriptions, {
+  'roi.fromGeometry.shape': '要构造哪种 ROI。接上同形状的端口会覆盖下面的数值兜底，所以定位得到的矩形/拟合圆可以直接驱动。',
+  'roi.fromGeometry.x': '兜底矩形的左边界（图像像素）。',
+  'roi.fromGeometry.y': '兜底矩形的上边界。',
+  'roi.fromGeometry.width': '矩形宽度，必须为正。',
+  'roi.fromGeometry.height': '矩形高度，必须为正。',
+  'roi.fromGeometry.rectangleAnchor': '矩形的 X/Y 指向哪里。目录本身不一致：匹配/ArUco 的框输出左上角，旋转矩形输出中心。按你接线的那一头选。',
+  'roi.fromGeometry.centerX': '兜底圆的圆心 X。',
+  'roi.fromGeometry.centerY': '兜底圆的圆心 Y。',
+  'roi.fromGeometry.radius': '圆半径，必须为正。',
+  'roi.fromGeometry.pointsJson': '未接 pointList 时的兜底 [x,y] 序列，3~20000 个点，坐标需有限且在 ±1e8 内。',
+  'roi.fromGeometry.expand': '整体外扩（负值收缩）：给后续卡尺搜索留余量，或收紧定位框。',
+  'roi.fromDetection.index': '用列表里的第几个检测（0 起），越界返回 found=false。',
+  'roi.fromDetection.shape': '矩形用外接框；圆形用拟合圆，没有半径时退化为长边的一半。',
+  'roi.fromDetection.expand': '整体外扩（负值收缩），给后续搜索留余量。',
+  'region.fromContour.index': '要光栅化哪条轮廓（0 起）。',
+  'region.fromContour.allContours': '把列表里所有轮廓填进同一个区域，用于被断开的同一条边。',
+  'region.fromContour.expand': '按椭圆核膨胀，补偿轮廓采样与亚像素缝隙。',
+  'region.fromContour.invert': '填充多边形外部，用于给 region.boolean 造背景区域。',
+  'region.toMask.foreground': '区域内写入的灰度值。255 是 region.fromMask/contour.fromMask 期望的值；1 可当权重图。',
+  'region.toMask.background': '区域外写入的灰度值。',
+  'contour.convexity.index': '要度量的轮廓序号（0 起）。',
+  'contour.convexity.closed': '按闭合轮廓处理。开放折线没有内部，凸性无意义，节点会返回 found=false。',
+  'contour.convexity.minDefectDepth': '浅于该值的凹陷不计入缺陷。低于约 1 像素就是在数采样噪声。',
+  'contour.convexity.maxDefectDepth': '可选门限：withinTolerance 判断最深凹陷是否超限。0 关闭。',
+  'feature.superpixel.regionSize': '超像素边长目标值，取纹理单元的几倍：太小把每颗纹理切碎，太大把缺陷并进背景。',
+  'feature.superpixel.ruler': '颜色相似度与空间紧凑度的权衡。值大偏方块，值小跟随颜色边缘（纹理分割通常要后者）。',
+  'feature.superpixel.iterations': 'SLIC 精化轮数，5 是 OpenCV 默认；再大收益很小而耗时线性增长。',
+  'feature.superpixel.enforceConnectivity': '合并精化后碎裂的小标签，保证每个输出的区域都是真连通域。',
+  'contour.matchXld.templateIndex': '模板列表里哪条轮廓是模型（0 起）。',
+  'contour.matchXld.samples': '每条轮廓的签名采样点数。越大越能分辨细节，耗时线性增长；几十个顶点的多边形 256 足够。',
+  'contour.matchXld.minScore': 'found 的分数线。分数是"1 − 归一化半径签名差的 RMS"，0.9 表示形状差异约为平均半径的 10%。',
+  'contour.matchXld.allowRotation': '搜索签名的所有循环移位。零件朝向已知时关掉，匹配更严格也更快。'
+} as Record<string, string>);
+
 export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): NodeCatalogItem[] {
   if (lang === 'en') return items;
   return items.map((item) => ({

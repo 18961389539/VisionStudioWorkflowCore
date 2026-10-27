@@ -21,6 +21,8 @@ public static class VisionExecutionPolicy
             type.Equals("contour.fromPoints", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("contour.toPoints", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("region.", StringComparison.OrdinalIgnoreCase) ||
+            type is "contour.convexity" or "contour.matchXld" ||
+            type.StartsWith("roi.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.reduceDomain", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("defect.", StringComparison.OrdinalIgnoreCase) ||
             type is "image.flatFieldCorrect" or "image.dynamicThreshold" or "image.difference" ||

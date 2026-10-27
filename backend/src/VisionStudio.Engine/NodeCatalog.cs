@@ -1608,6 +1608,8 @@ public static class BuiltInNodeCatalog
         .. GeometryToleranceCatalog.Items,
         .. MeasurementGapCatalog.Items,
         .. PreprocessGapCatalog.Items,
+        .. RegionGapCatalog.Items,
+        .. FeatureGapCatalog.Items,
         .. FeatureRegionCatalog.Items,
         new(
             "flow.join",
