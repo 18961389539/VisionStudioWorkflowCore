@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "c6b0df809327dcb20bb81d34cf025779d1b6a0945808c314badb976ccec2f213",
+  "hash": "3c1d2eeabc6022719caf408cade9fa51fce2f15639dc7dd56ae38cd2f97a650c",
   "items": [
     {
       "type": "image.acquire",
@@ -8301,6 +8301,605 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "defect.geometry",
+      "displayName": "Defect Geometry",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "geometryJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maxLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxWidth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "dominantAngleDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "elongatedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "totalArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "maxDefects",
+          "label": "Max Defects",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 1,
+          "max": 10000,
+          "step": 1,
+          "description": "Geometry is reported for the first maxDefects entries; the summary scalars still cover all of them."
+        },
+        {
+          "name": "elongationThreshold",
+          "label": "Elongated Above",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 1000,
+          "step": 0.1,
+          "description": "Defects whose length/width ratio exceeds this are counted as elongated (scratches, cracks, burrs). 3 separates a scratch from a smear in most cells."
+        },
+        {
+          "name": "angleMode",
+          "label": "Dominant Angle",
+          "type": "select",
+          "defaultValue": "length-weighted",
+          "options": [
+            {
+              "label": "Length-weighted (ignores specks)",
+              "value": "length-weighted"
+            },
+            {
+              "label": "Simple mean of elongated defects",
+              "value": "mean"
+            }
+          ],
+          "description": "length-weighted folds angles into 0..180 deg and weights by length, so a 200 px scratch decides the direction instead of 50 dirt specks."
+        },
+        {
+          "name": "contourOffset",
+          "label": "Contour Index Offset",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "description": "Index of the first contour in the contours port that corresponds to defect 0. Use it when the contour list also contains holes or the part outline."
+        }
+      ],
+      "description": "Measure defects instead of only counting them: length, width, orientation, elongation and fill ratio per defect, plus the summary a quality report needs (largest length/width, dominant direction, elongated count). Connect contours to get exact minimum-area-rectangle geometry; without contours the node falls back to the axis-aligned bounding box and says so in diagnostics, because a 45-degree scratch measured on its bounding box looks twice as wide as it is. The dominant angle is folded to 0..180 deg: a scratch at 10 and at 190 deg is the same scratch. Empty detection list returns found=false with zeroed summaries rather than an error.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.heatmap",
+      "displayName": "Defect Heatmap",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "countsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "hotspotX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "hotspotY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "hotspotCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "concentration",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "occupiedCells",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "gridCols",
+          "label": "Grid Columns",
+          "type": "number",
+          "defaultValue": 16,
+          "min": 2,
+          "max": 256,
+          "step": 1,
+          "description": "Horizontal cells. 16x12 is a good first look for a 4:3 sensor; finer grids turn sparse defects into visual noise."
+        },
+        {
+          "name": "gridRows",
+          "label": "Grid Rows",
+          "type": "number",
+          "defaultValue": 12,
+          "min": 2,
+          "max": 256,
+          "step": 1,
+          "description": "Vertical cells."
+        },
+        {
+          "name": "canvasWidth",
+          "label": "Canvas Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas width that the grid spans. 0 uses the bounding box of all defects, which hides absolute position - set it explicitly when comparing across parts."
+        },
+        {
+          "name": "canvasHeight",
+          "label": "Canvas Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas height that the grid spans. 0 uses the bounding box of all defects."
+        },
+        {
+          "name": "cellPixels",
+          "label": "Cell Size (px)",
+          "type": "number",
+          "defaultValue": 24,
+          "min": 4,
+          "max": 512,
+          "step": 1,
+          "description": "Rendered size of one cell in the output image. Only affects the picture, not the statistics."
+        },
+        {
+          "name": "colormap",
+          "label": "Colormap",
+          "type": "select",
+          "defaultValue": "heat",
+          "options": [
+            {
+              "label": "Blue to red heat",
+              "value": "heat"
+            },
+            {
+              "label": "Grayscale",
+              "value": "gray"
+            }
+          ],
+          "description": "How cell counts are coloured. Heat is easier to read in a report; gray is easier to threshold."
+        }
+      ],
+      "description": "Spatial distribution of defects on one part: counts per grid cell, rendered as a heatmap plus a hot-spot coordinate and a concentration index (share of defects in the top three cells). The question it answers is 'are defects clustered in one region' - a run of parts failing along the same edge points at tooling or lighting, not at the process. Concentration near 1 means clustered; near 0 means uniformly spread. The grid spans canvasWidth/canvasHeight when given, so the same node parameters stay comparable across parts; leaving them 0 makes the grid follow the defects themselves.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.dataset",
+      "displayName": "Defect Sample Export",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "directory",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "savedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "skippedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "samplesJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "dataset",
+          "label": "Dataset Name",
+          "type": "text",
+          "defaultValue": "defect-samples",
+          "description": "Used as the file name prefix and as the dataset tag in samplesJson. Keep it stable per defect class so the exported folder can be handed to labelling as-is."
+        },
+        {
+          "name": "directory",
+          "label": "Output Directory",
+          "type": "text",
+          "defaultValue": "artifacts/defect-samples",
+          "description": "Relative to the working directory, which is what makes this node safe: absolute paths and '..' are rejected, so a workflow cannot be used to write outside the project."
+        },
+        {
+          "name": "maxSamples",
+          "label": "Max Samples",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 1,
+          "max": 10000,
+          "step": 1,
+          "description": "Upper bound on exported crops per run. 50 keeps a full shift's worth of NG parts reviewable without filling the disk."
+        },
+        {
+          "name": "cropMarginPx",
+          "label": "Crop Margin (px)",
+          "type": "number",
+          "defaultValue": 4,
+          "min": 0,
+          "max": 512,
+          "step": 1,
+          "description": "Padding around the defect box. Some context is what makes a crop useful to a human labeller or a classifier; a tight crop of a 6 px speck is useless."
+        },
+        {
+          "name": "format",
+          "label": "Format",
+          "type": "select",
+          "defaultValue": "png",
+          "options": [
+            {
+              "label": "PNG (lossless, recommended)",
+              "value": "png"
+            },
+            {
+              "label": "JPEG (smaller, lossy)",
+              "value": "jpg"
+            }
+          ],
+          "description": "PNG keeps the exact pixel values that triggered the decision. JPEG is smaller but can erase a low-contrast defect, which defeats the purpose of the sample."
+        },
+        {
+          "name": "jpegQuality",
+          "label": "JPEG Quality",
+          "type": "number",
+          "defaultValue": 92,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "description": "Only used when format=jpg."
+        },
+        {
+          "name": "conflictPolicy",
+          "label": "On Existing File",
+          "type": "select",
+          "defaultValue": "suffix",
+          "options": [
+            {
+              "label": "Append a counter (never overwrite)",
+              "value": "suffix"
+            },
+            {
+              "label": "Overwrite",
+              "value": "overwrite"
+            },
+            {
+              "label": "Skip",
+              "value": "skip"
+            }
+          ],
+          "description": "suffix is the default: a re-run must not destroy the samples collected earlier in the shift."
+        }
+      ],
+      "description": "Export defect crops as image files plus a machine-readable index, which is the missing return path between production and training. inference.* can only consume models; without this node every field sample has to be dragged out by hand, and that is where deep-learning projects stall in practice. Writes one file per defect into a work-directory-relative folder and emits samplesJson with the path, class, area and position of each crop, ready to be fed to output.database or reviewed in the artefacts folder. Absolute paths and '..' are rejected by design. A missing image port, an empty detection list or an unusable directory returns found=false with the reason, and files already on disk are never silently destroyed under the default conflict policy.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.trend",
+      "displayName": "Defect Trend (SPC)",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "series",
+          "dataType": "NumberList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mean",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "sigma",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "ucl",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "lcl",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "last",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "movingAverage",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "slope",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "direction",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "outOfControl",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "window",
+          "label": "Moving Window",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 2,
+          "max": 1000,
+          "step": 1,
+          "description": "Samples in the moving average. Roughly one shift's worth of parts: long enough to average out part-to-part noise, short enough to see a drift starting."
+        },
+        {
+          "name": "sigmaK",
+          "label": "Control Limit Sigma",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 6,
+          "step": 0.1,
+          "description": "Control limits sit at mean +/- K*sigma of the whole series. 3 is the SPC convention; lower it to 2 only when the consequence of a false alarm is cheap."
+        },
+        {
+          "name": "minSamples",
+          "label": "Min Samples",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 2,
+          "max": 100000,
+          "step": 1,
+          "description": "Below this the sigma estimate is meaningless and the node returns found=false instead of a confident-looking limit."
+        },
+        {
+          "name": "baselineSamples",
+          "label": "Baseline Samples",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 100000,
+          "step": 1,
+          "description": "Estimate mean/sigma from the FIRST N samples only, i.e. a known-good period. 0 uses the whole series - which lets the very spike you want to catch inflate the limits and hide itself. Set it to the number of stable parts before the suspected drift."
+        }
+      ],
+      "description": "Run-chart statistics for a defect count series (one number per part, oldest first): mean, sigma, mean +/- K*sigma control limits, the moving average of the last window samples, the least-squares slope and a direction verdict. outOfControl fires when the latest sample leaves the limits - that is the signal to stop the line and look at the process, not at the part. A positive slope with a stable mean is the signature of a slow drift (tool wear, lamp ageing); a single spike with a flat slope is usually a handling event. This node is stateless: feed it a NumberList accumulated upstream (value.numberList / output.database readback), it does not remember previous runs.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "image.dynamicThreshold",
       "displayName": "Dynamic Defect Threshold",
       "category": "Defect",
@@ -8479,6 +9078,341 @@
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.edgeDefect",
+      "displayName": "Edge Defect (chip / burr)",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "samples",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "nominalLine",
+          "dataType": "Line2D",
+          "required": false
+        },
+        {
+          "name": "nominalCircle",
+          "dataType": "Circle",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maxDepth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "totalLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "segmentsJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "maxDeviation",
+          "label": "Max Deviation (px)",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0.01,
+          "max": 10000,
+          "step": 0.01,
+          "description": "Deviation from the nominal edge that counts as a defect. Set it just above the edge noise, not at the drawing tolerance: this node finds chips and burrs, not dimensional error."
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "both",
+          "options": [
+            {
+              "label": "Both sides (chips and burrs)",
+              "value": "both"
+            },
+            {
+              "label": "Material outside nominal (burr)",
+              "value": "excess"
+            },
+            {
+              "label": "Material missing (chip)",
+              "value": "short"
+            }
+          ],
+          "description": "Which side of the nominal counts. 'both' is the default because a chipped edge usually has a raised burr next to it."
+        },
+        {
+          "name": "minSegmentLength",
+          "label": "Min Segment Length (px)",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0.5,
+          "max": 10000,
+          "step": 0.5,
+          "description": "Adjacent out-of-tolerance samples are merged into one defect; segments shorter than this along the contour are dropped as noise."
+        },
+        {
+          "name": "mergeGapPx",
+          "label": "Merge Gap (px)",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 1000,
+          "step": 0.5,
+          "description": "Two over-tolerance segments separated by less than this along the contour belong to the same chip. A single chip produces two lobes when the burr in the middle dips back inside tolerance."
+        },
+        {
+          "name": "canvasWidth",
+          "label": "Canvas Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas width for the produced detection bounding boxes. 0 takes it from the sample extents."
+        },
+        {
+          "name": "canvasHeight",
+          "label": "Canvas Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas height for the produced detection bounding boxes."
+        }
+      ],
+      "description": "Turn an edge deviation profile into discrete edge defects. Wire samples (contour.toPoints / feature.ridge output) plus exactly one nominal - a line or a circle - and the node measures the signed normal deviation, marks the over-tolerance samples, merges them along the contour (including the two lobes of one chip separated by a burr), and emits one DetectionList entry per defect with its depth, arc length and bounding box. This is the missing counterpart of tolerance.profile: that node answers 'is the edge within tolerance', this one answers 'where are the chips and how big are they'. Requires samples ordered along the contour; unordered point clouds produce meaningless segments, which is why the deviation is measured along the polyline rather than by nearest-point search.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "defect.filter",
+      "displayName": "False-Positive Filter",
+      "category": "Defect",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "region",
+          "dataType": "Region",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "detections",
+          "dataType": "DetectionList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "removedCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "removedByJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "minArea",
+          "label": "Min Area (px)",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 0,
+          "max": 100000000,
+          "step": 0.5,
+          "description": "Drop defects smaller than this. Also the cheapest noise gate, but it is the one that hurts: a real scratch can be 4 px². Prefer the contrast gate first."
+        },
+        {
+          "name": "maxArea",
+          "label": "Max Area (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 1,
+          "description": "Drop defects larger than this. 0 disables. Use it to reject whole-region blobs caused by an exposure change, which are never real defects."
+        },
+        {
+          "name": "maxAspectRatio",
+          "label": "Max Aspect Ratio",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1,
+          "description": "Reject shapes whose long/short side ratio exceeds this. 0 disables. Line-shaped false positives (edges of the part, tooling shadows) usually sit above 8."
+        },
+        {
+          "name": "minCircularity",
+          "label": "Min Circularity",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "description": "Reject shapes below this 4*pi*area/perimeter^2 value. 0 disables. Use it to keep only compact dirt specks and drop thin edge artifacts."
+        },
+        {
+          "name": "minContrast",
+          "label": "Min Contrast",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "description": "Reject defects whose intensity range inside the bounding box is below this. Requires the image port; 0 disables. This is the single most effective false-positive gate, because tooling shadows are real edges with zero local range."
+        },
+        {
+          "name": "edgeMarginPx",
+          "label": "Edge Margin (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 4096,
+          "step": 1,
+          "description": "Reject defects whose centre lies within this distance of the canvas border. 0 disables. Edge-of-image artifacts (vignetting, interpolation, part clamping) dominate the false-positive count in most cells."
+        },
+        {
+          "name": "canvasWidth",
+          "label": "Canvas Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas width used for the edge margin. 0 takes it from the image port, or from the detection bounding box when no image is connected."
+        },
+        {
+          "name": "canvasHeight",
+          "label": "Canvas Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 32768,
+          "step": 1,
+          "description": "Canvas height used for the edge margin. 0 takes it from the image port."
+        },
+        {
+          "name": "maxCount",
+          "label": "Max Defects Kept",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 10000,
+          "step": 1,
+          "description": "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image."
+        }
+      ],
+      "description": "Suppress false positives with an explicit, attributable rule set instead of one global threshold. Each rejected defect is counted per reason (area / aspect / circularity / contrast / edge margin / count), so a sudden jump in one bucket tells you which knob to move - the usual alternative is lowering the threshold and silently accepting missed defects. Contrast and edge margin need the image or canvas ports; without them those two gates are skipped and reported as such rather than silently passing everything. All gates are AND-combined: a defect is kept only when it survives every enabled rule.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -11611,6 +12545,165 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "feature.corner",
+      "displayName": "Corner Detection",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "points",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "maxResponse",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanResponse",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "method",
+          "label": "Detector",
+          "type": "select",
+          "defaultValue": "shi-tomasi",
+          "options": [
+            {
+              "label": "Shi-Tomasi (good features to track)",
+              "value": "shi-tomasi"
+            },
+            {
+              "label": "Harris",
+              "value": "harris"
+            }
+          ],
+          "description": "Shi-Tomasi is the industrial default: stable ranking, one point per corner. Harris also responds to edges and needs a higher quality level to stay clean."
+        },
+        {
+          "name": "maxCorners",
+          "label": "Max Corners",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 1,
+          "max": 5000,
+          "step": 1,
+          "description": "Upper bound on returned points. Shi-Tomasi and Harris stop at the strongest maxCorners; FAST keeps everything above the threshold and is then distance-suppressed."
+        },
+        {
+          "name": "qualityLevel",
+          "label": "Quality Level",
+          "type": "number",
+          "defaultValue": 0.01,
+          "min": 1E-06,
+          "max": 1,
+          "step": 0.005,
+          "description": "Fraction of the strongest response kept (Shi-Tomasi/Harris). Raise it when the image is full of texture."
+        },
+        {
+          "name": "minDistance",
+          "label": "Min Distance (px)",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 0.5,
+          "max": 5000,
+          "step": 0.5,
+          "description": "Non-maximum suppression radius: no two corners closer than this. Should be about the smallest feature spacing on the part, not the pixel noise scale."
+        },
+        {
+          "name": "blockSize",
+          "label": "Block Size",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 3,
+          "max": 31,
+          "step": 2,
+          "description": "Averaging window for the structure tensor (odd, 3..31). Larger stabilises gradients on noisy images and blurs nearby corners together."
+        },
+        {
+          "name": "harrisK",
+          "label": "Harris K",
+          "type": "number",
+          "defaultValue": 0.04,
+          "min": 0.001,
+          "max": 0.25,
+          "step": 0.001,
+          "description": "Harris sensitivity constant; only used when method=harris."
+        },
+        {
+          "name": "subpixel",
+          "label": "Subpixel Refinement",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Refine every corner to sub-pixel accuracy with a 5x5 cornerSubPix window. Metrology needs this (0.05..0.2 px repeatability); leave it off for preview or coarse location work."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Corner detection with a ranked PointList output, so corners can feed measure.fitLine / measure.fitCircleFixedRadius / measure.bestFitAlign directly instead of going through an 8-operator dropdown. Shi-Tomasi and Harris use OpenCV good-features-to-track with an explicit non-maximum suppression radius; optional cornerSubPix refinement lifts the points off the pixel grid when sub-pixel centres matter. Responses are reported from the minimum-eigenvalue map so the ranking is comparable between the two detectors. Insufficient contrast, an empty ROI or a degenerate block size returns found=false with the reason in diagnostics.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "feature.edge",
       "displayName": "Edge / Canny",
       "category": "Feature",
@@ -11727,6 +12820,375 @@
       "capabilities": {
         "supportsRoi": true,
         "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "feature.ellipse",
+      "displayName": "Ellipse Detection",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "ellipses",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "ellipse",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "center",
+          "dataType": "Point2D",
+          "required": false
+        },
+        {
+          "name": "majorAxis",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "minorAxis",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "angleDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "coverageDeg",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "cannyLow",
+          "label": "Canny Low",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "description": "Lower hysteresis threshold used to build the edge map that the contours are traced from."
+        },
+        {
+          "name": "cannyHigh",
+          "label": "Canny High",
+          "type": "number",
+          "defaultValue": 150,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "description": "Upper hysteresis threshold; must be >= Canny Low."
+        },
+        {
+          "name": "minArea",
+          "label": "Min Area (px)",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 1,
+          "max": 100000000,
+          "step": 1,
+          "description": "Reject ellipses whose area is smaller than this; the cheapest way to drop edge noise."
+        },
+        {
+          "name": "maxArea",
+          "label": "Max Area (px)",
+          "type": "number",
+          "defaultValue": 10000000,
+          "min": 1,
+          "max": 1000000000,
+          "step": 1,
+          "description": "Reject ellipses larger than this. Set to the image area to disable."
+        },
+        {
+          "name": "minAspectRatio",
+          "label": "Min Aspect Ratio",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 100,
+          "step": 0.05,
+          "description": "Minor/major axis ratio floor. 1 only accepts near-circles; lower it to accept flattened ellipses."
+        },
+        {
+          "name": "maxAspectRatio",
+          "label": "Max Aspect Ratio",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1,
+          "max": 100,
+          "step": 0.05,
+          "description": "Minor/major axis ratio ceiling. Keep below 1 unless the inspection explicitly allows round features, because a circle also fits an ellipse."
+        },
+        {
+          "name": "minCoverageDeg",
+          "label": "Min Coverage (deg)",
+          "type": "number",
+          "defaultValue": 200,
+          "min": 10,
+          "max": 360,
+          "step": 5,
+          "description": "Angular coverage of the supporting contour. Partially occluded holes still pass at 200..300; anything below this is usually a straight edge faking an ellipse."
+        },
+        {
+          "name": "maxRmsError",
+          "label": "Max RMS Error (px)",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1,
+          "description": "Reject fits whose radial RMS residual exceeds this. 0 disables the gate. Typical clean edges land below 0.5 px."
+        },
+        {
+          "name": "maxEllipses",
+          "label": "Max Ellipses",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "description": "Maximum number of returned ellipses, strongest support first."
+        },
+        {
+          "name": "minPoints",
+          "label": "Min Support Points",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 5,
+          "max": 100000,
+          "step": 1,
+          "description": "Minimum contour points backing one ellipse; OpenCV needs 5, but 20+ is what actually separates a real ellipse from a noisy arc."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Detect ellipses straight from the image: Canny edge map, contour tracing, ellipse fit per contour, then an explicit consistency filter (area, axis ratio, angular coverage, radial RMS). This is the one-step path for foreshortened holes, O-rings and perspective-distorted circles that feature.circle (circles only) and measure.fitEllipse (needs a contour) cannot serve alone. Coverage uses the parametric angle in the ellipse frame, so an occluded ellipse still reports how much of it was actually supported. Largest-support ellipse is echoed on the scalar ports for direct wiring; the full list is in ellipses JSON. No ellipse converges, no contour passes the filters, or the ROI is empty returns found=false.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "feature.gaborBank",
+      "displayName": "Gabor Texture Energy",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "energy",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "dominantDirectionDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "anisotropy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanEnergy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxEnergy",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "wavelength",
+          "label": "Wavelength (px)",
+          "type": "number",
+          "defaultValue": 8,
+          "min": 1.5,
+          "max": 500,
+          "step": 0.5,
+          "description": "Period of the texture the bank should respond to, in pixels. Match it to one weave/grain period, not to the defect size."
+        },
+        {
+          "name": "orientations",
+          "label": "Orientations",
+          "type": "number",
+          "defaultValue": 6,
+          "min": 1,
+          "max": 24,
+          "step": 1,
+          "description": "Number of directions sampled over 180 deg. 6 (30 deg steps) is enough to tell weave from scratch; raise it when the defect differs from the background by a few degrees only."
+        },
+        {
+          "name": "sigmaRatio",
+          "label": "Sigma / Wavelength",
+          "type": "number",
+          "defaultValue": 0.56,
+          "min": 0.2,
+          "max": 1.5,
+          "step": 0.02,
+          "description": "Gaussian envelope relative to wavelength. 0.56 is the classic value; smaller means a wider frequency band and more sensitivity to scale drift."
+        },
+        {
+          "name": "gamma",
+          "label": "Spatial Aspect Ratio",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0.1,
+          "max": 1,
+          "step": 0.05,
+          "description": "Ellipticity of the Gabor kernel. 0.5 gives elongated kernels that discriminate direction strongly."
+        },
+        {
+          "name": "energyMode",
+          "label": "Energy Combination",
+          "type": "select",
+          "defaultValue": "sum",
+          "options": [
+            {
+              "label": "Sum over orientations",
+              "value": "sum"
+            },
+            {
+              "label": "Maximum over orientations",
+              "value": "max"
+            }
+          ],
+          "description": "sum answers 'how much texture is here', max answers 'is there a strong oriented structure here'. For defect detection sum is the usual pick; for dominant-direction work choose max."
+        },
+        {
+          "name": "directionMap",
+          "label": "Emit Direction Map",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Also emit an 8-bit image where each pixel holds the orientation (0..180 deg mapped to 0..255) of its strongest response. Doubles the analysis buffer."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Gabor filter bank texture energy: one filter per orientation at a fixed wavelength, squared and combined. Catches what a single band-pass cannot - woven cloth, brushed metal, sand-blasted or knurled surfaces - because the energy is directional while the defect usually is not. Outputs a normalised energy image, the per-orientation energy array, the dominant direction and an anisotropy ratio (max/min over orientations). Anisotropy near 1 means isotropic texture; a value well above 1 flags a strongly oriented background that will fight any rotation-invariant threshold. Wavelength must be within 1.5..500 px and no larger than half the image; otherwise the kernel degenerates and the node fails instead of returning an all-black image.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -11917,6 +13379,192 @@
         }
       ],
       "description": "Multi-line finder: edges → Hough/LSD → collinear merge → JLVision point-set line fit. Wire: image → primary line/length/angle plus lines JSON (RMS/inliers). Key params: houghThreshold, minLength, maxGap, Canny thresholds, maxLines, collinear tolerances. found=false when nothing qualifies (does not throw).",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": true,
+        "emitsOverlay": true,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "feature.ridge",
+      "displayName": "Ridge / Centre Line",
+      "category": "Feature",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "contours",
+          "dataType": "Contour",
+          "required": true
+        },
+        {
+          "name": "points",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "totalLength",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanWidth",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "sigma",
+          "label": "Sigma",
+          "type": "number",
+          "defaultValue": 1.5,
+          "min": 0.1,
+          "max": 100,
+          "step": 0.1,
+          "description": "Gaussian pre-smoothing, in pixels. Should be about half the ridge width; larger sigma merges nearby ridges into one and loses thin scratches."
+        },
+        {
+          "name": "low",
+          "label": "Low Threshold",
+          "type": "number",
+          "defaultValue": 5,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.5,
+          "description": "Lower hysteresis threshold on the ridge response. Lower it for faint scratches and expect more false segments."
+        },
+        {
+          "name": "high",
+          "label": "High Threshold",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.5,
+          "description": "Upper hysteresis threshold; must be >= Low. Only segments anchored above High survive."
+        },
+        {
+          "name": "polarity",
+          "label": "Polarity",
+          "type": "select",
+          "defaultValue": "light",
+          "options": [
+            {
+              "label": "Light ridges on dark background",
+              "value": "light"
+            },
+            {
+              "label": "Dark ridges on light background",
+              "value": "dark"
+            },
+            {
+              "label": "Both",
+              "value": "both"
+            }
+          ],
+          "description": "Which side the ridge sits on. 'both' costs two extraction passes and doubles the candidates."
+        },
+        {
+          "name": "lineModel",
+          "label": "Line Model",
+          "type": "select",
+          "defaultValue": "bar-shaped",
+          "options": [
+            {
+              "label": "Bar-shaped",
+              "value": "bar-shaped"
+            },
+            {
+              "label": "Parabolic",
+              "value": "parabolic"
+            },
+            {
+              "label": "Gaussian",
+              "value": "gaussian"
+            }
+          ],
+          "description": "Profile model used to localise the centre line. bar-shaped suits machined grooves and printed lines; parabolic/gaussian suit soft edges such as welds and scratches."
+        },
+        {
+          "name": "extractWidth",
+          "label": "Extract Width",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Also return the local ridge width per point. Needed for thickness checks; turn it off when only the path matters, because width estimation adds work."
+        },
+        {
+          "name": "completeJunctions",
+          "label": "Complete Junctions",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Bridge ridges across crossings so a grid does not break into isolated stubs."
+        },
+        {
+          "name": "minLength",
+          "label": "Min Length (px)",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 1000000,
+          "step": 1,
+          "description": "Drop extracted segments shorter than this; short segments are almost always noise around a junction."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
+        }
+      ],
+      "description": "Subpixel ridge (centre line) extraction on JLVision linesGauss, exposed as a first-class node instead of an operator option. Purpose: thin bright or dark structures - scratches, welds, cables, printed traces, glue beads - where the interesting quantity is the path and the width, not a region. Emits contours (XLD with per-point width attributes), a flattened PointList for downstream fitting, totalLength and meanWidth over all segments. sigma must track the actual ridge width: too large and two parallel ridges merge, too small and the centre line jitters. Empty image, no response above the thresholds or no polarity match returns found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -20325,6 +21973,427 @@
       "declaresRoiImageBindings": true
     },
     {
+      "type": "match.homography",
+      "displayName": "Homography Registration",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "sourcePoints",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "targetPoints",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": false
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "warped",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "reprojRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scaleX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scaleY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rotationDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "skewDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "perspectiveX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "perspectiveY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "corners",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "method",
+          "label": "Estimator",
+          "type": "select",
+          "defaultValue": "ransac",
+          "options": [
+            {
+              "label": "RANSAC (robust, recommended)",
+              "value": "ransac"
+            },
+            {
+              "label": "Least squares (all points count)",
+              "value": "least-squares"
+            },
+            {
+              "label": "LMEDS (least median of squares)",
+              "value": "lmeds"
+            }
+          ],
+          "description": "RANSAC rejects outliers before solving; least-squares uses every point and is only safe on clean correspondences; LMEDS tolerates up to 50% gross outliers but has no guarantee on the threshold."
+        },
+        {
+          "name": "ransacThresholdPx",
+          "label": "RANSAC Threshold (px)",
+          "type": "number",
+          "defaultValue": 2,
+          "min": 0.1,
+          "max": 100,
+          "step": 0.1,
+          "description": "A correspondence counts as an inlier when its reprojection lands within this distance. Should be about twice the point localisation noise, not the feature size."
+        },
+        {
+          "name": "maxIterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "defaultValue": 2000,
+          "min": 50,
+          "max": 20000,
+          "step": 50,
+          "description": "RANSAC sampling budget. 2000 is plenty for a 4-point model with 50% inliers."
+        },
+        {
+          "name": "confidence",
+          "label": "Confidence",
+          "type": "number",
+          "defaultValue": 0.995,
+          "min": 0.5,
+          "max": 0.9999,
+          "step": 0.0005,
+          "description": "Target probability that RANSAC found the correct model; stops early once reached."
+        },
+        {
+          "name": "minInliers",
+          "label": "Min Inliers",
+          "type": "number",
+          "defaultValue": 4,
+          "min": 4,
+          "max": 100000,
+          "step": 1,
+          "description": "Reject the homography when fewer points survive. Four is the mathematical minimum and is almost never enough in practice; 8..12 is a sane floor."
+        },
+        {
+          "name": "warpImage",
+          "label": "Warp Image",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Also resample the input image through the homography. Needs the image port connected; costs one full-frame warp."
+        },
+        {
+          "name": "outputWidth",
+          "label": "Output Width",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "description": "Canvas width for the warped image. 0 uses the input image width."
+        },
+        {
+          "name": "outputHeight",
+          "label": "Output Height",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 16384,
+          "step": 1,
+          "description": "Canvas height for the warped image. 0 uses the input image height."
+        }
+      ],
+      "description": "Fit a 3x3 projective transform from point correspondences, then expose it as a Transform2D plus a local decomposition (scale, rotation, skew, perspective terms) evaluated at the point set centroid. Use it for tilted cameras, skewed fixtures and any part whose four corners do not form a parallelogram - cases a rigid registration cannot express. A homography maps a PLANE to a plane: it will happily fit a non-planar scene and produce a wrong-but-low-residual answer, so keep the correspondences on one surface. Accuracy is limited by the point localisation, not by the solver: RANSAC with a 2 px threshold assumes sub-pixel corners. Fewer than 4 pairs, degenerate (collinear) configurations or fewer inliers than minInliers returns found=false with the reason in diagnostics.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "match.pose3d",
+      "displayName": "PnP Pose",
+      "category": "Matching",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "imagePoints",
+          "dataType": "PointList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pose",
+          "dataType": "Transform3D",
+          "required": true
+        },
+        {
+          "name": "x",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "y",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "z",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rxDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "ryDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rzDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rvecJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "tvecJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "reprojectionRms",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "objectPointsJson",
+          "label": "Object Points (JSON)",
+          "type": "text",
+          "defaultValue": "[[0,0,0],[100,0,0],[100,60,0],[0,60,0]]",
+          "description": "World coordinates of the correspondences, in the same order as imagePoints: [[x,y,z],...]. Keep them on one plane unless the solver is given depth variation; a planar target with a non-planar solver is the most common source of a mirrored pose."
+        },
+        {
+          "name": "cameraMatrixJson",
+          "label": "Camera Matrix (JSON)",
+          "type": "text",
+          "defaultValue": "[1000,0,640,0,1000,360,0,0,1]",
+          "description": "3x3 intrinsics in row-major order: [fx,0,cx, 0,fy,cy, 0,0,1]. Take it from calibration.cameraIntrinsics; a guessed focal length gives a pose that is self-consistent but metrically wrong."
+        },
+        {
+          "name": "distortionJson",
+          "label": "Distortion (JSON)",
+          "type": "text",
+          "defaultValue": "[]",
+          "description": "OpenCV distortion coefficients [k1,k2,p1,p2,k3,...]. Empty means undistorted input. If the image was already corrected, leave this empty instead of applying it twice."
+        },
+        {
+          "name": "solver",
+          "label": "Solver",
+          "type": "select",
+          "defaultValue": "iterative",
+          "options": [
+            {
+              "label": "Iterative (Levenberg-Marquardt)",
+              "value": "iterative"
+            },
+            {
+              "label": "IPPE (planar, fast)",
+              "value": "ippe"
+            },
+            {
+              "label": "AP3P (minimal, 4 points)",
+              "value": "ap3p"
+            }
+          ],
+          "description": "IPPE exploits planarity and is the best choice for flat targets; iterative is the safe general default; AP3P is minimal but unstable on near-collinear points."
+        },
+        {
+          "name": "useExtrinsicGuess",
+          "label": "Use Extrinsic Guess",
+          "type": "boolean",
+          "defaultValue": false,
+          "description": "Seed the solver with rvec/tvec from the parameters below instead of a fresh guess. Only useful when tracking a target across frames; ignored by SQPnP."
+        },
+        {
+          "name": "guessRvecJson",
+          "label": "Guess rvec (JSON)",
+          "type": "text",
+          "defaultValue": "[0,0,0]",
+          "description": "Initial rotation vector for useExtrinsicGuess, in radians."
+        },
+        {
+          "name": "guessTvecJson",
+          "label": "Guess tvec (JSON)",
+          "type": "text",
+          "defaultValue": "[0,0,1000]",
+          "description": "Initial translation for useExtrinsicGuess, in the object unit."
+        },
+        {
+          "name": "unit",
+          "label": "Object Unit",
+          "type": "text",
+          "defaultValue": "mm",
+          "description": "Unit of objectPointsJson and of the reported x/y/z. Intrinsics are unit-agnostic, so the pose comes back in whatever unit the object points use."
+        },
+        {
+          "name": "objectFrame",
+          "label": "Object Frame",
+          "type": "text",
+          "defaultValue": "object",
+          "description": "Frame name stamped on the produced Transform3D source side."
+        },
+        {
+          "name": "cameraFrame",
+          "label": "Camera Frame",
+          "type": "text",
+          "defaultValue": "camera",
+          "description": "Frame name stamped on the produced Transform3D target side."
+        },
+        {
+          "name": "maxReprojectionRms",
+          "label": "Max Reprojection RMS (px)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000,
+          "step": 0.1,
+          "description": "Quality gate: fail when the reprojection RMS exceeds this. 0 disables it. A clean planar target usually lands below 0.5 px; 2 px usually means a wrong correspondence order."
+        }
+      ],
+      "description": "Solve PnP: image points plus their known 3D coordinates give the object-to-camera SE(3), reported as a 4x4 Transform3D plus translation and ZYX Euler angles. This is the missing link between 2D detection and robot picking for anything that is not an ArUco board. Correspondence order is what defines the pose - the points are matched by index, not by geometry - so a shuffled object list yields a plausible but wrong pose; the reprojection RMS gate is the cheapest guard against it. At least 4 pairs are required, and 3 near-collinear points make the solution ambiguous. Failure returns found=false with the reason rather than a zero pose, because a zero pose silently commands the robot to the origin.",
+      "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "image.register",
       "displayName": "Register Image",
       "category": "Matching",
@@ -22618,6 +24687,196 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.bestFitAlign",
+      "displayName": "Best-Fit Alignment",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "measured",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "reference",
+          "dataType": "PointList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "transform",
+          "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "alignedPoints",
+          "dataType": "PointList",
+          "required": true
+        },
+        {
+          "name": "rotationDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "deltaX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "deltaY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "scale",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "inlierCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "fitMode",
+          "label": "Fit Mode",
+          "type": "select",
+          "defaultValue": "rigid",
+          "options": [
+            {
+              "label": "Rigid (rotation + translation)",
+              "value": "rigid"
+            },
+            {
+              "label": "Similarity (adds uniform scale)",
+              "value": "similarity"
+            }
+          ],
+          "description": "rigid is the metrology default: the part cannot grow or shrink, so scale must stay 1. similarity also solves a uniform scale, useful for thermal drift and film/print inspection, but it hides true size errors."
+        },
+        {
+          "name": "trimFraction",
+          "label": "Trim Fraction",
+          "type": "number",
+          "defaultValue": 0.1,
+          "min": 0,
+          "max": 0.45,
+          "step": 0.01,
+          "description": "Share of worst correspondences dropped each iteration (trimmed ICP). 0.1 tolerates burrs and partial occlusion; 0 disables trimming and is only safe on complete, clean contours."
+        },
+        {
+          "name": "maxIterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "defaultValue": 40,
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "description": "ICP iteration budget. Convergence is usually reached in 5..15 iterations on industrial contours."
+        },
+        {
+          "name": "tolerancePx",
+          "label": "Convergence Tolerance (px)",
+          "type": "number",
+          "defaultValue": 0.0001,
+          "min": 1E-09,
+          "max": 10,
+          "step": 0.0001,
+          "description": "Stop when both the incremental rotation and the incremental translation fall below this value. Smaller than the measurement resolution is pointless."
+        },
+        {
+          "name": "maxPoints",
+          "label": "Point Budget",
+          "type": "number",
+          "defaultValue": 600,
+          "min": 60,
+          "max": 1500,
+          "step": 20,
+          "description": "Both contours are thinned to at most this many points before matching. Cost grows with the square of this number: 600 keeps a 40-iteration fit in the tens of milliseconds."
+        },
+        {
+          "name": "initialRotationDeg",
+          "label": "Initial Rotation (deg)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": -180,
+          "max": 180,
+          "step": 0.5,
+          "description": "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on."
+        },
+        {
+          "name": "autoInitialRotation",
+          "label": "Auto Initial Rotation",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Coarse-search a full turn in 30 deg steps before refining, and start the ICP from the best candidate. Costs one extra pass over a thinned point set and removes the most common failure: a valid part that aligns to the wrong pose because the caller did not know the angle."
+        },
+        {
+          "name": "closedReference",
+          "label": "Closed Reference",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "Treat the reference polyline as a closed loop (last point connects back to the first). Turn off for open profiles such as a machined edge that does not wrap around."
+        }
+      ],
+      "description": "Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. Failure modes are explicit: fewer than 3 points, degenerate (collinear) point sets and non-convergence all return found=false with the reason in diagnostics. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
+      "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -26647,6 +28906,130 @@
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": true,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "measure.fitCircleFixedRadius",
+      "displayName": "Fixed Radius Circle Fit",
+      "category": "Measurement",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "points",
+          "dataType": "PointList",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "circle",
+          "dataType": "Circle",
+          "required": true
+        },
+        {
+          "name": "centerX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "centerY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "radius",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "rmsError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxError",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "pointCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "radius",
+          "label": "Known Radius",
+          "type": "number",
+          "defaultValue": 50,
+          "min": 0.001,
+          "max": 10000000,
+          "step": 0.001,
+          "description": "The radius that must not change (pin, probe tip, standard ball, circlip groove). Unlike measure.fitCircle this value is never re-estimated, so a weak arc cannot drag the centre."
+        },
+        {
+          "name": "maxRmsError",
+          "label": "Max RMS Error",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 0.001,
+          "description": "Optional quality gate: fail when the RMS radial residual exceeds this value. 0 disables the gate. Set it to roughly the expected edge noise."
+        },
+        {
+          "name": "maxIterations",
+          "label": "Max Iterations",
+          "type": "number",
+          "defaultValue": 100,
+          "min": 1,
+          "max": 1000,
+          "step": 1,
+          "description": "Spath fixed-point iteration budget. Convergence is quadratic near the solution, so 100 is generous."
+        },
+        {
+          "name": "tolerancePx",
+          "label": "Convergence Tolerance (px)",
+          "type": "number",
+          "defaultValue": 1E-06,
+          "min": 1E-12,
+          "max": 1,
+          "step": 1E-07,
+          "description": "Stop when the centre moves less than this between iterations."
+        }
+      ],
+      "description": "Least-squares circle fit with a known, fixed radius: it solves for the centre only, so every input point is judged as 'too close' or 'too far' and the centre cannot drift to absorb a bad arc. This is the circle-fit counterpart of measure.mzCircle for hole/shaft limits: use it when the radius comes from the drawing or from a calibrated artefact. Points come from a PointList (contour.toPoints / feature outputs); fewer than 3 points or a degenerate arc returns found=false. Residuals are radial distances (measured minus known radius) in pixels; rmsError and maxError are reported in the same unit as the input.",
+      "pluginId": "builtin",
+      "actions": [],
+      "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
       "declaresRoiImageBindings": false
     },
     {
@@ -33782,6 +36165,108 @@
       "declaresRoiImageBindings": false
     },
     {
+      "type": "image.distanceTransform",
+      "displayName": "Distance Transform",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "maxDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "meanDistance",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "foregroundCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "distanceType",
+          "label": "Distance Metric",
+          "type": "select",
+          "defaultValue": "l2",
+          "options": [
+            {
+              "label": "Euclidean (L2)",
+              "value": "l2"
+            },
+            {
+              "label": "City block (L1)",
+              "value": "l1"
+            }
+          ],
+          "description": "Distance metric. L2 is the physical distance; L1 is cheaper and still adequate for skeleton/proximity ordering."
+        },
+        {
+          "name": "maskSize",
+          "label": "Mask Size",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 3,
+          "max": 7,
+          "step": 2,
+          "description": "Neighborhood used by the L2 approximation: 3 (exact for small distances) or 5/7 (smoother far field). Fixed at 3 for L1."
+        },
+        {
+          "name": "mode",
+          "label": "Measurement Side",
+          "type": "select",
+          "defaultValue": "foreground",
+          "options": [
+            {
+              "label": "Inside the mask (foreground to background)",
+              "value": "foreground"
+            },
+            {
+              "label": "Outside the mask (background to foreground)",
+              "value": "background"
+            }
+          ],
+          "description": "foreground measures each non-zero pixel's distance to the nearest zero pixel (wall thickness, skeleton pruning). background inverts the mask first and measures the free space (clearance, channel width)."
+        }
+      ],
+      "description": "Per-pixel distance to the nearest zero pixel, emitted as float32 in pixels. Requires an 8-bit single-channel mask where non-zero means foreground; color or 16-bit input must be thresholded first instead of being silently guessed. Border handling assumes pixels outside the image are background, so objects touching the frame get a distance that saturates at the frame edge — pad the mask when the true distance matters.",
+      "pluginId": "builtin",
+      "declaresActions": false,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
       "type": "image.fftFilter",
       "displayName": "Frequency Filter (FFT)",
       "category": "Preprocess",
@@ -34275,6 +36760,125 @@
       },
       "actions": [],
       "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.gradient",
+      "displayName": "Gradient Magnitude and Direction",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "direction",
+          "dataType": "Image",
+          "required": false
+        },
+        {
+          "name": "meanMagnitude",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "maxMagnitude",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "p99Magnitude",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "directionUnit",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "operator",
+          "label": "Gradient Operator",
+          "type": "select",
+          "defaultValue": "sobel",
+          "options": [
+            {
+              "label": "Sobel",
+              "value": "sobel"
+            },
+            {
+              "label": "Scharr (3x3, better rotation symmetry)",
+              "value": "scharr"
+            }
+          ],
+          "description": "First-order derivative operator. Scharr is fixed at 3x3 and trades a little noise sensitivity for rotation symmetry."
+        },
+        {
+          "name": "kernelSize",
+          "label": "Kernel Size",
+          "type": "number",
+          "defaultValue": 3,
+          "min": 1,
+          "max": 7,
+          "step": 2,
+          "description": "Odd Sobel kernel size in 1..7 (3/5/7 are the only sensible values). Ignored when operator=scharr."
+        },
+        {
+          "name": "scaleMode",
+          "label": "Magnitude Scaling",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None (raw, saturated to source depth)",
+              "value": "none"
+            },
+            {
+              "label": "Stretch to 0..255 by P99",
+              "value": "stretch"
+            }
+          ],
+          "description": "none keeps raw derivative magnitudes (recommended for measurement and Otsu work). stretch divides by the 99th percentile and clamps to 0..255 so weak gradients become visible in the preview; the numeric metrics always report raw values."
+        },
+        {
+          "name": "emitDirection",
+          "label": "Emit Direction Image",
+          "type": "boolean",
+          "defaultValue": true,
+          "description": "When true, also emits a float32 direction image in degrees 0..360 measured by atan2(dy,dx), i.e. the direction of increasing gray. Texture analysis and anisotropic filtering need it; pure edge-strength work can turn it off to save a buffer."
+        }
+      ],
+      "description": "First-order gradient magnitude plus direction, as a single auditable step instead of wiring Sobel X, Sobel Y and a magnitude op by hand. Accepts 8/16-bit or float32, 1..4 channels (color is reduced to gray with the standard luminance weights). Magnitude keeps the source depth with saturation — negative lobes never wrap back into bright edges. Direction is float32 in degrees with 0 pointing along +x; undirected textures should fold it to 0..180.",
+      "pluginId": "builtin",
+      "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -37818,6 +40422,102 @@
       },
       "actions": [],
       "declaresActions": true,
+      "declaresFrames": false,
+      "declaresTransformFrames": false,
+      "declaresOutputFrames": false,
+      "declaresRoiImageBindings": false
+    },
+    {
+      "type": "image.flip",
+      "displayName": "Mirror Flip",
+      "category": "Preprocess",
+      "inputs": [
+        {
+          "name": "exec",
+          "dataType": "Control",
+          "required": true
+        },
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "dataType": "Image",
+          "required": true
+        },
+        {
+          "name": "width",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "height",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "channels",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "diagnostics",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "next",
+          "dataType": "Control",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "mode",
+          "label": "Flip Mode",
+          "type": "select",
+          "defaultValue": "horizontal",
+          "options": [
+            {
+              "label": "Horizontal (x -> width-1-x)",
+              "value": "horizontal"
+            },
+            {
+              "label": "Vertical (y -> height-1-y)",
+              "value": "vertical"
+            },
+            {
+              "label": "Both (180 deg)",
+              "value": "both"
+            }
+          ],
+          "description": "Mirror axis. Horizontal maps x to width-1-x, vertical maps y to height-1-y, both applies the two together (equivalent to a 180 deg rotation, not a transposition)."
+        },
+        {
+          "name": "emptyPolicy",
+          "label": "Empty Image Policy",
+          "type": "select",
+          "defaultValue": "fail",
+          "options": [
+            {
+              "label": "Fail",
+              "value": "fail"
+            },
+            {
+              "label": "Passthrough",
+              "value": "passthrough"
+            }
+          ],
+          "description": "Behavior when the input image is empty: fail stops the graph; passthrough emits an empty 1x1 8-bit image with zero diagnostics counters."
+        }
+      ],
+      "description": "Exact pixel mirror with no interpolation and no size change, for inverted cameras, mirrored workpieces and template alignment. Pixel depth and channel count are preserved as-is (8/16-bit, int16, float32; 1..4 channels). Geometry that already carries coordinates (poses, ROIs, detections) must be mirrored separately with the same mode — this node only flips the image buffer.",
+      "pluginId": "builtin",
+      "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -48024,7 +50724,7 @@
           "name": "source",
           "label": "Script Source",
           "type": "textarea",
-          "defaultValue": "var a = Input.Number(\"a\");\nOutput.Number = a * 2;",
+          "defaultValue": "var a = Input.Number(\"a\");\r\nOutput.Number = a * 2;",
           "group": "Script",
           "description": "C# script body. Use Input.Number/Integer/Boolean/Text/Numbers/Points, Image (Mat), Output.Result/Number/Text/Boolean/Json/Image, Log and Fail. Top-level return also becomes result when Output.Result is not set. Use a using block or explicit Dispose for working Mats; top-level 'using var' declarations are not accepted by the Roslyn script parser in this build."
         },

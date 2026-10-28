@@ -1611,6 +1611,11 @@ public static class BuiltInNodeCatalog
         .. RegionGapCatalog.Items,
         .. FeatureGapCatalog.Items,
         .. FeatureRegionCatalog.Items,
+        .. ImageGeometryCatalog.Items,
+        .. MeasurementAlignCatalog.Items,
+        .. FeatureDetectorCatalog.Items,
+        .. MatchingGeometryCatalog.Items,
+        .. DefectAnalysisCatalog.Items,
         new(
             "flow.join",
             "Join",
