@@ -24,7 +24,7 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
-        var result = await registration.ExecuteAsync(new NodeExecutionContext(inputs, workflowScope, runId), node, cancellationToken);
+        var result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, cancellationToken);
         try
         {
             result = NodeOutputContracts.Telemetry(node, registration.Catalog, result, System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
@@ -41,6 +41,38 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
                     && !inputs.Values.Any(input => ReferenceEquals(input.Value, disposable)))
                     try { disposable.Dispose(); } catch { /* preserve the contract error */ }
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 执行一次节点，并在节点声明了 <c>__timeoutMs</c> 时套一层节点级预算。
+    /// 未声明时走原路径（不建 CTS、不加任何包装），保证既有流程零开销零行为变化。
+    /// </summary>
+    private static async ValueTask<NodeExecutorResult> ExecuteWithTimeoutAsync(
+        VisionNodeRegistration registration,
+        NodeDefinition node,
+        IReadOnlyDictionary<string, VisionValue> inputs,
+        string? workflowScope,
+        string? runId,
+        CancellationToken cancellationToken)
+    {
+        var context = new NodeExecutionContext(inputs, workflowScope, runId);
+        var timeoutMs = NodeTimeoutPolicy.Resolve(node);
+        if (timeoutMs == 0)
+            return await registration.ExecuteAsync(context, node, cancellationToken);
+
+        using var nodeBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        nodeBudget.CancelAfter(timeoutMs);
+        try
+        {
+            return await registration.ExecuteAsync(context, node, nodeBudget.Token);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && nodeBudget.IsCancellationRequested)
+        {
+            // 只有"外层没取消、我们的预算到期"才归因为节点超时；整轮超时仍走原有的取消路径，
+            // 否则会被误报成某个节点的责任。
+            throw new NodeTimeoutException(node.Type, timeoutMs, System.Diagnostics.Stopwatch.GetElapsedTime(started), ex);
         }
     }
 

@@ -1,7 +1,7 @@
 import MetrologyObjectEditor from './MetrologyObjectEditor';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { Alert, Button, Collapse, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, Collapse, InputNumber, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
 import type { NodeCatalogItem, NodeFrameRule, PortDescriptor, RunResult, VisionOverlay, VisionRoi, VisionValueSnapshot } from '../types';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
@@ -1324,6 +1324,16 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             {dirty && <Tag color="gold" className="node-parameter-dirty" title="与打开弹窗时的值不同">已改 {changedCount} 项</Tag>}
             <Button size="small" type="link" disabled={!dirty || locked} onClick={() => setDraft(cloneParameters(baseline))}>还原为打开时</Button>
           </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '0 10px 8px' }}>
+          <span>节点超时</span>
+          <InputNumber size="small" min={0} max={600000} step={100} style={{ width: 120 }} aria-label="节点超时（毫秒）"
+            value={typeof draft.__timeoutMs === 'number' ? draft.__timeoutMs : undefined} placeholder="不限制" disabled={locked}
+            onChange={(value) => changeParameter('__timeoutMs', typeof value === 'number' && value > 0 ? Math.round(value) : undefined)} />
+          <span>毫秒</span>
+          <Tooltip title="超过后本次运行在此节点失败并返回 node_timeout 错误码，而不是让一个慢节点吃掉整轮预算。留空表示只受整轮预算限制。取消是协作式的：卡在原生库内部且不轮询取消的调用不会被强行打断。">
+            <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>说明</span>
+          </Tooltip>
         </div>
         {legacyReplacementType && <Alert type="info" showIcon title="兼容节点" style={{ margin: '0 10px 8px' }}
           description={`此节点保留用于已保存流程；新流程请使用「${legacyReplacement?.displayName ?? legacyReplacementType}」。`} />}

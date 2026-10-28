@@ -118,6 +118,7 @@ public sealed class WorkflowCoreVisionRunner(
                     ? null
                     : cancellationToken.IsCancellationRequested ? VisionRunErrorCodes.Cancelled
                     : timeout.IsCancellationRequested ? VisionRunErrorCodes.Timeout
+                    : data.FaultedException is NodeTimeoutException ? VisionRunErrorCodes.NodeTimeout
                     : VisionRunErrorCodes.NodeFailure
             };
         }

@@ -531,3 +531,44 @@ describe('node configuration draft', () => {
   });
 });
 
+
+describe('node timeout budget', () => {
+  // 参数名必须与后端 NodeTimeoutPolicy.ParameterName 一致；写错时超时会被静默忽略。
+  it('echoes an existing node timeout override', () => {
+    const budgetNode: Node = {
+      ...node,
+      data: { ...node.data, parameters: { expected: 'ABC', __timeoutMs: 2500 } }
+    };
+    const { dialog } = mount({ node: budgetNode, nodes: [budgetNode] });
+    const input = dialog.getByLabelText('节点超时（毫秒）') as HTMLInputElement;
+    expect(input.value).toBe('2500');
+  });
+
+  it('stages the node timeout for Apply', async () => {
+    const onApply = vi.fn();
+    const { dialog } = mount({ onApply });
+    const input = dialog.getByLabelText('节点超时（毫秒）');
+
+    fireEvent.change(input, { target: { value: '2500' } });
+    fireEvent.blur(input);
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0].__timeoutMs).toBe(2500);
+  });
+
+  it('drops the node timeout when the field is cleared', async () => {
+    const budgetNode: Node = {
+      ...node,
+      data: { ...node.data, parameters: { expected: 'ABC', __timeoutMs: 2500 } }
+    };
+    const onApply = vi.fn();
+    const { dialog } = mount({ node: budgetNode, nodes: [budgetNode], onApply });
+    const input = dialog.getByLabelText('节点超时（毫秒）');
+
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    fireEvent.click(dialog.getByRole('button', { name: /应\s*用/ }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    expect(onApply.mock.calls[0][0]).not.toHaveProperty('__timeoutMs');
+  });
+});

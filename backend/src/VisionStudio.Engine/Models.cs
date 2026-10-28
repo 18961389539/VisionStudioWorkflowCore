@@ -117,6 +117,8 @@ public static class VisionRunErrorCodes
     public const string Timeout = "timeout";
     public const string Cancelled = "cancelled";
     public const string NodeFailure = "node_failure";
+    /// <summary>单个节点超出自身 <c>__timeoutMs</c> 预算。与整轮 <see cref="Timeout"/> 区分，便于直接定位节点。</summary>
+    public const string NodeTimeout = "node_timeout";
     public const string RuntimeError = "runtime_error";
 }
 
