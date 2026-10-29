@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
@@ -18,7 +18,7 @@ public sealed class NodeExpansionIntegrationTests
             await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "samples", fileName)),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         var registry = new VisionNodeRegistry();
-        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new GaussianBlurNode(),
+        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new ImageFilterNode(),
             new OtsuThresholdNode(), new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode(),
             new ThresholdNode(), new ValueNumberNode(), new ValueArithmeticNode(), new DetectionForEachNode(),
             new LoopEndNode(), new DetectionCountNode()];
@@ -60,7 +60,7 @@ public sealed class NodeExpansionIntegrationTests
     public async Task PreprocessingAndCounting_ProduceTraceableDisposition(int min, int max, string expected)
     {
         var registry = new VisionNodeRegistry();
-        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new GaussianBlurNode(),
+        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new ImageFilterNode(),
             new OtsuThresholdNode(), new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode()];
         foreach (var executor in executors) registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "builtin");
         var services = new ServiceCollection();

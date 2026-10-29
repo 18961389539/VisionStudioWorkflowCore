@@ -71,9 +71,17 @@ public static class BuiltInNodeExecutors
                      .OrderBy(type => type, StringComparer.OrdinalIgnoreCase))
             problems.Add($"catalog type '{missing}' has no executor");
 
+        // 已合并节点的别名执行器不在目录里：它们只服务历史文档，算法转发给规范节点
+        // （见 Nodes/MergedNodeAliases.cs 与 NodeTypeMigration）。除此之外的编外执行器仍是错误。
+        var aliasTypes = NodeTypeMigration.ReplacementMap.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var unknown in executorSet.Except(catalogSet, StringComparer.OrdinalIgnoreCase)
+                     .Where(type => !aliasTypes.Contains(type))
                      .OrderBy(type => type, StringComparer.OrdinalIgnoreCase))
             problems.Add($"executor type '{unknown}' is not declared in the built-in catalog");
+
+        foreach (var staleAlias in aliasTypes.Except(executorSet, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(type => type, StringComparer.OrdinalIgnoreCase))
+            problems.Add($"merged-node alias '{staleAlias}' declares no executor");
 
         return problems;
     }

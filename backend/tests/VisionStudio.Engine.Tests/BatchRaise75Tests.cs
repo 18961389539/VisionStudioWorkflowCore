@@ -21,7 +21,7 @@ public sealed class BatchRaise75Tests
         [
             "camera.syncCapture", "contour.filter", "coordinate.transformCoordinatePoint", "coordinate.transformInverse",
             "device.readTag", "device.writeTag", "flow.delay", "flow.loopEnd", "flow.merge",
-            "image.blur.gaussian", "image.flatFieldCorrect", "inference.detection", "match.shape",
+            "image.flatFieldCorrect", "inference.detection", "match.shape",
             "measure.contourThickness", "measure.regionIntensity", "output.exportResult",
             "robot.currentPose", "robot.j4TcpCompensation", "text.match"
         ];

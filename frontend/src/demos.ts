@@ -864,7 +864,7 @@ export const edgeToleranceDemo = (): DemoGraph => ({
     node('fits', 'logic.boolean', 1980, 180, {"op":"and"}),
     node('gateFit', 'flow.ifBoolean', 2260, 180, {}),
     node('parallel', 'measure.parallelism', 2540, 20, {}),
-    node('perpendicular', 'measure.perpendicularity', 2820, 20, {}),
+    node('perpendicular', 'measure.parallelism', 2820, 20, { mode: 'perpendicular' }),
     node('deviation', 'measure.contourDeviation', 3100, 20, {"closed":false,"sampleStep":2,"symmetric":true}),
     node('gateDeviation', 'flow.ifBoolean', 3380, 20, {}),
     node('tolerance', 'value.range', 3660, -140, {"min":0,"max":13}),

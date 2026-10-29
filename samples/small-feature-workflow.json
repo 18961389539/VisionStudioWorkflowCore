@@ -88,39 +88,42 @@
     },
     {
       "id": "top",
-      "type": "image.topHat",
+      "type": "image.morphology",
       "name": null,
       "position": {
         "x": 20,
         "y": 300
       },
       "parameters": {
+        "operation": "whiteTopHat",
         "kernelWidth": 11,
         "kernelHeight": 11
       }
     },
     {
       "id": "bottom",
-      "type": "image.bottomHat",
+      "type": "image.morphology",
       "name": null,
       "position": {
         "x": 300,
         "y": 300
       },
       "parameters": {
+        "operation": "blackBottomHat",
         "kernelWidth": 11,
         "kernelHeight": 11
       }
     },
     {
       "id": "gradient",
-      "type": "image.morphGradient",
+      "type": "image.morphology",
       "name": null,
       "position": {
         "x": 580,
         "y": 300
       },
       "parameters": {
+        "operation": "gradient",
         "kernelWidth": 3,
         "kernelHeight": 3
       }

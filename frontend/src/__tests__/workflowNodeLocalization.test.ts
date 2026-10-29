@@ -76,7 +76,7 @@ describe('workflow node Chinese localization', () => {
       const angle = zh.find(item => item.type === type)?.outputs.find(port => port.name === 'angle');
       expect(angle?.label, type).toBe('角度 (°)');
     }
-    for (const type of ['measure.parallelism', 'measure.perpendicularity']) {
+    for (const type of ['measure.parallelism']) {
       const angle = zh.find(item => item.type === type)?.outputs.find(port => port.name === 'angleError');
       expect(angle?.label, type).toBe('角度误差 (°)');
     }

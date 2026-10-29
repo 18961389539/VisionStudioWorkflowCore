@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "3c1d2eeabc6022719caf408cade9fa51fce2f15639dc7dd56ae38cd2f97a650c",
+  "hash": "5e8be9b6d810dd77953b299c11135bce3db4532a4f4df9dccec2df54e9287afa",
   "items": [
     {
       "type": "image.acquire",
@@ -29285,7 +29285,7 @@
     },
     {
       "type": "measure.parallelism",
-      "displayName": "Line Parallelism",
+      "displayName": "Line Parallelism / Perpendicularity",
       "category": "Measurement",
       "inputs": [
         {
@@ -29343,92 +29343,22 @@
       ],
       "parameters": [
         {
-          "name": "maxAngleErrorDeg",
-          "label": "Max Angle Error deg (0=off)",
-          "type": "number",
-          "defaultValue": 0,
-          "min": 0,
-          "max": 90,
-          "step": 0.1,
-          "description": "Optional parallelism tolerance; withinTolerance reports |angleError| <= limit."
-        }
-      ],
-      "description": "Parallelism of two fitted line segments. Wire: lines a + b → acute angleError from parallel, measured angle, endpoint drift of B perpendicular to A, withinTolerance. Key params: maxAngleErrorDeg. Drift scales with B length; reversing endpoints does not change results. Image-plane geometry only.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": true,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "measure.perpendicularity",
-      "displayName": "Line Perpendicularity",
-      "category": "Measurement",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
+          "name": "mode",
+          "label": "Relation",
+          "type": "select",
+          "defaultValue": "parallel",
+          "options": [
+            {
+              "label": "Parallel (angle error from 0°)",
+              "value": "parallel"
+            },
+            {
+              "label": "Perpendicular (angle error from 90°)",
+              "value": "perpendicular"
+            }
+          ],
+          "description": "Which relation angleError is measured against: 0° (parallel) or 90° (perpendicular). Deviation follows the same choice: endpoint drift of B perpendicular to A for parallel, along A for perpendicular."
         },
-        {
-          "name": "a",
-          "dataType": "Line2D",
-          "required": true
-        },
-        {
-          "name": "b",
-          "dataType": "Line2D",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "angleError",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "deviation",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "measuredLength",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "measuredAngleDeg",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "withinTolerance",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
         {
           "name": "maxAngleErrorDeg",
           "label": "Max Angle Error deg (0=off)",
@@ -29437,10 +29367,10 @@
           "min": 0,
           "max": 90,
           "step": 0.1,
-          "description": "Optional perpendicularity tolerance; withinTolerance reports |angleError| <= limit."
+          "description": "Optional tolerance; withinTolerance reports |angleError| <= limit."
         }
       ],
-      "description": "Perpendicularity of two fitted line segments. Wire: lines a + b → angleError from 90°, measured angle, endpoint drift of B along datum A, withinTolerance. Key params: maxAngleErrorDeg. Geometry-only on supplied fitted lines; reversing endpoints does not change results.",
+      "description": "Orientation quality of two fitted line segments, as parallelism (mode=parallel, error from 0°) or perpendicularity (mode=perpendicular, error from 90°). Wire: lines a + b → acute angleError, measured angle, endpoint drift of B, withinTolerance. Key params: mode, maxAngleErrorDeg. Drift scales with B length; reversing endpoints does not change results. Image-plane geometry only.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -35148,112 +35078,6 @@
       "declaresRoiImageBindings": false
     },
     {
-      "type": "image.bottomHat",
-      "displayName": "Black Bottom Hat",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "stdIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "nonZeroCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "kernelWidth",
-          "label": "Kernel Width",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element width in 1..255. Must not exceed twice the image width. Larger than the target bright/dark feature."
-        },
-        {
-          "name": "kernelHeight",
-          "label": "Kernel Height",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element height in 1..255. Must not exceed twice the image height."
-        },
-        {
-          "name": "emptyPolicy",
-          "label": "Empty Image Policy",
-          "type": "select",
-          "defaultValue": "fail",
-          "options": [
-            {
-              "label": "Fail",
-              "value": "fail"
-            },
-            {
-              "label": "Passthrough",
-              "value": "passthrough"
-            }
-          ],
-          "description": "Behavior when the input image is empty: fail stops the graph; passthrough emits an empty owned gray image with zero statistics."
-        }
-      ],
-      "description": "Extract small dark features with rectangular grayscale closing minus gray. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.",
-      "pluginId": "builtin",
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
       "type": "image.channel",
       "displayName": "Channel Extract",
       "category": "Preprocess",
@@ -36632,140 +36456,6 @@
       "declaresRoiImageBindings": false
     },
     {
-      "type": "image.blur.gaussian",
-      "displayName": "Gaussian Blur",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "kernelSize",
-          "label": "Kernel Size",
-          "type": "number",
-          "defaultValue": 5,
-          "min": 3,
-          "max": 31,
-          "step": 2,
-          "description": "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."
-        },
-        {
-          "name": "sigmaX",
-          "label": "Sigma X",
-          "type": "number",
-          "defaultValue": 0,
-          "min": 0,
-          "max": 20,
-          "step": 0.5,
-          "description": "0 derives sigma from the kernel size."
-        },
-        {
-          "name": "sigmaY",
-          "label": "Sigma Y",
-          "type": "number",
-          "defaultValue": 0,
-          "min": 0,
-          "max": 20,
-          "step": 0.5,
-          "description": "0 mirrors sigmaX."
-        },
-        {
-          "name": "borderType",
-          "label": "Border Type",
-          "type": "select",
-          "defaultValue": "default",
-          "options": [
-            {
-              "label": "Default",
-              "value": "default"
-            },
-            {
-              "label": "Constant",
-              "value": "constant"
-            },
-            {
-              "label": "Replicate",
-              "value": "replicate"
-            },
-            {
-              "label": "Reflect",
-              "value": "reflect"
-            },
-            {
-              "label": "Wrap",
-              "value": "wrap"
-            }
-          ],
-          "description": "Edge policy; non-default uses pad-then-crop around the Gaussian aperture."
-        },
-        {
-          "name": "roi",
-          "label": "ROI",
-          "type": "roi",
-          "group": "ROI",
-          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
-          "internal": true
-        }
-      ],
-      "description": "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Optional borderType pad-then-crop. Validates finite, non-negative sigma values and emits JSON diagnostics.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": true,
-        "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
       "type": "image.gradient",
       "displayName": "Gradient Magnitude and Direction",
       "category": "Preprocess",
@@ -37108,6 +36798,10 @@
           "defaultValue": "reflect",
           "options": [
             {
+              "label": "Default",
+              "value": "default"
+            },
+            {
               "label": "Reflect",
               "value": "reflect"
             },
@@ -37118,9 +36812,13 @@
             {
               "label": "Constant",
               "value": "constant"
+            },
+            {
+              "label": "Wrap",
+              "value": "wrap"
             }
           ],
-          "description": "Border extrapolation for the filter kernel."
+          "description": "Border extrapolation for the filter kernel. Default and Wrap are accepted by the gaussian path only; median rejects them."
         },
         {
           "name": "roi",
@@ -40318,116 +40016,6 @@
       "declaresRoiImageBindings": false
     },
     {
-      "type": "image.blur.median",
-      "displayName": "Median Blur",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "kernelSize",
-          "label": "Kernel Size",
-          "type": "number",
-          "defaultValue": 5,
-          "min": 3,
-          "max": 31,
-          "step": 2,
-          "description": "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise."
-        },
-        {
-          "name": "borderType",
-          "label": "Border Type",
-          "type": "select",
-          "defaultValue": "replicate",
-          "options": [
-            {
-              "label": "Constant",
-              "value": "constant"
-            },
-            {
-              "label": "Replicate",
-              "value": "replicate"
-            },
-            {
-              "label": "Reflect",
-              "value": "reflect"
-            },
-            {
-              "label": "Wrap",
-              "value": "wrap"
-            }
-          ],
-          "description": "Edge policy applied via pad-then-crop because OpenCV medianBlur has no native borderMode."
-        },
-        {
-          "name": "roi",
-          "label": "ROI",
-          "type": "roi",
-          "group": "ROI",
-          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
-          "internal": true
-        }
-      ],
-      "description": "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). borderType pads the image before filtering and crops back. Emits JSON diagnostics with kernel, border, size and channels.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": true,
-        "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
       "type": "image.flip",
       "displayName": "Mirror Flip",
       "category": "Preprocess",
@@ -40518,112 +40106,6 @@
       "description": "Exact pixel mirror with no interpolation and no size change, for inverted cameras, mirrored workpieces and template alignment. Pixel depth and channel count are preserved as-is (8/16-bit, int16, float32; 1..4 channels). Geometry that already carries coordinates (poses, ROIs, detections) must be mirrored separately with the same mode — this node only flips the image buffer.",
       "pluginId": "builtin",
       "declaresActions": false,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "image.morphGradient",
-      "displayName": "Morphological Gradient",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "stdIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "nonZeroCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "kernelWidth",
-          "label": "Kernel Width",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element width in 1..255. Must not exceed twice the image width. Larger than the target bright/dark feature."
-        },
-        {
-          "name": "kernelHeight",
-          "label": "Kernel Height",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element height in 1..255. Must not exceed twice the image height."
-        },
-        {
-          "name": "emptyPolicy",
-          "label": "Empty Image Policy",
-          "type": "select",
-          "defaultValue": "fail",
-          "options": [
-            {
-              "label": "Fail",
-              "value": "fail"
-            },
-            {
-              "label": "Passthrough",
-              "value": "passthrough"
-            }
-          ],
-          "description": "Behavior when the input image is empty: fail stops the graph; passthrough emits an empty owned gray image with zero statistics."
-        }
-      ],
-      "description": "Local grayscale range: rectangular dilation minus erosion. Returns owned 8-bit gray; color is converted to gray. Kernel dimensions must be odd in 1..255. Gradient bands are kernel-dependent and are not subpixel edge positions.",
-      "pluginId": "builtin",
-      "actions": [],
-      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -43143,112 +42625,6 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "image.topHat",
-      "displayName": "White Top Hat",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "stdIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "nonZeroCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "kernelWidth",
-          "label": "Kernel Width",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element width in 1..255. Must not exceed twice the image width. Larger than the target bright/dark feature."
-        },
-        {
-          "name": "kernelHeight",
-          "label": "Kernel Height",
-          "type": "number",
-          "defaultValue": 15,
-          "min": 1,
-          "max": 255,
-          "step": 2,
-          "description": "Odd rectangular structuring-element height in 1..255. Must not exceed twice the image height."
-        },
-        {
-          "name": "emptyPolicy",
-          "label": "Empty Image Policy",
-          "type": "select",
-          "defaultValue": "fail",
-          "options": [
-            {
-              "label": "Fail",
-              "value": "fail"
-            },
-            {
-              "label": "Passthrough",
-              "value": "passthrough"
-            }
-          ],
-          "description": "Behavior when the input image is empty: fail stops the graph; passthrough emits an empty owned gray image with zero statistics."
-        }
-      ],
-      "description": "Extract small bright features with gray minus rectangular grayscale opening. Requires 8-bit input; color is converted to gray. Kernel dimensions must be odd in 1..255. Full-frame native border behavior; choose a kernel larger than the target feature.",
-      "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -46196,7 +45572,7 @@
           "description": "Behavior when the region is empty."
         }
       ],
-      "description": "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.",
+      "description": "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromRange; regular Image ports deliberately reject it to prevent silent domain loss.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,
@@ -46712,7 +46088,7 @@
           "description": "Swap foreground and background, for models or defects that encode the object as dark instead of bright."
         }
       ],
-      "description": "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromThreshold. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.",
+      "description": "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromRange. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.",
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
@@ -49644,103 +49020,6 @@
       "capabilities": {
         "supportsRoi": false,
         "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "region.fromThreshold",
-      "displayName": "Threshold Region",
-      "category": "Region",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": false
-        },
-        {
-          "name": "domainImage",
-          "dataType": "DomainImage",
-          "required": false
-        }
-      ],
-      "outputs": [
-        {
-          "name": "region",
-          "dataType": "Region",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "count",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "area",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "found",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": false
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "minGray",
-          "label": "Minimum Gray",
-          "type": "number",
-          "defaultValue": 128,
-          "min": -3.4028234663852886E+38,
-          "max": 3.4028234663852886E+38,
-          "step": 1,
-          "description": "Inclusive lower bound; byte 0..255, uint2 0..65535, int2 -32768..32767, int4 the signed 32-bit range, real any finite value."
-        },
-        {
-          "name": "maxGray",
-          "label": "Maximum Gray",
-          "type": "number",
-          "defaultValue": 255,
-          "min": -3.4028234663852886E+38,
-          "max": 3.4028234663852886E+38,
-          "step": 1,
-          "description": "Inclusive upper bound; must be >= the lower bound and valid for the input pixel type. Grayscale values are never rescaled implicitly."
-        }
-      ],
-      "description": "Creates a region from a closed interval in the source pixel units, supporting byte/uint2/int2/int4/real and validating the bounds against the actual input type. 8-bit color input is converted to gray; single-channel numeric input keeps its bit depth. Exactly one of image/domainImage must be connected; connected components are not split automatically.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,

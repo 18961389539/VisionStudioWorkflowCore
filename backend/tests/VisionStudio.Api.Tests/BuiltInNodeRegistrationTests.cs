@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using VisionStudio.Api.Hosting;
 using VisionStudio.Engine;
 
@@ -21,7 +21,8 @@ public sealed class BuiltInNodeRegistrationTests : IClassFixture<VisionStudioApi
         var executors = _factory.Services.GetServices<IVisionNodeExecutor>().ToArray();
 
         Assert.Empty(BuiltInNodeExecutors.FindDrift(executors, BuiltInNodeCatalog.Items));
-        Assert.Equal(BuiltInNodeCatalog.Items.Count, executors.Length);
+        // 已合并节点的别名执行器没有目录条目：执行器 = 目录条目 + 声明的别名。
+        Assert.Equal(BuiltInNodeCatalog.Items.Count + NodeTypeMigration.ReplacementMap.Count, executors.Length);
     }
 
     [Fact]

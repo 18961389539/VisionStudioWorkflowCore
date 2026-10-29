@@ -334,34 +334,18 @@ public sealed class ParallelismNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
+        // parallel / perpendicular 共用同一套角度误差计算：差别只在参考角是 0° 还是 90°。
+        var mode = (node.GetString("mode", "parallel") ?? "parallel").Trim().ToLowerInvariant();
+        if (mode is not ("parallel" or "perpendicular"))
+            throw new InvalidOperationException("measure.parallelism mode must be parallel or perpendicular.");
         var limit = node.GetDouble("maxAngleErrorDeg", 0);
         if (!double.IsFinite(limit) || limit < 0 || limit > 90)
             throw new InvalidOperationException("measure.parallelism maxAngleErrorDeg must be finite in [0, 90] (0 disables).");
         _ = context.Require<VisionLine2D>("a");
         _ = context.Require<VisionLine2D>("b");
-        var result = LineOrientationQuality.Execute(context, node, Type, false, cancellationToken);
+        var result = LineOrientationQuality.Execute(context, node, Type, mode == "perpendicular", cancellationToken);
         if (!result.Outputs.ContainsKey("diagnostics"))
             throw new InvalidOperationException("measure.parallelism diagnostics missing.");
-        return ValueTask.FromResult(result);
-    }
-}
-public sealed class PerpendicularityNode : IVisionNodeExecutor
-{
-    public string Type => "measure.perpendicularity";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        var limit = node.GetDouble("maxAngleErrorDeg", 0);
-        if (!double.IsFinite(limit) || limit < 0 || limit > 90)
-            throw new InvalidOperationException("measure.perpendicularity maxAngleErrorDeg must be finite in [0, 90] (0 disables).");
-        _ = context.Require<VisionLine2D>("a");
-        _ = context.Require<VisionLine2D>("b");
-        var result = LineOrientationQuality.Execute(context, node, Type, true, cancellationToken);
-        if (!result.Outputs.ContainsKey("diagnostics"))
-            throw new InvalidOperationException("measure.perpendicularity diagnostics missing.");
         return ValueTask.FromResult(result);
     }
 }

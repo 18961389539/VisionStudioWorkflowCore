@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -22,10 +22,11 @@ public sealed class FeatureRegionApiTests(VisionStudioApiFactory factory) : ICla
     }
     private static JsonElement Summary(JsonElement[] reports, string id) => Assert.Single(reports, r => r.GetProperty("nodeId").GetString() == id).GetProperty("summary");
     [Fact]
-    public async Task AllEightToolsAreRegisteredAndPipelineEligible()
+    public async Task AllRemainingToolsAreRegisteredAndPipelineEligible()
     {
         var catalog = await _client.GetFromJsonAsync<JsonElement>("/api/catalog"); var registry = factory.Services.GetRequiredService<VisionNodeRegistry>();
-        Assert.Equal(8, FeatureRegionCatalog.Items.Count);
+        // 三个形态学薄节点已合并进 image.morphology，本目录只剩 5 个独立节点。
+        Assert.Equal(5, FeatureRegionCatalog.Items.Count);
         foreach (var item in FeatureRegionCatalog.Items)
         {
             Assert.Single(catalog.EnumerateArray(), n => n.GetProperty("type").GetString() == item.Type);

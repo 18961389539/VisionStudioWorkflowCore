@@ -1,4 +1,4 @@
-namespace VisionStudio.Engine;
+﻿namespace VisionStudio.Engine;
 
 public static class RegionCatalog
 {
@@ -25,10 +25,6 @@ public static class RegionCatalog
             ,
                 new("emptyPolicy", "Empty Result Policy", "select", "empty", Group: "Output", Options: [new("Emit empty", "empty"), new("Fail", "fail")], Description: "Behavior when no pixels pass the range.")],
             "Create a Region from an inclusive gray or three-channel color range. Connect exactly one of image or domainImage; optional region further restricts. Key params: channel bounds, empty policy. Too-wide range swallows background; too-narrow drops the target.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
-        new("region.fromThreshold", "Threshold Region", "Region", Images, Outputs,
-            [new("minGray", "Minimum Gray", "number", 128, -(double)float.MaxValue, (double)float.MaxValue, 1, Description: "Inclusive lower bound; byte 0..255, uint2 0..65535, int2 -32768..32767, int4 the signed 32-bit range, real any finite value."),
-             new("maxGray", "Maximum Gray", "number", 255, -(double)float.MaxValue, (double)float.MaxValue, 1, Description: "Inclusive upper bound; must be >= the lower bound and valid for the input pixel type. Grayscale values are never rescaled implicitly.")],
-            "Creates a region from a closed interval in the source pixel units, supporting byte/uint2/int2/int4/real and validating the bounds against the actual input type. 8-bit color input is converted to gray; single-channel numeric input keeps its bit depth. Exactly one of image/domainImage must be connected; connected components are not split automatically.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
         new("region.connectedComponents", "Connected Regions", "Region", [Exec, Region], Outputs, [
                 new("emptyPolicy", "Empty Result Policy", "select", "empty", Options: [new("Emit empty", "empty"), new("Fail", "fail")], Description: "When the result region is empty: emit empty keeps outputs with found=false; fail stops the graph.")],
             "Union input region objects and split with JLVision native connectivity. Object indices are not tracking IDs. Empty input returns zero objects.", "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
@@ -47,11 +43,11 @@ public static class RegionCatalog
         new("image.reduceDomain", "Reduce Image Domain", "Region", [.. Images, Region],
             [new("domainImage", VisionDataType.DomainImage), Region, new("area", VisionDataType.Double), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), Next], [new("emptyPolicy", "Empty Domain Policy", "select", "fail", Options: [new("Fail", "fail"), new("Passthrough", "passthrough")], Description: "Behavior when the region is empty."),
                 ],
-            "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.", "builtin"),
+            "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromRange; regular Image ports deliberately reject it to prevent silent domain loss.", "builtin"),
         new("region.fromMask", "Region From Mask", "Region", [Exec, new("image", VisionDataType.Image)],
             [new("region", VisionDataType.Region), new("image", VisionDataType.Image), new("count", VisionDataType.Integer), new("area", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next],
             [new("threshold", "Mask Threshold", "number", 1, 1, 255, 1, Group: "Mask", Description: "Pixels at or above this level belong to the region; 1 means any non-zero pixel, which is the usual case for segmentation masks.") { Integer = true },
              new("invert", "Invert Mask", "boolean", false, Group: "Mask", Description: "Swap foreground and background, for models or defects that encode the object as dark instead of bright.")],
-            "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromThreshold. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
+            "Turn a mask image (for example the mask output of ONNX segmentation) directly into a Region instead of thresholding it again with region.fromRange. The mask is split into 8-connected components, so downstream region.properties / region.filter counts real blobs rather than one merged area; the binary mask is echoed on the image port and area reports the foreground pixel count. found is false when the mask is empty.", Capabilities: new VisionToolCapabilities(SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore), Actions: [])
     ];
 }

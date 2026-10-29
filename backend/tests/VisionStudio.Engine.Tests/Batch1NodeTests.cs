@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -501,12 +501,12 @@ public sealed class Batch1NodeTests
     // ---------- 目录/参数契约 ----------
 
     [Theory]
-    [InlineData("image.blur.median", """{"kernelSize":40}""", "above the maximum 31")]
+    [InlineData("image.filter", """{"method":"median","kernelSize":40}""", "above the maximum 31")]
     [InlineData("image.filter", """{"method":"gaussian","sigmaX":21}""", "above the maximum 20")]
     [InlineData("image.morphology", """{"operation":"skeletonize"}""", "not an allowed option")]
     [InlineData("measure.blobs", """{"sortBy":"diagonal"}""", "not an allowed option")]
     [InlineData("logic.boolean", """{"op":"nand"}""", "not an allowed option")]
-    [InlineData("image.threshold.adaptive", """{"blockSize":1}""", "below the minimum 3")]
+    [InlineData("image.threshold", """{"mode":"adaptive","blockSize":1}""", "below the minimum 3")]
     [InlineData("match.template", """{"minScore":2}""", "above the maximum 1")]
     public void NewNodes_RejectInvalidParametersAtCompileTime(string nodeType, string parametersJson, string reasonFragment)
     {
@@ -539,14 +539,16 @@ public sealed class Batch1NodeTests
     {
         string[] expected =
         [
-            "image.grayscale", "image.channel", "image.blur.gaussian", "image.blur.median", "image.morphology",
-            "image.filter",
-            "image.threshold.adaptive", "image.threshold.otsu", "measure.blobs", "match.template",
+            "image.grayscale", "image.channel", "image.morphology", "image.filter",
+            "image.threshold", "measure.blobs", "match.template",
             "value.number", "value.arithmetic", "value.range", "logic.boolean"
         ];
         foreach (var type in expected)
             Assert.NotNull(BuiltInNodeCatalog.Items.FirstOrDefault(x => x.Type == type));
-        Assert.Equal(14, expected.Distinct().Count());
+        Assert.Equal(11, expected.Distinct().Count());
+        // 已合并节点的类型只作为别名执行器存在，不再出现在目录里（见 NodeTypeMigration）。
+        foreach (var merged in new[] { "image.blur.gaussian", "image.blur.median", "image.topHat", "image.bottomHat", "image.morphGradient", "region.fromThreshold", "measure.perpendicularity" })
+            Assert.Null(BuiltInNodeCatalog.Items.FirstOrDefault(x => x.Type == merged));
     }
 
     // ---------- 测试辅助 ----------

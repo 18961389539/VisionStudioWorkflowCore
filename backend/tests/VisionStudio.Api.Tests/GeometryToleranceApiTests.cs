@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -28,7 +28,8 @@ public sealed class GeometryToleranceApiTests(VisionStudioApiFactory factory) : 
     {
         var catalog = await _client.GetFromJsonAsync<JsonElement>("/api/catalog"); var registry = factory.Services.GetRequiredService<VisionNodeRegistry>();
         // 目录条目数随 GD&T 三件套（tolerance.datum/position/runout）增长；这里锁定"全量注册 + pipeline 执行 + 无副作用"三条契约。
-        Assert.Equal(11, GeometryToleranceCatalog.Items.Count);
+        // measure.perpendicularity 已并入 measure.parallelism(mode)，本目录 11 → 10。
+        Assert.Equal(10, GeometryToleranceCatalog.Items.Count);
         foreach (var item in GeometryToleranceCatalog.Items)
         {
             var actual = Assert.Single(catalog.EnumerateArray(), entry => entry.GetProperty("type").GetString() == item.Type);

@@ -976,3 +976,32 @@
 ### 验证
 
 前端 `tsc -b` 0 error；`catalogLocalization` 3 项通过；全量 **1047 项通过**（68 文件），生产构建通过。
+
+## 第五十二轮：重复节点合并（2026-10-28）
+
+目录长期存在「通用节点 + 它的某个参数取值」两份条目：工具箱隐藏了旧类型，但目录、执行器、
+参数表、i18n 和对话框测试都还是两套。本轮把 7 个输出端口完全等价的节点真正合并。
+
+| 变更 | 说明 |
+| --- | --- |
+| 合并 | `image.blur.gaussian` / `image.blur.median` → `image.filter`（method）；`image.topHat` / `image.bottomHat` / `image.morphGradient` → `image.morphology`（operation）；`region.fromThreshold` → `region.fromRange`（mode=gray）；`measure.perpendicularity` → `measure.parallelism`（新增 mode=parallel/perpendicular） |
+| 目录 | 256 → **249** 条；`/api/catalog` 与工具箱只保留规范节点，`catalog.generated.json` 同步重生成 |
+| 实现 | 高斯/中值改为 `GaussianBlurFilter` / `MedianBlurFilter` 内部实现，由 `ImageFilterNode` 调用；灰度区间改为 `RegionFromThresholdCore`，由 `RegionFromRangeNode` 调用。**同一算法只有一份代码** |
+| 兼容 | 旧类型保留同名别名执行器（`Nodes/MergedNodeAliases.cs`），只转发不复制算法；`NodeTypeMigration` 在 `WorkflowModuleExpander.ExpandAsync` 与编译器入口改写类型并补齐参数，端口不变故无需重写连线 |
+| 不变式 | 目录 ⊆ 执行器；目录之外的执行器必须是 `NodeTypeMigration.ReplacementMap` 声明的别名，且每个别名都必须有执行器，否则启动失败（`BuiltInNodeExecutors.FindDrift`） |
+| 前端 | `legacyNodes.ts` 拆成两层：仍在目录的兼容映射（画布“兼容”标签）+ 已移除类型的加载期迁移（`migrateNodeType`），`App.restoreWorkflow` 加载时改写 |
+
+### 验证
+
+- Engine 测试 **2092 项通过**（新增 `NodeTypeMigrationTests` 6 项：映射目标存在、参数补齐、显式值不被覆盖、
+  未知类型原样返回、旧/新文档命中同一计划缓存键、别名执行器齐全）。
+- API 测试 **447 项通过**；前端 `tsc -b` 0 error，全量 **1134 项中 1133 通过**（唯一失败见“已知遗留”）。
+- 净删除约 820 行（重复实现 + 重复目录条目 + i18n 死键）。
+
+### 已知遗留
+
+- `nodeValidation.test.ts`「参数密集节点至少分两组」在本次改动前已失败：`feature.ellipse`、`feature.ridge`、
+  `match.homography`、`match.pose3d`、`measure.bestFitAlign`、`defect.filter` 六个节点参数未分组，与本轮无关。
+- 其余 6 个“已声明兼容但仍在目录”的节点（`image.grayscale`、`image.threshold.adaptive/otsu`、
+  `text.match/regex`、`region.fromColorRange`、`measure.blob`）暂不能物理删除：目标节点的输出端口是子集
+  （缺 `foregroundRatio`、`matchLength`、`groupId`、blob 几何等），需要先把缺失输出补进规范节点。

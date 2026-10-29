@@ -24,13 +24,14 @@
     },
     {
       "id": "blur",
-      "type": "image.blur.gaussian",
+      "type": "image.filter",
       "name": "image.blur.gaussian",
       "position": {
         "x": 570,
         "y": 150
       },
       "parameters": {
+        "method": "gaussian",
         "kernelSize": 5
       }
     },

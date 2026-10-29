@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Runtime.InteropServices;
 using JLVisionLib;
 using OpenCvSharp;
@@ -101,91 +101,6 @@ internal static class GrayMorphology
                 ["energy"] = energy, ["peakX"] = maxLoc.X, ["peakY"] = maxLoc.Y, ["emptyResult"] = nonZeroCount == 0,
                 ["algorithmBackend"] = "jlvision", ["diagnostics"] = diag
             });
-    }
-}
-
-public sealed class ImageTopHatNode : IVisionNodeExecutor
-{
-    public string Type => "image.topHat";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        var emptyPolicy = CoordinateValidation.RequireNonEmpty(node.GetString("emptyPolicy", "fail"), "emptyPolicy").ToLowerInvariant();
-        if (emptyPolicy is not ("fail" or "passthrough"))
-            throw new InvalidOperationException("image.topHat emptyPolicy must be fail or passthrough.");
-        var source = context.RequireImage("image");
-        if (source.Mat is null) throw new InvalidOperationException("image.topHat image mat must be non-null.");
-        if (emptyPolicy == "fail" && (source.Mat.Empty() || source.Mat.Width < 1 || source.Mat.Height < 1))
-            throw new InvalidOperationException("image.topHat requires a non-empty image.");
-        var kw = Math.Clamp(node.GetInt("kernelWidth", 15), 1, 255);
-        var kh = Math.Clamp(node.GetInt("kernelHeight", 15), 1, 255);
-        if (kw != node.GetInt("kernelWidth", 15) || kh != node.GetInt("kernelHeight", 15))
-            throw new InvalidOperationException("image.topHat kernelWidth/Height must be in 1..255.");
-        var result = GrayMorphology.Execute(Type, context, node, "topHat", cancellationToken);
-        if (!result.Outputs.ContainsKey("diagnostics"))
-            throw new InvalidOperationException("image.topHat diagnostics missing.");
-        if (!result.Outputs.TryGetValue("nonZeroCount", out var nz) || nz is null)
-            throw new InvalidOperationException("image.topHat nonZeroCount missing.");
-        return ValueTask.FromResult(result);
-    }
-}
-public sealed class ImageBottomHatNode : IVisionNodeExecutor
-{
-    public string Type => "image.bottomHat";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        var emptyPolicy = CoordinateValidation.RequireNonEmpty(node.GetString("emptyPolicy", "fail"), "emptyPolicy").ToLowerInvariant();
-        if (emptyPolicy is not ("fail" or "passthrough"))
-            throw new InvalidOperationException("image.bottomHat emptyPolicy must be fail or passthrough.");
-        var source = context.RequireImage("image");
-        if (source.Mat is null) throw new InvalidOperationException("image.bottomHat image mat must be non-null.");
-        if (emptyPolicy == "fail" && (source.Mat.Empty() || source.Mat.Width < 1 || source.Mat.Height < 1))
-            throw new InvalidOperationException("image.bottomHat requires a non-empty image.");
-        var kw = Math.Clamp(node.GetInt("kernelWidth", 15), 1, 255);
-        var kh = Math.Clamp(node.GetInt("kernelHeight", 15), 1, 255);
-        if (kw != node.GetInt("kernelWidth", 15) || kh != node.GetInt("kernelHeight", 15))
-            throw new InvalidOperationException("image.bottomHat kernelWidth/Height must be in 1..255.");
-        var result = GrayMorphology.Execute(Type, context, node, "bottomHat", cancellationToken);
-        if (!result.Outputs.ContainsKey("diagnostics"))
-            throw new InvalidOperationException("image.bottomHat diagnostics missing.");
-        if (!result.Outputs.TryGetValue("nonZeroCount", out var nz) || nz is null)
-            throw new InvalidOperationException("image.bottomHat nonZeroCount missing.");
-        return ValueTask.FromResult(result);
-    }
-}
-public sealed class ImageMorphGradientNode : IVisionNodeExecutor
-{
-    public string Type => "image.morphGradient";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        var emptyPolicy = CoordinateValidation.RequireNonEmpty(node.GetString("emptyPolicy", "fail"), "emptyPolicy").ToLowerInvariant();
-        if (emptyPolicy is not ("fail" or "passthrough"))
-            throw new InvalidOperationException("image.morphGradient emptyPolicy must be fail or passthrough.");
-        var source = context.RequireImage("image");
-        if (source.Mat is null) throw new InvalidOperationException("image.morphGradient image mat must be non-null.");
-        if (emptyPolicy == "fail" && (source.Mat.Empty() || source.Mat.Width < 1 || source.Mat.Height < 1))
-            throw new InvalidOperationException("image.morphGradient requires a non-empty image.");
-        var kw = Math.Clamp(node.GetInt("kernelWidth", 15), 1, 255);
-        var kh = Math.Clamp(node.GetInt("kernelHeight", 15), 1, 255);
-        if (kw != node.GetInt("kernelWidth", 15) || kh != node.GetInt("kernelHeight", 15))
-            throw new InvalidOperationException("image.morphGradient kernelWidth/Height must be in 1..255.");
-        var result = GrayMorphology.Execute(Type, context, node, "gradient", cancellationToken);
-        if (!result.Outputs.ContainsKey("diagnostics"))
-            throw new InvalidOperationException("image.morphGradient diagnostics missing.");
-        if (!result.Outputs.TryGetValue("nonZeroCount", out var nz) || nz is null)
-            throw new InvalidOperationException("image.morphGradient nonZeroCount missing.");
-        return ValueTask.FromResult(result);
     }
 }
 

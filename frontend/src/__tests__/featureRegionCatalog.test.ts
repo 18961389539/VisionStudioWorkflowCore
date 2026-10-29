@@ -6,9 +6,9 @@ import { nodeCategory, searchTools } from '../toolboxModel';
 import { validateWorkflow } from '../validation';
 
 describe('small features and region shapes', () => {
-  it('provides eight localized tools, parameters and enum choices', () => {
+  it('provides five localized tools, parameters and enum choices', () => {
     const catalog = localizeCatalog(fallbackCatalogRaw, 'zh');
-    for (const type of ['image.topHat', 'image.bottomHat', 'image.morphGradient', 'measure.grayHistogram',
+    for (const type of ['measure.grayHistogram',
       'region.fromRoi', 'region.convexHull', 'region.boundary', 'region.skeleton']) {
       const item = catalog.find(entry => entry.type === type)!;
       expect(item).toBeDefined(); expect(item.displayName).toMatch(/[\u4e00-\u9fff]/);

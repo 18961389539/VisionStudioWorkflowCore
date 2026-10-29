@@ -25,7 +25,7 @@ public sealed class BatchRaise7274Tests
         string[] types =
         [
             "collection.detections.at", "collection.detections.filter", "contour.properties", "coordinate.point",
-            "device.writeTag", "device.writeVisionResult", "device.readTag", "image.blur.median", "image.morphology",
+            "device.writeTag", "device.writeVisionResult", "device.readTag", "image.morphology",
             "image.perspective", "image.warpAffine", "image.filter", "image.synthetic", "image.flatFieldCorrect",
             "image.register", "image.undistort", "measure.colorDifference", "measure.fitEllipse", "measure.lineSpacing",
             "measure.regionIntensity", "measure.blob", "region.fromColorRange", "region.properties", "region.transform",

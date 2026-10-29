@@ -99,7 +99,7 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
         if (source.Width > 16384 || source.Height > 16384)
             throw new InvalidOperationException("region.fromRange image must be at most 16384 per axis.");
         var inner = mode == "gray"
-            ? await new RegionFromThresholdNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false)
+            ? RegionFromThresholdCore.Execute(context, node, Type, cancellationToken)
             : await new RegionFromColorRangeNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
         return RegionNodeHelpers.Complete(inner, cancellationToken, () =>
         {
@@ -118,20 +118,20 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
     }
 }
 
-public sealed class RegionFromThresholdNode : IVisionNodeExecutor
+/// <summary>灰度区间分割实现：只由 region.fromRange(mode=gray) 调用，不再单独暴露为节点。</summary>
+internal static class RegionFromThresholdCore
 {
-    public string Type => "region.fromThreshold";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
+        if (node is null) throw new InvalidOperationException(nodeType + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 var (source, domain) = RegionNodeHelpers.Source(context);
-        if (source.Width < 1 || source.Height < 1) throw new InvalidOperationException("region.fromThreshold requires a non-empty image.");
+        if (source.Width < 1 || source.Height < 1) throw new InvalidOperationException($"{nodeType} requires a non-empty image.");
         var minimum = node.GetDouble("minGray", 128); var maximum = node.GetDouble("maxGray", 255);
         if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || minimum > maximum)
-            throw new InvalidOperationException("region.fromThreshold minGray/maxGray must be finite with minGray <= maxGray.");
+            throw new InvalidOperationException($"{nodeType} minGray/maxGray must be finite with minGray <= maxGray.");
         var depth = source.Mat.Depth();
         var (pixelType, lowerLimit, upperLimit) = depth == MatType.CV_8U ? ("byte", 0d, 255d)
             : depth == MatType.CV_16U ? ("uint2", 0d, 65535d)
@@ -152,13 +152,13 @@ var (source, domain) = RegionNodeHelpers.Source(context);
         var result = RegionNodeHelpers.Result(region, cancellationToken);
         var area = result.Outputs.TryGetValue("area", out var a) ? a.Value : null;
         var count = result.Outputs.TryGetValue("count", out var c) ? c.Value : null;
-        var diag = CoordinateValidation.Diagnostics(Type, ("minGray", minimum), ("maxGray", maximum),
+        var diag = CoordinateValidation.Diagnostics(nodeType, ("minGray", minimum), ("maxGray", maximum),
             ("width", source.Width), ("height", source.Height), ("channels", channels.I),
             ("pixelType", pixelType), ("grayLowerLimit", lowerLimit), ("grayUpperLimit", upperLimit),
             ("componentCount", count), ("area", area), ("count", count));
         var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
         var summary = new Dictionary<string, object?>(result.Summary) { ["minGray"] = minimum, ["maxGray"] = maximum, ["pixelType"] = pixelType, ["grayLowerLimit"] = lowerLimit, ["grayUpperLimit"] = upperLimit, ["diagnostics"] = diag };
-        return ValueTask.FromResult(result with { Outputs = outputs, Summary = summary });
+        return result with { Outputs = outputs, Summary = summary };
     }
 }
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Catalog and runtime-status localization.
  *
  * The backend catalog is authored in English (node display names, categories, parameter
@@ -24,7 +24,7 @@ const nodeNames: Record<string, string> = {
   'region.convexHull': '区域凸包', 'region.boundary': '区域边界', 'region.skeleton': '区域骨架',
   'contour.fromPoints': '点列生成轮廓', 'measure.wallThickness': '圆环壁厚测量', 'measure.concentricity': '圆心偏移量',
   'measure.roundness': '轮廓圆度（采样）', 'measure.straightness': '轮廓直线度（采样）', 'measure.contourDeviation': '轮廓偏差（采样）',
-  'measure.parallelism': '线段平行度', 'measure.perpendicularity': '线段垂直度',
+  'measure.parallelism': '线段平行度 / 垂直度',
   'image.filter': '图像滤波', 'image.colorConvert': '颜色空间转换', 'region.fromRange': '灰度 / 颜色范围分割', 'region.fromColorRange': '颜色范围提取', 'measure.colorDifference': '色差测量（ΔE76）',
   'image.contrastNormalize': '对比度归一化', 'image.illuminationNormalize': '光照归一化', 'image.sharpen': '图像锐化',
   'text.validate': '文本校验', 'text.match': '文本匹配', 'text.regex': '正则校验',
@@ -1885,8 +1885,7 @@ const descriptions: Record<string, string> = {
   'measure.roundness': '圆度：对轮廓用 JLVision 最小二乘圆拟合，输出半径极差/RMS/outOfRoundPct。接线：contours → found/circle/radius/deviation；index 选轮廓；minCoverageDeg 控制角向覆盖；可选 maxDeviation。至少 6 点；覆盖不足或共线病态 → found=false。结果依赖轮廓采样密度。单位像素。',
   'measure.straightness': '直线度：对轮廓采样点做 JLVision 最小二乘直线拟合，输出峰峰值偏差/RMS 等。接线：contours → found/line/deviation/rms；index 选第几条轮廓；可选 maxDeviation 公差门。至少 3 个不重合点；请接单条被测边而非厚条带的闭合外轮廓。退化拟合失败；点数不足 found=false。单位像素。',
   'measure.contourDeviation': '对已对齐的轮廓按弧长均匀采样，通过 JLVision 计算采样点到参考折线段的最近距离。默认双向比较，输出采样最大值、合并均值和 RMS。超预算明确报错，点数不足时未找到。采样间的细小特征可能被遗漏。',
-  'measure.parallelism': '两拟合直线段平行度。接线：line a + b → angleError（相对平行的锐角误差）、端点垂向漂移、withinTolerance。关键参数：maxAngleErrorDeg。漂移与 B 段长度有关；端点对调不改结果。图像平面几何，非 3D。',
-  'measure.perpendicularity': '两拟合直线段垂直度。接线：line a + b → 相对 90° 的角度误差、沿基准的端点漂移、withinTolerance。关键参数：maxAngleErrorDeg。仅使用已拟合直线；端点对调不改结果。',
+  'measure.parallelism': '两拟合直线段的取向质量：mode=parallel 按相对 0° 的锐角误差评价平行度，mode=perpendicular 按相对 90° 的角度误差评价垂直度。接线：line a + b → angleError、实测角度、B 的端点漂移、withinTolerance。关键参数：mode、maxAngleErrorDeg。漂移与 B 段长度有关；端点对调不改结果。仅使用已拟合直线，图像平面几何。',
   'image.colorConvert': '将 8 位 sRGB 彩图或灰度图转换为三个独立浮点通道。RGB 为 0–1；HSV 的 H 为 0–360°，S/V 为 0–1；Lab 使用 sRGB 解码与 D65 白点，L* 为 0–100。灰度按 R=G=B 处理，透明度不参与颜色计算。',
   'region.fromColorRange': '三通道颜色范围求交生成 Region，常用于色标/色块。接线：彩色 image + 可选 region 限域。HSV 下色相可 min>max 跨红包裹；其它通道必须有序。无彩色像素色相为 0，查 H 时请设饱和度下限。需要多个色块时请再显式拆连通域。',
   'region.fromRange': '按灰度或三通道颜色闭区间生成区域。灰度模式保留原位深，支持 byte/uint2/int2/int4/real，不隐式缩放到 8 位。必须且只能连接 image 或 domainImage 之一，可选 region 缩小处理域；连通对象另接连通域拆分。',
@@ -3927,6 +3926,28 @@ Object.assign(parameterDescriptions, {
   'contour.matchXld.minScore': 'found 的分数线。分数是"1 − 归一化半径签名差的 RMS"，0.9 表示形状差异约为平均半径的 10%。',
   'contour.matchXld.allowRotation': '搜索签名的所有循环移位。零件朝向已知时关掉，匹配更严格也更快。'
 } as Record<string, string>);
+
+/** 节点合并批（2026-10-28）：image.blur.gaussian / image.blur.median / image.topHat / image.bottomHat /
+ *  image.morphGradient / region.fromThreshold / measure.perpendicularity 已从目录移除，
+ *  由 image.filter / image.morphology / region.fromRange / measure.parallelism 承接，这里补新增文案。 */
+Object.assign(nodeParameterLabels, {
+  'measure.parallelism': { Relation: '评价关系' },
+  // 补齐 localizeCatalog 守卫早已报缺、与本次合并不相关的参数译名。
+  'defect.heatmap': { 'Canvas Width': '画布宽度', 'Canvas Height': '画布高度' },
+  'defect.edgeDefect': { 'Canvas Width': '画布宽度', 'Canvas Height': '画布高度' },
+  'defect.filter': { 'Canvas Width': '画布宽度', 'Canvas Height': '画布高度' },
+  'feature.ellipse': { 'Canny Low': 'Canny 低阈值', 'Canny High': 'Canny 高阈值', 'Max RMS Error (px)': '最大 RMS 误差 (px)' },
+  'feature.gaborBank': { 'Emit Direction Map': '输出方向图' },
+  'match.homography': { Confidence: '置信度' }
+} as Record<string, Record<string, string>>);
+
+Object.assign(nodeOptionLabels, {
+  'measure.parallelism': {
+    'Parallel (angle error from 0°)': '平行（相对 0° 的角度误差）',
+    'Perpendicular (angle error from 90°)': '垂直（相对 90° 的角度误差）'
+  },
+  'image.filter': { Default: '默认', Wrap: '环绕' }
+} as Record<string, Record<string, string>>);
 
 export function localizeCatalog(items: NodeCatalogItem[], lang: Lang = 'zh'): NodeCatalogItem[] {
   if (lang === 'en') return items;

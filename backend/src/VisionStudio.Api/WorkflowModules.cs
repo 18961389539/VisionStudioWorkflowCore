@@ -294,7 +294,9 @@ public sealed class WorkflowModuleExpander(WorkflowModuleStore store)
 
     public async Task<ExpandedWorkflowModules> ExpandAsync(WorkflowDefinition workflow,CancellationToken ct=default)
     {
-        var current=workflow;
+        // 已合并节点的旧类型在这里统一改写：之后编译、执行与节点报告都只看到规范类型，
+        // 避免“编译用新类型、运行时按旧类型解析”的分裂（旧流程直接报 type is not registered）。
+        var current=NodeTypeMigration.Normalize(workflow);
         var dependencies=new List<WorkflowModuleDependency>();
         for(var depth=0;depth<MaxExpansionDepth;depth++)
         {

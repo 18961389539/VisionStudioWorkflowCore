@@ -54,6 +54,7 @@ import { useRunController, type BottomTab } from './useRunController';
 import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { applyReferenceParameters } from './roiReference';
 import { withSwitchPorts } from './switchPorts';
+import { migrateNodeType } from './legacyNodes';
 import { compatiblePorts, type PortRecommendation } from './toolboxModel';
 import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
 import { apiFetch } from './apiClient';
@@ -942,17 +943,19 @@ function Editor() {
     // 调用方如需绑定"本次实际加载"的修订基线，必须在 restore 之后重新设置（load 即如此）。
     if (!isWorkflowDocument(workflow)) throw new Error('工作流文档结构无效');
     const restoredNodes: Node[] = workflow.nodes.map((item) => {
-      const meta = catalog.find((x) => x.type === item.type);
-      const parameters = item.parameters ?? {};
+      // 已合并的旧节点类型在这里改写为规范类型并补齐参数，使旧流程仍可编辑与运行。
+      const migrated = migrateNodeType(item.type, item.parameters ?? undefined);
+      const meta = catalog.find((x) => x.type === migrated.type);
+      const parameters = migrated.parameters;
       const nodeMeta = meta ? withSwitchPorts(meta, parameters) : undefined;
-      const module = item.type === 'module.call' ? moduleMetadata(parameters) : undefined;
+      const module = migrated.type === 'module.call' ? moduleMetadata(parameters) : undefined;
       return {
         id: item.id,
         type: 'vision',
         position: item.position ?? { x: 100, y: 100 },
         data: {
-          typeKey: item.type,
-          label: item.name ?? nodeMeta?.displayName ?? (item.type === 'module.call' ? String(parameters.moduleId ?? 'Reusable Module') : item.type),
+          typeKey: migrated.type,
+          label: item.name ?? nodeMeta?.displayName ?? (migrated.type === 'module.call' ? String(parameters.moduleId ?? 'Reusable Module') : migrated.type),
           parameters,
           ...(module ? { inputs: module.inputs, outputs: module.outputs }
             : nodeMeta ? catalogNodeData(nodeMeta) : { inputs: [], outputs: [] }),
@@ -960,7 +963,7 @@ function Editor() {
           moduleVersion: parameters.moduleVersion,
           status: 'idle',
           breakpoint: options?.preserveDocument
-            ? Boolean(nodesRef.current.find((node) => node.id === item.id && node.data.typeKey === item.type)?.data.breakpoint) : false
+            ? Boolean(nodesRef.current.find((node) => node.id === item.id && node.data.typeKey === migrated.type)?.data.breakpoint) : false
         }
       };
     });

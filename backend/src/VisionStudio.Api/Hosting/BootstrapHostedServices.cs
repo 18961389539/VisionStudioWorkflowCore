@@ -151,10 +151,17 @@ public sealed class RuntimeBootstrapHostedService(
                 + Environment.NewLine + " - " + string.Join(Environment.NewLine + " - ", drift));
         }
 
+        // 已合并节点的别名执行器（Nodes/MergedNodeAliases.cs）没有目录条目，不进注册表：
+        // 历史文档在编译入口已被 NodeTypeMigration 改写为规范类型，别名只服务直接构造执行器的调用方。
+        var aliasTypes = NodeTypeMigration.ReplacementMap.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var executor in executors)
+        {
+            if (aliasTypes.Contains(executor.Type)) continue;
             registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "builtin");
+        }
 
-        logger.LogInformation("Registered {Count} built-in node executors.", executors.Length);
+        logger.LogInformation("Registered {Count} built-in node executors ({AliasCount} merged-node aliases skipped).",
+            executors.Length - aliasTypes.Count, aliasTypes.Count);
     }
 
     private void LoadPlugins()

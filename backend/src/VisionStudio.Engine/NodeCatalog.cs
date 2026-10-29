@@ -242,34 +242,8 @@ public static class BuiltInNodeCatalog
                 new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5,
                     Description: "0 mirrors sigmaX.", VisibleWhen: new("method", ["gaussian"]))
             ,
-                new("borderType", "Border Type", "select", "reflect", Options: [new("Reflect", "reflect"), new("Replicate", "replicate"), new("Constant", "constant")], Description: "Border extrapolation for the filter kernel.")],
+                new("borderType", "Border Type", "select", "reflect", Options: [new("Default", "default"), new("Reflect", "reflect"), new("Replicate", "replicate"), new("Constant", "constant"), new("Wrap", "wrap")], Description: "Border extrapolation for the filter kernel. Default and Wrap are accepted by the gaussian path only; median rejects them.")],
             "Gaussian suppresses general noise; median removes salt-and-pepper while preserving edges. Wire: image → filtered image. Kernel size must be odd. Common before calipers/edges; large kernels hurt localization.",
-            "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
-        new(
-            "image.blur.gaussian",
-            "Gaussian Blur",
-            "Preprocess",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
-            [
-                new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Gaussian aperture (coerced to an odd value in 1-31 and reported in diagnostics)."),
-                new("sigmaX", "Sigma X", "number", 0, 0, 20, 0.5, Description: "0 derives sigma from the kernel size."),
-                new("sigmaY", "Sigma Y", "number", 0, 0, 20, 0.5, Description: "0 mirrors sigmaX."),
-                new("borderType", "Border Type", "select", "default", Options: [new("Default", "default"), new("Constant", "constant"), new("Replicate", "replicate"), new("Reflect", "reflect"), new("Wrap", "wrap")], Description: "Edge policy; non-default uses pad-then-crop around the Gaussian aperture.")
-            ],
-            "Gaussian blur for noise suppression before edge/blob analysis; kernel size is coerced to an odd value and reported. Optional borderType pad-then-crop. Validates finite, non-negative sigma values and emits JSON diagnostics.",
-            "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
-        new(
-            "image.blur.median",
-            "Median Blur",
-            "Preprocess",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
-            [new("kernelSize", "Kernel Size", "number", 5, 3, 31, 2, Description: "Median aperture (coerced to an odd value in 3-31 and reported in diagnostics); larger kernels remove stronger impulse noise."),
-             new("borderType", "Border Type", "select", "replicate", Options: [new("Constant", "constant"), new("Replicate", "replicate"), new("Reflect", "reflect"), new("Wrap", "wrap")], Description: "Edge policy applied via pad-then-crop because OpenCV medianBlur has no native borderMode.")],
-            "Median filter: removes salt-and-pepper noise while preserving edges (odd kernel required). borderType pads the image before filtering and crops back. Emits JSON diagnostics with kernel, border, size and channels.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
@@ -277,7 +251,7 @@ public static class BuiltInNodeCatalog
             "Morphology",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("stdIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String, Required: false), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("stdIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String, Required: false), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
             [
                 new("operation", "Operation", "select", "open", Group: "Operation", Options:
                 [

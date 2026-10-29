@@ -6,10 +6,10 @@ import { nodeCategory, searchTools } from '../toolboxModel';
 import { validateWorkflow } from '../validation';
 
 describe('geometry tolerance tools', () => {
-  it('provides eight localized tools with Chinese parameters and descriptions', () => {
+  it('provides seven localized tools with Chinese parameters and descriptions', () => {
     const catalog = localizeCatalog(fallbackCatalogRaw, 'zh');
     for (const type of ['contour.fromPoints', 'measure.wallThickness', 'measure.concentricity', 'measure.roundness',
-      'measure.straightness', 'measure.contourDeviation', 'measure.parallelism', 'measure.perpendicularity']) {
+      'measure.straightness', 'measure.contourDeviation', 'measure.parallelism']) {
       const item = catalog.find(entry => entry.type === type)!;
       expect(item).toBeDefined(); expect(item.displayName).toMatch(/[\u4e00-\u9fff]/);
       expect(item.description).toMatch(/[\u4e00-\u9fff]/); expect(nodeCategory(type)).not.toBe('plugin');

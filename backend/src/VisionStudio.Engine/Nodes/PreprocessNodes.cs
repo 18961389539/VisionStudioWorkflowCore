@@ -1,4 +1,4 @@
-using VisionStudio.Engine.Algorithms;
+﻿using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine.Camera;
@@ -313,24 +313,23 @@ var mat = new Mat();
     }
 }
 
-public sealed class GaussianBlurNode : IVisionNodeExecutor
+/// <summary>Gaussian 平滑实现：只由 image.filter(method=gaussian) 调用，不再单独暴露为节点。</summary>
+internal static class GaussianBlurFilter
 {
-    public string Type => "image.blur.gaussian";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         var image = context.RequireImage("image");
-        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException("image.blur.gaussian requires a non-empty image.");
+        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException($"{nodeType} requires a non-empty image.");
         var source = image.Mat;
         var channels = source.Channels();
-        if (channels is < 1 or > 4) throw new InvalidOperationException("image.blur.gaussian supports 1..4 channel images.");
+        if (channels is < 1 or > 4) throw new InvalidOperationException($"{nodeType} supports 1..4 channel images.");
         var requested = node.GetInt("kernelSize", 5);
-        if (requested is < 1 or > 31) throw new InvalidOperationException("image.blur.gaussian kernelSize must be between 1 and 31.");
+        if (requested is < 1 or > 31) throw new InvalidOperationException($"{nodeType} kernelSize must be between 1 and 31.");
         var kernel = PreprocessImageHelpers.OddKernel(requested, 1, 31);
         var sigmaX = node.GetDouble("sigmaX", 0);
         var sigmaY = node.GetDouble("sigmaY", 0);
         if (!double.IsFinite(sigmaX) || !double.IsFinite(sigmaY) || sigmaX < 0 || sigmaY < 0)
-            throw new InvalidOperationException("image.blur.gaussian sigmaX/sigmaY must be finite and >= 0 (0 derives sigma from kernel size).");
+            throw new InvalidOperationException($"{nodeType} sigmaX/sigmaY must be finite and >= 0 (0 derives sigma from kernel size).");
         var borderName = node.GetString("borderType", "default").Trim().ToLowerInvariant();
         var border = borderName switch
         {
@@ -339,13 +338,10 @@ public sealed class GaussianBlurNode : IVisionNodeExecutor
             "replicate" => BorderTypes.Replicate,
             "reflect" => BorderTypes.Reflect,
             "wrap" => BorderTypes.Wrap,
-            _ => throw new InvalidOperationException("image.blur.gaussian borderType must be default, constant, replicate, reflect or wrap.")
+            _ => throw new InvalidOperationException($"{nodeType} borderType must be default, constant, replicate, reflect or wrap.")
         };
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-var roi = node.GetRoi();
+        var roi = node.GetRoi();
         var pad = kernel / 2;
         Mat blurred;
         if (pad == 0 || borderName == "default")
@@ -364,11 +360,11 @@ var roi = node.GetRoi();
         var output = PreprocessImageHelpers.ApplyRoiMask(blurred, roi, cancellationToken);
         JLVisionOperators.MinMax(output, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(output);
-        var diag = CoordinateValidation.Diagnostics(Type, ("kernelSize", kernel), ("requestedKernelSize", requested),
+        var diag = CoordinateValidation.Diagnostics(nodeType, ("kernelSize", kernel), ("requestedKernelSize", requested),
             ("sigmaX", sigmaX), ("sigmaY", sigmaY), ("borderType", borderName),
             ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
             ("width", output.Width), ("height", output.Height), ("channels", channels));
-        return ValueTask.FromResult(new NodeExecutorResult(
+        return new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["image"] = VisionValue.Image(VisionImage.Own(output)),
@@ -389,26 +385,25 @@ var roi = node.GetRoi();
                 ["minIntensity"] = minIntensity,
                 ["maxIntensity"] = maxIntensity,
                 ["diagnostics"] = diag
-            }));
+            });
     }
 }
 
-public sealed class MedianBlurNode : IVisionNodeExecutor
+/// <summary>中值滤波实现：只由 image.filter(method=median) 调用，不再单独暴露为节点。</summary>
+internal static class MedianBlurFilter
 {
-    public string Type => "image.blur.median";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         var image = context.RequireImage("image");
-        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException("image.blur.median requires a non-empty image.");
+        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException($"{nodeType} requires a non-empty image.");
         var source = image.Mat;
         var channels = source.Channels();
-        if (channels is not (1 or 3 or 4)) throw new InvalidOperationException("image.blur.median supports 1, 3 or 4 channel images only.");
+        if (channels is not (1 or 3 or 4)) throw new InvalidOperationException($"{nodeType} supports 1, 3 or 4 channel images only.");
         var requested = node.GetInt("kernelSize", 5);
-        if (requested is < 3 or > 31) throw new InvalidOperationException("image.blur.median kernelSize must be between 3 and 31.");
+        if (requested is < 3 or > 31) throw new InvalidOperationException($"{nodeType} kernelSize must be between 3 and 31.");
         var kernel = PreprocessImageHelpers.OddKernel(requested, 3, 31);
         if (kernel > Math.Max(image.Width, image.Height) * 2 + 1)
-            throw new InvalidOperationException("image.blur.median kernelSize is unreasonably large for the image dimensions.");
+            throw new InvalidOperationException($"{nodeType} kernelSize is unreasonably large for the image dimensions.");
         var borderName = node.GetString("borderType", "replicate").Trim().ToLowerInvariant();
         var border = borderName switch
         {
@@ -416,14 +411,11 @@ public sealed class MedianBlurNode : IVisionNodeExecutor
             "replicate" => BorderTypes.Replicate,
             "reflect" => BorderTypes.Reflect,
             "wrap" => BorderTypes.Wrap,
-            _ => throw new InvalidOperationException("image.blur.median borderType must be constant, replicate, reflect or wrap.")
+            _ => throw new InvalidOperationException($"{nodeType} borderType must be constant, replicate, reflect or wrap.")
         };
         var roi = node.GetRoi();
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-// OpenCV medianBlur has no borderMode; pad then crop so borderType is a real aperture edge policy.
+        // OpenCV medianBlur has no borderMode; pad then crop so borderType is a real aperture edge policy.
         var pad = kernel / 2;
         using var padded = new Mat();
         Cv2.CopyMakeBorder(source, padded, pad, pad, pad, pad, border, Scalar.All(0));
@@ -434,11 +426,11 @@ public sealed class MedianBlurNode : IVisionNodeExecutor
 
         JLVisionOperators.MinMax(output, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(output);
-        var diag = CoordinateValidation.Diagnostics(Type, ("kernelSize", kernel), ("requestedKernelSize", requested), ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
+        var diag = CoordinateValidation.Diagnostics(nodeType, ("kernelSize", kernel), ("requestedKernelSize", requested), ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
             ("borderType", borderName), ("pad", pad), ("width", output.Width), ("height", output.Height), ("channels", channels));
-        return ValueTask.FromResult(new NodeExecutorResult(
+        return new NodeExecutorResult(
             new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["meanIntensity"] = VisionValue.Double(meanIntensity), ["minIntensity"] = VisionValue.Double(minIntensity), ["maxIntensity"] = VisionValue.Double(maxIntensity), ["diagnostics"] = VisionValue.String(diag) },
-            new Dictionary<string, object?> { ["kernelSize"] = kernel, ["borderType"] = borderName, ["roi"] = roi?.Type.ToString() ?? "FullImage", ["channels"] = channels, ["meanIntensity"] = meanIntensity, ["minIntensity"] = minIntensity, ["maxIntensity"] = maxIntensity, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["kernelSize"] = kernel, ["borderType"] = borderName, ["roi"] = roi?.Type.ToString() ?? "FullImage", ["channels"] = channels, ["meanIntensity"] = meanIntensity, ["minIntensity"] = minIntensity, ["maxIntensity"] = maxIntensity, ["diagnostics"] = diag });
     }
 }
 
@@ -446,36 +438,31 @@ public sealed class ImageFilterNode : IVisionNodeExecutor
 {
     public string Type => "image.filter";
 
-    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-
         var image = context.RequireImage("image");
-        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException("image.filter requires a non-empty image.");
+        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException(Type + " requires a non-empty image.");
         var method = node.GetString("method", "gaussian").Trim().ToLowerInvariant();
         if (method is not ("gaussian" or "median")) throw new InvalidOperationException("image.filter method must be gaussian or median.");
         var requested = node.GetInt("kernelSize", 5);
-        if (requested is < 3 or > 31) throw new InvalidOperationException("image.filter kernelSize must be between 3 and 31.");
-        IVisionNodeExecutor executor = method switch
-        {
-            "gaussian" => new GaussianBlurNode(),
-            "median" => new MedianBlurNode(),
-            _ => throw new InvalidOperationException("Filter method must be gaussian or median.")
-        };
-        var result = await executor.ExecuteAsync(context, node with { Type = executor.Type }, cancellationToken).ConfigureAwait(false);
+        if (requested is < 1 or > 31) throw new InvalidOperationException("image.filter kernelSize must be between 1 and 31.");
+        var inner = method == "gaussian"
+            ? GaussianBlurFilter.Execute(context, node, Type, cancellationToken)
+            : MedianBlurFilter.Execute(context, node, Type, cancellationToken);
         var diag = CoordinateValidation.Diagnostics(Type, ("method", method), ("kernelSize", requested),
             ("width", image.Width), ("height", image.Height), ("channels", image.Mat.Channels()));
-        var outputs = new Dictionary<string, VisionValue>(result.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
+        var outputs = new Dictionary<string, VisionValue>(inner.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
         var filteredMat = outputs["image"].Require<VisionImage>("image").Mat;
         JLVisionOperators.MinMax(filteredMat, out double filterMin, out double filterMax);
         var filterMean = JLVisionOperators.Mean(filteredMat);
         outputs["meanIntensity"] = VisionValue.Double(filterMean);
         outputs["minIntensity"] = VisionValue.Double(filterMin);
         outputs["maxIntensity"] = VisionValue.Double(filterMax);
-        var summary = new Dictionary<string, object?>(result.Summary) { ["method"] = method, ["diagnostics"] = diag };
-        return result with { Outputs = outputs, Summary = summary };
+        var summary = new Dictionary<string, object?>(inner.Summary) { ["method"] = method, ["diagnostics"] = diag };
+        return ValueTask.FromResult(inner with { Outputs = outputs, Summary = summary });
     }
 }
 

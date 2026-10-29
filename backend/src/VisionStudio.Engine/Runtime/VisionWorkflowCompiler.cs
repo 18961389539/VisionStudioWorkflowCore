@@ -33,6 +33,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 
     public string GetPlanCacheKey(WorkflowDefinition workflow)
     {
+        // 迁移后再取指纹：同一份旧文档与它迁移后的新文档必须命中同一个计划缓存条目。
+        workflow = NodeTypeMigration.Normalize(workflow);
         string identity;
         lock (_identityGate)
         {
@@ -71,6 +73,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
 
     public CompiledWorkflow Compile(WorkflowDefinition workflow)
     {
+        // 已合并的旧节点类型在编译入口改写为规范类型（含参数补齐），旧文档因此无需手工迁移。
+        workflow = NodeTypeMigration.Normalize(workflow);
         if (workflow.Nodes.Count == 0)
             throw new InvalidOperationException("Workflow has no nodes.");
         if (workflow.Nodes.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != workflow.Nodes.Count)

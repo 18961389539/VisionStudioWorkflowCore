@@ -16,7 +16,6 @@ const previouslyChineseAuthored = [
   'output.httpRequest',
   'output.saveImage',
   'region.fromRange',
-  'region.fromThreshold',
   'jlvision.worldPlane',
   'jlvision.dxf',
   'jlvision.featureExtract',

@@ -33,7 +33,6 @@ public static class VisionExecutionPolicy
             type.StartsWith("image.blur.", StringComparison.OrdinalIgnoreCase) ||
             type.StartsWith("image.threshold.", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.morphology", StringComparison.OrdinalIgnoreCase) ||
-            type is "image.topHat" or "image.bottomHat" or "image.morphGradient" ||
             type.Equals("image.crop", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.resize", StringComparison.OrdinalIgnoreCase) ||
             type.Equals("image.rotate", StringComparison.OrdinalIgnoreCase) ||
