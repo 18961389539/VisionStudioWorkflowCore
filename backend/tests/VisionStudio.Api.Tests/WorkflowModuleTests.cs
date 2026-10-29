@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Engine;
@@ -112,7 +112,7 @@ public sealed class WorkflowModuleTests
         var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("image.synthetic"), new SyntheticImageNode(), "builtin");
         registry.Register(BuiltInNodeCatalog.Require("image.threshold"), new ThresholdNode(), "builtin");
-        registry.Register(BuiltInNodeCatalog.Require("measure.blob"), new LargestBlobNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("measure.blobs"), new MultiBlobNode(), "builtin");
         var store = new WorkflowModuleStore(db);
         var expander = new WorkflowModuleExpander(store);
         var compiler = new VisionWorkflowCompiler(registry);

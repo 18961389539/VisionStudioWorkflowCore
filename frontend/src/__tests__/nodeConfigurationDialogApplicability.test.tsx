@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 适用性/参数可见性域 —— 从 nodeConfigurationDialog.test.tsx 拆分（2026-10-23，测试并行化）。
  */
 import './nodeConfigurationDialogHarness';
@@ -61,18 +61,6 @@ describe('switch cases editor integration', () => {
     expect(dialog.getAllByRole('textbox', { name: /分支 \d+ 标签/ })).toHaveLength(3);
     fireEvent.click(dialog.getByRole('button', { name: /删除分支 2/ }));
     expect(dialog.getAllByRole('textbox', { name: /分支 \d+ 标签/ })).toHaveLength(2);
-  });
-});
-
-describe('legacy node guidance', () => {
-  it('points a compatibility node at its recommended replacement', () => {
-    const legacyCatalog = fallbackCatalog.find(item => item.type === 'image.grayscale')!;
-    const legacyNode: Node = { id: 'legacy', position: { x: 0, y: 0 }, data: {
-      typeKey: 'image.grayscale', label: '灰度转换', inputs: legacyCatalog.inputs, parameters: {}
-    } };
-    const { dialog } = mount({ node: legacyNode, nodes: [legacyNode], catalogItem: legacyCatalog, catalogItems: fallbackCatalog });
-    expect(dialog.getByText('兼容节点')).toBeTruthy();
-    expect(dialog.getByText(/灰度与通道提取/)).toBeTruthy();
   });
 });
 

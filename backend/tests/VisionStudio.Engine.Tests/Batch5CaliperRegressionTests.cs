@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
@@ -862,7 +862,7 @@ public sealed class Batch5CaliperRegressionTests
         using var source = VisionImage.Own(new Mat(100, 100, MatType.CV_8UC1, Scalar.All(80)));
         using var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("image.crop"), new ImageCropNode(), "test");
-        registry.Register(BuiltInNodeCatalog.Require("image.grayscale"), new GrayscaleNode(), "test");
+        registry.Register(BuiltInNodeCatalog.Require("image.channel"), new ChannelExtractNode(), "test");
         registry.Register(BuiltInNodeCatalog.Require("coordinate.transformCompose"), new ComposeTransformNode(), "test");
         var dispatcher = new VisionNodeDispatcher(registry);
         NodeDefinition ConfiguredNode(string id, string type, string json) => new(id, type, null, null,
@@ -871,7 +871,7 @@ public sealed class Batch5CaliperRegressionTests
         var firstCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop1", "image.crop",
                 """{"x":10,"y":10,"width":80,"height":80}"""), Inputs(source), null, CancellationToken.None);
         using var firstImage = (VisionImage)firstCrop.Outputs["image"].Require<IVisionImage>("image");
-        var gray = await dispatcher.ExecuteAsync(ConfiguredNode("gray", "image.grayscale", "{}"), Inputs(firstImage), null, CancellationToken.None);
+        var gray = await dispatcher.ExecuteAsync(ConfiguredNode("gray", "image.channel", "{}"), Inputs(firstImage), null, CancellationToken.None);
         using var grayImage = (VisionImage)gray.Outputs["image"].Require<IVisionImage>("image");
         var secondCrop = await dispatcher.ExecuteAsync(ConfiguredNode("crop2", "image.crop",
                 """{"x":5,"y":5,"width":60,"height":60}"""), Inputs(grayImage), null, CancellationToken.None);

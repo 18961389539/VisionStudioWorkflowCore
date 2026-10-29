@@ -14,13 +14,15 @@
     },
     {
       "id": "gray",
-      "type": "image.grayscale",
+      "type": "image.channel",
       "name": "image.grayscale",
       "position": {
         "x": 300,
         "y": 150
       },
-      "parameters": {}
+      "parameters": {
+        "channel": "gray"
+      }
     },
     {
       "id": "blur",
@@ -37,13 +39,15 @@
     },
     {
       "id": "binary",
-      "type": "image.threshold.otsu",
+      "type": "image.threshold",
       "name": "image.threshold.otsu",
       "position": {
         "x": 840,
         "y": 150
       },
-      "parameters": {}
+      "parameters": {
+        "mode": "otsu"
+      }
     },
     {
       "id": "clean",

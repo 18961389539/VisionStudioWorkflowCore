@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 裁剪工作区/上游 ROI 域 —— 从 nodeConfigurationDialog.test.tsx 拆分（2026-10-23，测试并行化）。
  */
 import './nodeConfigurationDialogHarness';
@@ -128,7 +128,7 @@ describe('crop workspace with a connected ROI', () => {
       { nodeId: 'gray', portName: 'image', width: 100, height: 100 },
       { nodeId: 'source', portName: 'image', width: 100, height: 100 }
     ] }) })));
-    const grayscaleNode: Node = { id: 'gray', position: { x: 0, y: 0 }, data: { typeKey: 'image.grayscale', label: '灰度转换' } };
+    const grayscaleNode: Node = { id: 'gray', position: { x: 0, y: 0 }, data: { typeKey: 'image.channel', label: '灰度转换' } };
     const edges = [
       { id: 'roi-gray', source: 'roi', sourceHandle: 'image', target: 'gray', targetHandle: 'image' },
       { id: 'gray-crop', source: 'gray', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
@@ -193,7 +193,7 @@ describe('crop workspace with a connected ROI', () => {
       { nodeId: 'gray', portName: 'image', width: 100, height: 100 },
       { nodeId: 'source', portName: 'image', width: 100, height: 100 }
     ] }) })));
-    const grayscaleNode: Node = { id: 'gray', position: { x: 0, y: 0 }, data: { typeKey: 'image.grayscale', label: '灰度转换' } };
+    const grayscaleNode: Node = { id: 'gray', position: { x: 0, y: 0 }, data: { typeKey: 'image.channel', label: '灰度转换' } };
     const edges = [
       { id: 'crop-image', source: 'source', sourceHandle: 'image', target: 'crop', targetHandle: 'image' },
       { id: 'corrected-roi', source: 'roi', sourceHandle: 'roi', target: 'crop', targetHandle: 'roi' },

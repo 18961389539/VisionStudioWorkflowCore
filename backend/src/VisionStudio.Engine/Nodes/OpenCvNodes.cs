@@ -1,4 +1,4 @@
-using VisionStudio.Engine.Algorithms;
+﻿using VisionStudio.Engine.Algorithms;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Runtime;
@@ -258,7 +258,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
 {
     public string Type => "image.threshold";
 
-    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -267,13 +267,14 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         var mode = node.GetString("mode", "manual").Trim().ToLowerInvariant();
         if (mode == "adaptive")
         {
-            var adaptive = await new AdaptiveThresholdNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
-            return EnrichThresholdResult(adaptive, "adaptive", node.GetBool("invert", false), cancellationToken);
+            // 自适应与 Otsu 已合并为阈值模式的取值：直接调用内部实现，输出由本节点统一补齐。
+            var adaptive = AdaptiveThresholdCore.Execute(context, node, Type, cancellationToken);
+            return ValueTask.FromResult(EnrichThresholdResult(adaptive, "adaptive", node.GetBool("invert", false), cancellationToken));
         }
         if (mode == "otsu")
         {
-            var otsu = await new OtsuThresholdNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
-            return EnrichThresholdResult(otsu, "otsu", node.GetBool("invert", false), cancellationToken);
+            var otsu = OtsuThresholdCore.Execute(context, node, Type, cancellationToken);
+            return ValueTask.FromResult(EnrichThresholdResult(otsu, "otsu", node.GetBool("invert", false), cancellationToken));
         }
         if (mode != "manual") throw new InvalidOperationException($"Unsupported threshold mode '{mode}'.");
 
@@ -308,8 +309,9 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             };
             DefectNodeHelpers.AttachByteStats(outputs, summary, output, Type, ("mode", "manual"), ("threshold", threshold), ("invert", invert), ("autoGray", converted));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
+            if (output.Total() > 0) outputs["foregroundRatio"] = VisionValue.Double(Convert.ToInt64(summary["nonZeroCount"]!) / output.Total());
             cancellationToken.ThrowIfCancellationRequested();
-            return new NodeExecutorResult(outputs, summary);
+            return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
         }
         catch
         {
@@ -333,6 +335,10 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         {
             DefectNodeHelpers.AttachByteStats(outputs, summary, owned.Mat, "image.threshold", ("mode", mode), ("invert", invert));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
+            // 自适应/OTSU 分支已在内部算好前景占比；这里只补 manual 等没有该输出的分支。
+            var total = owned.Mat.Total();
+            if (!outputs.ContainsKey("foregroundRatio") && total > 0)
+                outputs["foregroundRatio"] = VisionValue.Double(Convert.ToInt64(summary["nonZeroCount"]!) / total);
             if (!outputs.ContainsKey("threshold") && summary.TryGetValue("threshold", out var thr) && thr is double d)
                 outputs["threshold"] = VisionValue.Double(d);
             cancellationToken.ThrowIfCancellationRequested();
@@ -342,140 +348,6 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         {
             owned.Dispose();
             throw;
-        }
-    }
-}
-
-public sealed class LargestBlobNode : IVisionNodeExecutor
-{
-    public string Type => "measure.blob";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-
-        var sourceImage = context.RequireImage("image");
-        var source = sourceImage.Mat;
-        if (source.Empty()) throw new InvalidOperationException("measure.blob requires a non-empty image.");
-        var minArea = node.GetDouble("minArea", 1000);
-        var roi = node.GetRoi();
-
-        Mat? masked = null;
-        try
-        {
-            var analysis = source;
-            if (roi is not null)
-            {
-                using var mask = roi.BuildMask(source.Size());
-                masked = new Mat(source.Rows, source.Cols, source.Type(), Scalar.All(0));
-                source.CopyTo(masked, mask);
-                analysis = masked;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
-            cancellationToken.ThrowIfCancellationRequested();
-            var best = contours
-                .Select(c => (Contour: c, Area: JLVisionOperators.ContourArea(c)))
-                .Where(x => x.Area >= minArea)
-                .OrderByDescending(x => x.Area)
-                .FirstOrDefault();
-
-            var blobs = contours
-                .Select((c, contourIndex) =>
-                {
-                    if ((contourIndex & 63) == 0) cancellationToken.ThrowIfCancellationRequested();
-                    var area = JLVisionOperators.ContourArea(c);
-                    var perimeter = 0d;
-                    for (var i = 0; i < c.Length; i++)
-                    {
-                        if ((i & 1023) == 0) cancellationToken.ThrowIfCancellationRequested();
-                        var a = c[i]; var b = c[(i + 1) % c.Length];
-                        perimeter += Math.Sqrt(Math.Pow(b.X - a.X, 2) + Math.Pow(b.Y - a.Y, 2));
-                    }
-                    return new
-                    {
-                        contour = c, area, perimeter,
-                        circularity = perimeter > 0 ? Math.Min(1, 4 * Math.PI * area / (perimeter * perimeter)) : 0,
-                        x = c.Length == 0 ? 0 : c.Min(q => q.X), y = c.Length == 0 ? 0 : c.Min(q => q.Y),
-                        width = c.Length == 0 ? 0 : c.Max(q => q.X) - c.Min(q => q.X) + 1,
-                        height = c.Length == 0 ? 0 : c.Max(q => q.Y) - c.Min(q => q.Y) + 1
-                    };
-                })
-                .Where(x => x.area >= minArea)
-                .OrderByDescending(x => x.area)
-                .ToArray();
-            if (best.Contour is null)
-            {
-                // Mature blob tools report "no object" as a result, not a workflow failure.
-                var emptyDiag = CoordinateValidation.Diagnostics(Type, ("found", false), ("count", 0), ("minArea", minArea));
-                return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
-                {
-                    ["image"] = VisionValue.Image(sourceImage),
-                    ["found"] = VisionValue.Boolean(false),
-                    ["count"] = VisionValue.Integer(0),
-                    ["blobs"] = VisionValue.String("[]"),
-                    ["diagnostics"] = VisionValue.String(emptyDiag)
-                }, new Dictionary<string, object?> { ["found"] = false, ["count"] = 0, ["minArea"] = minArea, ["diagnostics"] = emptyDiag }));
-            }
-
-            JLVisionOperators.MinEnclosingCircle(best.Contour, out Point2f center, out float radius);
-            var typedCenter = new VisionPoint2D(center.X, center.Y);
-            var typedCircle = new VisionCircle(center.X, center.Y, radius);
-
-            var stride = Math.Max(1, (int)Math.Ceiling(best.Contour.Length / 160d));
-            var contourPoints = best.Contour
-                .Where((_, i) => i % stride == 0)
-                .Select(p => new VisionOverlayPoint(p.X, p.Y))
-                .ToArray();
-
-            var overlays = new List<VisionOverlay>
-            {
-                new("blob-contour", VisionOverlayType.Contour, Points: contourPoints, Stroke: "#faad14", StrokeWidth: 1.5),
-                new("blob-circle", VisionOverlayType.Circle, X: center.X, Y: center.Y, Radius: radius, Stroke: "#52c41a", StrokeWidth: 2),
-                new("blob-center", VisionOverlayType.Point, X: center.X, Y: center.Y, Stroke: "#ff4d4f", StrokeWidth: 2),
-                new("blob-label", VisionOverlayType.Text, Label: $"X={center.X:0.0} Y={center.Y:0.0} A={best.Area:0}", X: 12, Y: 22, Stroke: "#ffd666", StrokeWidth: 1)
-            };
-
-            var diag = CoordinateValidation.Diagnostics(Type,
-                ("found", true), ("count", blobs.Length), ("minArea", minArea),
-                ("x", Math.Round(center.X, 2)), ("y", Math.Round(center.Y, 2)),
-                ("area", Math.Round(best.Area, 2)), ("radius", Math.Round(radius, 2)),
-                ("circularity", Math.Round(blobs[0].circularity, 4)));
-            var outputs = new Dictionary<string, VisionValue>
-            {
-                ["image"] = VisionValue.Image(sourceImage),
-                ["x"] = VisionValue.Double(center.X),
-                ["y"] = VisionValue.Double(center.Y),
-                ["area"] = VisionValue.Double(best.Area),
-                ["radius"] = VisionValue.Double(radius),
-                ["center"] = VisionValue.Point(typedCenter),
-                ["circle"] = VisionValue.Circle(typedCircle),
-                ["found"] = VisionValue.Boolean(true),
-                ["count"] = VisionValue.Integer(blobs.Length),
-                ["circularity"] = VisionValue.Double(blobs[0].circularity),
-                ["width"] = VisionValue.Double(blobs[0].width),
-                ["height"] = VisionValue.Double(blobs[0].height),
-                ["blobs"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(blobs.Select(b => new { area = b.area, perimeter = b.perimeter, circularity = b.circularity, x = b.x, y = b.y, width = b.width, height = b.height }))),
-                ["diagnostics"] = VisionValue.String(diag)
-            };
-            var summary = new Dictionary<string, object?>
-            {
-                ["x"] = Math.Round(center.X, 2),
-                ["y"] = Math.Round(center.Y, 2),
-                ["area"] = Math.Round(best.Area, 2),
-                ["radius"] = Math.Round(radius, 2),
-                ["roi"] = roi?.Type.ToString() ?? "FullImage",
-                ["centerType"] = VisionDataType.Point2D.ToString(),
-                ["circleType"] = VisionDataType.Circle.ToString(),
-                ["diagnostics"] = diag
-            };
-            return ValueTask.FromResult(new NodeExecutorResult(outputs, summary, overlays));
-        }
-        finally
-        {
-            masked?.Dispose();
         }
     }
 }

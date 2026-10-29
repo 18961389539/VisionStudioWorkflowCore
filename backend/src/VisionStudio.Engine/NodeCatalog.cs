@@ -1,4 +1,4 @@
-namespace VisionStudio.Engine;
+﻿namespace VisionStudio.Engine;
 
 public static class BuiltInNodeCatalog
 {
@@ -164,6 +164,7 @@ public static class BuiltInNodeCatalog
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
             [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double, Required: false),
+             new("foregroundRatio", VisionDataType.Double, Required: false), new("preview", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer, Required: false),
              new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
             [
                 new("mode", "Threshold Mode", "select", "manual", Group: "Mode", Options:
@@ -179,27 +180,9 @@ public static class BuiltInNodeCatalog
                 new("invert", "Invert", "boolean", false, Group: "Output",
                     Description: "Swap foreground/background polarity.", VisibleWhen: new("mode", ["manual", "adaptive", "otsu"]))
             ],
-            "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+            "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
-        new(
-            "image.grayscale",
-            "Grayscale",
-            "Preprocess",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
-            [
-                new("mode", "Mode", "select", "luminance", Description: "Conversion mode: BT.601 luminance, channel average, or per-pixel channel maximum. Unknown modes fail instead of silently using luminance.", Options:
-                [
-                    new("Luminance (BT.601)", "luminance"),
-                    new("Average", "average"),
-                    new("Max", "max")
-                ])
-            ,
-                new("weights", "Gray Weights", "select", "bt601", Options: [new("BT.601", "bt601"), new("BT.709", "bt709"), new("Average", "avg")], Description: "Luma weights for RGB to gray.")],
-            "Convert color to single-channel gray for thresholding/measurement; single-channel input passes through. Strictly validates mode and emits channel/size diagnostics. Common prelude to threshold, match, and calipers.",
-            "builtin",
-            new VisionToolCapabilities(EmitsOverlay: false)),
         new(
             "image.channel",
             "Channel Extract",
@@ -220,8 +203,10 @@ public static class BuiltInNodeCatalog
                     new("Value", "value")
                 ])
             ,
-                ],
-            "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image. Color channels require color input; unknown channels fail deterministically.",
+                new("weights", "Gray Weights", "select", "bt601", VisibleWhen: new("channel", ["gray", "luminance"]),
+                    Options: [new("BT.601", "bt601"), new("BT.709", "bt709"), new("Average", "avg")],
+                    Description: "Luma weights for RGB to gray (gray/luminance only). BT.601 uses the native conversion; BT.709 and Average use per-channel weighting.")],
+            "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image. Gray/luminance also selects luma weights. Color channels require color input; unknown channels fail deterministically.",
             "builtin",
             new VisionToolCapabilities(EmitsOverlay: false)),
         new(
@@ -282,39 +267,6 @@ public static class BuiltInNodeCatalog
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         new(
-            "image.threshold.adaptive",
-            "Adaptive Threshold",
-            "Preprocess",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), Next],
-            [
-                new("blockSize", "Block Size", "number", 31, 3, 99, 2, Description: "Local window size (coerced to odd)."),
-                new("c", "C Constant", "number", 5, 0, 50, 1, Description: "Finite constant subtracted from the local threshold; larger values increase bright foreground when invert=false (the reverse when inverted)."),
-                new("method", "Method", "select", "mean", Options:
-                [
-                    new("Mean", "mean"),
-                    new("Gaussian", "gaussian")
-                ], Description: "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."),
-                new("invert", "Invert", "boolean", false, Description: "Swap foreground and background after adaptive thresholding.")
-            ,
-
-                ],
-            "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
-            "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
-        new(
-            "image.threshold.otsu",
-            "Otsu Threshold",
-            "Preprocess",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double), new("foregroundRatio", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
-            [new("invert", "Invert", "boolean", false, Description: "Invert the binary output (dark objects become foreground)."),
-
-                ],
-            "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
-            "builtin",
-            new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
-        new(
             "measure.blobs",
             "Multi Blob",
             "Measurement",
@@ -328,7 +280,13 @@ public static class BuiltInNodeCatalog
                 new("area", VisionDataType.Double, Required: false),
                 new("radius", VisionDataType.Double, Required: false),
                 new("center", VisionDataType.Point2D, Required: false),
-                new("circle", VisionDataType.Circle, Required: false), new("diagnostics", VisionDataType.String), Next
+                new("circle", VisionDataType.Circle, Required: false),
+                new("found", VisionDataType.Boolean, Required: false),
+                new("circularity", VisionDataType.Double, Required: false),
+                new("width", VisionDataType.Double, Required: false),
+                new("height", VisionDataType.Double, Required: false),
+                new("blobs", VisionDataType.String, Required: false),
+                new("overlay", VisionDataType.Image, Required: false), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("mode", "Blob Mode", "select", "all", Options:
@@ -458,31 +416,6 @@ public static class BuiltInNodeCatalog
             "JLVision cached NCC pyramid matching (CreateNccModel / FindNccModel). Wire: scene image + template port or templatePath; optional templateRoi (ReduceDomain before create), searchRoi, ignoreRoi; outputs found/score/pose/detections for roi.transform or measurement. Key params: minScore, angle window (searchAngleStart/End or angleRangeDeg), pyramidLevels, maxTargets, duplicateOverlapThreshold, ignorePolarity; default hard NMS prefers FindNccModel MaxOverlap. algorithmBackend=jlvision. Explicit-only engine extras: soft ignoreMode (mean-lerp, not JL soft-NCC) and Soft-NMS; scale search is discrete resampled models; scoreMap is diagnostic OpenCV unit-scale planes, not a JLVision pyramid score cube. No clutter/deformation/continuous scaled NCC — use match.shape. angle is CCW template-to-image. found=false: low score, outside angle window, ignoreRoi blocks, or missing template.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: true)),
-        new(
-            "measure.blob",
-            "Largest Blob",
-            "Measurement",
-            [ExecIn, new("image", VisionDataType.Image)],
-            [
-                new("image", VisionDataType.Image),
-                new("found", VisionDataType.Boolean),
-                new("x", VisionDataType.Double, Required: false),
-                new("y", VisionDataType.Double, Required: false),
-                new("area", VisionDataType.Double, Required: false),
-                new("radius", VisionDataType.Double, Required: false),
-                new("center", VisionDataType.Point2D, Required: false),
-                new("circle", VisionDataType.Circle, Required: false),
-                new("count", VisionDataType.Integer),
-                new("circularity", VisionDataType.Double, Required: false),
-                new("width", VisionDataType.Double, Required: false),
-                new("height", VisionDataType.Double, Required: false),
-                new("blobs", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-                Next
-            ],
-            [new("minArea", "Min Area", "number", 1000, 1, 999999, 10, Description: "Minimum blob area in pixels; smaller components are ignored.")],
-            "Largest blob with typed geometry and shape features; blobs JSON lists every blob ≥ minArea, largest first. No qualifying blob → found=false (does not throw). Multi-target: use measure.blobs.",
-            "builtin"),
         new(
             "feature.edge",
             "Edge / Canny",
@@ -1612,6 +1545,7 @@ public static class BuiltInNodeCatalog
         .Select(OperatorParameterForms.Apply)
         .Select(NodeOutputContracts.Apply)
         .Select(DeclareLocalRoiParameters)
+        .Select(NodeMaturityCatalog.Apply)
         .ToArray();
 
     /// <summary>
@@ -1633,8 +1567,7 @@ public static class BuiltInNodeCatalog
 
     // 这些节点运行时会读本地 ROI，但尚未声明 SupportsRoi（能力位待补）；契约仍必须暴露真实参数。
     private static bool ReadsLocalRoiWithoutCapability(string type) =>
-        type.Equals("measure.blob", StringComparison.OrdinalIgnoreCase)
-        || type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase)
+        type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase)
         || type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase)
         || type.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase);
 

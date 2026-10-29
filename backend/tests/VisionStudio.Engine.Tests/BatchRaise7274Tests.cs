@@ -28,8 +28,8 @@ public sealed class BatchRaise7274Tests
             "device.writeTag", "device.writeVisionResult", "device.readTag", "image.morphology",
             "image.perspective", "image.warpAffine", "image.filter", "image.synthetic", "image.flatFieldCorrect",
             "image.register", "image.undistort", "measure.colorDifference", "measure.fitEllipse", "measure.lineSpacing",
-            "measure.regionIntensity", "measure.blob", "region.fromColorRange", "region.properties", "region.transform",
-            "robot.j4TcpCompensation", "robot.currentPose", "robot.guidance2d", "text.match", "text.regex",
+            "measure.regionIntensity", "measure.blobs", "region.fromRange", "region.properties", "region.transform",
+            "robot.j4TcpCompensation", "robot.currentPose", "robot.guidance2d", "text.validate", "image.channel",
             "camera.syncCapture", "match.template", "feature.edge", "flow.merge", "output.httpRequest", "output.saveImage",
             "calibration.handEye3D"
         ];

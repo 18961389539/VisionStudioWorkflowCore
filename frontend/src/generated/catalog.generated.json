@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "5e8be9b6d810dd77953b299c11135bce3db4532a4f4df9dccec2df54e9287afa",
+  "hash": "8a5afc81a16214ef37e294d2407d8e9e6fe2169289ea2c81afdd9429c4dea902",
   "items": [
     {
       "type": "image.acquire",
@@ -490,6 +490,7 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -4405,6 +4406,7 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -11199,6 +11201,7 @@
           "parameter": "deviceId"
         }
       ],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -11478,6 +11481,7 @@
           "parameter": "deviceId"
         }
       ],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -11687,6 +11691,7 @@
           "parameter": "deviceId"
         }
       ],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -20512,6 +20517,7 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
+      "maturity": "Experimental",
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -20820,6 +20826,7 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
+      "maturity": "Experimental",
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -21145,6 +21152,7 @@
         "supportsParallel": true,
         "executionMode": "Auto"
       },
+      "maturity": "Experimental",
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -21966,6 +21974,7 @@
           "imagePort": "image"
         }
       ],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": true,
       "declaresTransformFrames": false,
@@ -29162,128 +29171,6 @@
       "declaresRoiImageBindings": false
     },
     {
-      "type": "measure.blob",
-      "displayName": "Largest Blob",
-      "category": "Measurement",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "found",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "x",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "y",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "area",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "radius",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "center",
-          "dataType": "Point2D",
-          "required": false
-        },
-        {
-          "name": "circle",
-          "dataType": "Circle",
-          "required": false
-        },
-        {
-          "name": "count",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "circularity",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "width",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "height",
-          "dataType": "Double",
-          "required": false
-        },
-        {
-          "name": "blobs",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "minArea",
-          "label": "Min Area",
-          "type": "number",
-          "defaultValue": 1000,
-          "min": 1,
-          "max": 999999,
-          "step": 10,
-          "description": "Minimum blob area in pixels; smaller components are ignored."
-        },
-        {
-          "name": "roi",
-          "label": "ROI",
-          "type": "roi",
-          "group": "ROI",
-          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
-          "internal": true
-        }
-      ],
-      "description": "Largest blob with typed geometry and shape features; blobs JSON lists every blob ≥ minArea, largest first. No qualifying blob → found=false (does not throw). Multi-target: use measure.blobs.",
-      "pluginId": "builtin",
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
       "type": "measure.parallelism",
       "displayName": "Line Parallelism / Perpendicularity",
       "category": "Measurement",
@@ -30062,6 +29949,31 @@
           "required": false
         },
         {
+          "name": "found",
+          "dataType": "Boolean",
+          "required": false
+        },
+        {
+          "name": "circularity",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "width",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "height",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "blobs",
+          "dataType": "String",
+          "required": false
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -30566,6 +30478,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -30876,6 +30789,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -32793,6 +32707,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -32958,6 +32873,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -33147,6 +33063,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -34837,120 +34754,7 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "image.threshold.adaptive",
-      "displayName": "Adaptive Threshold",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "foregroundRatio",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "warningCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "blockSize",
-          "label": "Block Size",
-          "type": "number",
-          "defaultValue": 31,
-          "min": 3,
-          "max": 99,
-          "step": 2,
-          "description": "Local window size (coerced to odd)."
-        },
-        {
-          "name": "c",
-          "label": "C Constant",
-          "type": "number",
-          "defaultValue": 5,
-          "min": 0,
-          "max": 50,
-          "step": 1,
-          "description": "Finite constant subtracted from the local threshold; larger values increase bright foreground when invert=false (the reverse when inverted)."
-        },
-        {
-          "name": "method",
-          "label": "Method",
-          "type": "select",
-          "defaultValue": "mean",
-          "options": [
-            {
-              "label": "Mean",
-              "value": "mean"
-            },
-            {
-              "label": "Gaussian",
-              "value": "gaussian"
-            }
-          ],
-          "description": "Local statistic: plain mean or Gaussian-weighted mean. Unknown methods fail."
-        },
-        {
-          "name": "invert",
-          "label": "Invert",
-          "type": "boolean",
-          "defaultValue": false,
-          "description": "Swap foreground and background after adaptive thresholding."
-        },
-        {
-          "name": "roi",
-          "label": "ROI",
-          "type": "roi",
-          "group": "ROI",
-          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
-          "internal": true
-        }
-      ],
-      "description": "Local adaptive threshold for uneven illumination (color input is auto-converted to gray). Strictly validates method and C, and emits the foreground pixel ratio plus JSON diagnostics so binarization drift is visible without opening the image.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": true,
-        "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -35170,9 +34974,37 @@
             }
           ],
           "description": "Channel to extract: gray/B/G/R, HSV hue/saturation/value, or average/max gray. Color/HSV channels require a color input; unknown values fail."
+        },
+        {
+          "name": "weights",
+          "label": "Gray Weights",
+          "type": "select",
+          "defaultValue": "bt601",
+          "options": [
+            {
+              "label": "BT.601",
+              "value": "bt601"
+            },
+            {
+              "label": "BT.709",
+              "value": "bt709"
+            },
+            {
+              "label": "Average",
+              "value": "avg"
+            }
+          ],
+          "description": "Luma weights for RGB to gray (gray/luminance only). BT.601 uses the native conversion; BT.709 and Average use per-channel weighting.",
+          "visibleWhen": {
+            "parameter": "channel",
+            "values": [
+              "gray",
+              "luminance"
+            ]
+          }
         }
       ],
-      "description": "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image. Color channels require color input; unknown channels fail deterministically.",
+      "description": "Extract one channel (gray/B/G/R or HSV H/S/V, plus average/max gray) as a single-channel image. Gray/luminance also selects luma weights. Color channels require color input; unknown channels fail deterministically.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -36569,115 +36401,6 @@
       "description": "First-order gradient magnitude plus direction, as a single auditable step instead of wiring Sobel X, Sobel Y and a magnitude op by hand. Accepts 8/16-bit or float32, 1..4 channels (color is reduced to gray with the standard luminance weights). Magnitude keeps the source depth with saturation — negative lobes never wrap back into bright edges. Direction is float32 in degrees with 0 pointing along +x; undirected textures should fold it to 0..180.",
       "pluginId": "builtin",
       "declaresActions": false,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "image.grayscale",
-      "displayName": "Grayscale",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "meanIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "minIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "maxIntensity",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "mode",
-          "label": "Mode",
-          "type": "select",
-          "defaultValue": "luminance",
-          "options": [
-            {
-              "label": "Luminance (BT.601)",
-              "value": "luminance"
-            },
-            {
-              "label": "Average",
-              "value": "average"
-            },
-            {
-              "label": "Max",
-              "value": "max"
-            }
-          ],
-          "description": "Conversion mode: BT.601 luminance, channel average, or per-pixel channel maximum. Unknown modes fail instead of silently using luminance."
-        },
-        {
-          "name": "weights",
-          "label": "Gray Weights",
-          "type": "select",
-          "defaultValue": "bt601",
-          "options": [
-            {
-              "label": "BT.601",
-              "value": "bt601"
-            },
-            {
-              "label": "BT.709",
-              "value": "bt709"
-            },
-            {
-              "label": "Average",
-              "value": "avg"
-            }
-          ],
-          "description": "Luma weights for RGB to gray."
-        }
-      ],
-      "description": "Convert color to single-channel gray for thresholding/measurement; single-channel input passes through. Strictly validates mode and emits channel/size diagnostics. Common prelude to threshold, match, and calipers.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -40715,83 +40438,6 @@
       "declaresRoiImageBindings": false
     },
     {
-      "type": "image.threshold.otsu",
-      "displayName": "Otsu Threshold",
-      "category": "Preprocess",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "threshold",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "foregroundRatio",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "invert",
-          "label": "Invert",
-          "type": "boolean",
-          "defaultValue": false,
-          "description": "Invert the binary output (dark objects become foreground)."
-        },
-        {
-          "name": "roi",
-          "label": "ROI",
-          "type": "roi",
-          "group": "ROI",
-          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
-          "internal": true
-        }
-      ],
-      "description": "Automatic global threshold (Otsu) with the computed threshold exposed for traceability and illumination drift monitoring. Also emits the foreground pixel ratio and JSON diagnostics (auto-gray flag, threshold) for run-to-run comparison.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": true,
-        "emitsOverlay": false,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
       "type": "image.perspective",
       "displayName": "Perspective Correction",
       "category": "Preprocess",
@@ -41571,6 +41217,16 @@
           "required": false
         },
         {
+          "name": "foregroundRatio",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "warningCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "meanIntensity",
           "dataType": "Double",
           "required": true
@@ -41724,7 +41380,7 @@
           "internal": true
         }
       ],
-      "description": "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+      "description": "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -43358,6 +43014,7 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -43584,151 +43241,6 @@
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
       "declaresRoiImageBindings": true
-    },
-    {
-      "type": "text.match",
-      "displayName": "Match Text",
-      "category": "Recognition",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": false
-        },
-        {
-          "name": "text",
-          "dataType": "String",
-          "required": false
-        },
-        {
-          "name": "expected",
-          "dataType": "String",
-          "required": false
-        }
-      ],
-      "outputs": [
-        {
-          "name": "pass",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "text",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "expected",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "mode",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "matchLength",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "warningCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "attemptCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "text",
-          "label": "Text (fallback)",
-          "type": "text",
-          "defaultValue": "",
-          "description": "Fallback actual text used when the text input is disconnected.",
-          "overriddenByPorts": [
-            "text"
-          ]
-        },
-        {
-          "name": "expected",
-          "label": "Expected Text",
-          "type": "text",
-          "defaultValue": "",
-          "description": "Fallback expected text used when the expected input is disconnected.",
-          "overriddenByPorts": [
-            "expected"
-          ]
-        },
-        {
-          "name": "mode",
-          "label": "Text Match Mode",
-          "type": "select",
-          "defaultValue": "equals",
-          "options": [
-            {
-              "label": "Equals",
-              "value": "equals"
-            },
-            {
-              "label": "Contains",
-              "value": "contains"
-            },
-            {
-              "label": "Starts With",
-              "value": "startsWith"
-            },
-            {
-              "label": "Ends With",
-              "value": "endsWith"
-            }
-          ],
-          "description": "Comparison mode: exact, contains, startsWith, or endsWith."
-        },
-        {
-          "name": "ignoreCase",
-          "label": "Ignore Case",
-          "type": "boolean",
-          "defaultValue": false,
-          "description": "Culture-invariant case-insensitive comparison."
-        },
-        {
-          "name": "trim",
-          "label": "Trim Outer Whitespace",
-          "type": "boolean",
-          "defaultValue": true,
-          "description": "Strip leading/trailing whitespace from both sides before comparing."
-        },
-        {
-          "name": "allowEmpty",
-          "label": "Allow Empty Text",
-          "type": "boolean",
-          "defaultValue": false,
-          "description": "When false, empty actual text fails without comparing."
-        }
-      ],
-      "description": "Ordinal text comparison for OCR/barcode results. Connected text/expected override their fallback parameters. Optional outer whitespace trimming and culture-independent case folding; empty actual or expected fails unless allowEmpty=true. Emits diagnostics. Maximum 65536 UTF-16 characters per input.",
-      "pluginId": "builtin",
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
     },
     {
       "type": "recognition.ocr",
@@ -44019,6 +43531,36 @@
           "required": true
         },
         {
+          "name": "mode",
+          "dataType": "String",
+          "required": false
+        },
+        {
+          "name": "matchLength",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "matchedLength",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "matchIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "matchCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "groupCount",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "matchedText",
           "dataType": "String",
           "required": false
@@ -44140,6 +43682,34 @@
           }
         },
         {
+          "name": "singleline",
+          "label": "Singleline Mode",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Regex",
+          "description": "Enable RegexOptions.Singleline so '.' also matches newlines.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
+        },
+        {
+          "name": "countMatches",
+          "label": "Count Every Match",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Regex",
+          "description": "Also scan for further matches so matchCount is exact. Costs extra regex work and can hit the timeout on backtracking patterns.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
+        },
+        {
           "name": "ignoreCase",
           "label": "Ignore Case",
           "type": "boolean",
@@ -44179,133 +43749,6 @@
               "regex"
             ]
           }
-        }
-      ],
-      "description": "Compare text literally or validate it with a culture-invariant .NET regular expression. Connected values override their fallback parameters. Regex mode exposes matchedText and groupsJson; a bounded timeout prevents a slow pattern from blocking the workflow.",
-      "pluginId": "builtin",
-      "actions": [],
-      "declaresActions": true,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "text.regex",
-      "displayName": "Validate Text with Regex",
-      "category": "Recognition",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "text",
-          "dataType": "String",
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "name": "pass",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "matchedText",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "matchedLength",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "matchIndex",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "matchCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "groupsJson",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "groupCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": true
-        },
-        {
-          "name": "warningCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "attemptCount",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "pattern",
-          "label": "Regular Expression",
-          "type": "text",
-          "defaultValue": "[A-Z0-9]+",
-          "group": "Pattern",
-          "description": "Non-empty .NET regex. Named groups appear in groupsJson."
-        },
-        {
-          "name": "fullMatch",
-          "label": "Match Entire Text",
-          "type": "boolean",
-          "defaultValue": true,
-          "group": "Match",
-          "description": "When true, the pattern must match the entire (optionally trimmed) input."
-        },
-        {
-          "name": "ignoreCase",
-          "label": "Ignore Case",
-          "type": "boolean",
-          "defaultValue": false,
-          "group": "Pattern",
-          "description": "Culture-invariant case folding for the regex."
-        },
-        {
-          "name": "trim",
-          "label": "Trim Outer Whitespace",
-          "type": "boolean",
-          "defaultValue": true,
-          "group": "Match",
-          "description": "Strip leading/trailing whitespace before matching."
-        },
-        {
-          "name": "timeoutMs",
-          "label": "Regex Timeout (ms)",
-          "type": "number",
-          "defaultValue": 100,
-          "min": 1,
-          "max": 1000,
-          "step": 1,
-          "group": "Match",
-          "description": "Shared budget for searching and counting regex matches; cancellation and the elapsed budget are checked between matches, and each search also has a .NET regex timeout."
         },
         {
           "name": "minMatchedLength",
@@ -44315,25 +43758,27 @@
           "min": 0,
           "max": 100000,
           "step": 1,
-          "group": "Match",
-          "description": "Pass only when the matched text is at least this many characters; 0 disables the gate."
-        },
-        {
-          "name": "singleline",
-          "label": "Singleline Mode",
-          "type": "boolean",
-          "defaultValue": false,
-          "group": "Pattern",
-          "description": "Enable RegexOptions.Singleline (dot matches newline)."
+          "group": "Regex",
+          "description": "Pass only when the matched text is at least this many characters; 0 disables the gate.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
         },
         {
           "name": "emptyInputPolicy",
           "label": "Empty Input Policy",
           "type": "select",
-          "defaultValue": "fail",
+          "defaultValue": "allow",
           "options": [
             {
-              "label": "Fail",
+              "label": "Allow (validate as-is)",
+              "value": "allow"
+            },
+            {
+              "label": "Fail the node",
               "value": "fail"
             },
             {
@@ -44341,11 +43786,17 @@
               "value": "nomatch"
             }
           ],
-          "group": "Match",
-          "description": "Behavior when the input text is empty."
+          "group": "Regex",
+          "description": "Regex mode only: allow keeps the allowEmpty semantics, fail stops the graph on empty text, nomatch returns pass=false.",
+          "visibleWhen": {
+            "parameter": "mode",
+            "values": [
+              "regex"
+            ]
+          }
         }
       ],
-      "description": "Culture-invariant .NET regex validation with a bounded timeout and diagnostics. Full-match mode anchors the entire input; otherwise return the first match. Named/numbered groups are JSON strings plus groupCount. Invalid expressions and timeouts fail execution; no match returns pass=false. Limits: 65536 input characters, 4096 pattern characters, 128 groups and 1 MiB group JSON.",
+      "description": "Compare text literally or validate it with a culture-invariant .NET regular expression. Connected values override their fallback parameters. Regex mode exposes matchedText and groupsJson; a bounded timeout prevents a slow pattern from blocking the workflow.",
       "pluginId": "builtin",
       "actions": [],
       "declaresActions": true,
@@ -44569,193 +44020,6 @@
       ],
       "description": "Watershed outputs basin regions and secondaryRegion holds the watershed boundary; count/found only count basin regions. For MSER, darkRegion/lightRegion hold dark/bright regions and remain available as region/secondaryRegion; darkCount/lightCount count each group and count/found count both. primaryCount/secondaryCount always refer to the two original ports.",
       "declaresActions": false,
-      "declaresFrames": false,
-      "declaresTransformFrames": false,
-      "declaresOutputFrames": false,
-      "declaresRoiImageBindings": false
-    },
-    {
-      "type": "region.fromColorRange",
-      "displayName": "Color Range Region",
-      "category": "Region",
-      "inputs": [
-        {
-          "name": "exec",
-          "dataType": "Control",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": false
-        },
-        {
-          "name": "domainImage",
-          "dataType": "DomainImage",
-          "required": false
-        },
-        {
-          "name": "region",
-          "dataType": "Region",
-          "required": false
-        }
-      ],
-      "outputs": [
-        {
-          "name": "region",
-          "dataType": "Region",
-          "required": true
-        },
-        {
-          "name": "image",
-          "dataType": "Image",
-          "required": true
-        },
-        {
-          "name": "count",
-          "dataType": "Integer",
-          "required": true
-        },
-        {
-          "name": "area",
-          "dataType": "Double",
-          "required": true
-        },
-        {
-          "name": "found",
-          "dataType": "Boolean",
-          "required": true
-        },
-        {
-          "name": "diagnostics",
-          "dataType": "String",
-          "required": false
-        },
-        {
-          "name": "next",
-          "dataType": "Control",
-          "required": true
-        }
-      ],
-      "parameters": [
-        {
-          "name": "space",
-          "label": "Color Space",
-          "type": "select",
-          "defaultValue": "hsv",
-          "options": [
-            {
-              "label": "HSV (degrees, 0-1, 0-1)",
-              "value": "hsv"
-            },
-            {
-              "label": "sRGB (0-1)",
-              "value": "rgb"
-            },
-            {
-              "label": "CIELAB (D65)",
-              "value": "lab"
-            }
-          ],
-          "description": "Target color space for conversion or range selection. HSV uses degrees for H; Lab uses D65."
-        },
-        {
-          "name": "min1",
-          "label": "Channel 1 Minimum",
-          "type": "number",
-          "defaultValue": 0,
-          "min": -360,
-          "max": 360,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive lower bound for channel 1 (H/L/R depending on space)."
-        },
-        {
-          "name": "max1",
-          "label": "Channel 1 Maximum",
-          "type": "number",
-          "defaultValue": 360,
-          "min": -360,
-          "max": 360,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive upper bound for channel 1. HSV hue may wrap when min1>max1."
-        },
-        {
-          "name": "min2",
-          "label": "Channel 2 Minimum",
-          "type": "number",
-          "defaultValue": 0,
-          "min": -200,
-          "max": 200,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive lower bound for channel 2 (S/a/G depending on space)."
-        },
-        {
-          "name": "max2",
-          "label": "Channel 2 Maximum",
-          "type": "number",
-          "defaultValue": 1,
-          "min": -200,
-          "max": 200,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive upper bound for channel 2."
-        },
-        {
-          "name": "min3",
-          "label": "Channel 3 Minimum",
-          "type": "number",
-          "defaultValue": 0.5,
-          "min": -200,
-          "max": 200,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive lower bound for channel 3 (V/b/B depending on space)."
-        },
-        {
-          "name": "max3",
-          "label": "Channel 3 Maximum",
-          "type": "number",
-          "defaultValue": 1,
-          "min": -200,
-          "max": 200,
-          "step": 0.01,
-          "group": "Color Range",
-          "description": "Inclusive upper bound for channel 3."
-        },
-        {
-          "name": "emptyPolicy",
-          "label": "Empty Result Policy",
-          "type": "select",
-          "defaultValue": "empty",
-          "options": [
-            {
-              "label": "Emit empty",
-              "value": "empty"
-            },
-            {
-              "label": "Fail",
-              "value": "fail"
-            }
-          ],
-          "group": "Output",
-          "description": "Behavior when no pixels pass the color range."
-        }
-      ],
-      "description": "Inclusive intersection of three color-channel ranges within the image domain and optional region. In HSV, minH>maxH wraps through red; other ranges must be ordered. Hue is 0 for achromatic pixels — use a saturation floor for hue checks. Split connected components explicitly.",
-      "pluginId": "builtin",
-      "capabilities": {
-        "supportsRoi": false,
-        "emitsOverlay": true,
-        "deterministic": true,
-        "supportsRunNode": true,
-        "supportsParallel": true,
-        "executionMode": "Auto"
-      },
-      "actions": [],
-      "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
       "declaresOutputFrames": false,
@@ -46098,6 +45362,7 @@
         "executionMode": "WorkflowCore"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -50967,7 +50232,7 @@
           "description": "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."
         }
       ],
-      "description": "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is process-local: restarting the host clears it. Deterministic=false because the result depends on execution history.",
+      "description": "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is snapshotted to data/runtime/counters.json every 5s so shift totals survive a restart; the node itself requires the store to be registered and fails fast when it is missing. Deterministic=false because the result depends on execution history.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -50978,6 +50243,7 @@
         "executionMode": "Auto"
       },
       "actions": [],
+      "maturity": "Preview",
       "declaresActions": true,
       "declaresFrames": false,
       "declaresTransformFrames": false,

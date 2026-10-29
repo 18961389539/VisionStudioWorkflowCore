@@ -26,14 +26,15 @@
     },
     {
       "id": "blob-1",
-      "type": "measure.blob",
+      "type": "measure.blobs",
       "name": "measure.blob",
       "position": {
         "x": 500,
         "y": 260
       },
       "parameters": {
-        "minArea": 1000
+        "minArea": 1000,
+        "mode": "largest"
       }
     },
     {

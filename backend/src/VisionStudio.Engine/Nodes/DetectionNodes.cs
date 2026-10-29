@@ -162,7 +162,27 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 outputs["radius"] = VisionValue.Double(best.Circle.Radius);
                 outputs["center"] = VisionValue.Point(new VisionPoint2D(best.Circle.X, best.Circle.Y));
                 outputs["circle"] = VisionValue.Circle(best.Circle);
+                // 单斑点便利口（原 measure.blob）：最大斑点的布尔、外接尺寸、圆度与完整列表。
+                outputs["found"] = VisionValue.Boolean(true);
+                outputs["circularity"] = VisionValue.Double(best.Circularity);
+                outputs["width"] = VisionValue.Double(best.Width);
+                outputs["height"] = VisionValue.Double(best.Height);
+                outputs["blobs"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(detections.Select(x => new
+                {
+                    area = x.Area,
+                    perimeter = x.Perimeter,
+                    circularity = x.Circularity,
+                    x = x.X,
+                    y = x.Y,
+                    width = x.Width,
+                    height = x.Height
+                })));
                 summary["bestArea"] = best.Area;
+            }
+            else
+            {
+                outputs["found"] = VisionValue.Boolean(false);
+                outputs["blobs"] = VisionValue.String("[]");
             }
             var diag = CoordinateValidation.Diagnostics(Type,
                 ("mode", mode), ("count", detections.Length), ("minArea", minArea), ("maxArea", maxArea),

@@ -39,14 +39,15 @@
     },
     {
       "id": "blob-1",
-      "type": "measure.blob",
+      "type": "measure.blobs",
       "name": "Largest Blob",
       "position": {
         "x": 680,
         "y": 150
       },
       "parameters": {
-        "minArea": 1000
+        "minArea": 1000,
+        "mode": "largest"
       }
     }
   ],

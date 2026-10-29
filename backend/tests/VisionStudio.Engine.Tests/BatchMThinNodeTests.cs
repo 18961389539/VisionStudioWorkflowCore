@@ -70,7 +70,7 @@ public sealed class BatchMThinNodeTests
             Def("text.regex", """{"pattern":"LOT-(?<date>[0-9]{8})-(?<batch>[A-Z][0-9]{2})"}"""), CancellationToken.None);
         Assert.True((bool)result.Outputs["pass"].Value!);
         Assert.True((long)result.Outputs["groupCount"].Value! >= 2);
-        Assert.Contains("text.regex", (string)result.Outputs["diagnostics"].Value!);
+        Assert.Contains("text.validate", (string)result.Outputs["diagnostics"].Value!);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await new TextRegexNode().ExecuteAsync(Ctx(new() { ["text"] = VisionValue.String("ABC") }),
                 Def("text.regex", """{"pattern":"   "}"""), CancellationToken.None));

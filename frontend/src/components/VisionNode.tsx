@@ -1,4 +1,4 @@
-import { isPortRequired } from '../portRequirements';
+﻿import { isPortRequired } from '../portRequirements';
 import type { ParameterDescriptor, PortDescriptor } from '../types';
 import { useEffect, useMemo, useState } from 'react';
 import { Handle, Position, useConnection, useNodeConnections, useNodesData, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
@@ -10,7 +10,6 @@ import ExecutionStatus, { executionStatusLabel } from './ExecutionStatus';
 import { summarizeScalars } from '../summaryText';
 import { localizePortName, portDisplayName } from '../i18n/catalog';
 import { useI18n } from '../i18n/provider';
-import { legacyNodeReplacement } from '../legacyNodes';
 import { configureNode, showNodeDetails } from '../uiBridge';
 import type { CSSProperties } from 'react';
 
@@ -59,7 +58,6 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
   });
   // 语言在启动时由 localStorage 确定性决定（项目无运行时切换入口），直接读模块级值即可
   const { lang } = useI18n();
-  const legacyReplacement = legacyNodeReplacement(typeKey);
 
   const connectedHandles = useMemo(() => ({
     input: new Set(inputConnections.map((c) => c.targetHandle).filter(Boolean) as string[]),
@@ -176,10 +174,6 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
       <div className="vision-node-title">
         <span className="vision-node-name" title={String(d.label ?? typeKey)}>
           <NodeCategoryIcon type={typeKey} /><span>{String(d.label ?? typeKey)}</span>
-          {legacyReplacement && <span className="legacy-node-badge"
-            title={lang === 'en' ? 'Compatibility node; use the recommended replacement for new workflows' : '兼容节点；新流程请使用推荐的替代节点'}>
-            {lang === 'en' ? 'Legacy' : '兼容'}
-          </span>}
         </span>
         <span className="node-title-right">
           <button type="button" className="node-configure nodrag nopan" title="配置节点（也可双击节点）" aria-label={`配置节点：${String(d.label ?? typeKey)}`}

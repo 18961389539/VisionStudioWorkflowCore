@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using VisionStudio.Abstractions;
 
 namespace VisionStudio.Engine;
@@ -15,17 +15,38 @@ namespace VisionStudio.Engine;
 /// </summary>
 public static class NodeTypeMigration
 {
-    /// <summary>旧类型 → 规范类型 + 需要补齐的参数（已存在的同名参数不覆盖）。</summary>
-    private static readonly Dictionary<string, (string Target, (string Key, string Value)[] Parameters)> Rules =
+    /// <summary>
+    /// 一条迁移规则：目标类型 + 需要补齐的参数（已存在的同名参数不覆盖）。
+    /// <paramref name="Remap"/> 用于“旧参数取值 → 新参数”的映射，例如 image.grayscale 的
+    /// mode(luminance/average/max) → image.channel 的 channel(gray/average/max)。
+    /// </summary>
+    private sealed record Rule(
+        string Target,
+        (string Key, string Value)[] Parameters,
+        (string From, string To, IReadOnlyDictionary<string, string> Values)? Remap = null);
+
+    /// <summary>旧类型 → 规范类型 + 参数改写规则。</summary>
+    private static readonly Dictionary<string, Rule> Rules =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["image.blur.gaussian"] = ("image.filter", [("method", "gaussian")]),
-            ["image.blur.median"] = ("image.filter", [("method", "median")]),
-            ["image.topHat"] = ("image.morphology", [("operation", "whiteTopHat")]),
-            ["image.bottomHat"] = ("image.morphology", [("operation", "blackBottomHat")]),
-            ["image.morphGradient"] = ("image.morphology", [("operation", "gradient")]),
-            ["region.fromThreshold"] = ("region.fromRange", [("mode", "gray")]),
-            ["measure.perpendicularity"] = ("measure.parallelism", [("mode", "perpendicular")])
+            ["image.blur.gaussian"] = new("image.filter", [("method", "gaussian")]),
+            ["image.blur.median"] = new("image.filter", [("method", "median")]),
+            ["image.topHat"] = new("image.morphology", [("operation", "whiteTopHat")]),
+            ["image.bottomHat"] = new("image.morphology", [("operation", "blackBottomHat")]),
+            ["image.morphGradient"] = new("image.morphology", [("operation", "gradient")]),
+            ["region.fromThreshold"] = new("region.fromRange", [("mode", "gray")]),
+            ["region.fromColorRange"] = new("region.fromRange", [("mode", "color")]),
+            ["measure.perpendicularity"] = new("measure.parallelism", [("mode", "perpendicular")]),
+            ["image.threshold.adaptive"] = new("image.threshold", [("mode", "adaptive")]),
+            ["image.threshold.otsu"] = new("image.threshold", [("mode", "otsu")]),
+            ["text.match"] = new("text.validate", []),
+            ["text.regex"] = new("text.validate", [("mode", "regex"), ("emptyInputPolicy", "fail"), ("countMatches", "true")]),
+            ["measure.blob"] = new("measure.blobs", [("mode", "largest")]),
+            ["image.grayscale"] = new("image.channel", [], ("mode", "channel", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["luminance"] = "gray", ["bt601"] = "gray", ["gray"] = "gray",
+                ["average"] = "average", ["mean"] = "average", ["max"] = "max"
+            }))
         };
 
     /// <summary>旧类型 → 规范类型；不是旧类型时返回 null。</summary>
@@ -49,6 +70,16 @@ public static class NodeTypeMigration
         var parameters = node.Parameters is null
             ? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
             : new Dictionary<string, JsonElement>(node.Parameters, StringComparer.Ordinal);
+        // 取值映射先于补齐：旧文档里 mode=average 应变成 channel=average，而不是被默认值覆盖。
+        if (rule.Remap is { } remap
+            && parameters.TryGetValue(remap.From, out var source)
+            && source.ValueKind == JsonValueKind.String
+            && source.GetString() is { } text
+            && remap.Values.TryGetValue(text.Trim(), out var mapped))
+        {
+            parameters.Remove(remap.From);
+            parameters.TryAdd(remap.To, JsonSerializer.SerializeToElement(mapped));
+        }
         foreach (var (key, value) in rule.Parameters)
             parameters.TryAdd(key, JsonSerializer.SerializeToElement(value));
 

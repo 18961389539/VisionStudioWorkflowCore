@@ -1,4 +1,4 @@
-import MetrologyObjectEditor from './MetrologyObjectEditor';
+﻿import MetrologyObjectEditor from './MetrologyObjectEditor';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, InputNumber, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
@@ -22,7 +22,7 @@ import { runImageEntryForPort, runImagePortLabel, useRunImages } from '../useRun
 import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { withSwitchPorts } from '../switchPorts';
-import { legacyNodeReplacement } from '../legacyNodes';
+import { maturityLabel, maturityLevel, maturityTitle } from '../nodeMaturity';
 import { canonicalParameterGroup, portDisplayName } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
 import { effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
@@ -87,6 +87,8 @@ function PortTable({ ports, input }: { ports: PortDescriptor[]; input?: boolean 
 
 export default function NodeConfigurationDialog({ node, catalogItem, catalogItems = fallbackCatalogRaw, nodes, edges, open, disabled, onClose, onApply, onPreview, previewBlockedReason, initialTab = 'parameters', result, resultReceivedAt, resultStale = false }: Props) {
   const cropMaskFramePreservingNodeTypes = useMemo(() => imageFramePreservingNodeTypes(catalogItems), [catalogItems]);
+  // 成熟度只在标题栏画一次徽标：Stable 不画（目录里该字段缺省即 Stable）。
+  const catalogMaturity = maturityLevel(catalogItem);
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
   const [maximized, setMaximized] = useState(false);
@@ -205,8 +207,6 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const isCaliperCircle = catalogItem.type === 'measure.caliperCircle';
   const isCaliperEdge = ['measure.caliper', 'feature.edgeSubpixel'].includes(catalogItem.type);
   const isMetrology = catalogItem.type === 'measure.metrology';
-  const legacyReplacementType = legacyNodeReplacement(catalogItem.type);
-  const legacyReplacement = legacyReplacementType ? catalogItems.find((item) => item.type === legacyReplacementType) : undefined;
   const roiImageInputPort = isRoiTransform ? 'debugImage'
     : ['image.crop', 'image.perspective', 'region.fromRoi', ...measurementNodeTypes].includes(catalogItem.type) ? 'image' : undefined;
   const roiImageInputEdge = roiImageInputPort ? inputEdge(edges, node.id, roiImageInputPort) : undefined;
@@ -1335,8 +1335,6 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>说明</span>
           </Tooltip>
         </div>
-        {legacyReplacementType && <Alert type="info" showIcon title="兼容节点" style={{ margin: '0 10px 8px' }}
-          description={`此节点保留用于已保存流程；新流程请使用「${legacyReplacement?.displayName ?? legacyReplacementType}」。`} />}
         {(isCaliperCircle || isCaliperEdge) && <div className="caliper-workspace-mode"><Segmented size="small" aria-label={isCaliperEdge ? '单边缘卡尺工作模式' : '圆卡尺工作模式'}
           value={caliperDiagnosticMode ? 'diagnostics' : 'settings'}
           options={[{ label: isCaliperEdge ? '选线与调参' : '圈选与调参', value: 'settings' }, { label: isCaliperEdge ? '边缘剖面诊断' : '单卡尺诊断', value: 'diagnostics' }]}
@@ -1460,6 +1458,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       afterOpenChange={(visible) => { if (visible && initialTab === 'result') focusResult(); }}
       className={'node-configuration-modal' + (maximized ? ' is-maximized' : '')} width={maximized ? '100vw' : 'min(1680px, calc(100vw - 32px))'} style={{ top: maximized ? 0 : 16 }}
       title={<div className="node-configuration-title"><NodeCategoryIcon type={catalogItem.type} /><span>节点配置 · {String(node.data.label ?? catalogItem.displayName)}</span>
+        {catalogMaturity !== 'stable' && <span className={`maturity-badge maturity-${catalogMaturity}`}
+          data-maturity={catalogMaturity} title={maturityTitle(catalogMaturity, 'zh')}>{maturityLabel(catalogMaturity, 'zh')}</span>}
         <Button className="node-dialog-maximize" size="small" type="text" aria-label={maximized ? '还原窗口' : '最大化窗口'} title={maximized ? '还原窗口' : '最大化窗口'} onClick={() => setMaximized((value) => !value)}>{maximized ? '⤡' : '⤢'}</Button>
       </div>}
       footer={<div className="node-configuration-footer">

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
@@ -55,7 +55,7 @@ public sealed class BatchIMeasurePreprocessTests
     {
         using var color=new Mat(10,10,MatType.CV_8UC3,new Scalar(10,100,200));
         var gray=await new GrayscaleNode().ExecuteAsync(Ctx(new(){{"image",Img(color)}}),Def("image.grayscale","{\"mode\":\"luminance\"}"),CancellationToken.None);
-        Assert.Contains("image.grayscale",(string)gray.Outputs["diagnostics"].Value!);
+        Assert.Contains("image.channel",(string)gray.Outputs["diagnostics"].Value!);
         await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new GrayscaleNode().ExecuteAsync(Ctx(new(){{"image",Img(color)}}),Def("image.grayscale","{\"mode\":\"bogus\"}"),CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new ChannelExtractNode().ExecuteAsync(Ctx(new(){{"image",Img(color)}}),Def("image.channel","{\"channel\":\"bogus\"}"),CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new GaussianBlurNode().ExecuteAsync(Ctx(new(){{"image",Img(color)}}),Def("image.blur.gaussian","{\"sigmaX\":-1}"),CancellationToken.None));

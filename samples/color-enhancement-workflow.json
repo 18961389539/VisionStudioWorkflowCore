@@ -61,7 +61,7 @@
     },
     {
       "id": "range",
-      "type": "region.fromColorRange",
+      "type": "region.fromRange",
       "name": null,
       "position": {
         "x": 1420,
@@ -74,7 +74,8 @@
         "min2": 0,
         "max2": 1,
         "min3": 0.6,
-        "max3": 1
+        "max3": 1,
+        "mode": "color"
       }
     },
     {

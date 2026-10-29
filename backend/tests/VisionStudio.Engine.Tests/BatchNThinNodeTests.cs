@@ -76,7 +76,7 @@ public sealed class BatchNThinNodeTests
             ["expected"] = VisionValue.String("ABC")
         }), Def("text.match"), CancellationToken.None);
         Assert.True((bool)match.Outputs["pass"].Value!);
-        Assert.Contains("text.match", (string)match.Outputs["diagnostics"].Value!);
+        Assert.Contains("text.validate", (string)match.Outputs["diagnostics"].Value!);
 
         using var top = VisionImage.Own(new Mat(8, 10, MatType.CV_8UC1, Scalar.All(1)));
         using var set = new VisionFrameSet(

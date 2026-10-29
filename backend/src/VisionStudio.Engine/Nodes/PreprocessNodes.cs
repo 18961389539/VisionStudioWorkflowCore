@@ -98,124 +98,6 @@ internal static class PreprocessImageHelpers
     }
 }
 
-public sealed class GrayscaleNode : IVisionNodeExecutor
-{
-    public string Type => "image.grayscale";
-
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        var image = context.RequireImage("image");
-        if (image.Width < 1 || image.Height < 1) throw new InvalidOperationException("image.grayscale requires a non-empty image.");
-        var source = image.Mat;
-        var mode = node.GetString("mode", "luminance").Trim().ToLowerInvariant();
-        if (mode is not ("luminance" or "bt601" or "gray" or "average" or "mean" or "max")) throw new InvalidOperationException($"image.grayscale mode '{mode}' is unsupported; use luminance, average or max.");
-        var weights = node.GetString("weights", "bt601").Trim().ToLowerInvariant();
-        if (weights is not ("bt601" or "bt709" or "avg")) throw new InvalidOperationException("image.grayscale weights must be bt601, bt709 or avg.");
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-        if (context is null) throw new ArgumentNullException(nameof(context));
-var mat = new Mat();
-        var converted = false;
-
-        if (source.Channels() == 1)
-        {
-            // 已是单通道：原样输出（克隆以保持"输出归节点所有"的生命周期约定）。
-            source.CopyTo(mat);
-        }
-        else if (mode is "average" or "mean")
-        {
-            using var bgr = new Mat();
-            var color = source.Channels() == 4 ? Convert(source, bgr, ColorConversionCodes.BGRA2BGR) : source;
-            JLVisionOperators.Split(color, out var channels);
-            try
-            {
-                using var sum = new Mat();
-                JLVisionOperators.AddWeighted(channels[0], 1d / 3, channels[1], 1d / 3, 0, sum);
-                JLVisionOperators.AddWeighted(sum, 1, channels[2], 1d / 3, 0, mat);
-            }
-            finally
-            {
-                foreach (var channel in channels) channel.Dispose();
-            }
-        }
-        else if (mode == "max")
-        {
-            using var bgr = new Mat();
-            var color = source.Channels() == 4 ? Convert(source, bgr, ColorConversionCodes.BGRA2BGR) : source;
-            JLVisionOperators.Split(color, out var channels);
-            try
-            {
-                JLVisionOperators.Max(channels[0], channels[1], mat);
-                JLVisionOperators.Max(mat, channels[2], mat);
-            }
-            finally
-            {
-                foreach (var channel in channels) channel.Dispose();
-            }
-        }
-        else if (mode is "luminance" or "bt601" or "gray")
-        {
-            if (weights == "bt601" && source.Channels() != 1)
-                JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
-            else
-            {
-                using var bgr = new Mat();
-                var color = source.Channels() == 4 ? Convert(source, bgr, ColorConversionCodes.BGRA2BGR) : source;
-                JLVisionOperators.Split(color, out var channels);
-                try
-                {
-                    var (bw, gw, rw) = weights switch
-                    {
-                        "bt709" => (0.0722, 0.7152, 0.2126),
-                        "avg" => (1d / 3, 1d / 3, 1d / 3),
-                        _ => (0.114, 0.587, 0.299)
-                    };
-                    using var sum = new Mat();
-                    JLVisionOperators.AddWeighted(channels[0], bw, channels[1], gw, 0, sum);
-                    JLVisionOperators.AddWeighted(sum, 1, channels[2], rw, 0, mat);
-                }
-                finally
-                {
-                    foreach (var channel in channels) channel.Dispose();
-                }
-            }
-        }
-
-        converted = source.Channels() != 1;
-        var effectiveMode = source.Channels() == 1 ? "passthrough" : mode;
-        JLVisionOperators.MinMax(mat, out double minIntensity, out double maxIntensity);
-        var meanIntensity = JLVisionOperators.Mean(mat, out _);
-        var diag = CoordinateValidation.Diagnostics(Type, ("mode", effectiveMode), ("weights", weights), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()),
-            ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
-            ("width", mat.Width), ("height", mat.Height));
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["image"] = VisionValue.Image(VisionImage.Own(mat)),
-                ["meanIntensity"] = VisionValue.Double(meanIntensity),
-                ["minIntensity"] = VisionValue.Double(minIntensity),
-                ["maxIntensity"] = VisionValue.Double(maxIntensity),
-                ["diagnostics"] = VisionValue.String(diag)
-            },
-            new Dictionary<string, object?>
-            {
-                ["mode"] = effectiveMode,
-                ["weights"] = weights,
-                ["autoGray"] = converted,
-                ["channels"] = mat.Channels(),
-                ["meanIntensity"] = meanIntensity,
-                ["diagnostics"] = diag
-            }));
-    }
-
-    private static Mat Convert(Mat source, Mat scratch, ColorConversionCodes code)
-    {
-        JLVisionOperators.CvtColor(source, scratch, code);
-        return scratch;
-    }
-}
-
 public sealed class ChannelExtractNode : IVisionNodeExecutor
 {
     public string Type => "image.channel";
@@ -227,6 +109,9 @@ public sealed class ChannelExtractNode : IVisionNodeExecutor
         var source = image.Mat;
         var channel = node.GetString("channel", "gray").Trim().ToLowerInvariant();
         if (channel is not ("gray" or "luminance" or "blue" or "green" or "red" or "hue" or "saturation" or "value" or "average" or "mean" or "max")) throw new InvalidOperationException($"image.channel channel '{channel}' is unsupported; use gray, blue, green, red, hue, saturation, value, average or max.");
+        // gray/luminance 的亮度权重：bt601 走原生 CvtColor，bt709 / avg 走逐通道加权（原 image.grayscale 的 weights 能力）。
+        var weights = node.GetString("weights", "bt601").Trim().ToLowerInvariant();
+        if (weights is not ("bt601" or "bt709" or "avg")) throw new InvalidOperationException("image.channel weights must be bt601, bt709 or avg.");
         cancellationToken.ThrowIfCancellationRequested();
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
@@ -284,14 +169,36 @@ var mat = new Mat();
         }
         else
         {
-            // gray/luminance uses the same BT.601 conversion as image.grayscale's default mode.
+            // gray/luminance：bt601 与 image.grayscale 的默认路径一致；bt709/avg 按通道权重求和。
             if (source.Channels() == 1) source.CopyTo(mat);
-            else JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            else if (weights == "bt601")
+                JLVisionOperators.CvtColor(source, mat, source.Channels() == 4 ? ColorConversionCodes.BGRA2GRAY : ColorConversionCodes.BGR2GRAY);
+            else
+            {
+                using var bgr = new Mat();
+                var color = source.Channels() == 4 ? Bgr(source, bgr) : source;
+                JLVisionOperators.Split(color, out var channels);
+                try
+                {
+                    var (bw, gw, rw) = weights switch
+                    {
+                        "bt709" => (0.0722, 0.7152, 0.2126),
+                        _ => (1d / 3, 1d / 3, 1d / 3)
+                    };
+                    using var sum = new Mat();
+                    JLVisionOperators.AddWeighted(channels[0], bw, channels[1], gw, 0, sum);
+                    JLVisionOperators.AddWeighted(sum, 1, channels[2], rw, 0, mat);
+                }
+                finally
+                {
+                    foreach (var component in channels) component.Dispose();
+                }
+            }
         }
 
         JLVisionOperators.MinMax(mat, out double minIntensity, out double maxIntensity);
         var meanIntensity = JLVisionOperators.Mean(mat, out _);
-        var diag = CoordinateValidation.Diagnostics(Type, ("channel", channel), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()),
+        var diag = CoordinateValidation.Diagnostics(Type, ("channel", channel), ("weights", weights), ("inputChannels", source.Channels()), ("outputChannels", mat.Channels()),
             ("meanIntensity", meanIntensity), ("minIntensity", minIntensity), ("maxIntensity", maxIntensity),
             ("width", mat.Width), ("height", mat.Height));
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -303,7 +210,7 @@ var mat = new Mat();
                 ["maxIntensity"] = VisionValue.Double(maxIntensity),
                 ["diagnostics"] = VisionValue.String(diag)
             },
-            new Dictionary<string, object?> { ["channel"] = channel, ["channels"] = mat.Channels(), ["meanIntensity"] = meanIntensity, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["channel"] = channel, ["weights"] = weights, ["channels"] = mat.Channels(), ["meanIntensity"] = meanIntensity, ["diagnostics"] = diag }));
 
         static Mat Bgr(Mat source, Mat scratch)
         {
@@ -550,23 +457,22 @@ public sealed class MorphologyNode : IVisionNodeExecutor
     }
 }
 
-public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
+internal static class AdaptiveThresholdCore
 {
-    public string Type => "image.threshold.adaptive";
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
+        if (node is null) throw new InvalidOperationException(nodeType + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var source = context.RequireImage("image").Mat;
-        if (source.Empty()) throw new InvalidOperationException(Type + " requires a non-empty image.");
+        if (source.Empty()) throw new InvalidOperationException(nodeType + " requires a non-empty image.");
         // 光照变化场景的二值化主入口：局部窗口均值/高斯加权阈值（块大小必须为奇数）。
         var blockSize = PreprocessImageHelpers.OddKernel(node.GetInt("blockSize", 31), 3, 99);
         var c = node.GetDouble("c", 5);
         var method = node.GetString("method", "mean").Trim().ToLowerInvariant();
-        if (method is not ("mean" or "gaussian")) throw new InvalidOperationException($"image.threshold.adaptive method '{method}' is unsupported; use mean or gaussian.");
-        if (!double.IsFinite(c)) throw new InvalidOperationException("image.threshold.adaptive c must be finite.");
+        if (method is not ("mean" or "gaussian")) throw new InvalidOperationException($"{nodeType} method '{method}' is unsupported; use mean or gaussian.");
+        if (!double.IsFinite(c)) throw new InvalidOperationException($"{nodeType} c must be finite.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
@@ -581,9 +487,9 @@ public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
             output = PreprocessImageHelpers.ApplyRoiMask(binary, roi, cancellationToken);
 
             var fg = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
-            var diag = CoordinateValidation.Diagnostics(Type, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("autoGray", converted));
+            var diag = CoordinateValidation.Diagnostics(nodeType, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("autoGray", converted));
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeExecutorResult(
+            return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["foregroundRatio"] = VisionValue.Double(fg), ["diagnostics"] = VisionValue.String(diag) },
                 new Dictionary<string, object?>
                 {
@@ -609,17 +515,16 @@ public sealed class AdaptiveThresholdNode : IVisionNodeExecutor
     }
 }
 
-public sealed class OtsuThresholdNode : IVisionNodeExecutor
+internal static class OtsuThresholdCore
 {
-    public string Type => "image.threshold.otsu";
 
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
+        if (node is null) throw new InvalidOperationException(nodeType + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var source = context.RequireImage("image").Mat;
-        if (source.Empty()) throw new InvalidOperationException(Type + " requires a non-empty image.");
+        if (source.Empty()) throw new InvalidOperationException(nodeType + " requires a non-empty image.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
 
@@ -634,9 +539,9 @@ public sealed class OtsuThresholdNode : IVisionNodeExecutor
             output = PreprocessImageHelpers.ApplyRoiMask(binary, roi, cancellationToken);
 
             var fg2 = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
-            var diag2 = CoordinateValidation.Diagnostics(Type, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("autoGray", converted));
+            var diag2 = CoordinateValidation.Diagnostics(nodeType, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("autoGray", converted));
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new NodeExecutorResult(
+            return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
                 {
                     ["image"] = VisionValue.Image(VisionImage.Own(output)),

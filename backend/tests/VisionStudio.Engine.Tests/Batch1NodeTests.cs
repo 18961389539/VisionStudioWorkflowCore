@@ -41,7 +41,8 @@ public sealed class Batch1NodeTests
         var result = await Run(new GrayscaleNode(), Image(gray), """{"mode":"luminance"}""");
         using var output = TakeImage(result);
         Assert.Equal(77, output.At<byte>(4, 4));
-        Assert.Equal("passthrough", result.Summary["mode"]);
+        // 已合并进 image.channel：模式改由 channel 表达，单通道输入原样透传。
+        Assert.Equal("gray", result.Summary["channel"]);
     }
 
     [Fact]
@@ -539,15 +540,21 @@ public sealed class Batch1NodeTests
     {
         string[] expected =
         [
-            "image.grayscale", "image.channel", "image.morphology", "image.filter",
-            "image.threshold", "measure.blobs", "match.template",
+            "image.channel", "image.morphology", "image.filter",
+            "image.threshold", "measure.blobs", "match.template", "text.validate",
             "value.number", "value.arithmetic", "value.range", "logic.boolean"
         ];
         foreach (var type in expected)
             Assert.NotNull(BuiltInNodeCatalog.Items.FirstOrDefault(x => x.Type == type));
         Assert.Equal(11, expected.Distinct().Count());
         // 已合并节点的类型只作为别名执行器存在，不再出现在目录里（见 NodeTypeMigration）。
-        foreach (var merged in new[] { "image.blur.gaussian", "image.blur.median", "image.topHat", "image.bottomHat", "image.morphGradient", "region.fromThreshold", "measure.perpendicularity" })
+        foreach (var merged in new[]
+                 {
+                     "image.blur.gaussian", "image.blur.median", "image.topHat", "image.bottomHat", "image.morphGradient",
+                     "region.fromThreshold", "region.fromColorRange", "measure.perpendicularity",
+                     "image.grayscale", "image.threshold.adaptive", "image.threshold.otsu",
+                     "text.match", "text.regex", "measure.blob"
+                 })
             Assert.Null(BuiltInNodeCatalog.Items.FirstOrDefault(x => x.Type == merged));
     }
 

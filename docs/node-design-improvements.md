@@ -1005,3 +1005,31 @@
 - 其余 6 个“已声明兼容但仍在目录”的节点（`image.grayscale`、`image.threshold.adaptive/otsu`、
   `text.match/regex`、`region.fromColorRange`、`measure.blob`）暂不能物理删除：目标节点的输出端口是子集
   （缺 `foregroundRatio`、`matchLength`、`groupId`、blob 几何等），需要先把缺失输出补进规范节点。
+
+## 第五十三轮：补齐规范节点输出后完成剩余兼容节点合并（2026-10-29）
+
+第五十二轮保留了 6 个“输出端口是子集”的兼容节点。本轮先把缺失输出补进规范节点，再物理合并：
+目录 **249 → 242**，`legacyNodes` 兼容映射随之清空，画布“兼容”徽标与配置页提示一并删除。
+
+| 旧节点 | 合并到 | 先补的能力 |
+| --- | --- | --- |
+| `image.grayscale` | `image.channel`（channel=gray/average/max） | 新增 `weights`（BT.601 / BT.709 / 均值），gray 分支按权重求和 |
+| `image.threshold.adaptive` / `.otsu` | `image.threshold`（mode） | 新增 `foregroundRatio` 输出；`warningCount`/`preview` 保留为可空端口 |
+| `text.match` | `text.validate` | 新增 `mode`/`matchLength` 输出；`mode` 对外仍是 startsWith/endsWith 驼峰取值 |
+| `text.regex` | `text.validate`（mode=regex） | 新增 `matchedLength`/`matchIndex`/`matchCount`/`groupCount` 输出与 `singleline`/`minMatchedLength`/`emptyInputPolicy`/`countMatches` 参数 |
+| `region.fromColorRange` | `region.fromRange`（mode=color） | 端口本就一致，仅补 mode |
+| `measure.blob` | `measure.blobs`（mode=largest） | 新增 `found`/`circularity`/`width`/`height`/`blobs` 输出与 `overlay` 可空端口 |
+
+要点：
+
+- `text.validate` 的正则路径默认 **不统计全部匹配**（`countMatches=false`），避免回溯型 pattern 因为多遍历一次而超时；
+  `text.regex` 兼容路径显式打开，保持旧语义与旧超时行为。
+- 别名执行器（`Nodes/MergedNodeAliases.cs`）继续只做“参数改写 + 转发”，不复制算法；
+  `image.grayscale` 的 `mode→channel` 需要**取值映射**，`NodeTypeMigration` 因此新增 `Remap` 概念。
+- 目录删除按条目边界操作时要注意参数数组里也有 `new(`：本轮误删造成两处语法碎片，已修复；后续建议按“条目起始锚点 + 下一个条目锚点”删除。
+
+### 验证
+
+- Engine 2091 项、Api 447 项全通过；`dotnet build` 0 error。
+- 前端 `tsc -b` 0 error、生产构建通过、1138 项中 1137 通过（唯一失败仍是既有的参数分组守卫）。
+- `legacyNodes.test.ts` 重写为迁移契约测试：14 个旧类型都能映射到目录中存在的类型、参数补齐不覆盖显式值、灰度 mode→channel 映射。

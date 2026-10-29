@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using OpenCvSharp;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Nodes;
@@ -118,14 +118,14 @@ public sealed class BatchQThinNodeTests
             Ctx(new() { ["image"] = Img(image) }),
             Def("measure.blob", """{"minArea":50}"""), CancellationToken.None);
         Assert.True((bool)found.Outputs["found"].Value!);
-        Assert.Contains("measure.blob", (string)found.Outputs["diagnostics"].Value!);
+        Assert.Contains("measure.blobs", (string)found.Outputs["diagnostics"].Value!);
 
         using var empty = new Mat(32, 32, MatType.CV_8UC1, Scalar.All(0));
         var none = await new LargestBlobNode().ExecuteAsync(
             Ctx(new() { ["image"] = Img(empty) }),
             Def("measure.blob", """{"minArea":50}"""), CancellationToken.None);
         Assert.False((bool)none.Outputs["found"].Value!);
-        Assert.Contains("measure.blob", (string)none.Outputs["diagnostics"].Value!);
+        Assert.Contains("measure.blobs", (string)none.Outputs["diagnostics"].Value!);
     }
 
     [Fact]

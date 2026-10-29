@@ -18,8 +18,8 @@ public sealed class NodeExpansionIntegrationTests
             await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "samples", fileName)),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         var registry = new VisionNodeRegistry();
-        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new ImageFilterNode(),
-            new OtsuThresholdNode(), new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode(),
+        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new ChannelExtractNode(), new ImageFilterNode(),
+            new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode(),
             new ThresholdNode(), new ValueNumberNode(), new ValueArithmeticNode(), new DetectionForEachNode(),
             new LoopEndNode(), new DetectionCountNode()];
         foreach (var executor in executors) registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "builtin");
@@ -60,8 +60,9 @@ public sealed class NodeExpansionIntegrationTests
     public async Task PreprocessingAndCounting_ProduceTraceableDisposition(int min, int max, string expected)
     {
         var registry = new VisionNodeRegistry();
-        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new GrayscaleNode(), new ImageFilterNode(),
-            new OtsuThresholdNode(), new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode()];
+        // 灰度/阈值/Otsu 已并入 image.channel 与 image.threshold(mode)，这里按规范节点注册并显式指定模式。
+        IVisionNodeExecutor[] executors = [new SyntheticImageNode(), new ChannelExtractNode(), new ImageFilterNode(),
+            new ThresholdNode(), new MorphologyNode(), new MultiBlobNode(), new ValueRangeNode(), new ResultDispositionNode()];
         foreach (var executor in executors) registry.Register(BuiltInNodeCatalog.Require(executor.Type), executor, "builtin");
         var services = new ServiceCollection();
         services.AddLogging(); services.AddWorkflow(); services.AddWorkflowDSL();
@@ -71,7 +72,9 @@ public sealed class NodeExpansionIntegrationTests
         services.AddSingleton<WorkflowPlanCache>(); services.AddTransient<WorkflowCoreVisionRunner>();
         await using var provider = services.BuildServiceProvider();
         var nodes = executors.Select((executor, i) => new NodeDefinition($"n{i}", executor.Type, null, null,
-            i == 6 ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { min, max })) : null)).ToArray();
+            i == 6 ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(new { min, max }))
+            : i == 3 ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"mode":"otsu"}""")
+            : null)).ToArray();
         var edges = new List<EdgeDefinition>();
         for (var i = 0; i < nodes.Length - 1; i++)
         {

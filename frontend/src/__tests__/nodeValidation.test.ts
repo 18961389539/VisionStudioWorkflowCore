@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
 import { configurationIssues, cropRoiOutsideImageIssue } from '../nodeConfigurationState';
@@ -100,7 +100,7 @@ describe('consistent node validation', () => {
     expect(configurationIssues(arithmetic, { ...makeDefaultParameters(arithmetic), op: 'clamp', clampMin: null }).length).toBeGreaterThan(0);
   });
 
-  it.each(['text.match', 'text.validate'])('uses connected OCR text instead of stale %s fallback parameters', type => {
+  it.each(['text.validate'])('uses connected OCR text instead of stale %s fallback parameters', type => {
     const catalog = item(type);
     const parameters = { ...makeDefaultParameters(catalog), text: 123, expected: false };
     expect(configurationIssues(catalog, parameters, { connectedInputPorts: ['text', 'expected'] })).toEqual([]);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw } from '../catalog';
 import { localizeCatalog } from '../i18n/catalog';
 import { searchTools } from '../toolboxModel';
@@ -7,7 +7,7 @@ import { isParameterVisible, validateParameterValues } from '../validation';
 const catalog = localizeCatalog(fallbackCatalogRaw, 'zh');
 
 describe('merged node entries', () => {
-  it('shows unified toolbox entries while keeping legacy catalog types loadable', () => {
+  it('shows only the canonical entries; merged legacy types no longer exist in the catalog', () => {
     const allTools = searchTools(catalog, '');
     const visibleTypes = allTools.map((item) => item.type);
     expect(visibleTypes).toContain('image.filter');
@@ -25,9 +25,13 @@ describe('merged node entries', () => {
     for (const type of ['image.threshold.adaptive', 'image.threshold.otsu', 'image.grayscale', 'region.fromThreshold', 'region.fromColorRange', 'measure.blob']) {
       expect(visibleTypes).not.toContain(type);
     }
-    expect(catalog.some((item) => item.type === 'text.regex')).toBe(true);
+    // 13 个兼容节点已全部物理合并：目录里不再有旧类型，旧流程靠加载期迁移升级。
+    for (const type of ['text.match', 'text.regex', 'text.validate', 'measure.blob', 'region.fromColorRange']) {
+      if (type === 'text.validate') continue;
+      expect(catalog.some((item) => item.type === type), type).toBe(false);
+    }
     expect(searchTools(catalog, '中值滤波')[0].type).toBe('image.filter');
-    expect(searchTools(catalog, '正则校验')[0].type).toBe('text.validate');
+    expect(searchTools(catalog, '文本校验')[0].type).toBe('text.validate');
     expect(searchTools(catalog, 'Otsu')[0].type).toBe('image.threshold');
     expect(searchTools(catalog, '灰度范围')[0].type).toBe('region.fromRange');
   });

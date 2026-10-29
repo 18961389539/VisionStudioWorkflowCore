@@ -1,4 +1,4 @@
-using JLVisionLib;
+﻿using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
@@ -115,14 +115,13 @@ public sealed class ImageColorConvertNode : IVisionNodeExecutor
     }
 }
 
-public sealed class RegionFromColorRangeNode : IVisionNodeExecutor
+internal static class RegionFromColorRangeCore
 {
-    public string Type => "region.fromColorRange";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
+        if (node is null) throw new InvalidOperationException(nodeType + " requires a node definition.");
         var emptyPolicy = CoordinateValidation.RequireNonEmpty(node.GetString("emptyPolicy", "empty"), "emptyPolicy").ToLowerInvariant();
         if (emptyPolicy is not ("empty" or "fail")) throw new InvalidOperationException("region.fromColorRange emptyPolicy must be empty or fail");
         var (source, scoped) = RegionNodeHelpers.Source(context);
@@ -147,7 +146,7 @@ public sealed class RegionFromColorRangeNode : IVisionNodeExecutor
             foreach (var output in result.Outputs.Values) (output.Value as IDisposable)?.Dispose();
             throw new InvalidOperationException("region.fromColorRange produced no pixels and emptyPolicy=fail.");
         }
-        return ValueTask.FromResult(result with { Summary = new Dictionary<string, object?>(result.Summary) { ["space"] = space, ["emptyPolicy"] = emptyPolicy, ["algorithmBackend"] = "jlvision" } });
+        return (result with { Summary = new Dictionary<string, object?>(result.Summary) { ["space"] = space, ["emptyPolicy"] = emptyPolicy, ["algorithmBackend"] = "jlvision" } });
     }
     private static JlRegion WrappedHue(JlImage image, double min, double max)
     {

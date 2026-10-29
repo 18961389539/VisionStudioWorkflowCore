@@ -1,4 +1,4 @@
-using JLVisionLib;
+﻿using JLVisionLib;
 using OpenCvSharp;
 using VisionStudio.Engine.Algorithms;
 using VisionStudio.Engine.Camera;
@@ -80,7 +80,7 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
 {
     public string Type => "region.fromRange";
 
-    public async ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
+    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -100,8 +100,8 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
             throw new InvalidOperationException("region.fromRange image must be at most 16384 per axis.");
         var inner = mode == "gray"
             ? RegionFromThresholdCore.Execute(context, node, Type, cancellationToken)
-            : await new RegionFromColorRangeNode().ExecuteAsync(context, node, cancellationToken).ConfigureAwait(false);
-        return RegionNodeHelpers.Complete(inner, cancellationToken, () =>
+            : RegionFromColorRangeCore.Execute(context, node, Type, cancellationToken);
+        return ValueTask.FromResult(RegionNodeHelpers.Complete(inner, cancellationToken, () =>
         {
             if (!inner.Outputs.TryGetValue("found", out var foundVal))
                 throw new InvalidOperationException("region.fromRange inner result missing found.");
@@ -114,7 +114,7 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
             var outputs = new Dictionary<string, VisionValue>(inner.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
             var summary = new Dictionary<string, object?>(inner.Summary) { ["mode"] = mode, ["emptyPolicy"] = emptyPolicy, ["diagnostics"] = diag };
             return inner with { Outputs = outputs, Summary = summary };
-        });
+        }));
     }
 }
 

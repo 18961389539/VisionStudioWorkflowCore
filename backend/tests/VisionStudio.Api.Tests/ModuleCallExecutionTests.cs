@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using VisionStudio.Api;
 using VisionStudio.Api.Infrastructure;
@@ -95,7 +95,7 @@ public sealed class ModuleCallExecutionTests
         var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("image.synthetic"), new SyntheticImageNode(), "builtin");
         registry.Register(BuiltInNodeCatalog.Require("image.threshold"), new ThresholdNode(), "builtin");
-        registry.Register(BuiltInNodeCatalog.Require("measure.blob"), new LargestBlobNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("measure.blobs"), new MultiBlobNode(), "builtin");
         return registry;
     }
 

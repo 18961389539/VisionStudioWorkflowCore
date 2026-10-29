@@ -36,7 +36,7 @@ public sealed class BatchRaise80Tests
         "measure.parallelism", "output.exportResult", "output.httpRequest", "output.saveImage",
         "region.connectedComponents", "region.fillHoles", "region.fromRoi",
         "robot.currentPose", "robot.executeTarget", "robot.guidance2d", "robot.j4TcpCompensation",
-        "text.match", "text.regex", "text.validate",
+        "text.validate", "measure.blobs",
         "value.number"
     ];
 

@@ -1,4 +1,4 @@
-using VisionStudio.Abstractions;
+﻿using VisionStudio.Abstractions;
 using VisionStudio.Engine;
 
 namespace VisionStudio.Engine.Tests;
@@ -23,7 +23,6 @@ public sealed class NodeParameterContractTests
     [InlineData("measure.blobs", "roi")]
     [InlineData("feature.line", "roi")]
     // 运行时读 ROI 但未声明能力位的节点（能力位待补，契约先如实暴露）。
-    [InlineData("measure.blob", "roi")]
     [InlineData("region.fromRoi", "roi")]
     [InlineData("recognition.ocr", "roi")]
     [InlineData("recognition.barcode", "roi")]

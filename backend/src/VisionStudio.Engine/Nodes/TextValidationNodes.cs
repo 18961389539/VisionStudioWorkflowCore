@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -85,51 +85,11 @@ internal static class TextRegexValidation
     }
 }
 
-public sealed class TextMatchNode : IVisionNodeExecutor
-{
-    public string Type => "text.match";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        cancellationToken.ThrowIfCancellationRequested();
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-
-        cancellationToken.ThrowIfCancellationRequested();
-        if (context is null) throw new ArgumentNullException(nameof(context));
-
-var actual = TextValidationInput.Read(context.TryGetValue("text", out var connectedText) ? connectedText.Require<string>("text") : node.GetString("text", ""), node);
-        var expected = TextValidationInput.Read(context.TryGetValue("expected", out var value) ? value.Require<string>("expected") : node.GetString("expected", ""), node);
-        var mode = node.GetString("mode", "equals").Trim().ToLowerInvariant() switch
-        {
-            "equals" => "equals", "contains" => "contains", "startswith" => "startsWith", "endswith" => "endsWith",
-            _ => throw new InvalidOperationException("Text match mode must be equals, contains, startsWith or endsWith.")
-        };
-        var comparison = node.GetBool("ignoreCase", false) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var pass = mode switch
-        {
-            "equals" => actual.Equals(expected, comparison), "contains" => actual.Contains(expected, comparison),
-            "startsWith" => actual.StartsWith(expected, comparison), "endsWith" => actual.EndsWith(expected, comparison),
-            _ => throw new InvalidOperationException("Text match mode must be equals, contains, startsWith or endsWith.")
-        };
-        if (!node.GetBool("allowEmpty", false) && (actual.Length == 0 || expected.Length == 0)) pass = false;
-        var diag = CoordinateValidation.Diagnostics(Type,
-            ("pass", pass), ("mode", mode), ("textLength", actual.Length), ("expectedLength", expected.Length),
-            ("ignoreCase", node.GetBool("ignoreCase", false)), ("allowEmpty", node.GetBool("allowEmpty", false)));
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["pass"] = VisionValue.Boolean(pass), ["text"] = VisionValue.String(actual),
-                ["expected"] = VisionValue.String(expected),
-                ["mode"] = VisionValue.String(mode),
-                ["matchLength"] = VisionValue.Integer(actual.Length),
-                ["diagnostics"] = VisionValue.String(diag)
-            },
-            new Dictionary<string, object?> { ["pass"] = pass, ["mode"] = mode, ["textLength"] = actual.Length, ["expectedLength"] = expected.Length, ["matchLength"] = actual.Length, ["diagnostics"] = diag }));
-    }
-}
-
+/// <summary>
+/// 文本校验（原 text.validate + text.match + text.regex 三合一）。
+/// 非正则模式按 equals/contains/startsWith/endsWith 比较；正则模式额外提供最短匹配长度与空输入策略。
+/// 输出是三个旧节点的并集：pass/text/expected/mode/matchLength/matchedLength/matchIndex/matchCount/groupCount/matchedText/groupsJson。
+/// </summary>
 public sealed class TextValidationNode : IVisionNodeExecutor
 {
     public string Type => "text.validate";
@@ -139,10 +99,9 @@ public sealed class TextValidationNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
 
         if (context is null) throw new ArgumentNullException(nameof(context));
-        cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
 
-var actual = TextValidationInput.Read(context.TryGetValue("text", out var connectedText)
+        var actual = TextValidationInput.Read(context.TryGetValue("text", out var connectedText)
             ? connectedText.Require<string>("text") : node.GetString("text", ""), node);
         var mode = node.GetString("mode", "equals").Trim().ToLowerInvariant();
         var expected = mode == "regex" ? string.Empty : TextValidationInput.Read(context.TryGetValue("expected", out var connectedExpected)
@@ -152,10 +111,29 @@ var actual = TextValidationInput.Read(context.TryGetValue("text", out var connec
         string matchedText;
         string groupsJson;
         int groupCount;
+        var matchedLength = 0;
+        var matchIndex = -1;
+        var matchCount = 0;
+        // 原 text.regex 的两个旋钮：空输入策略与最短匹配长度。默认 allow 保持 text.validate 既有语义。
+        var emptyPolicy = (node.GetString("emptyInputPolicy", "allow") ?? "allow").Trim().ToLowerInvariant();
+        if (emptyPolicy is not ("allow" or "fail" or "nomatch"))
+            throw new InvalidOperationException("text.validate emptyInputPolicy must be allow, fail or nomatch.");
+        var minMatchedLength = node.GetInt("minMatchedLength", 0);
+        if (minMatchedLength < 0) throw new InvalidOperationException("text.validate minMatchedLength must be >= 0.");
         if (mode == "regex")
         {
-            var regex = TextRegexValidation.Execute(actual, node, cancellationToken);
-            pass = regex.Pass;
+            if (actual.Length == 0 && emptyPolicy == "fail")
+                throw new InvalidOperationException("text.validate received empty text and emptyInputPolicy=fail.");
+            // 计数会额外遍历全部匹配，代价高且可能触发回溯超时；只有显式开启才计数（text.regex 兼容路径开启）。
+            var countMatches = node.GetBool("countMatches", false);
+            var regex = TextRegexValidation.Execute(actual, node, cancellationToken, countMatches);
+            matchedLength = regex.MatchedLength;
+            matchIndex = regex.MatchIndex;
+            matchCount = regex.MatchCount;
+            // allow：沿用 TextRegexValidation 的 allowEmpty 语义；nomatch：空输入一律判不合格。
+            pass = regex.Pass
+                && (minMatchedLength <= 0 || matchedLength >= minMatchedLength)
+                && (emptyPolicy != "nomatch" || actual.Length > 0);
             matchedText = regex.MatchedText;
             groupsJson = regex.GroupsJson;
             groupCount = regex.GroupCount;
@@ -173,71 +151,33 @@ var actual = TextValidationInput.Read(context.TryGetValue("text", out var connec
             };
             if (!node.GetBool("allowEmpty", false) && (actual.Length == 0 || expected.Length == 0)) pass = false;
             matchedText = pass ? actual : "";
+            matchedLength = matchedText.Length;
+            matchCount = pass ? 1 : 0;
             groupsJson = "{}";
             groupCount = 0;
         }
 
-        var diag = CoordinateValidation.Diagnostics(Type, ("pass", pass), ("mode", mode), ("textLength", actual.Length),
-            ("expectedLength", expected.Length), ("groupCount", groupCount), ("matchedLength", matchedText.Length));
+        // 对外仍是旧 text.match 的 camelCase 取值（startsWith / endsWith），下游按字符串分支不受影响。
+        var reportedMode = mode switch { "startswith" => "startsWith", "endswith" => "endsWith", _ => mode };
+        var diag = CoordinateValidation.Diagnostics(Type, ("pass", pass), ("mode", reportedMode), ("textLength", actual.Length),
+            ("expectedLength", expected.Length), ("groupCount", groupCount), ("matchedLength", matchedLength),
+            ("matchIndex", matchIndex), ("matchCount", matchCount), ("emptyInputPolicy", emptyPolicy));
         var outputs = new Dictionary<string, VisionValue>
         {
             ["pass"] = VisionValue.Boolean(pass), ["text"] = VisionValue.String(actual), ["expected"] = VisionValue.String(expected),
+            ["mode"] = VisionValue.String(reportedMode),
+            ["matchLength"] = VisionValue.Integer(mode == "regex" ? matchedLength : actual.Length),
+            ["matchedLength"] = VisionValue.Integer(matchedLength),
+            ["matchIndex"] = VisionValue.Integer(matchIndex),
+            ["matchCount"] = VisionValue.Integer(matchCount),
+            ["groupCount"] = VisionValue.Integer(groupCount),
             ["matchedText"] = VisionValue.String(matchedText), ["groupsJson"] = VisionValue.String(groupsJson),
             ["diagnostics"] = VisionValue.String(diag)
         };
         return ValueTask.FromResult(new NodeExecutorResult(outputs, new Dictionary<string, object?>
         {
-            ["pass"] = pass, ["mode"] = mode, ["textLength"] = actual.Length, ["expectedLength"] = expected.Length, ["groupCount"] = groupCount, ["diagnostics"] = diag
+            ["pass"] = pass, ["mode"] = reportedMode, ["textLength"] = actual.Length, ["expectedLength"] = expected.Length,
+            ["groupCount"] = groupCount, ["matchedLength"] = matchedLength, ["matchIndex"] = matchIndex, ["matchCount"] = matchCount, ["diagnostics"] = diag
         }));
-    }
-}
-
-public sealed class TextRegexNode : IVisionNodeExecutor
-{
-    public string Type => "text.regex";
-    public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (context is null) throw new ArgumentNullException(nameof(context));
-        cancellationToken.ThrowIfCancellationRequested();
-        if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
-
-        cancellationToken.ThrowIfCancellationRequested();
-        if (context is null) throw new ArgumentNullException(nameof(context));
-
-var emptyPolicy = node.GetString("emptyInputPolicy", "fail").Trim().ToLowerInvariant();
-        if (emptyPolicy is not ("fail" or "nomatch")) throw new InvalidOperationException("text.regex emptyInputPolicy must be fail or nomatch.");
-        var text = TextValidationInput.Read(context.Require<string>("text"), node);
-        if (text.Length == 0 && emptyPolicy == "fail")
-            throw new InvalidOperationException("text.regex received empty text and emptyInputPolicy=fail.");
-        var pattern = node.GetString("pattern", "[A-Z0-9]+");
-        if (string.IsNullOrWhiteSpace(pattern)) throw new InvalidOperationException("text.regex pattern must be non-empty.");
-        var minMatchedLength = node.GetInt("minMatchedLength", 0);
-        if (minMatchedLength < 0) throw new InvalidOperationException("text.regex minMatchedLength must be >= 0.");
-        var result = TextRegexValidation.Execute(text, node, cancellationToken, countMatches: true);
-        var effectivePass = text.Length > 0 && result.Pass && (minMatchedLength <= 0 || result.MatchedLength >= minMatchedLength);
-        var diag = CoordinateValidation.Diagnostics(Type,
-            ("pass", effectivePass), ("rawPass", result.Pass), ("fullMatch", result.FullMatch), ("textLength", text.Length),
-            ("patternLength", pattern.Length), ("groupCount", result.GroupCount),
-            ("matchedLength", result.MatchedLength), ("matchIndex", result.MatchIndex), ("matchCount", result.MatchCount), ("minMatchedLength", minMatchedLength), ("timeoutMs", node.GetInt("timeoutMs", 100)),
-            ("ignoreCase", node.GetBool("ignoreCase", false)), ("emptyInputPolicy", emptyPolicy));
-        return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue>
-            {
-                ["pass"] = VisionValue.Boolean(effectivePass),
-                ["matchedText"] = VisionValue.String(result.MatchedText),
-                ["matchedLength"] = VisionValue.Integer(result.MatchedLength),
-                ["matchIndex"] = VisionValue.Integer(result.MatchIndex),
-                ["matchCount"] = VisionValue.Integer(result.MatchCount),
-                ["groupsJson"] = VisionValue.String(result.GroupsJson),
-                ["groupCount"] = VisionValue.Integer(result.GroupCount),
-                ["diagnostics"] = VisionValue.String(diag)
-            },
-            new Dictionary<string, object?>
-            {
-                ["pass"] = effectivePass, ["fullMatch"] = result.FullMatch, ["textLength"] = text.Length, ["matchedLength"] = result.MatchedLength, ["matchIndex"] = result.MatchIndex, ["matchCount"] = result.MatchCount, ["minMatchedLength"] = minMatchedLength,
-                ["groupCount"] = result.GroupCount, ["diagnostics"] = diag
-            }));
     }
 }

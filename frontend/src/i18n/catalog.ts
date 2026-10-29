@@ -1894,9 +1894,9 @@ const descriptions: Record<string, string> = {
   'image.illuminationNormalize': '局部均值估计背景，按背景下限保护除法，再计算灰度÷背景×目标灰度。窗口应大于待检特征；输出裁剪到 0–255。不能替代真实明暗场参考图校正。',
   'image.sharpen': '将输入转为 8 位灰度，按 原图+强度×（原图−局部均值）锐化，输出裁剪到 0–255。强度为 0 时保留灰度像素；锐化也会放大噪声。',
   'image.filter': '图像滤波：高斯抑制一般噪声，中值去除椒盐并较好保边。接线：image → 滤波图，再接边缘、卡尺或匹配。核大小必须为奇数。关键参数：滤波类型、核尺寸、σ（若有）。核过大虽更平滑，但会损失边缘定位与细线对比度。',
-  'image.channel': '从彩色图提取单通道：gray/B/G/R，或 HSV 的 H/S/V，以及平均/最大灰度合成。接线：image → 单通道图，再阈值或测色。彩色通道要求输入为彩色；未知通道名确定失败。选对通道可拉开目标与背景对比；查色相时注意配合饱和度，避免无彩像素干扰。',
+  'image.channel': '从彩色图提取单通道：gray/B/G/R，或 HSV 的 H/S/V，以及平均/最大灰度合成。gray/luminance 还能选亮度权重（BT.601 原生转换，BT.709/均值按通道加权）。接线：image → 单通道图，再阈值或测色。彩色通道要求输入为彩色；未知通道名确定失败。选对通道可拉开目标与背景对比；查色相时注意配合饱和度，避免无彩像素干扰。',
   'image.grayscale': '彩色转单通道灰度；输入已是单通道则直通不变。接线：彩色 image → 灰度图，常作为阈值、直方图、匹配、卡尺的前置。模式参数会严格校验；diagnostics 带输入/输出通道与尺寸，便于排查通道数不符。',
-  'image.threshold': '阈值分割，支持手动、局部自适应与 Otsu。接线：image → 8 位单通道二值图；所有模式均将彩色转灰，16 位无符号输入按 1/257 缩放；手动与 Otsu 另输出所用阈值数值。关键参数：mode、高低阈或自适应窗口。光照两极时 Otsu 可能把目标并进背景；可再接形态学或 region 清理。',
+  'image.threshold': '阈值分割，支持手动、局部自适应与 Otsu。接线：image → 8 位单通道二值图；所有模式均将彩色转灰，16 位无符号输入按 1/257 缩放；手动与 Otsu 另输出所用阈值数值，并统一输出前景占比。关键参数：mode、高低阈或自适应窗口。光照两极时 Otsu 可能把目标并进背景；可再接形态学或 region 清理。',
   'image.morphology': '图像形态学：二值清理用腐蚀/膨胀/开/闭；灰度特征用白帽、黑帽与形态学梯度。接线：image → 处理后图像。灰度类运算会先转灰，结构元素为矩形奇数核。关键参数：operation、核宽高、迭代次数。开运算去小亮噪，闭运算填小暗孔；白帽提细小亮缺陷。核或迭代过大易粘连目标或抹掉细节，请按特征尺寸选择。',
   'text.validate': '可选普通文本比较或正则校验。接入的文本与期望文本优先于备用参数；正则模式可输出匹配文本和捕获分组 JSON，并带超时限制。',
   'text.match': '校验 OCR 或条码字符串，支持相等、包含、前缀和后缀。文本与期望值接线优先于参数，支持首尾空白处理和不依赖系统语言的大小写比较。默认任一文本为空即不通过。',
@@ -2379,6 +2379,7 @@ const parameterDescriptions: Record<string, string> = {
   'image.threshold.c': '从局部阈值减去的修正值：未反转时，增大后通常保留更多亮前景；反转时相反。',
   'image.threshold.method': '均值适合一般场景；高斯按窗口中心加权，适合局部亮度变化更明显的图像。',
   'image.channel.channel': '灰度为 BT.601 亮度；通道均值或最大值适用于自定义灰度；B/G/R 和 H/S/V 用于按颜色分量检查。',
+  'image.channel.weights': '灰度的亮度权重：BT.601 用原生转换，BT.709 与均值按通道加权求和。',
   'measure.blobs.mode': '所有斑点模式支持面积、圆度筛选及排序；最大斑点模式只返回面积最大的目标。',
   'image.acquire.cameraId': '要取图的相机 ID（如 virtual-1），可在“设备 → 相机”面板查看可用相机。',
   'image.acquire.frameMode': '取图模式：最新帧直接复用最近一帧；下一帧会等待新图像，适合触发采集。',
@@ -3232,6 +3233,10 @@ const parameterDescriptions: Record<string, string> = {
   'text.validate.pattern': 'mode=regex 时使用的正则表达式。',
   'text.validate.fullMatch': '要求正则匹配整个字符串。',
   'text.validate.ignoreCase': '为真时忽略大小写进行比较。',
+  'text.validate.singleline': '启用 Singleline 模式，让「.」也匹配换行。',
+  'text.validate.minMatchedLength': '仅当匹配文本长度不小于该值才通过对齐；0 关闭。',
+  'text.validate.emptyInputPolicy': '正则模式下的空输入处理：允许按原样校验、直接报错，或判定为不匹配。',
+  'text.validate.countMatches': '额外遍历全部匹配以给出精确 matchCount；回溯型正则会因此更容易触发超时。',
   'text.validate.trim': '比较前去除首尾空白。',
   'text.validate.allowEmpty': '为真时允许空实际文本通过。',
   'text.validate.timeoutMs': '操作超时（毫秒）。',
@@ -3932,6 +3937,7 @@ Object.assign(parameterDescriptions, {
  *  由 image.filter / image.morphology / region.fromRange / measure.parallelism 承接，这里补新增文案。 */
 Object.assign(nodeParameterLabels, {
   'measure.parallelism': { Relation: '评价关系' },
+  'text.validate': { 'Count Every Match': '统计全部匹配' },
   // 补齐 localizeCatalog 守卫早已报缺、与本次合并不相关的参数译名。
   'defect.heatmap': { 'Canvas Width': '画布宽度', 'Canvas Height': '画布高度' },
   'defect.edgeDefect': { 'Canvas Width': '画布宽度', 'Canvas Height': '画布高度' },
@@ -3942,6 +3948,12 @@ Object.assign(nodeParameterLabels, {
 } as Record<string, Record<string, string>>);
 
 Object.assign(nodeOptionLabels, {
+  'text.validate': {
+    'Allow (validate as-is)': '允许（按原样校验）',
+    'Fail the node': '空输入报错',
+    'No match': '空输入判不合格'
+  },
+  'image.channel': { 'BT.601': 'BT.601 亮度', 'BT.709': 'BT.709 亮度', Average: '通道均值' },
   'measure.parallelism': {
     'Parallel (angle error from 0°)': '平行（相对 0° 的角度误差）',
     'Perpendicular (angle error from 90°)': '垂直（相对 90° 的角度误差）'

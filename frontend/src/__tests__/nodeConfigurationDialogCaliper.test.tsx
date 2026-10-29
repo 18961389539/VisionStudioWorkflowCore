@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 卡尺几何拟合与输入引导域（原 describe 上半段） —— 从 nodeConfigurationDialog.test.tsx 拆分（2026-10-23，测试并行化）。
  */
 import './nodeConfigurationDialogHarness';
@@ -584,7 +584,7 @@ describe('caliper geometry input guidance', () => {
   it('traces crop-mask guidance through pixel-coordinate-preserving image processing', () => {
     const lineCatalog = fallbackCatalog.find(item => item.type === 'measure.caliperLine')!;
     const cropCatalog = fallbackCatalog.find(item => item.type === 'image.crop')!;
-    const grayscaleCatalog = fallbackCatalog.find(item => item.type === 'image.grayscale')!;
+    const grayscaleCatalog = fallbackCatalog.find(item => item.type === 'image.channel')!;
     const lineNode: Node = { id: 'line', position: { x: 0, y: 0 }, data: {
       typeKey: lineCatalog.type, label: '卡尺找线', inputs: lineCatalog.inputs, parameters: {}
     } };

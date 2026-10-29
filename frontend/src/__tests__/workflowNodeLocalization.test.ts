@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw } from '../catalog';
 import { localizeCatalog } from '../i18n/catalog';
 
@@ -9,7 +9,7 @@ import { localizeCatalog } from '../i18n/catalog';
  */
 const targets = [
   'coordinate.pose', 'coordinate.point', 'flow.if', 'logic.boolean', 'value.arithmetic',
-  'collection.detections.sort', 'image.grayscale', 'device.waitTag', 'match.template', 'value.range'
+  'collection.detections.sort', 'image.channel', 'device.waitTag', 'match.template', 'value.range'
 ];
 
 const han = /[\u4e00-\u9fff]/;

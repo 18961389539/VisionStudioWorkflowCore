@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -17,7 +17,8 @@ public sealed class ColorTextApiTests(VisionStudioApiFactory factory) : IClassFi
     {
         var catalog = await _client.GetFromJsonAsync<JsonElement>("/api/catalog");
         var registry = factory.Services.GetRequiredService<VisionNodeRegistry>();
-        Assert.Equal(9, ColorTextCatalog.Items.Count);
+        // region.fromColorRange / text.match / text.regex 已并入 region.fromRange 与 text.validate，本目录 9 → 6。
+        Assert.Equal(6, ColorTextCatalog.Items.Count);
         foreach (var item in ColorTextCatalog.Items)
         {
             var actual = Assert.Single(catalog.EnumerateArray(), entry => entry.GetProperty("type").GetString() == item.Type);
@@ -79,7 +80,7 @@ public sealed class ColorTextApiTests(VisionStudioApiFactory factory) : IClassFi
     public async Task EmptyColorSelectionTakesNgBranchWithoutReadingAbsentDeltaE()
     {
         var workflow = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "samples", "color-enhancement-workflow.json")))!;
-        workflow["nodes"]!.AsArray().Single(n => n!["id"]!.GetValue<string>() == "range")!["parameters"] = JsonSerializer.SerializeToNode(new { space = "rgb", min1 = 0, max1 = 0, min2 = 1, max2 = 1, min3 = 0, max3 = 0 });
+        workflow["nodes"]!.AsArray().Single(n => n!["id"]!.GetValue<string>() == "range")!["parameters"] = JsonSerializer.SerializeToNode(new { mode = "color", space = "rgb", min1 = 0, max1 = 0, min2 = 1, max2 = 1, min3 = 0, max3 = 0 });
         var response = await _client.PostAsJsonAsync("/api/run", workflow);
         var diagnosticBody = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, diagnosticBody);

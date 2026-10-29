@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+﻿import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node, NodeConnection, NodeProps } from '@xyflow/react';
 import type { CSSProperties } from 'react';
@@ -232,14 +232,5 @@ describe('canvas node presentation', () => {
     expect(screen.queryByText('OK')).toBeNull();
     expect(screen.getByText('旧结果 ·')).toBeTruthy();
     expect(container.querySelector('.status-ok')).toBeNull();
-  });
-});
-
-describe('legacy node badge', () => {
-  it('marks compatibility-only nodes and leaves current nodes unmarked', () => {
-    const view = render(component({ ...base, typeKey: 'image.grayscale', label: '灰度转换' } as typeof base));
-    expect(screen.getByText('兼容')).toBeTruthy();
-    view.rerender(component({ ...base, typeKey: 'image.channel', label: '灰度与通道提取' } as typeof base));
-    expect(screen.queryByText('兼容')).toBeNull();
   });
 });

@@ -221,7 +221,7 @@ public sealed class BatchRaise71ScoreFloorTests
         var pass = await new TextRegexNode().ExecuteAsync(Ctx(new() { ["text"] = VisionValue.String("ABC-12") }),
             Def("text.regex", """{"pattern":"^[A-Z]+-\\d+$","fullMatch":true}"""), CancellationToken.None);
         Assert.True(pass.Outputs["pass"].Require<bool>("pass"));
-        Assert.Contains("text.regex", pass.Outputs["diagnostics"].Require<string>("diagnostics"));
+        Assert.Contains("text.validate", pass.Outputs["diagnostics"].Require<string>("diagnostics"));
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await new TextRegexNode().ExecuteAsync(Ctx(new() { ["text"] = VisionValue.String("x") }),
                 Def("text.regex", """{"pattern":""}"""), CancellationToken.None));
