@@ -46,4 +46,26 @@ describe('toolbox shortcuts and discovery', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onAddNode).toHaveBeenCalledWith('image.threshold', undefined);
   });
+
+  it('shows a maturity badge only for preview and experimental nodes', () => {
+    const withMaturity: NodeCatalogItem[] = [
+      { type: 'measure.thread', displayName: '螺纹测量', category: '测量', inputs: [], outputs: [], parameters: [], description: '轮廓法螺纹测量。', maturity: 'Preview' },
+      { type: 'inference.obb', displayName: '旋转框检测', category: '推理', inputs: [], outputs: [], parameters: [], description: '旋转框。', maturity: 'Experimental' },
+      { type: 'image.synthetic', displayName: '生成测试图像', category: '图像采集', inputs: [], outputs: [], parameters: [], description: '生成测试图。' }
+    ];
+
+    render(<Toolbox catalog={withMaturity} recentTypes={[]} onAddNode={vi.fn()} />);
+
+    const preview = screen.getByRole('button', { name: '螺纹测量' });
+    const experimental = screen.getByRole('button', { name: '旋转框检测' });
+    const stable = screen.getByRole('button', { name: '生成测试图像' });
+
+    expect(within(preview).getByText('预览').getAttribute('data-maturity')).toBe('preview');
+    expect(within(experimental).getByText('实验').getAttribute('data-maturity')).toBe('experimental');
+    // Stable 是缺省值，不画徽标——否则 90% 的条目都会带一个没有信息量的标签。
+    expect(within(stable).queryByText('预览')).toBeNull();
+    expect(within(stable).queryByText('实验')).toBeNull();
+    // 徽标必须带悬停说明，讲清"为什么降级"。
+    expect(within(preview).getByText('预览').getAttribute('title')).toContain('适用范围');
+  });
 });

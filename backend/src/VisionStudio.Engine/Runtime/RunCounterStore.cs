@@ -37,14 +37,70 @@ public sealed class CounterState
     }
 }
 
+/// <summary>一个计数器的可持久化快照（作用域 + 计数器 ID + 四个计数值）。</summary>
+public sealed record RunCounterSnapshot(
+    string Scope,
+    string CounterId,
+    long Count,
+    long Total,
+    long Pass,
+    long Fail);
+
 /// <summary>进程内实现：不落盘，重启即清零。需要跨重启保留时由宿主替换实现。</summary>
 public sealed class InMemoryRunCounterStore : IRunCounterStore
 {
-    private readonly ConcurrentDictionary<string, CounterState> _states = new(StringComparer.Ordinal);
+    private sealed record Entry(string Scope, string CounterId, CounterState State);
+
+    private readonly ConcurrentDictionary<string, Entry> _states = new(StringComparer.Ordinal);
 
     public CounterState GetOrAdd(string scope, string counterId)
-        => _states.GetOrAdd($"{scope}\u001f{counterId}", _ => new CounterState());
+        => _states.GetOrAdd($"{scope}\u001f{counterId}", _ => new Entry(scope, counterId, new CounterState())).State;
 
     /// <summary>清空全部计数器（宿主重启流程/切换配方时使用）。</summary>
     public void Clear() => _states.Clear();
+
+    /// <summary>
+    /// 取全部计数器的稳定快照（2026-10-29）。每个状态在各自的锁内读取，保证
+    /// "Count 与 Pass/Fail 来自同一次累加"，不会读到半更新的一行。
+    /// 顺序按 Scope/CounterId 排序，方便持久化时做内容比较去抖。
+    /// </summary>
+    public IReadOnlyList<RunCounterSnapshot> Snapshot()
+    {
+        var snapshots = new List<RunCounterSnapshot>(_states.Count);
+        foreach (var entry in _states.Values)
+        {
+            lock (entry.State)
+            {
+                snapshots.Add(new RunCounterSnapshot(entry.Scope, entry.CounterId,
+                    entry.State.Count, entry.State.Total, entry.State.Pass, entry.State.Fail));
+            }
+        }
+        snapshots.Sort(static (left, right) =>
+        {
+            var scope = string.CompareOrdinal(left.Scope, right.Scope);
+            return scope != 0 ? scope : string.CompareOrdinal(left.CounterId, right.CounterId);
+        });
+        return snapshots;
+    }
+
+    /// <summary>
+    /// 恢复快照。**只应在启动阶段调用**：它会覆盖同名计数器的当前值，
+    /// 运行期调用会把正在累加的班次统计冲掉。
+    /// </summary>
+    public void Restore(IEnumerable<RunCounterSnapshot> snapshots)
+    {
+        ArgumentNullException.ThrowIfNull(snapshots);
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.Scope) || string.IsNullOrWhiteSpace(snapshot.CounterId)) continue;
+            var state = GetOrAdd(snapshot.Scope, snapshot.CounterId);
+            lock (state)
+            {
+                state.Count = snapshot.Count;
+                state.Total = snapshot.Total;
+                state.Pass = snapshot.Pass;
+                state.Fail = snapshot.Fail;
+            }
+        }
+    }
 }

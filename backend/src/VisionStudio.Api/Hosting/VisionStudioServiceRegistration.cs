@@ -210,9 +210,12 @@ public static class VisionStudioServiceRegistration
         // 结果落库：output.database 节点通过 IResultRecordStore 写 result_records 表（migration 23）。
         services.AddSingleton<IResultRecordStore, SqliteResultRecordStore>();
 
-        // 跨轮计数：value.counter 通过 IRunCounterStore 记住 total/pass/fail（进程内，重启清零）。
-        // 注册为单例，否则每次解析执行器都会得到一份新状态，"连续 NG"永远停在 1。
-        services.AddSingleton<IRunCounterStore, InMemoryRunCounterStore>();
+        // 跨轮计数：value.counter 通过 IRunCounterStore 记住 total/pass/fail。
+        // 单例是硬要求，否则每次解析执行器都会得到一份新状态，"连续 NG"永远停在 1。
+        // 2026-10-29：进程内状态由 RunCounterPersistence 每 5s 落盘到 data/runtime/counters.json，
+        // 并在启动时恢复；节点侧不再有 static 兜底（没注册就显式报错）。
+        services.AddSingleton<InMemoryRunCounterStore>();
+        services.AddSingleton<IRunCounterStore>(provider => provider.GetRequiredService<InMemoryRunCounterStore>());
         services.AddSingleton<LegacyStorageMigrationService>();
         // F03：失败锁持久化到数据根——重启后仍保留，直到受控恢复入口（或人工）完成核对后解除；
         // 纯内存的旧实现重启即丢锁，半恢复的主机会在多实例资产不一致的状态下放行写入。
@@ -373,6 +376,8 @@ public static class VisionStudioServiceRegistration
         services.AddHostedService<ProductionRuntimeHostedService>();
         services.AddHostedService<TraceRetentionHostedService>();
         services.AddHostedService<StorageCapacityHostedService>();
+        // 跨轮计数落盘：启动即恢复，之后每 5s 有变化才写（停机补写一次）。
+        services.AddHostedService<RunCounterPersistence>();
 
         return services;
     }

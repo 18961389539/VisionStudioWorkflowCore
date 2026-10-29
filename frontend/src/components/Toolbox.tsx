@@ -5,6 +5,7 @@ import { compatiblePorts, nodePresentation, searchTools, type PortRecommendation
 import { useI18n } from '../i18n/provider';
 import { STORAGE_KEYS, readStoredJson, writeStoredJson } from '../storage';
 import { portDisplayName } from '../i18n/catalog';
+import { maturityLabel, maturityLevel, maturityTitle } from '../nodeMaturity';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
 
@@ -153,6 +154,7 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
   const renderItem = (item: NodeCatalogItem) => {
     const favorite = favorites.includes(item.type);
     const active = item.type === activeType;
+    const maturity = maturityLevel(item);
     const purpose = (item.description || text('添加后配置参数并连接到流程。', 'Add, configure and connect to the workflow.')).trim().split(/[。！？]|\.(?:\s|$)/)[0];
     return <div key={item.type} className={`toolbox-item${active ? ' active' : ''}`} data-tool-active={active}
       style={{ '--node-accent': nodePresentation(item.type).color } as CSSProperties}
@@ -166,6 +168,8 @@ export default function Toolbox({ catalog, recentTypes, onAddNode, connection, o
         <NodeCategoryIcon type={item.type} /><span className="toolbox-item-copy"><span className="toolbox-item-name"><Highlight text={item.displayName} query={query} /></span>
           {(keyword || connection) && <small className="toolbox-item-purpose">{purpose}</small>}
         </span>
+        {maturity !== 'stable' && <span className={`maturity-badge maturity-${maturity}`} data-maturity={maturity}
+          title={maturityTitle(maturity, lang)}>{maturityLabel(maturity, lang)}</span>}
       </button>
       <button type="button" className={`toolbox-action${favorite ? ' favorited' : ''}`} aria-label={text(`${favorite ? '取消收藏' : '收藏'} ${item.displayName}`, `${favorite ? 'Unfavorite' : 'Favorite'} ${item.displayName}`)}
         aria-pressed={favorite} title={text(favorite ? '取消收藏' : '收藏', favorite ? 'Unfavorite' : 'Favorite')}

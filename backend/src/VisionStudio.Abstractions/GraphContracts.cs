@@ -224,6 +224,27 @@ public static class NodeActionContract
 /// </summary>
 public sealed record NodeResourceDeclaration(string Kind, string Parameter);
 
+/// <summary>
+/// 节点成熟度：披露"验证到什么程度"，不是"能不能用"。
+///
+/// 之所以要这个字段：目录此前对所有节点一视同仁，工程师无法从界面分辨
+/// "有行为基线、文档无保留"（Stable）与"只有目录契约、算法靠现场试"（Experimental）。
+/// 分级口径（新增节点必须自证）：
+/// - <see cref="Stable"/>：有行为级测试（断言数值/几何，不是只跑通），且文档没有适用性保留；
+/// - <see cref="Preview"/>：有行为基线，但文档写明适用范围——近似算法、只支持子集、
+///   不能用于合规判定、依赖模型/外部数据等；
+/// - <see cref="Experimental"/>：没有行为基线（新节点、或核心算法委托给外部原生库），
+///   现场使用前必须自行验证。
+///
+/// 该字段只做披露，不改变执行语义：Experimental 节点照样能加进流程、能跑。
+/// </summary>
+public enum NodeMaturity
+{
+    Stable = 0,
+    Preview = 1,
+    Experimental = 2
+}
+
 public sealed record NodeCatalogItem(
     string Type,
     string DisplayName,
@@ -256,7 +277,13 @@ public sealed record NodeCatalogItem(
     /// <summary>
     /// ROI 输入与图像输入的绑定（ROI 帧校验用）。null = 未声明：不校验该 ROI 输入。
     /// </summary>
-    IReadOnlyList<NodeRoiImageBinding>? RoiImageBindings = null)
+    IReadOnlyList<NodeRoiImageBinding>? RoiImageBindings = null,
+    /// <summary>
+    /// 节点成熟度声明（见 <see cref="NodeMaturity"/>）。Stable 是默认值且不写入 JSON——
+    /// 目录里绝大多数节点因此保持原有的序列化形状与哈希，只有明确降级的条目才出现该字段。
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    NodeMaturity Maturity = NodeMaturity.Stable)
 {
     /// <summary>该目录是否给出了显式动作声明（与"未声明、走兼容回退"区分）。</summary>
     public bool DeclaresActions => Actions is not null;

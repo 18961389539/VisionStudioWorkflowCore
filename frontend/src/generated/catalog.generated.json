@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "8a5afc81a16214ef37e294d2407d8e9e6fe2169289ea2c81afdd9429c4dea902",
+  "hash": "cbdbf23df93671e0c28a2533de41c4e4f90ab80ca74ffa2b0829f42443b70172",
   "items": [
     {
       "type": "image.acquire",
@@ -9327,6 +9327,7 @@
           "min": 0,
           "max": 100000000,
           "step": 0.5,
+          "group": "Size",
           "description": "Drop defects smaller than this. Also the cheapest noise gate, but it is the one that hurts: a real scratch can be 4 px². Prefer the contrast gate first."
         },
         {
@@ -9337,6 +9338,7 @@
           "min": 0,
           "max": 1000000000,
           "step": 1,
+          "group": "Size",
           "description": "Drop defects larger than this. 0 disables. Use it to reject whole-region blobs caused by an exposure change, which are never real defects."
         },
         {
@@ -9347,6 +9349,7 @@
           "min": 0,
           "max": 1000,
           "step": 0.1,
+          "group": "Shape",
           "description": "Reject shapes whose long/short side ratio exceeds this. 0 disables. Line-shaped false positives (edges of the part, tooling shadows) usually sit above 8."
         },
         {
@@ -9357,6 +9360,7 @@
           "min": 0,
           "max": 1,
           "step": 0.01,
+          "group": "Shape",
           "description": "Reject shapes below this 4*pi*area/perimeter^2 value. 0 disables. Use it to keep only compact dirt specks and drop thin edge artifacts."
         },
         {
@@ -9367,6 +9371,7 @@
           "min": 0,
           "max": 1000000,
           "step": 1,
+          "group": "Contrast",
           "description": "Reject defects whose intensity range inside the bounding box is below this. Requires the image port; 0 disables. This is the single most effective false-positive gate, because tooling shadows are real edges with zero local range."
         },
         {
@@ -9377,6 +9382,7 @@
           "min": 0,
           "max": 4096,
           "step": 1,
+          "group": "Edge",
           "description": "Reject defects whose centre lies within this distance of the canvas border. 0 disables. Edge-of-image artifacts (vignetting, interpolation, part clamping) dominate the false-positive count in most cells."
         },
         {
@@ -9387,6 +9393,7 @@
           "min": 0,
           "max": 32768,
           "step": 1,
+          "group": "Edge",
           "description": "Canvas width used for the edge margin. 0 takes it from the image port, or from the detection bounding box when no image is connected."
         },
         {
@@ -9397,6 +9404,7 @@
           "min": 0,
           "max": 32768,
           "step": 1,
+          "group": "Edge",
           "description": "Canvas height used for the edge margin. 0 takes it from the image port."
         },
         {
@@ -9407,6 +9415,7 @@
           "min": 0,
           "max": 10000,
           "step": 1,
+          "group": "Limit",
           "description": "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image."
         }
       ],
@@ -12929,6 +12938,7 @@
           "min": 1,
           "max": 255,
           "step": 1,
+          "group": "Detection",
           "description": "Lower hysteresis threshold used to build the edge map that the contours are traced from."
         },
         {
@@ -12939,6 +12949,7 @@
           "min": 1,
           "max": 255,
           "step": 1,
+          "group": "Detection",
           "description": "Upper hysteresis threshold; must be >= Canny Low."
         },
         {
@@ -12949,6 +12960,7 @@
           "min": 1,
           "max": 100000000,
           "step": 1,
+          "group": "Size",
           "description": "Reject ellipses whose area is smaller than this; the cheapest way to drop edge noise."
         },
         {
@@ -12959,6 +12971,7 @@
           "min": 1,
           "max": 1000000000,
           "step": 1,
+          "group": "Size",
           "description": "Reject ellipses larger than this. Set to the image area to disable."
         },
         {
@@ -12969,6 +12982,7 @@
           "min": 1,
           "max": 100,
           "step": 0.05,
+          "group": "Shape",
           "description": "Minor/major axis ratio floor. 1 only accepts near-circles; lower it to accept flattened ellipses."
         },
         {
@@ -12979,6 +12993,7 @@
           "min": 1,
           "max": 100,
           "step": 0.05,
+          "group": "Shape",
           "description": "Minor/major axis ratio ceiling. Keep below 1 unless the inspection explicitly allows round features, because a circle also fits an ellipse."
         },
         {
@@ -12989,6 +13004,7 @@
           "min": 10,
           "max": 360,
           "step": 5,
+          "group": "Shape",
           "description": "Angular coverage of the supporting contour. Partially occluded holes still pass at 200..300; anything below this is usually a straight edge faking an ellipse."
         },
         {
@@ -12999,6 +13015,7 @@
           "min": 0,
           "max": 1000,
           "step": 0.1,
+          "group": "Shape",
           "description": "Reject fits whose radial RMS residual exceeds this. 0 disables the gate. Typical clean edges land below 0.5 px."
         },
         {
@@ -13009,6 +13026,7 @@
           "min": 1,
           "max": 200,
           "step": 1,
+          "group": "Limits",
           "description": "Maximum number of returned ellipses, strongest support first."
         },
         {
@@ -13019,6 +13037,7 @@
           "min": 5,
           "max": 100000,
           "step": 1,
+          "group": "Limits",
           "description": "Minimum contour points backing one ellipse; OpenCV needs 5, but 20+ is what actually separates a real ellipse from a noisy arc."
         },
         {
@@ -13472,6 +13491,7 @@
           "min": 0.1,
           "max": 100,
           "step": 0.1,
+          "group": "Detection",
           "description": "Gaussian pre-smoothing, in pixels. Should be about half the ridge width; larger sigma merges nearby ridges into one and loses thin scratches."
         },
         {
@@ -13482,6 +13502,7 @@
           "min": 0,
           "max": 1000000000,
           "step": 0.5,
+          "group": "Detection",
           "description": "Lower hysteresis threshold on the ridge response. Lower it for faint scratches and expect more false segments."
         },
         {
@@ -13492,6 +13513,7 @@
           "min": 0,
           "max": 1000000000,
           "step": 0.5,
+          "group": "Detection",
           "description": "Upper hysteresis threshold; must be >= Low. Only segments anchored above High survive."
         },
         {
@@ -13513,6 +13535,7 @@
               "value": "both"
             }
           ],
+          "group": "Detection",
           "description": "Which side the ridge sits on. 'both' costs two extraction passes and doubles the candidates."
         },
         {
@@ -13534,6 +13557,7 @@
               "value": "gaussian"
             }
           ],
+          "group": "Model",
           "description": "Profile model used to localise the centre line. bar-shaped suits machined grooves and printed lines; parabolic/gaussian suit soft edges such as welds and scratches."
         },
         {
@@ -13541,6 +13565,7 @@
           "label": "Extract Width",
           "type": "boolean",
           "defaultValue": true,
+          "group": "Model",
           "description": "Also return the local ridge width per point. Needed for thickness checks; turn it off when only the path matters, because width estimation adds work."
         },
         {
@@ -13548,6 +13573,7 @@
           "label": "Complete Junctions",
           "type": "boolean",
           "defaultValue": true,
+          "group": "Model",
           "description": "Bridge ridges across crossings so a grid does not break into isolated stubs."
         },
         {
@@ -13558,6 +13584,7 @@
           "min": 1,
           "max": 1000000,
           "step": 1,
+          "group": "Limits",
           "description": "Drop extracted segments shorter than this; short segments are almost always noise around a junction."
         },
         {
@@ -22109,6 +22136,7 @@
               "value": "lmeds"
             }
           ],
+          "group": "Estimator",
           "description": "RANSAC rejects outliers before solving; least-squares uses every point and is only safe on clean correspondences; LMEDS tolerates up to 50% gross outliers but has no guarantee on the threshold."
         },
         {
@@ -22119,6 +22147,7 @@
           "min": 0.1,
           "max": 100,
           "step": 0.1,
+          "group": "Estimator",
           "description": "A correspondence counts as an inlier when its reprojection lands within this distance. Should be about twice the point localisation noise, not the feature size."
         },
         {
@@ -22129,6 +22158,7 @@
           "min": 50,
           "max": 20000,
           "step": 50,
+          "group": "Estimator",
           "description": "RANSAC sampling budget. 2000 is plenty for a 4-point model with 50% inliers."
         },
         {
@@ -22139,6 +22169,7 @@
           "min": 0.5,
           "max": 0.9999,
           "step": 0.0005,
+          "group": "Estimator",
           "description": "Target probability that RANSAC found the correct model; stops early once reached."
         },
         {
@@ -22149,6 +22180,7 @@
           "min": 4,
           "max": 100000,
           "step": 1,
+          "group": "Gates",
           "description": "Reject the homography when fewer points survive. Four is the mathematical minimum and is almost never enough in practice; 8..12 is a sane floor."
         },
         {
@@ -22156,6 +22188,7 @@
           "label": "Warp Image",
           "type": "boolean",
           "defaultValue": false,
+          "group": "Output",
           "description": "Also resample the input image through the homography. Needs the image port connected; costs one full-frame warp."
         },
         {
@@ -22166,6 +22199,7 @@
           "min": 0,
           "max": 16384,
           "step": 1,
+          "group": "Output",
           "description": "Canvas width for the warped image. 0 uses the input image width."
         },
         {
@@ -22176,6 +22210,7 @@
           "min": 0,
           "max": 16384,
           "step": 1,
+          "group": "Output",
           "description": "Canvas height for the warped image. 0 uses the input image height."
         }
       ],
@@ -22295,6 +22330,7 @@
           "label": "Object Points (JSON)",
           "type": "text",
           "defaultValue": "[[0,0,0],[100,0,0],[100,60,0],[0,60,0]]",
+          "group": "Geometry",
           "description": "World coordinates of the correspondences, in the same order as imagePoints: [[x,y,z],...]. Keep them on one plane unless the solver is given depth variation; a planar target with a non-planar solver is the most common source of a mirrored pose."
         },
         {
@@ -22302,6 +22338,7 @@
           "label": "Camera Matrix (JSON)",
           "type": "text",
           "defaultValue": "[1000,0,640,0,1000,360,0,0,1]",
+          "group": "Geometry",
           "description": "3x3 intrinsics in row-major order: [fx,0,cx, 0,fy,cy, 0,0,1]. Take it from calibration.cameraIntrinsics; a guessed focal length gives a pose that is self-consistent but metrically wrong."
         },
         {
@@ -22309,6 +22346,7 @@
           "label": "Distortion (JSON)",
           "type": "text",
           "defaultValue": "[]",
+          "group": "Geometry",
           "description": "OpenCV distortion coefficients [k1,k2,p1,p2,k3,...]. Empty means undistorted input. If the image was already corrected, leave this empty instead of applying it twice."
         },
         {
@@ -22330,6 +22368,7 @@
               "value": "ap3p"
             }
           ],
+          "group": "Solver",
           "description": "IPPE exploits planarity and is the best choice for flat targets; iterative is the safe general default; AP3P is minimal but unstable on near-collinear points."
         },
         {
@@ -22337,6 +22376,7 @@
           "label": "Use Extrinsic Guess",
           "type": "boolean",
           "defaultValue": false,
+          "group": "Solver",
           "description": "Seed the solver with rvec/tvec from the parameters below instead of a fresh guess. Only useful when tracking a target across frames; ignored by SQPnP."
         },
         {
@@ -22344,6 +22384,7 @@
           "label": "Guess rvec (JSON)",
           "type": "text",
           "defaultValue": "[0,0,0]",
+          "group": "Solver",
           "description": "Initial rotation vector for useExtrinsicGuess, in radians."
         },
         {
@@ -22351,6 +22392,7 @@
           "label": "Guess tvec (JSON)",
           "type": "text",
           "defaultValue": "[0,0,1000]",
+          "group": "Solver",
           "description": "Initial translation for useExtrinsicGuess, in the object unit."
         },
         {
@@ -22358,6 +22400,7 @@
           "label": "Object Unit",
           "type": "text",
           "defaultValue": "mm",
+          "group": "Geometry",
           "description": "Unit of objectPointsJson and of the reported x/y/z. Intrinsics are unit-agnostic, so the pose comes back in whatever unit the object points use."
         },
         {
@@ -22365,6 +22408,7 @@
           "label": "Object Frame",
           "type": "text",
           "defaultValue": "object",
+          "group": "Frames",
           "description": "Frame name stamped on the produced Transform3D source side."
         },
         {
@@ -22372,6 +22416,7 @@
           "label": "Camera Frame",
           "type": "text",
           "defaultValue": "camera",
+          "group": "Frames",
           "description": "Frame name stamped on the produced Transform3D target side."
         },
         {
@@ -22382,6 +22427,7 @@
           "min": 0,
           "max": 1000,
           "step": 0.1,
+          "group": "Gates",
           "description": "Quality gate: fail when the reprojection RMS exceeds this. 0 disables it. A clean planar target usually lands below 0.5 px; 2 px usually means a wrong correspondence order."
         }
       ],
@@ -24817,6 +24863,7 @@
               "value": "similarity"
             }
           ],
+          "group": "Fit",
           "description": "rigid is the metrology default: the part cannot grow or shrink, so scale must stay 1. similarity also solves a uniform scale, useful for thermal drift and film/print inspection, but it hides true size errors."
         },
         {
@@ -24827,6 +24874,7 @@
           "min": 0,
           "max": 0.45,
           "step": 0.01,
+          "group": "Fit",
           "description": "Share of worst correspondences dropped each iteration (trimmed ICP). 0.1 tolerates burrs and partial occlusion; 0 disables trimming and is only safe on complete, clean contours."
         },
         {
@@ -24837,6 +24885,7 @@
           "min": 1,
           "max": 200,
           "step": 1,
+          "group": "Fit",
           "description": "ICP iteration budget. Convergence is usually reached in 5..15 iterations on industrial contours."
         },
         {
@@ -24847,6 +24896,7 @@
           "min": 1E-09,
           "max": 10,
           "step": 0.0001,
+          "group": "Fit",
           "description": "Stop when both the incremental rotation and the incremental translation fall below this value. Smaller than the measurement resolution is pointless."
         },
         {
@@ -24857,6 +24907,7 @@
           "min": 60,
           "max": 1500,
           "step": 20,
+          "group": "Data",
           "description": "Both contours are thinned to at most this many points before matching. Cost grows with the square of this number: 600 keeps a 40-iteration fit in the tens of milliseconds."
         },
         {
@@ -24867,6 +24918,7 @@
           "min": -180,
           "max": 180,
           "step": 0.5,
+          "group": "Initial Alignment",
           "description": "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on."
         },
         {
@@ -24874,6 +24926,7 @@
           "label": "Auto Initial Rotation",
           "type": "boolean",
           "defaultValue": true,
+          "group": "Initial Alignment",
           "description": "Coarse-search a full turn in 30 deg steps before refining, and start the ICP from the best candidate. Costs one extra pass over a thinned point set and removes the most common failure: a valid part that aligns to the wrong pose because the caller did not know the angle."
         },
         {
@@ -24881,6 +24934,7 @@
           "label": "Closed Reference",
           "type": "boolean",
           "defaultValue": true,
+          "group": "Data",
           "description": "Treat the reference polyline as a closed loop (last point connects back to the first). Turn off for open profiles such as a machined edge that does not wrap around."
         }
       ],

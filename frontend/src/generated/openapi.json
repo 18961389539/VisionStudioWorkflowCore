@@ -6637,6 +6637,72 @@
           }
         }
       }
+    },
+    "/api/scripts/validate": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/scripts/complete": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/scripts/format": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptFormatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9480,7 +9546,8 @@
         "enum": [
           "DeviceWrite",
           "RobotCommand",
-          "CameraTrigger"
+          "CameraTrigger",
+          "ExternalCall"
         ]
       },
       "NodeCatalogItem": {
@@ -9597,6 +9664,9 @@
             "items": {
               "$ref": "#/components/schemas/NodeRoiImageBinding"
             }
+          },
+          "maturity": {
+            "$ref": "#/components/schemas/NodeMaturity"
           },
           "declaresActions": {
             "type": "boolean"
@@ -9733,6 +9803,14 @@
           "TransformTarget",
           "InputFrame"
         ]
+      },
+      "NodeMaturity": {
+        "enum": [
+          "Stable",
+          "Preview",
+          "Experimental"
+        ],
+        "default": "Stable"
       },
       "NodeOutputFrameRule": {
         "required": [
@@ -11768,6 +11846,58 @@
           }
         }
       },
+      "ScriptCompletionRequest": {
+        "required": [
+          "source",
+          "offset",
+          "ports"
+        ],
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "offset": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "ports": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ScriptFormatRequest": {
+        "required": [
+          "source"
+        ],
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "ScriptValidateRequest": {
+        "required": [
+          "source"
+        ],
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          }
+        }
+      },
       "StartPluginBenchmarkRequest": {
         "required": [
           "datasetId",
@@ -12410,7 +12540,9 @@
           "DomainImage",
           "Transform3D",
           "CoordinatePoint3D",
-          "MetrologyResults"
+          "MetrologyResults",
+          "NumberList",
+          "PointList"
         ]
       },
       "VisionExecutionMode": {

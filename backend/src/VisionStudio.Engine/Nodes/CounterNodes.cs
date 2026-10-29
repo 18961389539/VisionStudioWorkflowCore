@@ -23,7 +23,16 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
 {
     public string Type => "value.counter";
 
-    private static readonly InMemoryRunCounterStore Default = new();
+    /// <summary>
+    /// 状态存储必须由宿主注入（2026-10-29 修复）。此前这里有一个 <c>static Default</c> 兜底：
+    /// 忘注册时节点照样能跑，但计数器落在进程级静态实例里——不同工作流互相串号、重启后静默清零，
+    /// 现场只表现为"良率/连续 NG 数对不上"，没有任何报错可查。现在改为显式失败：
+    /// 没有存储就说明宿主装配不完整，宁可停机也不产生"看起来对"的假数据。
+    /// </summary>
+    private IRunCounterStore Store => store ?? throw new InvalidOperationException(
+        "value.counter requires an IRunCounterStore: register it in DI " +
+        "(services.AddSingleton<IRunCounterStore, InMemoryRunCounterStore>()) or construct the node with a store. " +
+        "Running without one would reset counters on every restart and share them across workflows.");
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(
         NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -31,6 +40,9 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
+
+        // 先确认宿主装配完整，否则参数写错时抛出的校验异常会把"没注册计数器存储"这个根因挡住。
+        _ = Store;
 
         var counterId = node.GetString("counterId", "counter").Trim();
         if (counterId.Length is < 1 or > 64)
@@ -52,7 +64,7 @@ public sealed class ValueCounterNode(IRunCounterStore? store = null) : IVisionNo
         var scopeKey = scopeMode == "run"
             ? context.RunId ?? context.WorkflowScope ?? "local"
             : context.WorkflowScope ?? "local";
-        var state = (store ?? Default).GetOrAdd(scopeKey, counterId);
+        var state = Store.GetOrAdd(scopeKey, counterId);
 
         long count;
         long total;

@@ -193,7 +193,7 @@ internal static class P0CompletionCatalog
                 new("resetOnFail", "Reset On Fail", "boolean", false, Group: "Reset",
                     Description: "Clear the counter when the pass input is false, then count this execution. Use it for a consecutive-OK or no-fault streak."),
             ],
-            "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is process-local: restarting the host clears it. Deterministic=false because the result depends on execution history.",
+            "Cross-run counter with yield statistics. Wire: optional pass + reset -> count/total/passCount/failCount/rate. Reset is evaluated before incrementing, so the part that triggers the reset counts as the first item, not the zeroth. State lives in the host counter store keyed by workflow (default) or run, is thread-safe for parallel branches, and is snapshotted to data/runtime/counters.json every 5s so shift totals survive a restart; the node itself requires the store to be registered and fails fast when it is missing. Deterministic=false because the result depends on execution history.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false),
             Actions: [])
     ];

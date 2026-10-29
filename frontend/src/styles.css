@@ -219,6 +219,12 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .metric-help { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .metric-help:focus-visible { outline: 1px solid var(--vs-text-brand); outline-offset: 3px; }
 .node-icon-badge { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 28%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--node-accent, var(--vs-text-brand)) 11%, transparent); color: var(--node-accent, var(--vs-text-brand)); }
+/* 节点成熟度徽标（2026-10-29）：Stable 不渲染，只在预览/实验节点上提示"验证到什么程度"。
+   放到工具箱条目右侧与配置对话框标题栏，颜色跟随主题 warn/danger 变量，暗色主题自动适配。 */
+.maturity-badge { flex: none; padding: 0 5px; border-radius: 999px; border: 1px solid currentColor; font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: .02em; cursor: help; white-space: nowrap; }
+.maturity-preview { color: var(--vs-warn-text); background: var(--vs-warn-bg); }
+.maturity-experimental { color: var(--vs-text-danger); background: color-mix(in srgb, var(--vs-text-danger) 12%, transparent); }
+.node-configuration-title .maturity-badge { margin-left: 8px; vertical-align: 1px; }
 .node-category-icon { width: 16px; height: 16px; flex: none; }
 .toolbox-item mark { background: var(--vs-warn-bg); color: var(--vs-warn-text); border-radius: 2px; }
 .toolbox-action, .toolbox-close { flex: none; width: 24px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--vs-text-4); font: inherit; font-size: 17px; cursor: pointer; }

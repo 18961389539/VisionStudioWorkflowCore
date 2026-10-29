@@ -91,6 +91,9 @@ export type NodeTransformFrameDeclaration = {
   templatePort?: string;
 };
 
+/** 节点成熟度（后端 enum 字符串）。目录里 Stable 不写该字段，缺省一律按 Stable 处理。 */
+export type NodeMaturity = 'Stable' | 'Preview' | 'Experimental';
+
 export type NodeCatalogItem = {
   type: string;
   displayName: string;
@@ -109,6 +112,8 @@ export type NodeCatalogItem = {
   outputFrames?: NodeOutputFrameRule[] | null;
   /** ROI 输入绑定的图像输入端口（ROI 帧校验用）。 */
   roiImageBindings?: { roiPort: string; imagePort: string }[] | null;
+  /** 节点成熟度：Stable 不写入 JSON，缺省即 Stable。见 src/nodeMaturity.ts。 */
+  maturity?: NodeMaturity | null;
 };
 
 export type VisionValueSnapshot = {
