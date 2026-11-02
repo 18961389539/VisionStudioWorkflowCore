@@ -50,16 +50,24 @@ internal static class P1CompletionCatalog
             Actions: []),
 
         new("image.fuse", "Fuse Frames", "Preprocess",
-            [Exec, new("image1", VisionDataType.Image), new("image2", VisionDataType.Image),
+            [Exec,
+             new("image1", VisionDataType.Image, Required: false) { RequiredWhen = new("sourceMode", ["images"]) },
+             new("image2", VisionDataType.Image, Required: false) { RequiredWhen = new("sourceMode", ["images"]) },
              new("image3", VisionDataType.Image, Required: false), new("image4", VisionDataType.Image, Required: false),
              new("image5", VisionDataType.Image, Required: false), new("image6", VisionDataType.Image, Required: false),
-             new("image7", VisionDataType.Image, Required: false), new("image8", VisionDataType.Image, Required: false)],
+             new("image7", VisionDataType.Image, Required: false), new("image8", VisionDataType.Image, Required: false),
+             new("frameSet", VisionDataType.FrameSet, Required: false) { RequiredWhen = new("sourceMode", ["frameSet"]) }],
             [
                 new("image", VisionDataType.Image), new("width", VisionDataType.Integer),
                 new("height", VisionDataType.Integer), new("channels", VisionDataType.Integer),
                 new("inputCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
             ],
             [
+                new("sourceMode", "Input Source", "select", "images", Group: "Fusion", Options:
+                [
+                    new("Image ports (image1..image8)", "images"),
+                    new("Synchronized FrameSet", "frameSet")
+                ], Description: "images reads image1..image8. frameSet reads every camera image of a camera.syncCapture FrameSet in camera-id order, so a multi-camera stack needs one wire instead of eight; the two sources are mutually exclusive."),
                 new("mode", "Fusion Mode", "select", "mean", Group: "Fusion", Options:
                 [
                     new("Mean (random noise / sqrt(N))", "mean"),
@@ -70,7 +78,7 @@ internal static class P1CompletionCatalog
                 new("maxPixels", "Maximum Input Pixels", "number", 16000000, 1000, 200000000, 1000000, Group: "Limits",
                     Description: "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."),
             ],
-            "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time. For synchronized multi-camera frames use frameset.image first.",
+            "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image, or sourceMode=frameSet + frameSet (synchronized capture) -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 

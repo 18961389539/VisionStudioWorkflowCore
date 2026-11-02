@@ -1345,6 +1345,22 @@ export type DiagnosticsSummary = {
   staleProviders?: string[];
 };
 
+/**
+ * 跨轮计数器落盘状态（GET /api/diagnostics/run-counters）。
+ *
+ * `degraded` 为真表示计数仍在内存累加、但磁盘副本已落后——重启后
+ * "本班次良率 / 连续 NG"会倒退，这是现场最容易被误判成"视觉算错"的一类问题。
+ */
+export type RunCounterPersistenceStatus = {
+  snapshotPath: string;
+  counterCount: number;
+  /** 最近一次成功写盘时间；从未成功写过为 null */
+  lastWriteAt: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+  degraded: boolean;
+};
+
 export type MediaLibraryStatus = {
   root: string;
   collectionCount: number;

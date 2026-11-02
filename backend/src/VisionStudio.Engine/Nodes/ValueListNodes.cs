@@ -153,7 +153,8 @@ public sealed class StatisticsNode : IVisionNodeExecutor
         };
         var enableLimits = node.GetBool("enableLimits", false);
         var lsl = node.GetDouble("lsl", 0);
-        var usl = node.GetDouble("usl", 0);
+        // 与目录默认值一致（USL=1）：兜底 0 会让只写了 lsl 的旧节点在 LSL < USL 校验上直接失败。
+        var usl = node.GetDouble("usl", 1);
         if (enableLimits)
         {
             if (!double.IsFinite(lsl) || !double.IsFinite(usl))

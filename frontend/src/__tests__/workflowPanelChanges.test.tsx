@@ -64,7 +64,13 @@ describe('模块编辑与载入', () => {
   it('模块编辑归属按文档代次绑定，切换其它文档后不能误存为模块版本', async () => {
     const { change } = mount('module', false);
     fireEvent.click(await screen.findByRole('button', { name: '在设计器中打开模块内部' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '将设计器内容另存为新版本' })).toBeEnabled());
+    // 超时放宽到 5s：coverage 插桩（v8 逐语句计数）会把这段 Drawer + 异步载入拖慢数倍，
+    // 默认 1s 在 `npm run test:coverage` 下会稳定超时（普通 vitest run 则能过），
+    // 表现为"只在门禁里红"的假失败。等待的仍是同一个状态跃迁，没有放松断言。
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: '将设计器内容另存为新版本' })).toBeEnabled(),
+      { timeout: 5000 }
+    );
     change({ ...workflow, id: 'another-document' }, 2);
     expect(screen.getByRole('button', { name: '将设计器内容另存为新版本' })).toBeDisabled();
   });

@@ -38,7 +38,7 @@ internal static class JlVisionOperatorCatalog
             "gray erosion/dilation/opening/closing/top-hat/bottom-hat/skeleton/inside, channel compose/append/split and domain helpers, plus mean/deviation/equalisation/topographic/noise. " +
             "Gray morphology uses image2 as the structuring element image and, when image2 is absent, generates a flat size x size structuring element; operators that need a second image use the connected image2 or fall back to the image itself, and an empty connected image2 fails. " +
             "Pixel-type errors surface as a node error naming the operator and the parameters it consumes, never as a silent no-op.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false), Frames: [new(NodeImageFramePolicy.NewSpatialFrame, FrameLabel: "operator spatial frame", Transform: NodeTransformFramePolicy.Spatial, WhenParameter: "operator", WhenValues: ["cropPart", "cropRectangle2", "cropDomainRel", "rotateImage", "zoomImageFactor", "addBorder", "changeFormat"]), new(NodeImageFramePolicy.PreserveInput)]),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true), Frames: [new(NodeImageFramePolicy.NewSpatialFrame, FrameLabel: "operator spatial frame", Transform: NodeTransformFramePolicy.Spatial, WhenParameter: "operator", WhenValues: ["cropPart", "cropRectangle2", "cropDomainRel", "rotateImage", "zoomImageFactor", "addBorder", "changeFormat"]), new(NodeImageFramePolicy.PreserveInput)]),
 
         new("jlvision.regionFeature", "Region Feature Extraction", "Measurement",
             [new("exec", VisionDataType.Control), new("region", VisionDataType.Region), new("image", VisionDataType.Image, Required: false)],
@@ -64,7 +64,7 @@ internal static class JlVisionOperatorCatalog
             "(grayFeatures, areaCenterGray, entropy, fuzzy entropy/perimeter, plane deviation, noise distribution, gray histograms/projections, text line orientation/slant, shape histograms). " +
             "Value outputs the primary scalar; Values is a JSON object with every named component (for example row/column/radius). " +
             "Features that need pixels validate the image input up front instead of failing inside the native call.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.regionOp", "Region Operations", "Region",
             [new("exec", VisionDataType.Control), new("region", VisionDataType.Region), new("region2", VisionDataType.Region, Required: false), new("image", VisionDataType.Image, Required: false)],
@@ -95,7 +95,7 @@ internal static class JlVisionOperatorCatalog
             "gray-driven selection, and region generators (rectangle2/ellipse/circle sector/line/polygon/checker/random/struct element). " +
             "Ergonomics: no hand-drawn structuring element is required; Size drives a square SE, and reference-point operators read Row/Column. " +
             "Region2 and Image inputs are validated before execution, so a missing input fails with an actionable message instead of a native error code.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.geometry", "Geometry Operations", "Geometry",
             [new("exec", VisionDataType.Control)],
@@ -131,7 +131,7 @@ internal static class JlVisionOperatorCatalog
             "Angle outputs are radians; Value is the primary scalar and Values holds every named component (row/column/min/max/phiDeg). " +
             "point/points/count/found describe computed 2D points only (intersection, projection, ellipse point or line centre); parallel lines have no point. inputPoints are debug inputs; componentCount counts named scalar fields. " +
             "This node covers the geometry math that used to be hand-written inside scripts when converting a located pose into robot offsets.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.matrixOp", "Matrix Operations", "Geometry",
             [new("exec", VisionDataType.Control), new("matrixA", VisionDataType.String, Required: false), new("matrixB", VisionDataType.String, Required: false)],
@@ -158,7 +158,7 @@ internal static class JlVisionOperatorCatalog
             "linear solve, symmetric/generalized symmetric eigenvalues, orthogonal decomposition and type decomposition, plus constant matrix creation. " +
             "Value is the element count (or the scalar result for determinant/norm/getValue); Matrix is the result as JSON; Values carries rows/columns. " +
             "Connect a previous matrix output to matrixA/matrixB to compose calculations; connected values override the editable parameters. Matrices are limited to one million elements; expansion operations check the output size before allocation. Heatmaps show the top-left 128x128 cells; plot shows up to 64 normalized debug samples. Full matrix output is retained.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.homMat", "Homogeneous Transform", "Geometry",
             [new("exec", VisionDataType.Control)],
@@ -188,7 +188,7 @@ internal static class JlVisionOperatorCatalog
             "determinant, toAffinePar (sx/sy/phi/theta/tx/ty) and point/pixel transformation. " +
             "Because the affine parameters come straight from hom_mat2d_to_affine_par, the reported 3x3 matches exactly what the native operator applies; " +
             "no matrix JSON parsing is required. Use this node to build the offset that roi.transform or a robot guidance step consumes.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.contourOp", "Contour Operator", "Contour",
             [new("exec", VisionDataType.Control), new("contour", VisionDataType.Contour, Required: false) { RequiredWhen = new("operator", JlContourOperations.All.Where(p => !p.Value.IgnoresInput).Select(p => p.Key).ToArray()) },
@@ -217,7 +217,7 @@ internal static class JlVisionOperatorCatalog
             "shape-based and point-based selection, adjacent/collinear/cocircular union, closed-contour union/difference/intersection, and region intersection. " +
             "Each output XLD object becomes one platform contour with area/perimeter/circularity/bounding box recomputed, so downstream contour.properties and geometry fitting keep working. " +
             "Set operators read contour2 and region intersection reads region; a missing input fails before the native call with a readable message.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.threshold", "Threshold and Region Segmentation", "Preprocess",
             [new("exec", VisionDataType.Control), new("image", VisionDataType.Image), new("image2", VisionDataType.Image, Required: false)],
@@ -244,7 +244,7 @@ internal static class JlVisionOperatorCatalog
             "dynamic threshold against a second image, local maxima/minima and region growing. " +
             "Area and component count are reported so a threshold that silently selects nothing is visible immediately. " +
             "Operators that need a second image fail up front when image2 is missing.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.contourFeature", "Contour Feature Extraction", "Measurement",
             [new("exec", VisionDataType.Control), new("contour", VisionDataType.Contour), new("contour2", VisionDataType.Contour, Required: false) { RequiredWhen = new("feature", JlContourFeatures.All.Where(p => p.Value.NeedsSecond).Select(p => p.Key).ToArray()) }],
@@ -270,7 +270,7 @@ internal static class JlVisionOperatorCatalog
             "and distances to a second contour, a point, a line or a segment. " +
             "XLD features are computed on the contour itself (no region fill), so they stay valid for open or self-touching edges where region statistics would fail. " +
             "Features that need a second contour validate the input before the native call.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false)),
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true)),
 
         new("jlvision.measure1d", "1D Edge Measurement", "Measurement",
             [new("exec", VisionDataType.Control), new("image", VisionDataType.Image)],
@@ -314,6 +314,6 @@ internal static class JlVisionOperatorCatalog
             "Unlike measure.caliper this node goes through the native measure object, which is what enables arc profiles and gray projection. " +
             "Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths (the pair width tuple is empty, so width is dropped instead of faked), " +
             "and TranslateMeasure / GetMeasureParam / ResetFuzzyMeasure corrupt or fail the measure handle, so translateRow/translateColumn are intentionally ignored.",
-            "builtin", new VisionToolCapabilities(EmitsOverlay: false))
+            "builtin", new VisionToolCapabilities(EmitsOverlay: true))
     ];
 }

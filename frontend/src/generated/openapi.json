@@ -831,6 +831,47 @@
         }
       }
     },
+    "/api/diagnostics/run-counters": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCounterPersistenceStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/diagnostics/node-durations": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeDurationStatistic"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/calibration/providers": {
       "get": {
         "tags": [
@@ -9725,6 +9766,88 @@
           }
         }
       },
+      "NodeDurationStatistic": {
+        "required": [
+          "nodeType",
+          "samples",
+          "p50Ms",
+          "p95Ms",
+          "maxMs",
+          "configuredTimeoutMs",
+          "suggestedTimeoutMs",
+          "timeoutCount"
+        ],
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "type": "string"
+          },
+          "samples": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "p50Ms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "p95Ms": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "configuredTimeoutMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "suggestedTimeoutMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "timeoutCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "timeoutTooTight": {
+            "type": "boolean"
+          },
+          "hasTimedOut": {
+            "type": "boolean"
+          }
+        }
+      },
       "NodeExecutionPhase": {
         "enum": [
           "Warmup",
@@ -11562,6 +11685,53 @@
             ],
             "format": "double",
             "default": 0.05
+          }
+        }
+      },
+      "RunCounterPersistenceStatus": {
+        "required": [
+          "snapshotPath",
+          "counterCount",
+          "lastWriteAt",
+          "consecutiveFailures",
+          "lastError"
+        ],
+        "type": "object",
+        "properties": {
+          "snapshotPath": {
+            "type": "string"
+          },
+          "counterCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "lastWriteAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "consecutiveFailures": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "degraded": {
+            "type": "boolean"
           }
         }
       },

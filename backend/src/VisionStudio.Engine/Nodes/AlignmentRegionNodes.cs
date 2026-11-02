@@ -370,15 +370,22 @@ var region = context.Require<VisionRegion>("region");
         if (detections.Length == 0 && emptyPolicy == "fail")
             throw new InvalidOperationException("region.toDetections produced no detections and emptyPolicy=fail.");
         var diag = CoordinateValidation.Diagnostics(Type, ("count", detections.Length), ("sourceCount", properties.Count),
+            ("truncated", properties.Count > detections.Length),
             ("found", detections.Length > 0), ("maxCount", maxCount), ("sortBy", sortBy), ("emptyPolicy", emptyPolicy), ("width", region.Width), ("height", region.Height));
+        // 截断必须可见：maxCount 会静默丢弃多余连通域，调用方需要 truncated 才能把"只有 3 个"和"被裁到 3 个"区分开。
+        var emittedArea = 0d;
+        foreach (var detection in detections) emittedArea += detection.Area;
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue>
         {
             ["detections"] = VisionValue.Detections(detections),
             ["count"] = VisionValue.Integer(detections.Length),
             ["found"] = VisionValue.Boolean(detections.Length > 0),
+            ["emitted"] = VisionValue.Integer(detections.Length),
+            ["truncated"] = VisionValue.Boolean(properties.Count > detections.Length),
+            ["totalArea"] = VisionValue.Double(emittedArea),
             ["diagnostics"] = VisionValue.String(diag)
         },
-            new Dictionary<string, object?> { ["count"] = detections.Length, ["found"] = detections.Length > 0, ["sourceCount"] = properties.Count, ["diagnostics"] = diag }));
+            new Dictionary<string, object?> { ["count"] = detections.Length, ["found"] = detections.Length > 0, ["sourceCount"] = properties.Count, ["truncated"] = properties.Count > detections.Length, ["totalArea"] = emittedArea, ["diagnostics"] = diag }));
     }
 }
 

@@ -1,15 +1,36 @@
-﻿backend/src/VisionStudio.Api/GigENetworkCommissioning.cs(466,80) : warning CA1416
+﻿# 警告指纹基线（scripts/check-warning-baseline.ps1）。
+# 只允许"修复后删除"，或"显式新增并在评审里说明为什么这次不修"。
+# 注意：`check-warning-baseline.ps1 -Update` 会重写本文件并**丢掉这些注释**，优先手工编辑。
+#
+# 2026-10-29（P2 收口批次）：新增下面 12 条。它们全部来自本次未触碰的文件，
+# 在改动前的增量构建里就已存在，属于基线滞后于分析器集合，不是本批次引入的回归。
+# 都是机械可修的（CS0618 GetGenericIndexer→At<T>、OCVS002 循环外缓存 Rows/Cols、
+# CS8625 可选参数显式可空、xUnit2013 Assert.Equal→Assert.Single），
+# 但都要改像素访问与断言语义，留给独立一轮"警告清零"，不要混在功能改动里做。
+backend/src/VisionStudio.Api/GigENetworkCommissioning.cs(466,80) : warning CA1416
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(147,33) : warning SYSLIB0057
 backend/src/VisionStudio.Api/PluginPackageManagement.cs(427,37) : warning SYSLIB0057
 backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs(18,25) : warning CS0108
 backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs(346,54) : warning CS8603
 backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs(393,54) : warning CS8603
+backend/src/VisionStudio.Engine/Nodes/BarcodeQualityNode.cs(222,23) : warning CS0618
+backend/src/VisionStudio.Engine/Nodes/FeatureDetectorNodes.cs(582,37) : warning OCVS002
+backend/src/VisionStudio.Engine/Nodes/FeatureDetectorNodes.cs(583,37) : warning OCVS002
+backend/src/VisionStudio.Engine/Nodes/FeatureGapNodes.cs(86,23) : warning CS0618
+backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(94,23) : warning CS0618
+backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(96,29) : warning OCVS002
+backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(101,33) : warning OCVS002
+backend/src/VisionStudio.Engine/Nodes/MatchingGeometryNodes.cs(532,33) : warning OCVS002
+backend/src/VisionStudio.Engine/Nodes/MergedNodeAliases.cs(200,86) : warning CS8625
 backend/tests/VisionStudio.Api.Tests/PluginPackageManagementTests.cs(112,20) : warning SYSLIB0057
 backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs(66,26) : warning CS8602
 backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(21,20) : warning xUnit2031
 backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(32,21) : warning xUnit2031
 backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(57,25) : warning CS8602
+backend/tests/VisionStudio.Engine.Tests/BatchFeatureDetectorTests.cs(134,29) : warning OCVS002
+backend/tests/VisionStudio.Engine.Tests/BatchFeatureDetectorTests.cs(135,29) : warning OCVS002
 backend/tests/VisionStudio.Engine.Tests/HybridRuntimeTests.cs(40,21) : warning xUnit2031
+backend/tests/VisionStudio.Engine.Tests/P0CompletionNodeTests.cs(50,9) : warning xUnit2013
 backend/tests/VisionStudio.Engine.Tests/ParallelDispositionTests.cs(215,12) : warning xUnit2031
 backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs(18,21) : warning xUnit2031
 backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs(19,21) : warning xUnit2031

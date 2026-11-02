@@ -5,11 +5,17 @@ namespace VisionStudio.Engine;
 /// <summary>Catalog contract for the built-in C# script node (2026-10-27).</summary>
 internal static class CSharpScriptCatalog
 {
-    internal const string DefaultSource =
+    /// <summary>
+    /// 脚本模板。**必须归一化为 LF**：raw string 的换行符跟随源文件检出状态
+    /// （<c>core.autocrlf</c> / <c>.gitattributes</c> 决定），不归一化会让
+    /// <c>catalog.generated.json</c> 的 hash 在不同机器上不同，quality-gate 的
+    /// 目录新鲜度检查随机失败（2026-10-29 实测：提交里是 CRLF，CI 检出是 LF）。
+    /// </summary>
+    internal static readonly string DefaultSource =
         """
         var a = Input.Number("a");
         Output.Number = a * 2;
-        """;
+        """.ReplaceLineEndings("\n");
 
     private static readonly PortDescriptor Exec = new("exec", VisionDataType.Control);
     private static readonly PortDescriptor Next = new("next", VisionDataType.Control);

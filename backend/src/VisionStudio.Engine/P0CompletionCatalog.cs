@@ -137,6 +137,10 @@ internal static class P0CompletionCatalog
                     Description: "Absolute http/https endpoint. A connected url port overrides it, so the address can come from a recipe or a device tag."),
                 new("subject", "Subject", "text", "VisionStudio alarm", Group: "Message",
                     Description: "First line of the notification and the mail subject. Keep it short: the on-call engineer reads the subject on a lock screen."),
+                // 2026-10-29：执行器一直在读这个键（BuildBody 里写进 webhook JSON 的 source 字段），
+                // 但目录从未声明——参数面板看不到、也没法配，属于"能用但不可发现"的漂移。
+                new("source", "Source Tag", "text", string.Empty, Group: "Message",
+                    Description: "Optional tag echoed into the webhook JSON as 'source' so the receiving alarm platform can filter by line, station or product. Webhook channel only; WeCom and SMTP ignore it."),
                 new("message", "Message", "textarea", string.Empty, Group: "Message",
                     Description: "Body text. A connected message port overrides it. Empty body plus a value input still sends the serialized value.")
                     { OverriddenByPorts = ["message"] },

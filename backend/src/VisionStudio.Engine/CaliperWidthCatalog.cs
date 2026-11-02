@@ -12,7 +12,7 @@ internal static class CaliperWidthCatalog
                 new("width", VisionDataType.Double, Required: false), new("point1", VisionDataType.Point2D, Required: false),
                 new("point2", VisionDataType.Point2D, Required: false), new("center", VisionDataType.Point2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false), new("pairCount", VisionDataType.Integer),
-                new("sampleCount", VisionDataType.Integer), new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)],
+                new("sampleCount", VisionDataType.Integer), new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
                 new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -50,7 +50,7 @@ internal static class CaliperWidthCatalog
                 new("widthCv", VisionDataType.Double, Required: false), new("center", VisionDataType.Point2D, Required: false),
                 new("strength", VisionDataType.Double, Required: false), new("caliperCount", VisionDataType.Integer),
                 new("validCount", VisionDataType.Integer), new("calipersJson", VisionDataType.String),
-                new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)],
+                new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
                 new("startY", "Start Y", "number", 240, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start Y in pixels.") { OverriddenByPorts = ["searchLine"] },

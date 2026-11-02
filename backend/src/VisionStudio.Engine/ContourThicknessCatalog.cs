@@ -14,7 +14,7 @@ internal static class ContourThicknessCatalog
                 new("variation", VisionDataType.Double, Required: false), new("thinSampleCount", VisionDataType.Integer, Required: false),
                 new("minInnerPoint", VisionDataType.Point2D, Required: false), new("minOuterPoint", VisionDataType.Point2D, Required: false),
                 new("minLine", VisionDataType.Line2D, Required: false), new("image", VisionDataType.Image, Required: false),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)],
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)],
             [new("innerIndex", "Inner Contour Index", "number", 0, 0, 1999, 1, Group: "Contours", Description: "Zero-based index into the innerContours list; out of range yields found=false."),
                 new("outerIndex", "Outer Contour Index", "number", 0, 0, 1999, 1, Group: "Contours", Description: "Zero-based index into the outerContours list; must be a closed contour in the same pixel frame."),
                 new("measurementMode", "Thickness Measurement Mode", "select", "shortest", Group: "Sampling", Options:

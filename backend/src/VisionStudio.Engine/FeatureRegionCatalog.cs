@@ -16,8 +16,7 @@ public static class FeatureRegionCatalog
     [
         new("measure.grayHistogram", "Gray Histogram and Percentiles", "Measurement",
             [Exec, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false), new("region", VisionDataType.Region, Required: false)],
-            [new("found", VisionDataType.Boolean), new("pixelCount", VisionDataType.Integer), new("binsJson", VisionDataType.String), new("cdfJson", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-             .. new[] { "mean", "stdDev", "minGray", "maxGray", "median", "entropy", "percentileLow", "percentileHigh" }.Select(key => new PortDescriptor(key, VisionDataType.Double, Required: false)), Next],
+            [new("found", VisionDataType.Boolean), new("pixelCount", VisionDataType.Integer), new("binsJson", VisionDataType.String), new("cdfJson", VisionDataType.String), new("diagnostics", VisionDataType.String), .. new[] { "mean", "stdDev", "minGray", "maxGray", "median", "entropy", "percentileLow", "percentileHigh" }.Select(key => new PortDescriptor(key, VisionDataType.Double, Required: false)), Next],
             [new("lowPercent", "Lower Percentile", "number", 5, 0, 100, .1, Description: "Lower percentile (0..100) reported as percentileLow; must be <= highPercent."),
              new("highPercent", "Upper Percentile", "number", 95, 0, 100, .1, Description: "Upper percentile (0..100) reported as percentileHigh.")],
             "Native 256-bin histogram over selected pixels ∩ image domain. Connect exactly one of image or domainImage; optional region restricts further. 8-bit color converts to gray. An empty domain emits found=false, pixelCount=0 and zero bins/CDF; scalar statistics are omitted.", "builtin"),

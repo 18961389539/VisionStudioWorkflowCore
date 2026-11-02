@@ -156,6 +156,64 @@ public sealed class OpenCvExtraNodeTests
     }
 
     [Fact]
+    public async Task Stitch_ReadsAFrameSetInCameraOrderAndRejectsUnknownIds()
+    {
+        using var source = StitchSource();
+        using var leftView = new Mat(source, new Rect(0, 0, 250, 240));
+        using var rightView = new Mat(source, new Rect(50, 0, 250, 240));
+        using var frameSet = new VisionFrameSet("sync-1", "host", 6, true,
+            new Dictionary<string, IVisionImage>
+            {
+                ["cam-right"] = VisionImage.Own(rightView.Clone()),
+                ["cam-left"] = VisionImage.Own(leftView.Clone())
+            },
+            new Dictionary<string, VisionFrameSetFrameInfo>());
+
+        var result = await Run(new ImageStitchNode(), "image.stitch",
+            new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) },
+            """{"sourceMode":"frameSet","cameraOrder":"cam-left,cam-right","mode":"scans","maxInputPixels":1000000}""");
+        using var panorama = result.Outputs["image"].Require<VisionImage>("image");
+        Assert.True(result.Outputs["found"].Require<bool>("found"));
+        Assert.Equal(2L, result.Outputs["inputCount"].Require<long>("inputCount"));
+        Assert.True(panorama.Width >= 280, $"panorama width {panorama.Width} should cover both cameras");
+
+        // 未知相机 id 必须在拼接前失败，并列出可用 id，避免现场只能看到 OpenCV 的失败状态码。
+        var unknown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageStitchNode(), "image.stitch",
+                new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) },
+                """{"sourceMode":"frameSet","cameraOrder":"cam-left,cam-9"}"""));
+        Assert.Contains("cam-9", unknown.Message);
+        Assert.Contains("cam-left", unknown.Message);
+    }
+
+    [Fact]
+    public async Task Stitch_RejectsSingleCameraFrameSetAndMixedSources()
+    {
+        using var source = StitchSource();
+        using var onlyView = new Mat(source, new Rect(0, 0, 120, 120));
+        using var single = new VisionFrameSet("sync-2", "host", 0, true,
+            new Dictionary<string, IVisionImage> { ["cam-1"] = VisionImage.Own(onlyView.Clone()) },
+            new Dictionary<string, VisionFrameSetFrameInfo>());
+
+        var one = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageStitchNode(), "image.stitch",
+                new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(single) },
+                """{"sourceMode":"frameSet"}"""));
+        Assert.Contains("at least two camera images", one.Message);
+
+        using var extra = new Mat(source, new Rect(50, 0, 120, 120)).Clone();
+        var mixed = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageStitchNode(), "image.stitch",
+                new Dictionary<string, VisionValue>
+                {
+                    ["frameSet"] = VisionValue.FrameSet(single),
+                    ["image1"] = VisionValue.Image(VisionImage.Own(extra.Clone()))
+                },
+                """{"sourceMode":"frameSet"}"""));
+        Assert.Contains("ignores image1", mixed.Message);
+    }
+
+    [Fact]
     public async Task Stitch_RejectsSingleImageBudgetAndDepth()
     {
         using var source = StitchSource();

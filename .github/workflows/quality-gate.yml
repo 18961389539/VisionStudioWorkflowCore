@@ -9,7 +9,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     env:
-      MIN_LINE_COVERAGE: '60'
+      # 棘轮：2026-10-29 实测行 83.51% / 分支 62.04%，各取 81 / 60 留约 2 点余量
+      # （原行阈值 60 形同虚设）。与 scripts/quality-gate.ps1 的默认值保持一致，提升后同步上调。
+      MIN_LINE_COVERAGE: '81'
+      MIN_BRANCH_COVERAGE: '60'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

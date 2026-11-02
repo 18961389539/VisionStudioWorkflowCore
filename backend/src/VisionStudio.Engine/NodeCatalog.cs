@@ -18,7 +18,7 @@ public static class BuiltInNodeCatalog
                 new("timestamp", VisionDataType.String),
                 new("cameraId", VisionDataType.String),
                 new("width", VisionDataType.Integer),
-                new("height", VisionDataType.Integer), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
+                new("height", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("cameraId", "Camera ID", "text", "virtual-1", Group: "Camera", Description: "Camera device id to acquire from."),
@@ -63,7 +63,7 @@ public static class BuiltInNodeCatalog
                 new("cameras", VisionDataType.String),
                 new("skewMs", VisionDataType.Double),
                 new("groupId", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -101,7 +101,7 @@ public static class BuiltInNodeCatalog
                 new("deviceTimestampNs", VisionDataType.Integer, Required: false),
                 new("triggerId", VisionDataType.Integer, Required: false),
                 new("cameraId", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [new("cameraId", "Camera ID", "text", "camera-1", Description: "Must match a key in the FrameSet; missing camera or empty image fails."),
@@ -126,7 +126,7 @@ public static class BuiltInNodeCatalog
             "Synthetic Image",
             "Acquisition",
             [],
-            [new("image", VisionDataType.Image), new("width", VisionDataType.Integer), new("height", VisionDataType.Integer), new("channels", VisionDataType.Integer), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("width", VisionDataType.Integer), new("height", VisionDataType.Integer), new("channels", VisionDataType.Integer), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("width", "Width", "number", 1280, 160, 1920, 1, Group: "Pattern", Description: "Generated image width in pixels."),
                 new("height", "Height", "number", 960, 120, 1080, 1, Group: "Pattern", Description: "Generated image height in pixels."),
@@ -157,15 +157,17 @@ public static class BuiltInNodeCatalog
 
                 ],
             "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
-            "builtin"),
+            "builtin",
+            // placementMode=randomEachRun 每次运行都重新采样位置与角度，不能进自动重试（重试会得到另一张图）。
+            new VisionToolCapabilities(Deterministic: false)),
         new(
             "image.threshold",
             "Threshold",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
             [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double, Required: false),
-             new("foregroundRatio", VisionDataType.Double, Required: false), new("preview", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer, Required: false),
-             new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+             new("foregroundRatio", VisionDataType.Double, Required: false), new("warningCount", VisionDataType.Integer, Required: false),
+             new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next],
             [
                 new("mode", "Threshold Mode", "select", "manual", Group: "Mode", Options:
                 [new("Manual", "manual"), new("Adaptive", "adaptive"), new("Otsu", "otsu")], Description: "manual uses Threshold; adaptive uses local mean/Gaussian; otsu picks a global level."),
@@ -188,7 +190,7 @@ public static class BuiltInNodeCatalog
             "Channel Extract",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("channel", "Channel", "select", "gray", Description: "Channel to extract: gray/B/G/R, HSV hue/saturation/value, or average/max gray. Color/HSV channels require a color input; unknown values fail.", Options:
                 [
@@ -214,7 +216,7 @@ public static class BuiltInNodeCatalog
             "Image Filter",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String, Required: false), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("method", "Filter Method", "select", "gaussian", Options:
                 [
@@ -236,7 +238,7 @@ public static class BuiltInNodeCatalog
             "Morphology",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("stdIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String, Required: false), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("meanIntensity", VisionDataType.Double), new("minIntensity", VisionDataType.Double), new("maxIntensity", VisionDataType.Double), new("stdIntensity", VisionDataType.Double), new("nonZeroCount", VisionDataType.Integer), new("diagnostics", VisionDataType.String, Required: false), Next],
             [
                 new("operation", "Operation", "select", "open", Group: "Operation", Options:
                 [
@@ -274,6 +276,8 @@ public static class BuiltInNodeCatalog
             [
                 new("image", VisionDataType.Image),
                 new("count", VisionDataType.Integer),
+                new("inputCount", VisionDataType.Integer),
+                new("truncated", VisionDataType.Boolean),
                 new("detections", VisionDataType.DetectionList),
                 new("x", VisionDataType.Double, Required: false),
                 new("y", VisionDataType.Double, Required: false),
@@ -286,7 +290,7 @@ public static class BuiltInNodeCatalog
                 new("width", VisionDataType.Double, Required: false),
                 new("height", VisionDataType.Double, Required: false),
                 new("blobs", VisionDataType.String, Required: false),
-                new("overlay", VisionDataType.Image, Required: false), new("diagnostics", VisionDataType.String), Next
+                new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("mode", "Blob Mode", "select", "all", Options:
@@ -310,7 +314,7 @@ public static class BuiltInNodeCatalog
                 new("descending", "Descending", "boolean", true, Group: "Sorting", VisibleWhen: new("mode", ["all"]), Description: "Rank largest or highest first; turn off for ascending order.")
             ,
                 ],
-            "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+            "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
@@ -421,7 +425,7 @@ public static class BuiltInNodeCatalog
             "Edge / Canny",
             "Feature",
             [ExecIn, new("image", VisionDataType.Image)],
-            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("chainCount", VisionDataType.Integer), new("longestChain", VisionDataType.Integer), new("chains", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("image", VisionDataType.Image), new("edgeCount", VisionDataType.Integer), new("found", VisionDataType.Boolean), new("chainCount", VisionDataType.Integer), new("longestChain", VisionDataType.Integer), new("chains", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("lowThreshold", "Low Threshold", "number", 50, 0, 255, 1, Unit: "gray", Group: "Edge", Description: "Canny low hysteresis threshold (0..255, <= highThreshold)."),
                 new("highThreshold", "High Threshold", "number", 150, 0, 255, 1, Unit: "gray", Group: "Edge", Description: "Canny high hysteresis threshold (0..255, >= lowThreshold)."),
@@ -447,7 +451,7 @@ public static class BuiltInNodeCatalog
                 new("rmsError", VisionDataType.Double, Required: false),
                 new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
-                new("lines", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
+                new("lines", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("houghThreshold", "Minimum Edge Evidence", "number", 45, 1, 500, 1, Group: "Detection", Description: "Hough accumulator threshold for line votes."),
@@ -480,7 +484,7 @@ public static class BuiltInNodeCatalog
                 new("coverageDeg", VisionDataType.Double, Required: false),
                 new("confidence", VisionDataType.Double, Required: false),
                 new("count", VisionDataType.Integer),
-                new("circles", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
+                new("circles", VisionDataType.String), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("minRadius", "Min Radius", "number", 15, 1, 5000, 1, Unit: "px", Group: "Geometry", Description: "Smallest circle radius to detect, in pixels."),
@@ -510,7 +514,7 @@ public static class BuiltInNodeCatalog
                 new("strength", VisionDataType.Double, Required: false),
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
-                new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
+                new("searchLine", VisionDataType.Line2D), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -557,8 +561,7 @@ public static class BuiltInNodeCatalog
                 new("height", VisionDataType.Double),
                 new("area", VisionDataType.Double),
                 new("aspectRatio", VisionDataType.Double),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-                Next
+                new("diagnostics", VisionDataType.String), Next
             ],
             [new("minArea", "Min Area", "number", 500, 1, 99999999, 10, Unit: "px²", Group: "Contour", Description: "Minimum contour area in px^2; contours below it are ignored and no accepted contour fails deterministically.")],
             "Minimum-area rotated rectangle around the largest accepted contour. Emits rectangle, centre, pose, angle, width/height, contour area, aspect ratio and JSON diagnostics; validates minArea and reports how many external contours were considered.",
@@ -569,7 +572,7 @@ public static class BuiltInNodeCatalog
             "Line Intersection",
             "Geometry",
             [ExecIn, new("lineA", VisionDataType.Line2D), new("lineB", VisionDataType.Line2D)],
-            [new("point", VisionDataType.Point2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("withinSegments", VisionDataType.Boolean), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("point", VisionDataType.Point2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("withinSegments", VisionDataType.Boolean), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [new("parallelTolerance", "Parallel Tolerance", "number", 0.000000001, 0, 0.1, 0.000000001, Group: "Validation", Description: "Minimum |determinant| below which lines are rejected as parallel/coincident instead of returning an unstable point."), new("requireWithinSegments", "Require Within Segments", "boolean", false, Group: "Validation", Description: "When true, reject intersections that lie outside either finite segment; when false, intersect the infinite lines."),
                 ],
             "Intersect two Line2D values with strict parallel/degenerate validation. Reports point, segment membership (withinSegments), inter-line angle and diagnostics; optionally require the crossing inside both finite segments. Parallel or near-parallel lines fail execution.",
@@ -580,7 +583,7 @@ public static class BuiltInNodeCatalog
             "Point Distance",
             "Geometry",
             [ExecIn, new("pointA", VisionDataType.Point2D), new("pointB", VisionDataType.Point2D)],
-            [new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("midX", VisionDataType.Double), new("midY", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("midX", VisionDataType.Double), new("midY", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [new("metric", "Distance Metric", "select", "euclidean", Options: [new("Euclidean", "euclidean"), new("Manhattan", "manhattan")], Description: "Distance metric between the two points."),
                 ],
             "Euclidean or Manhattan distance between two finite Point2D values, with signed dx/dy, midpoint, direction angle and JSON diagnostics. Non-finite inputs are rejected deterministically (no NaN propagation).",
@@ -591,7 +594,7 @@ public static class BuiltInNodeCatalog
             "Line Angle",
             "Geometry",
             [ExecIn, new("lineA", VisionDataType.Line2D), new("lineB", VisionDataType.Line2D)],
-            [new("angle", VisionDataType.Double), new("signedAngleDeg", VisionDataType.Double), new("lineALength", VisionDataType.Double), new("lineBLength", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("degrees", VisionDataType.Double), new("radians", VisionDataType.Double), new("quadrant", VisionDataType.Integer), Next],
+            [new("angle", VisionDataType.Double), new("signedAngleDeg", VisionDataType.Double), new("lineALength", VisionDataType.Double), new("lineBLength", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
             "Acute (0-90 deg) and signed (-180..180 deg) angle between two non-degenerate Line2D values, with both line lengths, parallel/perpendicular flags in JSON diagnostics, and overlay lines for visual debugging.",
@@ -609,7 +612,7 @@ public static class BuiltInNodeCatalog
                 new("pointCount", VisionDataType.Integer),
                 new("worstPairIndex", VisionDataType.Integer),
                 new("residualsJson", VisionDataType.String),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -646,7 +649,7 @@ public static class BuiltInNodeCatalog
             "Transform Point",
             "Coordinate",
             [ExecIn, new("point", VisionDataType.Point2D), new("transform", VisionDataType.Transform2D)],
-            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
             "Map an image-space Point2D through a validated Transform2D into a frame/unit-aware point. Wire: point + transform → point + frame/unit/diagnostics. Rejects non-finite points and singular transforms. Typical after match/register.",
@@ -656,7 +659,7 @@ public static class BuiltInNodeCatalog
             "Transform 3D Point",
             "Coordinate",
             [ExecIn, new("point", VisionDataType.CoordinatePoint3D), new("transform", VisionDataType.Transform3D)],
-            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("magnitude", VisionDataType.Double), new("xyMagnitude", VisionDataType.Double), new("azimuthDeg", VisionDataType.Double), new("elevationDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
             "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
             "builtin"),
@@ -665,7 +668,7 @@ public static class BuiltInNodeCatalog
             "Transform Line",
             "Coordinate",
             [ExecIn, new("line", VisionDataType.Line2D), new("transform", VisionDataType.Transform2D)],
-            [new("line", VisionDataType.CoordinateLine2D), new("length", VisionDataType.Measurement), new("lengthValue", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("line", VisionDataType.CoordinateLine2D), new("length", VisionDataType.Measurement), new("lengthValue", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("minLength", "Min Length (0=off)", "number", 0, 0, 1e9, 0.001, Description: "Optional minimum transformed length gate; 0 disables."),
                 ],
@@ -676,7 +679,7 @@ public static class BuiltInNodeCatalog
             "Transform Pose",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.Pose2D), new("transform", VisionDataType.Transform2D)],
-            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
             "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
@@ -686,7 +689,7 @@ public static class BuiltInNodeCatalog
             "Coordinate Point",
             "Coordinate",
             [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
-            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("x", "X", "number", 20, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the X input is not connected.") { OverriddenByPorts = ["x"] },
                 new("y", "Y", "number", 10, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Used when the Y input is not connected.") { OverriddenByPorts = ["y"] },
@@ -704,7 +707,7 @@ public static class BuiltInNodeCatalog
             [new("point", VisionDataType.CoordinatePoint3D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("z", VisionDataType.Double),
              new("magnitude", VisionDataType.Double), new("xyMagnitude", VisionDataType.Double),
              new("azimuthDeg", VisionDataType.Double), new("elevationDeg", VisionDataType.Double),
-             new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+             new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("x", "X", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "X in the named frame. Optional X input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["x"] },
                 new("y", "Y", "number", 0, -1000000, 1000000, 0.001, Unit: "target", Group: "Point", Description: "Y in the named frame. Optional Y input overrides this constant; must be finite within +/-1e9.") { OverriddenByPorts = ["y"] },
@@ -720,7 +723,7 @@ public static class BuiltInNodeCatalog
             "Coordinate Distance",
             "Coordinate",
             [ExecIn, new("pointA", VisionDataType.CoordinatePoint2D), new("pointB", VisionDataType.CoordinatePoint2D)],
-            [new("measurement", VisionDataType.Measurement), new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("coincident", VisionDataType.Boolean), Next],
+            [new("measurement", VisionDataType.Measurement), new("distance", VisionDataType.Double), new("dx", VisionDataType.Double), new("dy", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
 
                 new("metric", "Distance Metric", "select", "euclidean", Options: [new("Euclidean", "euclidean"), new("Manhattan", "manhattan")], Description: "Distance metric between the two coordinate points; both keep signed dx/dy."),
@@ -732,7 +735,7 @@ public static class BuiltInNodeCatalog
             "Constant Transform",
             "Coordinate",
             [ExecIn],
-            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("angleDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Frames", Description: "Frame the transform maps from; must be non-empty."),
                 new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Frames", Description: "Frame the transform maps to; must be non-empty."),
@@ -752,7 +755,7 @@ public static class BuiltInNodeCatalog
             "Inverse Transform",
             "Coordinate",
             [ExecIn, new("transform", VisionDataType.Transform2D)],
-            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("inputDeterminant", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("inputDeterminant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
 
                 ],
@@ -763,7 +766,7 @@ public static class BuiltInNodeCatalog
             "Compose Transform",
             "Coordinate",
             [ExecIn, new("transformA", VisionDataType.Transform2D), new("transformB", VisionDataType.Transform2D)],
-            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("valid", VisionDataType.Boolean), Next],
+            [new("transform", VisionDataType.Transform2D), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
 
                 new("order", "Compose Order", "select", "outerInner", Options: [new("Outer*Inner", "outerInner"), new("Inner*Outer", "innerOuter")], Description: "Matrix multiply order when composing transforms."),
@@ -775,7 +778,7 @@ public static class BuiltInNodeCatalog
             "Frame Tree",
             "Coordinate",
             [ExecIn],
-            [new("tree", VisionDataType.FrameTree2D), new("transformCount", VisionDataType.Integer), new("frameCount", VisionDataType.Integer), new("frames", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("edgeCount", VisionDataType.Integer), new("valid", VisionDataType.Boolean), Next],
+            [new("tree", VisionDataType.FrameTree2D), new("transformCount", VisionDataType.Integer), new("frameCount", VisionDataType.Integer), new("frames", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("transformsJson", "Transforms JSON", "textarea", "[]",
                     Group: "Frame Tree",
@@ -790,7 +793,7 @@ public static class BuiltInNodeCatalog
             "Resolve Frame Transform",
             "Coordinate",
             [ExecIn, new("tree", VisionDataType.FrameTree2D)],
-            [new("transform", VisionDataType.Transform2D), new("path", VisionDataType.String), new("hopCount", VisionDataType.Integer), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("transform", VisionDataType.Transform2D), new("path", VisionDataType.String), new("hopCount", VisionDataType.Integer), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("sourceFrame", "Source Frame", "text", "Workpiece", Group: "Resolve", Description: "Frame to resolve from; must exist in the frame tree."),
                 new("targetFrame", "Target Frame", "text", "RobotBase", Group: "Resolve", Description: "Frame to resolve to; an unreachable target fails deterministically.")
@@ -804,7 +807,7 @@ public static class BuiltInNodeCatalog
             "Coordinate Pose",
             "Coordinate",
             [ExecIn, new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("thetaDeg", VisionDataType.Double, Required: false), new("tree", VisionDataType.FrameTree2D, Required: false)],
-            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [
                 new("x", "X", "number", 500, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the X input is not connected.") { OverriddenByPorts = ["x"] },
                 new("y", "Y", "number", 200, -1000000, 1000000, 0.001, Group: "Pose", Description: "Used when the Y input is not connected.") { OverriddenByPorts = ["y"] },
@@ -820,7 +823,7 @@ public static class BuiltInNodeCatalog
             "Pose to Transform",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
-            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("transform", VisionDataType.Transform2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("sourceFrame", VisionDataType.String), new("targetFrame", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [new("sourceFrame", "Source Frame", "text", "Tool", Group: "Frames", Description: "Child/tool frame named by the new transform; must differ from the pose frame."),
 
                 ],
@@ -831,7 +834,7 @@ public static class BuiltInNodeCatalog
             "Transform Coordinate Point",
             "Coordinate",
             [ExecIn, new("point", VisionDataType.CoordinatePoint2D), new("transform", VisionDataType.Transform2D)],
-            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("sourceFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("point", VisionDataType.CoordinatePoint2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("sourceFrame", VisionDataType.String), new("determinant", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 ],
             "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
@@ -841,7 +844,7 @@ public static class BuiltInNodeCatalog
             "Transform Coordinate Pose",
             "Coordinate",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D), new("transform", VisionDataType.Transform2D)],
-            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), Next],
+            [new("pose", VisionDataType.CoordinatePose2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("thetaDeg", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), Next],
             [],
             "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
             "builtin"),
@@ -861,7 +864,7 @@ public static class BuiltInNodeCatalog
                 new("timestamp", VisionDataType.String),
                 new("ageMs", VisionDataType.Double),
                 new("isGoodQuality", VisionDataType.Boolean),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -903,7 +906,7 @@ public static class BuiltInNodeCatalog
                 new("timestamp", VisionDataType.String),
                 new("ageMs", VisionDataType.Double),
                 new("isGoodQuality", VisionDataType.Boolean),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -1048,7 +1051,7 @@ public static class BuiltInNodeCatalog
                 new("quality", VisionDataType.String),
                 new("timestamp", VisionDataType.String),
                 new("matched", VisionDataType.Boolean),
-                new("waitMs", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next
+                new("waitMs", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next
             ],
             [
                 new("deviceId", "Device ID", "text", "virtual-modbus-1", Group: "Device", Description: "Device identifier."),
@@ -1091,7 +1094,7 @@ public static class BuiltInNodeCatalog
             "Device",
             [ExecIn, new("pass", VisionDataType.Boolean), new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("r", VisionDataType.Double, Required: false)],
             [new("written", VisionDataType.Boolean), new("pass", VisionDataType.Boolean), new("x", VisionDataType.Double, Required: false), new("y", VisionDataType.Double, Required: false), new("r", VisionDataType.Double, Required: false),
-                new("xWritten", VisionDataType.Boolean), new("yWritten", VisionDataType.Boolean), new("rWritten", VisionDataType.Boolean), new("tagsWritten", VisionDataType.Integer), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+                new("xWritten", VisionDataType.Boolean), new("yWritten", VisionDataType.Boolean), new("rWritten", VisionDataType.Boolean), new("tagsWritten", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next],
             [
                 new("deviceId", "Device ID", "text", "virtual-modbus-1", Group: "Device", Description: "Non-empty device id registered in DeviceManager (max 128 chars)."),
                 new("resultReadyTag", "Result Ready Tag", "text", "resultReady", Group: "Mapping", Description: "Ready/handshake tag written 0 before the payload and 1 after it."),
@@ -1141,7 +1144,7 @@ public static class BuiltInNodeCatalog
                 new("y", VisionDataType.Double),
                 new("thetaDeg", VisionDataType.Double),
                 new("hasError", VisionDataType.Boolean),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -1175,7 +1178,7 @@ public static class BuiltInNodeCatalog
                 new("state", VisionDataType.String),
                 new("traceId", VisionDataType.String),
                 new("attempts", VisionDataType.Integer),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
+                new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer),
                 Next
             ],
             [
@@ -1205,7 +1208,7 @@ public static class BuiltInNodeCatalog
             "Robot Guidance 2D",
             "Robot",
             [ExecIn, new("pose", VisionDataType.CoordinatePose2D)],
-            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer), Next],
+            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer), Next],
             [
                 new("robot", "Robot", "text", "ABB", Group: "Target", Description: "Robot identifier the generated target is intended for."),
                 new("guidanceMode", "Guidance Mode", "select", "EyeToHand", Options: [new("Eye-to-Hand", "EyeToHand"), new("Eye-in-Hand", "EyeInHand"), new("Manual", "Manual")], Group: "Target", Description: "How the input pose is interpreted before offsets are applied."),
@@ -1231,7 +1234,7 @@ public static class BuiltInNodeCatalog
             "J4 / TCP Compensation",
             "Robot",
             [ExecIn, new("target", VisionDataType.RobotTarget2D)],
-            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("eccentricity", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("compensationMode", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer), Next],
+            [new("target", VisionDataType.RobotTarget2D), new("x", VisionDataType.Double), new("y", VisionDataType.Double), new("r", VisionDataType.Double), new("eccentricity", VisionDataType.Double), new("frame", VisionDataType.String), new("unit", VisionDataType.String), new("compensationMode", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("attemptCount", VisionDataType.Integer), Next],
             [
                 new("tcpOffsetX", "TCP Offset X", "number", 0, -1000, 1000, 0.001, Unit: "target unit", Group: "Eccentricity", Description: "TCP offset X from the J4 rotation centre, in target units."),
                 new("tcpOffsetY", "TCP Offset Y", "number", 0, -1000, 1000, 0.001, Unit: "target unit", Group: "Eccentricity", Description: "TCP offset Y from the J4 rotation centre, in target units."),
@@ -1258,7 +1261,7 @@ public static class BuiltInNodeCatalog
             "Number Constant",
             "Value",
             [ExecIn],
-            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), new("isInteger", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("isFinite", VisionDataType.Boolean), new("isZero", VisionDataType.Boolean), new("sign", VisionDataType.Integer), Next],
+            [new("value", VisionDataType.Double), new("integer", VisionDataType.Integer), new("isInteger", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("isFinite", VisionDataType.Boolean), new("isZero", VisionDataType.Boolean), new("sign", VisionDataType.Integer), Next],
             [new("value", "Value", "number", 0, -1000000000, 1000000000, 1, Description: "Finite constant within the signed 64-bit integer range; non-finite values fail deterministically."),
                 new("min", "Minimum (optional)", "number", 0, VisibleWhen: new("enforceBounds", ["true"]), Description: "Optional lower bound; when set with enforceBounds, values below fail."),
                 new("max", "Maximum (optional)", "number", 0, VisibleWhen: new("enforceBounds", ["true"]), Description: "Optional upper bound; when set with enforceBounds, values above fail."),
@@ -1272,7 +1275,7 @@ public static class BuiltInNodeCatalog
             "Arithmetic",
             "Value",
             [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double, Required: false) { RequiredWhen = new("op", ["add", "subtract", "multiply", "divide", "pow", "min", "max"]) }],
-            [new("result", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("isFinite", VisionDataType.Boolean), new("a", VisionDataType.Double), new("b", VisionDataType.Double), new("op", VisionDataType.String), Next],
+            [new("result", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("isFinite", VisionDataType.Boolean), new("a", VisionDataType.Double), new("b", VisionDataType.Double), new("op", VisionDataType.String), Next],
             [
                 new("op", "Operation", "select", "add", Description: "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add.", Options:
                 [
@@ -1299,7 +1302,7 @@ public static class BuiltInNodeCatalog
             "Range Check",
             "Value",
             [ExecIn, new("value", VisionDataType.Double)],
-            [new("pass", VisionDataType.Boolean), new("inside", VisionDataType.Boolean), new("margin", VisionDataType.Double), new("deviation", VisionDataType.Double), new("clamped", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), Next],
+            [new("pass", VisionDataType.Boolean), new("inside", VisionDataType.Boolean), new("margin", VisionDataType.Double), new("deviation", VisionDataType.Double), new("clamped", VisionDataType.Double), new("diagnostics", VisionDataType.String), Next],
             [
                 new("min", "Min", "number", 0, -1000000000, 1000000000, 1, Description: "Inclusive lower bound; reversed bounds are swapped and reported in diagnostics."),
                 new("max", "Max", "number", 100, -1000000000, 1000000000, 1, Description: "Inclusive upper bound; must be finite."),
@@ -1415,7 +1418,7 @@ public static class BuiltInNodeCatalog
             "Boolean Logic",
             "Logic",
             [ExecIn, new("a", VisionDataType.Boolean), new("b", VisionDataType.Boolean, Required: false) { RequiredWhen = new("op", ["and", "or", "xor"]) }],
-            [new("result", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("operationApplied", VisionDataType.String), Next],
+            [new("result", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), new("operationApplied", VisionDataType.String), Next],
             [
                 new("op", "Operation", "select", "and", Description: "Strictly one of and/or/xor/not; NOT uses input a only, unknown operations fail.", Options:
                 [
@@ -1436,7 +1439,7 @@ public static class BuiltInNodeCatalog
             "If",
             "Flow",
             [ExecIn, new("value", VisionDataType.Double), new("previous", VisionDataType.Boolean, Required: false)],
-            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean), new("value", VisionDataType.Double), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false)],
+            [new("true", VisionDataType.Control), new("false", VisionDataType.Control), new("condition", VisionDataType.Boolean), new("value", VisionDataType.Double), new("margin", VisionDataType.Double), new("diagnostics", VisionDataType.String)],
             [
                 new(
                     "operator",
@@ -1473,7 +1476,7 @@ public static class BuiltInNodeCatalog
             "Result / Disposition",
             "Flow",
             [ExecIn, new("pass", VisionDataType.Boolean)],
-            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("warningCount", VisionDataType.Integer), Next],
+            [new("pass", VisionDataType.Boolean), new("disposition", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), Next],
             [new("okLabel", "OK Label", "text", "OK", Description: "Disposition string when pass is true."),
                 new("ngLabel", "NG Label", "text", "NG", Description: "Disposition string when pass is false."),
 
@@ -1486,7 +1489,7 @@ public static class BuiltInNodeCatalog
             "Parallel",
             "Flow",
             [ExecIn],
-            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control), new("branches", VisionDataType.Integer), new("nodeId", VisionDataType.String), new("marker", VisionDataType.String), new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("preview", VisionDataType.Image, Required: false), new("branchCount", VisionDataType.Integer), new("joined", VisionDataType.Boolean), new("elapsedMs", VisionDataType.Double)],
+            [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control), new("branches", VisionDataType.Integer), new("nodeId", VisionDataType.String), new("marker", VisionDataType.String), new("diagnostics", VisionDataType.String), new("elapsedMs", VisionDataType.Double)],
             [
                 ],
             "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
@@ -1528,7 +1531,7 @@ public static class BuiltInNodeCatalog
             "Join",
             "Flow",
             [new("branch1", VisionDataType.Control), new("branch2", VisionDataType.Control)],
-            [Next, new("joined", VisionDataType.Boolean), new("nodeId", VisionDataType.String), new("marker", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer), new("overlay", VisionDataType.Image, Required: false)],
+            [Next, new("joined", VisionDataType.Boolean), new("nodeId", VisionDataType.String), new("marker", VisionDataType.String), new("diagnostics", VisionDataType.String), new("warningCount", VisionDataType.Integer)],
             [],
             "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
             "builtin")
@@ -1536,6 +1539,12 @@ public static class BuiltInNodeCatalog
 
     // Compute-only built-ins explicitly declare absence of device actions, including for Try validation.
     // File-backed template matching stays outside automatic retry because its file can change between attempts.
+    /// <summary>
+    /// 未经 <see cref="OperatorParameterForms"/> / 本地 ROI 参数声明后处理的目录原文。
+    /// 仅供契约测试使用：发布目录必须逐端口等于这份原文（后处理不得改写输出端口）。
+    /// </summary>
+    internal static IReadOnlyList<NodeCatalogItem> RawCatalog => RawItems;
+
     public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems
         .Select(item => item.Type == "match.template"
             ? item with { Capabilities = (item.Capabilities ?? new VisionToolCapabilities()) with { Deterministic = false } }
@@ -1543,7 +1552,6 @@ public static class BuiltInNodeCatalog
                 ? item with { Actions = [] }
                 : item)
         .Select(OperatorParameterForms.Apply)
-        .Select(NodeOutputContracts.Apply)
         .Select(DeclareLocalRoiParameters)
         .Select(NodeMaturityCatalog.Apply)
         .ToArray();

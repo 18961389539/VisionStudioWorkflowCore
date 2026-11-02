@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
 import { Alert, Button, Modal, Segmented, Space, Statistic, Table, Tag, Typography } from 'antd';
-import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary } from '../types';
+import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary, RunCounterPersistenceStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
 import { apiUrl } from '../endpoints';
@@ -18,17 +18,21 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
   const [assets, setAssets] = useState<AssetHealthSnapshot[]>([]);
   const [events, setEvents] = useState<AssetEventEnvelope[]>([]);
   const [summary, setSummary] = useState<DiagnosticsSummary>();
+  const [counters, setCounters] = useState<RunCounterPersistenceStatus>();
   const [filter, setFilter] = useState<Filter>('All');
   const [live, setLive] = useState<'connecting' | 'connected' | 'reconnecting' | 'offline'>('offline');
   const [error, setError] = useState<string>();
 
   const refresh = useCallback(async () => {
     try {
-      const [a, e, s] = await Promise.all([
-        apiFetch(apiUrl('diagnostics/assets')), apiFetch(apiUrl('diagnostics/events?take=250')), apiFetch(apiUrl('diagnostics/summary'))
+      const [a, e, s, c] = await Promise.all([
+        apiFetch(apiUrl('diagnostics/assets')), apiFetch(apiUrl('diagnostics/events?take=250')), apiFetch(apiUrl('diagnostics/summary')),
+        // 计数器落盘状态是附加信息：单独兜住失败，不让它把整个诊断面板判成"不可用"。
+        apiFetch(apiUrl('diagnostics/run-counters')).catch(() => undefined)
       ]);
       if (!a.ok || !e.ok || !s.ok) throw new Error('Diagnostics API unavailable');
       setAssets(await a.json()); setEvents(await e.json()); setSummary(await s.json()); setError(undefined);
+      setCounters(c && c.ok ? await c.json() : undefined);
     } catch (ex) { setError(ex instanceof Error ? ex.message : 'Diagnostics API unavailable'); }
   }, []);
 
@@ -84,6 +88,15 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
         showIcon
         style={{ marginBottom: 12 }}
         title={`诊断采样故障：${summary.staleProviders.join('、')} 的数据可能过期（已保留上次快照，暂不作为删除处理）`}
+      />
+    )}
+    {counters?.degraded && (
+      <Alert
+        type="error"
+        showIcon
+        style={{ marginBottom: 12 }}
+        title={`跨轮计数未落盘：已连续失败 ${counters.consecutiveFailures} 次，磁盘副本落后于内存（共 ${counters.counterCount} 个计数器）。此时重启会让"本班次良率 / 连续 NG"倒退。`}
+        description={counters.lastError ? `最近错误：${counters.lastError}` : undefined}
       />
     )}
 

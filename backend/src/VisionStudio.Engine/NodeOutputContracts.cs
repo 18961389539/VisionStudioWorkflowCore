@@ -1,45 +1,21 @@
 namespace VisionStudio.Engine;
 
-/// <summary>Remove historical advertised-only ports and distinguish conditional values from guaranteed results.</summary>
+/// <summary>
+/// Output-contract helpers that do not rewrite the catalog.
+///
+/// The catalog used to be post-processed here by three rules: an <c>Unimplemented</c> list that stripped ports no
+/// executor ever emitted (coordinate.distance's frame/unit/coincident, geometry.angle's degrees/radians/quadrant,
+/// flow.parallel's branchCount/joined, …), an <c>OverlayProducers</c> whitelist that decided which nodes may publish an
+/// <c>overlay</c> image port, and a per-node patch that weakened required flags. All three made the source catalog
+/// disagree with /api/catalog and all three went stale (flow.loopEnd's ports were already gone; 118 nodes declared an
+/// overlay port they never produced; 38 declared a <c>preview</c> port nothing emits). Every dead declaration has been
+/// removed from its own catalog, region.toDetections really emits emitted/truncated/totalArea, image.colorConvert
+/// declares channel2/channel3 optional itself, and only the 16 overlay-image producers declare <c>overlay</c>.
+/// The catalog is now published exactly as written: a declared output must be produced, and a produced output must be
+/// declared. <c>NodeOutputContractTests</c> enforces that.
+/// </summary>
 internal static class NodeOutputContracts
 {
-    private static readonly IReadOnlyDictionary<string, string[]> Unimplemented = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["coordinate.transformCompose"] = ["valid"],
-        ["coordinate.distance"] = ["frame", "unit", "coincident"],
-        ["coordinate.frameTree"] = ["edgeCount", "valid"],
-        ["coordinate.transformPoint3D"] = ["magnitude", "xyMagnitude", "azimuthDeg", "elevationDeg"],
-        ["geometry.angle"] = ["degrees", "radians", "quadrant"],
-        ["measure.concentricity"] = ["deltaX", "deltaY", "pass"],
-        ["collection.detections.count"] = ["finiteCount", "invalidCount", "maxScore"],
-        ["collection.detections.filter"] = ["keptRatio", "minKeptScore", "maxKeptScore"],
-        ["region.toDetections"] = ["emitted", "truncated", "totalArea"],
-        ["flow.loopEnd"] = ["iteration", "stopped", "reason"],
-        ["flow.parallel"] = ["branchCount", "joined"],
-    };
-
-    private static readonly HashSet<string> OverlayProducers = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "inference.obb", "inference.segmentation", "inference.instanceSegmentation", "inference.pose",
-        "recognition.aruco", "calibration.charuco",
-        "jlvision.contourOp", "jlvision.contourFeature", "jlvision.geometry", "jlvision.homMat",
-        "jlvision.matrixOp", "jlvision.measure1d", "jlvision.imageOp", "jlvision.regionFeature",
-        "jlvision.regionOp", "jlvision.threshold"
-    };
-
-    internal static NodeCatalogItem Apply(NodeCatalogItem item)
-    {
-        Unimplemented.TryGetValue(item.Type, out var unsupported);
-        var emitsOverlay = OverlayProducers.Contains(item.Type);
-        return item with { Outputs = item.Outputs
-            .Where(port => unsupported?.Contains(port.Name) != true
-                && port.Name != "preview"
-                && (port.Name != "overlay" || emitsOverlay))
-            .Select(port => (item.Type == "logic.boolean" && port.Name == "b")
-                || (item.Type == "image.colorConvert" && port.Name is "channel2" or "channel3")
-                    ? port with { Required = false } : port).ToArray() };
-    }
-
     /// <summary>Transfer a newly owned resource to the result only after construction and cancellation checks succeed.</summary>
     internal static NodeExecutorResult CreateOwnedResult(IDisposable owner, Func<NodeExecutorResult> create, CancellationToken cancellationToken)
     {

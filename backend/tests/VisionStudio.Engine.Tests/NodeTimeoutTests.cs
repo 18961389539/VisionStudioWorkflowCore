@@ -95,6 +95,49 @@ public sealed class NodeTimeoutTests
     public void Normalize_TreatsNonPositiveAsUnset_AndClampsToCeiling(int input, int expected)
         => Assert.Equal(expected, NodeTimeoutPolicy.Normalize(input));
 
+    [Fact]
+    public void Ceiling_DefaultsToTheConstAndCanBeRaisedForLongCycleNodes()
+    {
+        try
+        {
+            NodeTimeoutPolicy.ResetCeiling();
+            Assert.Equal(NodeTimeoutPolicy.MaxTimeoutMs, NodeTimeoutPolicy.CeilingMs);
+            // 默认上限下，超过 600s 的配置被钳住（既有语义不变）。
+            Assert.Equal(NodeTimeoutPolicy.MaxTimeoutMs, NodeTimeoutPolicy.Normalize(1_800_000));
+
+            // 现场确实存在 20 分钟级别的节点（烘烤、长时间握手、多帧堆叠）时才抬高上限。
+            Assert.True(NodeTimeoutPolicy.TryConfigureCeiling(1_800_000, out var error), error);
+            Assert.Equal(1_800_000, NodeTimeoutPolicy.Normalize(1_800_000));
+            // 抬高上限不改变"未配置即不设限"。
+            Assert.Equal(0, NodeTimeoutPolicy.Normalize(0));
+            Assert.Equal(0, NodeTimeoutPolicy.Normalize(-1));
+        }
+        finally
+        {
+            NodeTimeoutPolicy.ResetCeiling();
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(999)]
+    [InlineData(NodeTimeoutPolicy.AbsoluteMaxTimeoutMs + 1)]
+    public void Ceiling_RejectsValuesThatWouldFireOnEverythingOrDisableTheWatchdog(int ceiling)
+    {
+        try
+        {
+            Assert.False(NodeTimeoutPolicy.TryConfigureCeiling(ceiling, out var error));
+            Assert.False(string.IsNullOrWhiteSpace(error));
+            // 拒绝后必须仍是默认值：不能出现"配错了一半生效"的中间状态。
+            Assert.Equal(NodeTimeoutPolicy.MaxTimeoutMs, NodeTimeoutPolicy.CeilingMs);
+        }
+        finally
+        {
+            NodeTimeoutPolicy.ResetCeiling();
+        }
+    }
+
     private static WorkflowDefinition CreateWorkflow(int? timeoutMs)
     {
         Dictionary<string, JsonElement>? parameters = timeoutMs is null

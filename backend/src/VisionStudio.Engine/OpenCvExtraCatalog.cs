@@ -74,16 +74,26 @@ internal static class OpenCvExtraCatalog
             Actions: [], Frames: [new(NodeImageFramePolicy.PreserveInput)], RoiImageBindings: [new("roi", "image")]),
 
         new("image.stitch", "Image Stitch", "Preprocess",
-            [Exec, new("image1", VisionDataType.Image), new("image2", VisionDataType.Image),
+            [Exec,
+                new("image1", VisionDataType.Image, Required: false) { RequiredWhen = new("sourceMode", ["images"]) },
+                new("image2", VisionDataType.Image, Required: false) { RequiredWhen = new("sourceMode", ["images"]) },
                 new("image3", VisionDataType.Image, Required: false), new("image4", VisionDataType.Image, Required: false),
                 new("image5", VisionDataType.Image, Required: false), new("image6", VisionDataType.Image, Required: false),
-                new("image7", VisionDataType.Image, Required: false), new("image8", VisionDataType.Image, Required: false)],
+                new("image7", VisionDataType.Image, Required: false), new("image8", VisionDataType.Image, Required: false),
+                new("frameSet", VisionDataType.FrameSet, Required: false) { RequiredWhen = new("sourceMode", ["frameSet"]) }],
             [
                 new("image", VisionDataType.Image), new("width", VisionDataType.Integer),
                 new("height", VisionDataType.Integer), new("inputCount", VisionDataType.Integer),
                 new("found", VisionDataType.Boolean), new("diagnostics", VisionDataType.String), Next
             ],
             [
+                new("sourceMode", "Input Source", "select", "images", Group: "Stitching", Options:
+                [
+                    new("Image ports (image1..image8)", "images"),
+                    new("Synchronized FrameSet", "frameSet")
+                ], Description: "images reads image1..image8. frameSet reads a camera.syncCapture FrameSet; use Camera Order to set the stitching order because panorama quality depends on it. The two sources are mutually exclusive."),
+                new("cameraOrder", "Camera Order", "text", "", Group: "Stitching", VisibleWhen: new("sourceMode", ["frameSet"]),
+                    Description: "Comma-separated camera ids in stitching order (left to right). Empty sorts by camera id. Every id must exist in the FrameSet; unknown ids fail before stitching."),
                 new("mode", "Stitch Mode", "select", "panorama", Group: "Stitching", Options:
                 [
                     new("Panorama", "panorama"),
@@ -92,7 +102,7 @@ internal static class OpenCvExtraCatalog
                 new("maxInputPixels", "Maximum Input Pixels", "number", 64000000, 1, 500000000, 1000000, Group: "Stitching",
                     Description: "Total pixel budget across all connected inputs. Exceeding it fails before cloning or stitching, so a mistaken full-resolution batch cannot exhaust memory."),
             ],
-            "Stitch 2..8 overlapping 8-bit images into one panorama with OpenCV Stitcher (features, homography, bundle adjustment, seam and blend). Inputs must share the same channel count. A stitch failure returns the OpenCV status in the error instead of a half-composed image. algorithmBackend=opencv.",
+            "Stitch 2..8 overlapping 8-bit images into one panorama with OpenCV Stitcher (features, homography, bundle adjustment, seam and blend). Wire: image1..image8, or sourceMode=frameSet + frameSet (+ optional cameraOrder) for a synchronized capture. Inputs must share the same channel count. A stitch failure returns the OpenCV status in the error instead of a half-composed image. algorithmBackend=opencv.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false, SupportsParallel: false, ExecutionMode: VisionExecutionMode.WorkflowCore),
             Actions: [], Frames: [new(NodeImageFramePolicy.NewSpatialFrame, InputPort: "image1", FrameLabel: "stitched frame")]),
 

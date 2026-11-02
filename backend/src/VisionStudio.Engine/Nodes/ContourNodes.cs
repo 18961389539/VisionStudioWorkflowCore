@@ -210,6 +210,9 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
             // ParentIndex always addresses the emitted list. If its parent was filtered/truncated
             // (or holes-only omitted the external ring), retain IsHole and use -1 for no emitted parent.
             var selected = candidates.Take(maxCount).ToArray();
+            // 截断必须可见：maxCount 默认 200，超过 200 条候选时下游只能看到前 200 条。
+            var inputCount = candidates.Count;
+            var truncated = inputCount > selected.Length;
             var outputIndexBySource = selected.Select((candidate, index) => (candidate.SourceIndex, index))
                 .ToDictionary(x => x.SourceIndex, x => x.index);
             var results = selected.Select((candidate, index) =>
@@ -220,10 +223,10 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
             }).ToList();
 
             var diag = CoordinateValidation.Diagnostics(Type,
-                ("found", results.Count > 0), ("count", results.Count), ("holes", results.Count(x => x.IsHole)),
+                ("found", results.Count > 0), ("count", results.Count), ("inputCount", inputCount), ("truncated", truncated),
+                ("holes", results.Count(x => x.IsHole)),
                 ("mode", mode), ("binarize", effectiveBinarize), ("minArea", minArea),
-                ("maxCount", maxCount), ("pointBudget", maxPoints), ("roi", roi?.Type.ToString() ?? "FullImage"),
-                ("truncated", candidates.Count > maxCount));
+                ("maxCount", maxCount), ("pointBudget", maxPoints), ("roi", roi?.Type.ToString() ?? "FullImage"));
             var overlays = new List<VisionOverlay>();
             for (var i = 0; i < results.Count; i++)
             {
@@ -244,6 +247,8 @@ public sealed class ContourExtractNode : IVisionNodeExecutor
                 ["image"] = VisionValue.Image(sourceImage.CloneOwned()),
                 ["contours"] = VisionValue.Contours(results),
                 ["count"] = VisionValue.Integer(results.Count),
+                ["inputCount"] = VisionValue.Integer(inputCount),
+                ["truncated"] = VisionValue.Boolean(truncated),
                 ["found"] = VisionValue.Boolean(results.Count > 0),
                 ["diagnostics"] = VisionValue.String(diag)
             };

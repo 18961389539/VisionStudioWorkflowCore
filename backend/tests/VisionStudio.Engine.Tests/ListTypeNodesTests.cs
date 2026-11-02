@@ -100,6 +100,17 @@ public sealed class ListTypeNodesTests
     }
 
     [Fact]
+    public async Task Statistics_MissingUslUsesTheCatalogDefaultInsteadOfZero()
+    {
+        // 旧节点只写 lsl 时，USL 兜底必须与目录默认值一致（1）；兜底 0 会触发 "LSL >= USL" 直接失败。
+        var result = await new StatisticsNode().ExecuteAsync(
+            Ctx(("numberList", VisionValue.NumberList([0.2, 0.4, 0.6]))),
+            Def("value.statistics", ("enableLimits", "true"), ("lsl", "0")), CancellationToken.None);
+        Assert.True(result.Outputs["pass"].Require<bool>("pass"));
+        Assert.True(result.Outputs["cp"].Require<double>("cp") > 0);
+    }
+
+    [Fact]
     public async Task Statistics_RejectsEmptyNonFiniteAndZeroVarianceWithLimits()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => new StatisticsNode().ExecuteAsync(

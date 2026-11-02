@@ -284,6 +284,9 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
         }
 
         var ordered = deduped.Take(maxEllipses).ToArray();
+        // 截断必须可见：maxEllipses 默认 10，去重后多于 10 个时下游只能看到前 10 个。
+        var inputCount = deduped.Count;
+        var truncated = inputCount > ordered.Length;
 
         var overlays = new List<VisionOverlay>();
         for (var index = 0; index < ordered.Length; index++)
@@ -299,7 +302,8 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
         timer.Stop();
 
         var diagnostics = CoordinateValidation.Diagnostics(
-            Type, ("count", ordered.Length), ("contours", contours.Length), ("candidates", candidates.Count),
+            Type, ("count", ordered.Length), ("inputCount", inputCount), ("truncated", truncated),
+            ("contours", contours.Length), ("candidates", candidates.Count),
             ("minArea", minArea), ("minCoverageDeg", minCoverage), ("maxRmsError", maxRms),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
             ("elapsedMs", timer.Elapsed.TotalMilliseconds));
@@ -320,6 +324,8 @@ public sealed class FeatureEllipseNode : IVisionNodeExecutor
                 area = Math.Round(candidate.Area, 2)
             }))),
             ["count"] = VisionValue.Integer(ordered.Length),
+            ["inputCount"] = VisionValue.Integer(inputCount),
+            ["truncated"] = VisionValue.Boolean(truncated),
             ["found"] = VisionValue.Boolean(ordered.Length > 0),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };

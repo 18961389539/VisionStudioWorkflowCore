@@ -67,6 +67,8 @@ public static class FeatureDetectorCatalog
                 Image,
                 new("ellipses", VisionDataType.String),
                 new("count", VisionDataType.Integer),
+                new("inputCount", VisionDataType.Integer),
+                new("truncated", VisionDataType.Boolean),
                 new("ellipse", VisionDataType.String, Required: false),
                 new("center", VisionDataType.Point2D, Required: false),
                 new("majorAxis", VisionDataType.Double, Required: false),
@@ -90,7 +92,7 @@ public static class FeatureDetectorCatalog
                 new("maxEllipses", "Max Ellipses", "number", 10, 1, 200, 1, Group: "Limits", Description: "Maximum number of returned ellipses, strongest support first."),
                 new("minPoints", "Min Support Points", "number", 20, 5, 100000, 1, Group: "Limits", Description: "Minimum contour points backing one ellipse; OpenCV needs 5, but 20+ is what actually separates a real ellipse from a noisy arc.")
             ],
-            "Detect ellipses straight from the image: Canny edge map, contour tracing, ellipse fit per contour, then an explicit consistency filter (area, axis ratio, angular coverage, radial RMS). This is the one-step path for foreshortened holes, O-rings and perspective-distorted circles that feature.circle (circles only) and measure.fitEllipse (needs a contour) cannot serve alone. Coverage uses the parametric angle in the ellipse frame, so an occluded ellipse still reports how much of it was actually supported. Largest-support ellipse is echoed on the scalar ports for direct wiring; the full list is in ellipses JSON. No ellipse converges, no contour passes the filters, or the ROI is empty returns found=false.",
+            "Detect ellipses straight from the image: Canny edge map, contour tracing, ellipse fit per contour, then an explicit consistency filter (area, axis ratio, angular coverage, radial RMS). This is the one-step path for foreshortened holes, O-rings and perspective-distorted circles that feature.circle (circles only) and measure.fitEllipse (needs a contour) cannot serve alone. Coverage uses the parametric angle in the ellipse frame, so an occluded ellipse still reports how much of it was actually supported. Largest-support ellipse is echoed on the scalar ports for direct wiring; the full list is in ellipses JSON. count is the emitted length and inputCount the deduplicated candidate count, so truncated=true means maxEllipses (default 10) cut the list and more ellipses exist than the outputs show. No ellipse converges, no contour passes the filters, or the ROI is empty returns found=false.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
 
         new("feature.ridge", "Ridge / Centre Line", "Feature",

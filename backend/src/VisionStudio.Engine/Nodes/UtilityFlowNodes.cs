@@ -53,14 +53,25 @@ public sealed class SwitchNode : IVisionNodeExecutor
     internal const string DefaultCasesJson = "[\"OK\",\"NG\"]";
     public string Type => "flow.switch";
 
+    internal static StringComparison MatchingComparison(NodeDefinition node)
+        => node.GetBool("ignoreCase", false) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     internal static string[] ReadCases(NodeDefinition node)
     {
         var casesJson = node.GetString("casesJson", DefaultCasesJson);
         string[] cases;
         try { cases = System.Text.Json.JsonSerializer.Deserialize<string[]>(casesJson) ?? []; }
         catch (System.Text.Json.JsonException ex) { throw new InvalidOperationException($"Switch '{node.Id}' casesJson must be a JSON string array.", ex); }
-        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(StringComparer.Ordinal).Count() != cases.Length)
-            throw new InvalidOperationException($"Switch '{node.Id}' requires 1-16 non-empty unique case labels.");
+        // 与运行时匹配口径一致：trimValues 同时作用于标签，否则"OK"标签永远匹配不到被裁剪过的输入。
+        if (node.GetBool("trimValues", false)) cases = cases.Select(label => label.Trim()).ToArray();
+        var comparison = MatchingComparison(node);
+        var comparer = comparison == StringComparison.OrdinalIgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        if (cases.Length is < 1 or > 16 || cases.Any(string.IsNullOrWhiteSpace) || cases.Distinct(comparer).Count() != cases.Length)
+            throw new InvalidOperationException(
+                $"Switch '{node.Id}' requires 1-16 non-empty unique case labels" +
+                (comparison == StringComparison.OrdinalIgnoreCase
+                    ? "; ignoreCase=true makes labels that differ only by case ambiguous and rejected."
+                    : "."));
         return cases;
     }
 
@@ -69,9 +80,12 @@ public sealed class SwitchNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         var value = context.RequireValue("value"); var cases = ReadCases(node);
         var key = Convert.ToString(value.Value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        // 扫码/OCR 文本常带尾随空格或 \r；先裁剪再判长度，避免把可用的值当超长拒绝。
+        if (node.GetBool("trimValues", false)) key = key.Trim();
         if (key.Length > 256) throw new InvalidOperationException("flow.switch input value text is too long (max 256 chars).");
-        var index = Array.FindIndex(cases, x => string.Equals(x, key, StringComparison.Ordinal)); var matched = index >= 0; var selected = matched ? $"case{index + 1}" : "default";
-        var diag = CoordinateValidation.Diagnostics(Type, ("value", key), ("selected", selected), ("matched", matched), ("caseCount", cases.Length), ("caseIndex", matched ? index : -1));
+        var comparison = MatchingComparison(node);
+        var index = Array.FindIndex(cases, x => string.Equals(x, key, comparison)); var matched = index >= 0; var selected = matched ? $"case{index + 1}" : "default";
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", key), ("selected", selected), ("matched", matched), ("caseCount", cases.Length), ("caseIndex", matched ? index : -1), ("comparison", comparison == StringComparison.OrdinalIgnoreCase ? "ignoreCase" : "ordinal"));
         return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["selected"] = VisionValue.String(selected), ["selectedCase"] = VisionValue.String(selected), ["matched"] = VisionValue.Boolean(matched), ["caseCount"] = VisionValue.Integer(cases.Length), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["selected"] = selected, ["caseCount"] = cases.Length, ["diagnostics"] = diag }));
     }
 }

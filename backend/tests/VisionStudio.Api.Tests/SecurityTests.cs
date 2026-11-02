@@ -26,6 +26,29 @@ public sealed class SecurityTests
         Assert.Equal("application/problem+json", protectedResponse.Content.Headers.ContentType?.MediaType);
     }
 
+    /// <summary>
+    /// 诊断读接口必须与同域 SignalR 通道（/hubs/diagnostics）一样要求授权。
+    ///
+    /// 2026-10-29 修复：这四个端点此前没有任何授权要求，而认证处理器在 Security:Enabled=true 时
+    /// 对无 token 请求返回 NoResult —— "没要求授权"实际等于"匿名可读"，会泄露资产状态、事件流、
+    /// 快照文件路径和错误原文。
+    /// </summary>
+    [Theory]
+    [InlineData("/api/diagnostics/summary")]
+    [InlineData("/api/diagnostics/assets")]
+    [InlineData("/api/diagnostics/events")]
+    [InlineData("/api/diagnostics/run-counters")]
+    [InlineData("/api/diagnostics/node-durations")]
+    public async Task DiagnosticsEndpoints_RequireAuthentication(string path)
+    {
+        using var factory = new SecureVisionStudioApiFactory();
+        using var client = factory.CreateFreshClient();
+
+        var response = await client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     [Fact]
     public async Task Bootstrap_IsOneShot_AndLoginCreatesAuthenticatedSession()
     {

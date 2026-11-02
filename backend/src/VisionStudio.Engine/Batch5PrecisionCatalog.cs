@@ -10,6 +10,46 @@ namespace VisionStudio.Engine;
 /// </summary>
 public static class Batch5PrecisionCatalog
 {
+    /// <summary>
+    /// match.shape 的宿主协议字段：训练请求（调优工作区临时注入、不落盘）与训练结果元数据（随节点保存）。
+    ///
+    /// 为什么声明在目录里：这些键的读取发生在 <c>Algorithms/JLVisionMatching.cs</c>，不在 <c>Nodes/</c> 下，
+    /// 而"执行器读取的键必须在目录中声明"的自动闸门（scripts/static-audit.py）按 Nodes/ 的类块扫描，
+    /// 过去完全漏掉了它们——一个 16 MB 的隐藏参数没有任何契约约束。声明为 Internal 后：不进配置面板、
+    /// 不写新节点默认值、但进入目录契约与生成快照。
+    ///
+    /// 模型以 base64 存在 <c>trainedModelData</c>（上限 16 MB），<c>trainedModelConfig</c> 是训练参数指纹；
+    /// 指纹变化时执行器拒绝使用旧模型并要求重训。
+    /// </summary>
+    private static readonly ParameterDescriptor[] ShapeMatchHostProtocolParameters =
+    [
+        HostKey("trainingMode", "boolean", "Workspace request to run one training pass; the result goes to the run summary and is never stored as a workflow parameter."),
+        HostKey("trainingPreviewOnly", "boolean", "Return only the training preview image, without producing model data."),
+        HostKey("searchPreviewOnly", "boolean", "Return only the search scene image for tuning previews."),
+        HostKey("trainingImageData", "text", "Base64 training image supplied by the workspace; takes precedence over the template port."),
+        HostKey("trainingCombineModelData", "text", "Multi-view training: JSON array of already trained model blobs (base64)."),
+        HostKey("trainingCombineSourceImages", "text", "Multi-view training: JSON array of source images (base64)."),
+        HostKey("trainingReferenceModelData", "text", "Reference model blob (base64) used when combining multi-view training samples."),
+        HostKey("trainingReferenceOriginImageX", "number", "Reference model origin X in the source image, in pixels."),
+        HostKey("trainingReferenceOriginImageY", "number", "Reference model origin Y in the source image, in pixels."),
+        HostKey("trainingOriginOverrideX", "number", "Forced origin X for this training pass; NaN follows trainingOriginMode."),
+        HostKey("trainingOriginOverrideY", "number", "Forced origin Y for this training pass; NaN follows trainingOriginMode."),
+        HostKey("trainedModelData", "text", "Trained shape model blob (base64, 16 MB limit) stored with the node together with trainedModelConfig."),
+        HostKey("trainedModelConfig", "text", "Fingerprint of the training parameters; the executor refuses to reuse a model trained with different settings."),
+        HostKey("trainedSourceImage", "text", "Base64 training source image used to echo the model contour in the dialog."),
+        HostKey("trainedWidth", "number", "Training source image width in pixels."),
+        HostKey("trainedHeight", "number", "Training source image height in pixels."),
+        HostKey("trainedOriginX", "number", "Model origin X in image coordinates at training time."),
+        HostKey("trainedOriginY", "number", "Model origin Y in image coordinates at training time."),
+        HostKey("trainedOriginImageX", "number", "Model origin X inside the training source image (display only)."),
+        HostKey("trainedOriginImageY", "number", "Model origin Y inside the training source image (display only)."),
+        HostKey("trainedPoseOffsetX", "number", "Pose offset X recorded during multi-view training."),
+        HostKey("trainedPoseOffsetY", "number", "Pose offset Y recorded during multi-view training."),
+    ];
+
+    private static ParameterDescriptor HostKey(string name, string type, string description)
+        => new(name, name, type, Group: "Host Protocol", Internal: true, Description: description);
+
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
         // ===== 5A 轮廓族 =====
@@ -22,8 +62,10 @@ public static class Batch5PrecisionCatalog
                 new("image", VisionDataType.Image),
                 new("contours", VisionDataType.Contour),
                 new("count", VisionDataType.Integer),
+                new("inputCount", VisionDataType.Integer),
+                new("truncated", VisionDataType.Boolean),
                 new("found", VisionDataType.Boolean),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("mode", "Retrieval", "select", "external", Options:
@@ -46,7 +88,7 @@ public static class Batch5PrecisionCatalog
                 new("maxPoints", "Point Budget", "number", 2000, 16, 20000, 1, Group: "Filter",
                     Description: "Contours are evenly subsampled to this budget so graph data stays bounded.")
             ],
-            "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
+            "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -60,8 +102,7 @@ public static class Batch5PrecisionCatalog
                 new("inputCount", VisionDataType.Integer),
                 new("droppedCount", VisionDataType.Integer),
                 new("truncated", VisionDataType.Boolean),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-                new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("minArea", "Min Area", "number", 0, 0, 99999999, 1, Unit: "px²", Group: "Geometry", Description: "Keep contours whose area is at least this value (px²)."),
@@ -104,8 +145,7 @@ public static class Batch5PrecisionCatalog
                 new("extent", VisionDataType.Double),
                 new("aspectRatio", VisionDataType.Double),
                 new("equivalentDiameter", VisionDataType.Double),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-                new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("selectBy", "Select", "select", "largest", Options:
@@ -142,7 +182,7 @@ public static class Batch5PrecisionCatalog
                 new("fitError", VisionDataType.Double, Required: false),
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in pixels.") { OverriddenByPorts = ["searchLine"] },
@@ -196,7 +236,7 @@ public static class Batch5PrecisionCatalog
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("searchLine", VisionDataType.Line2D),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false), new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("startX", "Start X", "number", 120, -10000000, 10000000, 1, Unit: "px", Group: "Search Line", Description: "Search-line start X in image pixels before the optional rigid transform.") { OverriddenByPorts = ["searchLine"] },
@@ -262,7 +302,6 @@ public static class Batch5PrecisionCatalog
                 new("sampleCount", VisionDataType.Integer, Required: false),
                 new("ignoredCount", VisionDataType.Integer, Required: false),
                 new("diagnostics", VisionDataType.String),
-                new("overlay", VisionDataType.Image, Required: false),
                 new("next", VisionDataType.Control)
             ],
             [
@@ -330,8 +369,7 @@ public static class Batch5PrecisionCatalog
                 new("angle", VisionDataType.Double),
                 new("axisRatio", VisionDataType.Double),
                 new("count", VisionDataType.Integer),
-                new("diagnostics", VisionDataType.String), new("overlay", VisionDataType.Image, Required: false),
-                new("next", VisionDataType.Control)
+                new("diagnostics", VisionDataType.String), new("next", VisionDataType.Control)
             ],
             [
                 new("selectBy", "Select", "select", "largest", Options:
@@ -474,8 +512,9 @@ public static class Batch5PrecisionCatalog
                 new("chamferContinuousRefine", "Chamfer Continuous Pose Refine", "boolean", true, Group: "Managed Chamfer", VisibleWhen: new("engine", ["managedChamfer"]), Description: "Managed engine: parabolic continuous angle+scale refine after discrete search (not full HALCON XLD least-squares)."),
                 new("chamferXldSnap", "Chamfer XLD-ish Contour Snap", "boolean", true, Group: "Managed Chamfer", VisibleWhen: new("engine", ["managedChamfer"]), Description: "Managed engine: snap pose along model normals toward the chamfer zero-set (+/-1 px). Approximate XLD refine, not PatMax."),
                 new("diagnosticsLevel", "Diagnostics Level", "select", "standard", Group: "Diagnostics", Options: [new("Minimal", "minimal"), new("Standard", "standard"), new("Verbose", "verbose")], Description: "Controls how many fields are included in the diagnostics JSON payload."),
+                .. ShapeMatchHostProtocolParameters,
                 ],
-            "JLVision gray-edge shape matching with explicit model/search regions, train-up-to-four equal-size samples, rotation, uniform or aniso scale, polarity, multi-target and clutter ROI. Wire: train first on new nodes, then run on scene image; pose/scale outputs feed roi.transform. Key params: model/search regions, minScore, train/search angle and scale ranges, pyramidLevels, contrast gates, clutterRoi. Default matchingBackend=jlvision; engine=auto is native only and never silently switches to managedChamfer (explicit engine=managedChamfer required for the managed distance matcher). Remaining gap vs PatMax/full HALCON: no PatMax feature vectors, no trained clutter model, no full XLD least-squares deformation. found=false: not trained, weak contrast, outside angle/scale window, or clutter reject.",
+            "JLVision gray-edge shape matching with explicit model/search regions, train-up-to-four equal-size samples, rotation, uniform or aniso scale, polarity, multi-target and clutter ROI. Wire: train first on new nodes, then run on scene image; pose/scale outputs feed roi.transform. Key params: model/search regions, minScore, train/search angle and scale ranges, pyramidLevels, contrast gates, clutterRoi. Default matchingBackend=jlvision; engine=auto is native only and never silently switches to managedChamfer (explicit engine=managedChamfer required for the managed distance matcher). Remaining gap vs PatMax/full HALCON: no PatMax feature vectors, no trained clutter model, no full XLD least-squares deformation. The trained model is stored inside the node as base64 (16 MB limit) together with a training-parameter fingerprint; changing training parameters requires retraining, and modelMode=trained refuses to run before the first training. found=false: not trained, weak contrast, outside angle/scale window, or clutter reject.",
             "builtin",
             new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true, SupportsRoi: true), TransformFrames: new(NodeTransformFramePolicy.TemplateToImage, ImagePort: "image", TemplatePort: "template"), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
@@ -497,8 +536,6 @@ public static class Batch5PrecisionCatalog
                 new("pose", VisionDataType.Pose2D, Required: false),
                 new("transform", VisionDataType.Transform2D, Required: false),
                 new("diagnostics", VisionDataType.String),
-                new("overlay", VisionDataType.Image, Required: false),
-                new("preview", VisionDataType.Image, Required: false),
                 new("next", VisionDataType.Control)
             ],
             [

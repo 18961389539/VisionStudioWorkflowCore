@@ -282,6 +282,18 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<PluginManager>();
         services.AddSingleton<PluginPackageService>();
 
+        // 节点超时上限（Pipeline:NodeTimeoutMaxMs）。缺省沿用 600s；显式配置但越界时**启动即失败**：
+        // 静默回落会让现场以为"已经调大了"，实际节点照样被 600s 砍掉；而放任调到天文数字
+        // 又等于关掉看门狗（卡住的节点永不报错，节拍慢慢烂掉）。两种误解都比一条启动错误昂贵。
+        if (configuration.GetValue<int?>("Pipeline:NodeTimeoutMaxMs") is { } nodeTimeoutCeiling
+            && !NodeTimeoutPolicy.TryConfigureCeiling(nodeTimeoutCeiling, out var ceilingError))
+        {
+            throw new InvalidOperationException(
+                $"Configuration 'Pipeline:NodeTimeoutMaxMs' is invalid. {ceilingError}");
+        }
+
+        // 每节点耗时统计：给 __timeoutMs 选值提供数据，由 dispatcher 自动注入。
+        services.AddSingleton<NodeDurationStatistics>();
         services.AddSingleton<VisionNodeDispatcher>();
         services.AddSingleton<VisionNodeRuntime>();
         services.AddSingleton<VisionPipelineExecutor>();
@@ -377,7 +389,9 @@ public static class VisionStudioServiceRegistration
         services.AddHostedService<TraceRetentionHostedService>();
         services.AddHostedService<StorageCapacityHostedService>();
         // 跨轮计数落盘：启动即恢复，之后每 5s 有变化才写（停机补写一次）。
-        services.AddHostedService<RunCounterPersistence>();
+        // 先注册具体类型再转发到 IHostedService，诊断端点才能注入它读取落盘状态。
+        services.AddSingleton<RunCounterPersistence>();
+        services.AddHostedService(provider => provider.GetRequiredService<RunCounterPersistence>());
 
         return services;
     }

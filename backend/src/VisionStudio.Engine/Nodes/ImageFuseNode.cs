@@ -12,9 +12,9 @@ namespace VisionStudio.Engine.Nodes;
 /// 没有任何节点能把多帧叠起来。于是"多帧平均降噪（把随机噪声压到 1/√N）"
 /// "多曝光融合（暗部用长曝、亮部用短曝）"在图上完全做不到。
 ///
-/// 为什么不做 `image.stack`（帧组构建节点）：库里没有 ImageList 端口类型，硬塞进
-/// DetectionList/PointList 都得先降维丢数据。fuse 直接吃 8 个图像端口，反而少一跳、
-/// 参数面板也更直白。要真正的帧组请等 ImageList 类型随 3D/多相机批次一起落。
+/// 2026-11-02：补 `sourceMode=frameSet`，直接吃 `camera.syncCapture` 的 FrameSet（按相机 id 排序），
+/// 多相机叠加从 8 根线变成 1 根。`image1..image8` 保留原样（已保存流程的端口不变），两条来源互斥。
+/// 仍保留 8 个图像端口的原因：库里没有 ImageList 端口类型，单帧多曝光场景本来就要逐根接线。
 ///
 /// 口径：
 /// - 所有输入必须同尺寸、同通道数、同位深，否则直接失败（尺寸不一致的"平均"是没意义的）；
@@ -39,16 +39,44 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
         if (mode is not ("mean" or "median" or "min" or "max"))
             throw new InvalidOperationException("image.fuse mode must be mean, median, min or max.");
 
+        var sourceMode = node.GetString("sourceMode", "images").Trim().ToLowerInvariant();
+        if (sourceMode is not ("images" or "frameset"))
+            throw new InvalidOperationException("image.fuse sourceMode must be images or frameSet.");
+
         var images = new List<VisionImage>(MaxInputs);
-        for (var index = 1; index <= MaxInputs; index++)
+        if (sourceMode == "frameset")
         {
-            var port = $"image{index}";
-            if (!context.TryGetValue(port, out _)) continue;
-            images.Add(context.RequireImage(port));
+            for (var index = 1; index <= MaxInputs; index++)
+            {
+                if (context.TryGetValue($"image{index}", out _))
+                    throw new InvalidOperationException(
+                        $"image.fuse sourceMode=frameSet ignores image1..image{MaxInputs}; disconnect them or switch sourceMode=images.");
+            }
+            var frameSet = context.TryGetValue("frameSet", out var frameSetValue)
+                ? frameSetValue.Require<IVisionFrameSet>("frameSet")
+                : throw new InvalidOperationException("image.fuse sourceMode=frameSet requires a frameSet input.");
+            // 按相机 id 排序：mean/median/min/max 与顺序无关，但跨运行顺序必须稳定，诊断也要可复现。
+            foreach (var pair in frameSet.Images.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (pair.Value is not VisionImage frame)
+                    throw new InvalidOperationException($"image.fuse frameSet image '{pair.Key}' is not a VisionImage.");
+                images.Add(frame);
+            }
+        }
+        else
+        {
+            for (var index = 1; index <= MaxInputs; index++)
+            {
+                var port = $"image{index}";
+                if (!context.TryGetValue(port, out _)) continue;
+                images.Add(context.RequireImage(port));
+            }
         }
         if (images.Count < 2)
             throw new InvalidOperationException(
-                $"image.fuse needs at least two images (image1..image{MaxInputs}); got {images.Count}.");
+                sourceMode == "frameset"
+                    ? $"image.fuse sourceMode=frameSet needs at least two camera images in the FrameSet; got {images.Count}."
+                    : $"image.fuse needs at least two images (image1..image{MaxInputs}); got {images.Count}.");
 
         var maxPixels = node.GetInt("maxPixels", 16_000_000);
         if (maxPixels is < 1000 or > 200_000_000)
@@ -94,7 +122,7 @@ public sealed class ImageFuseNode : IVisionNodeExecutor
         var image = VisionImage.Own(result);
 
         var diagnostics = CoordinateValidation.Diagnostics(
-            Type, ("mode", mode), ("inputCount", images.Count),
+            Type, ("mode", mode), ("sourceMode", sourceMode), ("inputCount", images.Count),
             ("width", reference.Cols), ("height", reference.Rows), ("channels", reference.Channels()));
 
         return ValueTask.FromResult(new NodeExecutorResult(

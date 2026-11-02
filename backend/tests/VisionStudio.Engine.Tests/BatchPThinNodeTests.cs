@@ -44,6 +44,10 @@ public sealed class BatchPThinNodeTests
         var dets = await new RegionToDetectionsNode().ExecuteAsync(Ctx(new() { ["region"] = VisionValue.Region(region) }),
             Def("region.toDetections", """{"maxCount":1}"""), CancellationToken.None);
         Assert.Equal(1L, (long)dets.Outputs["count"].Value!);
+        // maxCount 裁掉的对象必须能被下游发现，否则"只有 1 个"和"被裁到 1 个"无法区分。
+        Assert.Equal(1L, (long)dets.Outputs["emitted"].Value!);
+        Assert.True((bool)dets.Outputs["truncated"].Value!);
+        Assert.Equal(64d, (double)dets.Outputs["totalArea"].Value!);
         Assert.Contains("region.toDetections", (string)dets.Outputs["diagnostics"].Value!);
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await new RegionToDetectionsNode().ExecuteAsync(Ctx(new() { ["region"] = VisionValue.Region(region) }),

@@ -328,12 +328,9 @@ var source = context.RequireImage("image").Mat;
             }
         }
         var kept = new List<DetectionCandidate>();
-        foreach (var candidate in candidates.OrderByDescending(x => x.Score))
-        {
-            if (kept.Any(x => x.ClassId == candidate.ClassId && IoU(x, candidate) > nmsThreshold)) continue;
-            kept.Add(candidate);
-            if (kept.Count == maxCount) break;
-        }
+        var truncated = InferenceNmsCap.Fill(candidates.OrderByDescending(x => x.Score), maxCount, kept,
+            (existing, candidate) => existing.Any(x => x.ClassId == candidate.ClassId && IoU(x, candidate) > nmsThreshold),
+            cancellationToken);
         var detections = kept.Select((x, index) => ToVisionDetection(x, index)).ToArray();
         var payload = kept.Select(x => new { x1 = x.Left, y1 = x.Top, x2 = x.Right, y2 = x.Bottom, score = x.Score, classId = x.ClassId }).ToArray();
         return ValueTask.FromResult(new NodeExecutorResult(
@@ -341,10 +338,11 @@ var source = context.RequireImage("image").Mat;
             {
                 ["detections"] = VisionValue.Detections(detections),
                 ["count"] = VisionValue.Integer(detections.Length),
+                ["truncated"] = VisionValue.Boolean(truncated),
                 ["result"] = VisionValue.String(JsonSerializer.Serialize(new { detections = payload, outputShape = shape, tensorOrder })),
                 ["maxScore"] = VisionValue.Double(detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
                 ["diagnostics"] = VisionValue.String(CoordinateValidation.Diagnostics(Type,
-                    ("count", detections.Length), ("maxScore", detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
+                    ("count", detections.Length), ("truncated", truncated), ("maxScore", detections.Length == 0 ? 0 : detections.Max(d => d.Confidence ?? 0)),
                     ("layout", layout), ("tensorOrder", tensorOrder), ("coordinates", coordinates), ("letterbox", letterbox),
                     ("confidenceThreshold", threshold), ("nmsThreshold", nmsThreshold), ("maxCount", maxCount),
                     ("outputShape", string.Join(',', shape))))
@@ -470,16 +468,11 @@ var source = context.RequireImage("image").Mat;
         }
 
         var kept = new List<ObbCandidate>();
-        foreach (var candidate in candidates.OrderByDescending(x => x.Score))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (applyNms && kept.Any(x => x.ClassId == candidate.ClassId && BoundsOverlap(x, candidate) &&
+        var truncated = InferenceNmsCap.Fill(candidates.OrderByDescending(x => x.Score), maxCount, kept,
+            (existing, candidate) => applyNms && existing.Any(x => x.ClassId == candidate.ClassId && BoundsOverlap(x, candidate) &&
                 InferenceStats.RotatedBoxIoU(x.CenterX, x.CenterY, x.Width, x.Height, x.AngleRad,
-                    candidate.CenterX, candidate.CenterY, candidate.Width, candidate.Height, candidate.AngleRad) > nmsThreshold))
-                continue;
-            kept.Add(candidate);
-            if (kept.Count == maxCount) break;
-        }
+                    candidate.CenterX, candidate.CenterY, candidate.Width, candidate.Height, candidate.AngleRad) > nmsThreshold),
+            cancellationToken);
 
         var labels = OnnxInferenceHelpers.ResolveLabels(node);
         var detections = new List<VisionDetection>(kept.Count);
@@ -514,13 +507,14 @@ var source = context.RequireImage("image").Mat;
         }
 
         var overlay = BuildObbOverlay(source, kept, labels);
-        var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("count", detections.Count), ("nmsMode", nmsMode),
+        var diagnostics = CoordinateValidation.Diagnostics(Type, ("layout", layout), ("count", detections.Count), ("truncated", truncated), ("nmsMode", nmsMode),
             ("letterbox", letterbox), ("coordinates", coordinates), ("outputShape", shape));
         return ValueTask.FromResult(new NodeExecutorResult(
             new Dictionary<string, VisionValue>
             {
                 ["detections"] = VisionValue.Detections(detections),
                 ["count"] = VisionValue.Integer(detections.Count),
+                ["truncated"] = VisionValue.Boolean(truncated),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
                 ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, outputShape = shape, nmsApplied = applyNms, detections = payload })),
                 ["diagnostics"] = VisionValue.String(diagnostics)
@@ -863,12 +857,9 @@ var source = context.RequireImage("image").Mat;
                 scored.Add((c, left, top, right, bottom));
             }
             var kept = new List<(InferenceStats.YoloSegCandidate Cand, double Left, double Top, double Right, double Bottom)>();
-            foreach (var candidate in scored.OrderByDescending(x => x.Cand.Score))
-            {
-                if (applyNms && kept.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
-                kept.Add(candidate);
-                if (kept.Count == maxCount) break;
-            }
+            var truncated = InferenceNmsCap.Fill(scored.OrderByDescending(x => x.Cand.Score), maxCount, kept,
+                (existing, candidate) => applyNms && existing.Any(x => x.Cand.ClassId == candidate.Cand.ClassId && BoxIoU(x, candidate) > nmsThreshold),
+                cancellationToken);
 
             var combined = new byte[source.Height * source.Width];
             var labels = OnnxInferenceHelpers.ResolveLabels(node);
@@ -937,6 +928,7 @@ var source = context.RequireImage("image").Mat;
                 {
                     ["detections"] = VisionValue.Detections(detections.ToArray()),
                     ["count"] = VisionValue.Integer(detections.Count),
+                    ["truncated"] = VisionValue.Boolean(truncated),
                     ["mask"] = VisionValue.Image(VisionImage.Own(maskOut)),
                     ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
                     ["instances"] = VisionValue.String(JsonSerializer.Serialize(instancePayload)),
@@ -1070,12 +1062,9 @@ var source = context.RequireImage("image").Mat;
 
         var applyNms = layout == "yolo";
         var kept = new List<(double Left, double Top, double Right, double Bottom, double Score, int ClassId, double[] Kpts)>();
-        foreach (var candidate in scored.OrderByDescending(x => x.Score))
-        {
-            if (applyNms && kept.Any(x => x.ClassId == candidate.ClassId && BoxIoU(x, candidate) > nmsThreshold)) continue;
-            kept.Add(candidate);
-            if (kept.Count == maxCount) break;
-        }
+        var truncated = InferenceNmsCap.Fill(scored.OrderByDescending(x => x.Score), maxCount, kept,
+            (existing, candidate) => applyNms && existing.Any(x => x.ClassId == candidate.ClassId && BoxIoU(x, candidate) > nmsThreshold),
+            cancellationToken);
 
         var labels = OnnxInferenceHelpers.ResolveLabels(node);
         var detections = new List<VisionDetection>();
@@ -1108,6 +1097,7 @@ var source = context.RequireImage("image").Mat;
             {
                 ["detections"] = VisionValue.Detections(detections.ToArray()),
                 ["count"] = VisionValue.Integer(detections.Count),
+                ["truncated"] = VisionValue.Boolean(truncated),
                 ["keypoints"] = VisionValue.String(JsonSerializer.Serialize(posePayload)),
                 ["overlay"] = VisionValue.Image(VisionImage.Own(overlay)),
                 ["result"] = VisionValue.String(JsonSerializer.Serialize(new { count = detections.Count, layout, tensorOrder, numKeypoints, keypointDims, outputShape = shape, nmsApplied = applyNms, poses = posePayload }))

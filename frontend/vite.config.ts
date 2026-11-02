@@ -60,11 +60,15 @@ export default defineConfig({
       ],
       // 2026-10-23 首次基线（83 文件 / 1091 项全绿实测）：
       //   statements 69.29% / branches 65.99% / functions 59.35% / lines 74.02%
-      // 阈值取整数并各留约 1% 余量，只为拦住退化，不制造 flaky。棘轮：只升不降。
+      // 2026-10-29 复核（91 文件 / 1138 项全绿实测）：
+      //   statements 69.73% / branches 66.32% / functions 60.47% / lines 74.34%
+      // 阈值取整数并各留约 1~2% 余量，只为拦住退化，不制造 flaky。棘轮：只升不降。
+      // 本次只收紧 functions（58 → 59，实测 60.47）；其余三项已各留 1.3~2.5 点，
+      // 再抬 1 点就会把余量压到 0.3 以内，等于用 flaky 换覆盖率数字。
       thresholds: {
         statements: 68,
         branches: 65,
-        functions: 58,
+        functions: 59,
         lines: 73
       }
     }

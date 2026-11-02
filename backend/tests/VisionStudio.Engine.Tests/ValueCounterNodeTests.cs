@@ -69,6 +69,115 @@ public sealed class ValueCounterNodeTests
     }
 
     [Fact]
+    public void GetOrAdd_DoesNotMergeScopesThatContainTheLegacySeparator()
+    {
+        // 回归：旧键是 $"{scope}\u001f{counterId}"，于是这两对会算出同一个字符串——
+        // 两个工位的良率静默合并成一个计数器，而且没有任何异常可查。
+        var store = new InMemoryRunCounterStore();
+        var left = store.GetOrAdd("A", "B\u001FC");
+        var right = store.GetOrAdd("A\u001FB", "C");
+
+        Assert.NotSame(left, right);
+        left.Count = 5;
+        Assert.Equal(0L, right.Count);
+        Assert.Equal(2, store.Snapshot().Count);
+    }
+
+    [Fact]
+    public void Snapshot_CarriesLastTouchedSoTheHostCanReclaimIdleCounters()
+    {
+        var store = new InMemoryRunCounterStore();
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        store.GetOrAdd("wf-1", "yield");
+
+        var touched = store.Snapshot()[0].LastTouchedAt;
+        Assert.True(touched >= before, "GetOrAdd must stamp LastTouchedAt so retention can judge age");
+
+        // 恢复的条目要原样带上时间戳，否则重启一次所有计数器就都"变年轻"，
+        // 孤儿永远不会被回收。
+        var restored = new InMemoryRunCounterStore();
+        restored.Restore([new RunCounterSnapshot("wf-1", "yield", 1, 1, 1, 0, touched)]);
+        Assert.Equal(touched, restored.Snapshot()[0].LastTouchedAt);
+    }
+
+    [Fact]
+    public void Snapshot_OfLegacyFileWithoutTimestampReportsDefaultSoHostKeepsIt()
+    {
+        // 旧版快照没有 lastTouchedAt 字段。反序列化后为 default，宿主据此"无法判定年龄 → 保留"。
+        var directory = Path.Combine(Path.GetTempPath(), "vs-counters-" + Guid.NewGuid().ToString("n"));
+        var path = Path.Combine(directory, "counters.json");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path, """[{"scope":"wf-1","counterId":"yield","count":3,"total":3,"pass":3,"fail":0}]""");
+
+            var loaded = RunCounterSnapshotFile.Load(path);
+            Assert.Single(loaded);
+            Assert.Equal(default, loaded[0].LastTouchedAt);
+            Assert.Equal(3L, loaded[0].Count);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SnapshotFile_FailsFastWhenAnotherHostHoldsTheWriteLock()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "vs-counters-" + Guid.NewGuid().ToString("n"));
+        var path = Path.Combine(directory, "counters.json");
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            // 升级重启的重叠窗口：旧进程还在补写，新进程已经启动。
+            // 后来者必须显式失败（由宿主的失败重试 + 降级告警兜住），不能覆盖对方。
+            using var held = new FileStream(
+                path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+            var error = Assert.Throws<IOException>(() => RunCounterSnapshotFile.Save(
+                path, [new RunCounterSnapshot("wf-1", "yield", 1, 1, 1, 0)], TimeSpan.FromMilliseconds(120)));
+
+            Assert.Contains(".lock", error.Message);
+            // 失败既不留半成品，也不产生正式文件（否则会读到一个不属于自己的快照）。
+            Assert.False(File.Exists(path));
+            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SnapshotFile_ConcurrentWritersNeverLeaveACorruptFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "vs-counters-" + Guid.NewGuid().ToString("n"));
+        var path = Path.Combine(directory, "counters.json");
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            // 旧实现用固定名 path + ".tmp"：A 关闭临时文件后 B 以 Create 打开（截断），
+            // A 再把 B 的**半成品** rename 到正式位置 —— 下次启动读到半个 JSON 就从零开始，
+            // 整班次良率清零。唯一临时名 + 写锁让这种交叉不可能发生。
+            Parallel.For(0, 16, i => RunCounterSnapshotFile.Save(
+                path, [new RunCounterSnapshot("wf-1", "yield", i, i, i, 0)]));
+
+            // 结果必须是某个完整快照，而不是拼接/截断的产物。
+            var loaded = RunCounterSnapshotFile.Load(path);
+            Assert.Equal(("wf-1", "yield"), (loaded[0].Scope, loaded[0].CounterId));
+            Assert.InRange(loaded[0].Count, 0L, 15L);
+            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SnapshotFile_RoundTripsAndReplacesAtomically()
     {
         var directory = Path.Combine(Path.GetTempPath(), "vs-counters-" + Guid.NewGuid().ToString("n"));
@@ -83,10 +192,17 @@ public sealed class ValueCounterNodeTests
             Assert.Single(loaded);
             Assert.Equal(7L, loaded[0].Count);
 
-            // 第二次写入必须覆盖而不是追加，且不留下 .tmp。
+            // 第二次写入必须覆盖而不是追加，且不留下任何临时文件
+            // （临时名带 pid+guid，所以要查 *.tmp 而不是某个固定名）。
             RunCounterSnapshotFile.Save(path, [new RunCounterSnapshot("wf-1", "yield", 9, 9, 8, 1)]);
             Assert.Equal(9L, RunCounterSnapshotFile.Load(path)[0].Count);
-            Assert.False(File.Exists(path + ".tmp"));
+            Assert.Empty(Directory.GetFiles(directory, "*.tmp"));
+
+            // 写入改走手写 FileStream（为了 fsync）后，编码必须与原来的 File.WriteAllText 一致：
+            // UTF-8 无 BOM。带 BOM 会让按字节解析的消费方读到 \uFEFF 前缀。
+            var bytes = File.ReadAllBytes(path);
+            Assert.False(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF,
+                "snapshot must be written as UTF-8 without BOM");
         }
         finally
         {

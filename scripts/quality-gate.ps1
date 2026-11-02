@@ -1,7 +1,13 @@
 ﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $results = Join-Path $root 'artifacts/test-results'
-$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '60' }
+# 覆盖率棘轮（只升不降）。2026-10-29 实测 83.47% 合并行覆盖率，取 81 留约 2.5 点余量：
+# 原默认 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化，最终仍会滑到 60 附近。
+# 提升覆盖后必须同步上调此值与 workflow 里的 MIN_LINE_COVERAGE。
+$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '81' }
+# 分支覆盖率棘轮（2026-10-29 接入）：实测 62.04%，取 60 留约 2 点余量。
+# 行覆盖率挡不住"行走了、分支只走一边"——`if (x) return;` 走一次就算整行覆盖。
+$minBranchCoverage = if ($env:MIN_BRANCH_COVERAGE) { $env:MIN_BRANCH_COVERAGE } else { '60' }
 
 # Native commands (python / dotnet / npm) do not raise terminating errors through
 # ErrorActionPreference: every native step must check its exit code and abort with a non-zero
@@ -31,6 +37,12 @@ New-Item $results -ItemType Directory -Force | Out-Null
 Write-Host "== VisionStudio V0.63 Quality Gate =="
 & $python "$root/scripts/static-audit.py"
 Assert-LastExitCode 'static audit'
+
+# 度量下限棘轮（2026-10-29）：节点目录与测试数量只许升不许降。
+# 覆盖率门槛挡不住"删测试"——被删的往往正是难覆盖的分支，删完覆盖率反而更高，门禁更绿。
+# 数量下限是唯一能发现"测试悄悄消失"的信号，基线见 scripts/metric-floor.json。
+& $python "$root/scripts/check-metric-floor.py"
+Assert-LastExitCode 'metric floor'
 
 # R08: production data must stay separated from the version package across publishes.
 & "$root/scripts/test-publish-data-separation.ps1"
@@ -77,7 +89,7 @@ finally { Pop-Location }
 & "$root/scripts/check-warning-baseline.ps1"
 Assert-LastExitCode 'warning baseline'
 
-& $python "$root/scripts/check-coverage.py" $results --min-line $minCoverage
+& $python "$root/scripts/check-coverage.py" $results --min-line $minCoverage --min-branch $minBranchCoverage
 Assert-LastExitCode 'coverage gate'
 
 Push-Location "$root/frontend"

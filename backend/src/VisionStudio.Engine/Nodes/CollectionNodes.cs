@@ -103,18 +103,23 @@ var items = DetectionListInput.Read(context, cancellationToken);
         }
         IEnumerable<VisionDetection> selected = ordered ?? items.OrderBy(_ => 0);
         if (topN > 0) selected = selected.Take(topN);
+        // topN 只截断输出；inputCount/truncated 让下游知道"排完只剩这些"还是"被 topN 裁到这些"。
+        var inputCount = items.Count;
+        var truncated = topN > 0 && inputCount > topN;
         var result = selected.Select((detection, index) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
             return detection with { Index = index };
         }).ToArray();
         cancellationToken.ThrowIfCancellationRequested();
-        var diag = CoordinateValidation.Diagnostics(Type, ("count", result.Length), ("sortBy", keys[0].Item1), ("descending", keys[0].Item2), ("empty", result.Length == 0));
+        var diag = CoordinateValidation.Diagnostics(Type, ("count", result.Length), ("inputCount", inputCount), ("truncated", truncated), ("sortBy", keys[0].Item1), ("descending", keys[0].Item2), ("empty", result.Length == 0));
         return ValueTask.FromResult(new NodeExecutorResult(
-            new Dictionary<string, VisionValue> { ["detections"] = VisionValue.Detections(result), ["count"] = VisionValue.Integer(result.Length), ["diagnostics"] = VisionValue.String(diag) },
+            new Dictionary<string, VisionValue> { ["detections"] = VisionValue.Detections(result), ["count"] = VisionValue.Integer(result.Length), ["inputCount"] = VisionValue.Integer(inputCount), ["truncated"] = VisionValue.Boolean(truncated), ["diagnostics"] = VisionValue.String(diag) },
             new Dictionary<string, object?>
             {
                 ["count"] = result.Length,
+                ["inputCount"] = inputCount,
+                ["truncated"] = truncated,
                 ["sortBy"] = keys[0].Item1,
                 ["descending"] = keys[0].Item2,
                 ["sortBy2"] = keys[1].Item1,

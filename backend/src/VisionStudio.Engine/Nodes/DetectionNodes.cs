@@ -111,11 +111,16 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 .Take(maxCount)
                 .Select((detection, index) => detection with { Index = index })
                 .ToArray();
+            // 截断必须可见：maxCount 默认 20，超过 20 个斑点时下游只能看到前 20 个。
+            var inputCount = candidates.Count;
+            var truncated = inputCount > detections.Length;
 
             var outputs = new Dictionary<string, VisionValue>
             {
                 ["image"] = VisionValue.Image(sourceImage),
                 ["count"] = VisionValue.Integer(detections.Length),
+                ["inputCount"] = VisionValue.Integer(inputCount),
+                ["truncated"] = VisionValue.Boolean(truncated),
                 ["detections"] = VisionValue.Detections(detections)
             };
             var overlays = new List<VisionOverlay>();
@@ -146,6 +151,8 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
             {
                 ["mode"] = mode,
                 ["count"] = detections.Length,
+                ["inputCount"] = inputCount,
+                ["truncated"] = truncated,
                 ["totalArea"] = detections.Sum(x => x.Area),
                 ["minArea"] = minArea,
                 ["maxArea"] = maxArea <= 0 ? "unlimited" : maxArea,
@@ -185,7 +192,8 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 outputs["blobs"] = VisionValue.String("[]");
             }
             var diag = CoordinateValidation.Diagnostics(Type,
-                ("mode", mode), ("count", detections.Length), ("minArea", minArea), ("maxArea", maxArea),
+                ("mode", mode), ("count", detections.Length), ("inputCount", inputCount), ("truncated", truncated),
+                ("minArea", minArea), ("maxArea", maxArea),
                 ("sortBy", sortBy), ("roi", roi?.Type.ToString() ?? "FullImage"));
             outputs["diagnostics"] = VisionValue.String(diag);
             summary["diagnostics"] = diag;

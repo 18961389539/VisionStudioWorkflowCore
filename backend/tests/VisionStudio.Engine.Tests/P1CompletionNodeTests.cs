@@ -131,6 +131,37 @@ public sealed class P1CompletionNodeTests
     }
 
     [Fact]
+    public async Task Fuse_AcceptsASynchronizedFrameSet()
+    {
+        using var frameSet = new VisionFrameSet("sync-1", "host", 12, true,
+            new Dictionary<string, IVisionImage>
+            {
+                ["cam-b"] = VisionImage.Own(Constant(64, 200)),
+                ["cam-a"] = VisionImage.Own(Constant(64, 120))
+            },
+            new Dictionary<string, VisionFrameSetFrameInfo>());
+
+        var mean = await Run(new ImageFuseNode(), "image.fuse",
+            new Dictionary<string, VisionValue> { ["frameSet"] = VisionValue.FrameSet(frameSet) },
+            """{"sourceMode":"frameSet","mode":"mean"}""");
+        using var meanImage = Result(mean);
+        Assert.Equal(160, meanImage.Mat.At<byte>(0, 0));
+        Assert.Equal(2L, mean.Outputs["inputCount"].Require<long>("inputCount"));
+
+        // 两条来源互斥：frameSet 模式再接 image1 必须明确失败，而不是悄悄只算一半。
+        using var extra = Constant(64, 120);
+        var both = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ImageFuseNode(), "image.fuse",
+                new Dictionary<string, VisionValue>
+                {
+                    ["frameSet"] = VisionValue.FrameSet(frameSet),
+                    ["image1"] = VisionValue.Image(VisionImage.Own(extra.Clone()))
+                },
+                """{"sourceMode":"frameSet","mode":"mean"}"""));
+        Assert.Contains("ignores image1", both.Message);
+    }
+
+    [Fact]
     public async Task Fuse_MedianRejectsASpeckPresentInOneFrameOnly()
     {
         using var clean1 = Constant(64, 100);

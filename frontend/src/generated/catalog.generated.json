@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "cbdbf23df93671e0c28a2533de41c4e4f90ab80ca74ffa2b0829f42443b70172",
+  "hash": "fcc8704005832c6309bdc4baf1b47aa5294cf37c32ae0d6daf24b20a6690f011",
   "items": [
     {
       "type": "image.acquire",
@@ -953,6 +953,14 @@
       ],
       "description": "Generate a large test image with a fixed-size pattern. The pattern can stay fixed, follow a sample-index sequence, use repeatable seeded random offsets, or choose a new valid random placement on every run. Sequence and seeded placements are minimally translated into the image when needed; random-each-run placements are resampled instead.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": false,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Auto"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -3513,6 +3521,16 @@
           "required": true
         },
         {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "diagnostics",
           "dataType": "String",
           "required": true
@@ -3917,6 +3935,16 @@
           "required": true
         },
         {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "found",
           "dataType": "Boolean",
           "required": true
@@ -4045,7 +4073,7 @@
           "internal": true
         }
       ],
-      "description": "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
+      "description": "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -5365,7 +5393,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -12879,6 +12907,16 @@
           "required": true
         },
         {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "ellipse",
           "dataType": "String",
           "required": false
@@ -13049,7 +13087,7 @@
           "internal": true
         }
       ],
-      "description": "Detect ellipses straight from the image: Canny edge map, contour tracing, ellipse fit per contour, then an explicit consistency filter (area, axis ratio, angular coverage, radial RMS). This is the one-step path for foreshortened holes, O-rings and perspective-distorted circles that feature.circle (circles only) and measure.fitEllipse (needs a contour) cannot serve alone. Coverage uses the parametric angle in the ellipse frame, so an occluded ellipse still reports how much of it was actually supported. Largest-support ellipse is echoed on the scalar ports for direct wiring; the full list is in ellipses JSON. No ellipse converges, no contour passes the filters, or the ROI is empty returns found=false.",
+      "description": "Detect ellipses straight from the image: Canny edge map, contour tracing, ellipse fit per contour, then an explicit consistency filter (area, axis ratio, angular coverage, radial RMS). This is the one-step path for foreshortened holes, O-rings and perspective-distorted circles that feature.circle (circles only) and measure.fitEllipse (needs a contour) cannot serve alone. Coverage uses the parametric angle in the ellipse frame, so an occluded ellipse still reports how much of it was actually supported. Largest-support ellipse is echoed on the scalar ports for direct wiring; the full list is in ellipses JSON. count is the emitted length and inputCount the deduplicated candidate count, so truncated=true means maxEllipses (default 10) cut the list and more ellipses exist than the outputs show. No ellipse converges, no contour passes the filters, or the ROI is empty returns found=false.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -15382,9 +15420,25 @@
           "type": "textarea",
           "defaultValue": "[\"OK\",\"NG\"]",
           "description": "JSON array of 1-16 non-empty unique case labels; malformed JSON or duplicates fail deterministically."
+        },
+        {
+          "name": "trimValues",
+          "label": "Trim Whitespace",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Matching",
+          "description": "Trim leading/trailing whitespace from the input value and from every case label before comparing. Scanner and OCR text often carries a trailing space or CR."
+        },
+        {
+          "name": "ignoreCase",
+          "label": "Ignore Case",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Matching",
+          "description": "Compare case-insensitively. Labels that differ only by case then collide and are rejected instead of silently matching the first one."
         }
       ],
-      "description": "Choose one matching path. casesJson entries map in order to case1-caseN; only configured case ports are exposed on the node. Unmatched values take the default path and report matched=false. Converge all configured paths at Flow Merge. Emits case count and JSON diagnostics.",
+      "description": "Choose one matching path. casesJson entries map in order to case1-caseN; only configured case ports are exposed on the node. Match is exact by default; trimValues/ignoreCase relax it for scanner and OCR text. Unmatched values take the default path and report matched=false. Converge all configured paths at Flow Merge. Emits case count and JSON diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -17205,7 +17259,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -17968,7 +18022,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -19220,7 +19274,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -19969,6 +20023,11 @@
           "required": true
         },
         {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "result",
           "dataType": "String",
           "required": true
@@ -20202,7 +20261,7 @@
           "description": "Hard cap on detections returned after NMS (1..1000)."
         }
       ],
-      "description": "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6] (YOLO26 end-to-end nms=False export is typically [1,300,6]); layout yolo expects YOLOv8/YOLO26 raw cx,cy,w,h plus per-class scores as [1,C,N]; layout yolov5 adds objectness. Enable letterbox so preprocess pads like Ultralytics and coordinates un-pad correctly. Class-aware NMS is applied here (not embedded).",
+      "description": "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6] (YOLO26 end-to-end nms=False export is typically [1,300,6]); layout yolo expects YOLOv8/YOLO26 raw cx,cy,w,h plus per-class scores as [1,C,N]; layout yolov5 adds objectness. Enable letterbox so preprocess pads like Ultralytics and coordinates un-pad correctly. Class-aware NMS is applied here (not embedded). count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -20243,6 +20302,11 @@
         {
           "name": "count",
           "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -20534,7 +20598,7 @@
           "description": "Hard cap on instances retained after NMS (1..1000)."
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -20576,6 +20640,11 @@
         {
           "name": "count",
           "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -20843,7 +20912,7 @@
           "description": "Optional comma-separated labels in model class order; leave empty to emit class_N labels."
         }
       ],
-      "description": "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes.",
+      "description": "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -20885,6 +20954,11 @@
         {
           "name": "count",
           "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
           "required": true
         },
         {
@@ -21169,7 +21243,7 @@
           "description": "Hard cap on poses retained after NMS (1..1000)."
         }
       ],
-      "description": "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only.",
+      "description": "Run Ultralytics YOLO26/YOLOv8 pose ONNX. layout=yolo decodes the raw multi-candidate head (external class-aware NMS). layout=xyxy matches YOLO26 end-to-end NMS-free rows [x1,y1,x2,y2,score,class,kpts...]. Outputs person boxes, keypoints JSON (x,y,conf in source pixels), and an overlay. Set swapRB=true (default here) and letterbox=true for Ultralytics exports. Custom keypoint topologies work if numKeypoints/keypointDims match; skeleton drawing is COCO-17 only. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -23498,6 +23572,182 @@
           "description": "Controls how many fields are included in the diagnostics JSON payload."
         },
         {
+          "name": "trainingMode",
+          "label": "trainingMode",
+          "type": "boolean",
+          "group": "Host Protocol",
+          "description": "Workspace request to run one training pass; the result goes to the run summary and is never stored as a workflow parameter.",
+          "internal": true
+        },
+        {
+          "name": "trainingPreviewOnly",
+          "label": "trainingPreviewOnly",
+          "type": "boolean",
+          "group": "Host Protocol",
+          "description": "Return only the training preview image, without producing model data.",
+          "internal": true
+        },
+        {
+          "name": "searchPreviewOnly",
+          "label": "searchPreviewOnly",
+          "type": "boolean",
+          "group": "Host Protocol",
+          "description": "Return only the search scene image for tuning previews.",
+          "internal": true
+        },
+        {
+          "name": "trainingImageData",
+          "label": "trainingImageData",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Base64 training image supplied by the workspace; takes precedence over the template port.",
+          "internal": true
+        },
+        {
+          "name": "trainingCombineModelData",
+          "label": "trainingCombineModelData",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Multi-view training: JSON array of already trained model blobs (base64).",
+          "internal": true
+        },
+        {
+          "name": "trainingCombineSourceImages",
+          "label": "trainingCombineSourceImages",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Multi-view training: JSON array of source images (base64).",
+          "internal": true
+        },
+        {
+          "name": "trainingReferenceModelData",
+          "label": "trainingReferenceModelData",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Reference model blob (base64) used when combining multi-view training samples.",
+          "internal": true
+        },
+        {
+          "name": "trainingReferenceOriginImageX",
+          "label": "trainingReferenceOriginImageX",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Reference model origin X in the source image, in pixels.",
+          "internal": true
+        },
+        {
+          "name": "trainingReferenceOriginImageY",
+          "label": "trainingReferenceOriginImageY",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Reference model origin Y in the source image, in pixels.",
+          "internal": true
+        },
+        {
+          "name": "trainingOriginOverrideX",
+          "label": "trainingOriginOverrideX",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Forced origin X for this training pass; NaN follows trainingOriginMode.",
+          "internal": true
+        },
+        {
+          "name": "trainingOriginOverrideY",
+          "label": "trainingOriginOverrideY",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Forced origin Y for this training pass; NaN follows trainingOriginMode.",
+          "internal": true
+        },
+        {
+          "name": "trainedModelData",
+          "label": "trainedModelData",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Trained shape model blob (base64, 16 MB limit) stored with the node together with trainedModelConfig.",
+          "internal": true
+        },
+        {
+          "name": "trainedModelConfig",
+          "label": "trainedModelConfig",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Fingerprint of the training parameters; the executor refuses to reuse a model trained with different settings.",
+          "internal": true
+        },
+        {
+          "name": "trainedSourceImage",
+          "label": "trainedSourceImage",
+          "type": "text",
+          "group": "Host Protocol",
+          "description": "Base64 training source image used to echo the model contour in the dialog.",
+          "internal": true
+        },
+        {
+          "name": "trainedWidth",
+          "label": "trainedWidth",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Training source image width in pixels.",
+          "internal": true
+        },
+        {
+          "name": "trainedHeight",
+          "label": "trainedHeight",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Training source image height in pixels.",
+          "internal": true
+        },
+        {
+          "name": "trainedOriginX",
+          "label": "trainedOriginX",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Model origin X in image coordinates at training time.",
+          "internal": true
+        },
+        {
+          "name": "trainedOriginY",
+          "label": "trainedOriginY",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Model origin Y in image coordinates at training time.",
+          "internal": true
+        },
+        {
+          "name": "trainedOriginImageX",
+          "label": "trainedOriginImageX",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Model origin X inside the training source image (display only).",
+          "internal": true
+        },
+        {
+          "name": "trainedOriginImageY",
+          "label": "trainedOriginImageY",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Model origin Y inside the training source image (display only).",
+          "internal": true
+        },
+        {
+          "name": "trainedPoseOffsetX",
+          "label": "trainedPoseOffsetX",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Pose offset X recorded during multi-view training.",
+          "internal": true
+        },
+        {
+          "name": "trainedPoseOffsetY",
+          "label": "trainedPoseOffsetY",
+          "type": "number",
+          "group": "Host Protocol",
+          "description": "Pose offset Y recorded during multi-view training.",
+          "internal": true
+        },
+        {
           "name": "roi",
           "label": "ROI",
           "type": "roi",
@@ -23530,7 +23780,7 @@
           "internal": true
         }
       ],
-      "description": "JLVision gray-edge shape matching with explicit model/search regions, train-up-to-four equal-size samples, rotation, uniform or aniso scale, polarity, multi-target and clutter ROI. Wire: train first on new nodes, then run on scene image; pose/scale outputs feed roi.transform. Key params: model/search regions, minScore, train/search angle and scale ranges, pyramidLevels, contrast gates, clutterRoi. Default matchingBackend=jlvision; engine=auto is native only and never silently switches to managedChamfer (explicit engine=managedChamfer required for the managed distance matcher). Remaining gap vs PatMax/full HALCON: no PatMax feature vectors, no trained clutter model, no full XLD least-squares deformation. found=false: not trained, weak contrast, outside angle/scale window, or clutter reject.",
+      "description": "JLVision gray-edge shape matching with explicit model/search regions, train-up-to-four equal-size samples, rotation, uniform or aniso scale, polarity, multi-target and clutter ROI. Wire: train first on new nodes, then run on scene image; pose/scale outputs feed roi.transform. Key params: model/search regions, minScore, train/search angle and scale ranges, pyramidLevels, contrast gates, clutterRoi. Default matchingBackend=jlvision; engine=auto is native only and never silently switches to managedChamfer (explicit engine=managedChamfer required for the managed distance matcher). Remaining gap vs PatMax/full HALCON: no PatMax feature vectors, no trained clutter model, no full XLD least-squares deformation. The trained model is stored inside the node as base64 (16 MB limit) together with a training-parameter fingerprint; changing training parameters requires retraining, and modelMode=trained refuses to run before the first training. found=false: not trained, weak contrast, outside angle/scale window, or clutter reject.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -24576,7 +24826,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -28054,7 +28304,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -28287,7 +28537,7 @@
     },
     {
       "type": "tolerance.datum",
-      "displayName": "Datum Reference Frame",
+      "displayName": "Datum Frame (A + projected B)",
       "category": "Measurement",
       "inputs": [
         {
@@ -28398,7 +28648,7 @@
     },
     {
       "type": "tolerance.drf",
-      "displayName": "Datum Reference Frame (A|B)",
+      "displayName": "Datum Frame (A|B intersection)",
       "category": "Measurement",
       "inputs": [
         {
@@ -29968,6 +30218,16 @@
           "required": true
         },
         {
+          "name": "inputCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
           "name": "detections",
           "dataType": "DetectionList",
           "required": true
@@ -30263,7 +30523,7 @@
           "internal": true
         }
       ],
-      "description": "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0).",
+      "description": "Analyze either all filtered/sorted blobs or only the largest one. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -31685,7 +31945,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -34530,6 +34790,14 @@
           "description": "First line of the notification and the mail subject. Keep it short: the on-call engineer reads the subject on a lock screen."
         },
         {
+          "name": "source",
+          "label": "Source Tag",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Message",
+          "description": "Optional tag echoed into the webhook JSON as 'source' so the receiving alarm platform can filter by line, station or product. Webhook channel only; WeCom and SMTP ignore it."
+        },
+        {
           "name": "message",
           "label": "Message",
           "type": "textarea",
@@ -36210,12 +36478,24 @@
         {
           "name": "image1",
           "dataType": "Image",
-          "required": true
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "images"
+            ]
+          }
         },
         {
           "name": "image2",
           "dataType": "Image",
-          "required": true
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "images"
+            ]
+          }
         },
         {
           "name": "image3",
@@ -36246,6 +36526,17 @@
           "name": "image8",
           "dataType": "Image",
           "required": false
+        },
+        {
+          "name": "frameSet",
+          "dataType": "FrameSet",
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "frameSet"
+            ]
+          }
         }
       ],
       "outputs": [
@@ -36287,6 +36578,24 @@
       ],
       "parameters": [
         {
+          "name": "sourceMode",
+          "label": "Input Source",
+          "type": "select",
+          "defaultValue": "images",
+          "options": [
+            {
+              "label": "Image ports (image1..image8)",
+              "value": "images"
+            },
+            {
+              "label": "Synchronized FrameSet",
+              "value": "frameSet"
+            }
+          ],
+          "group": "Fusion",
+          "description": "images reads image1..image8. frameSet reads every camera image of a camera.syncCapture FrameSet in camera-id order, so a multi-camera stack needs one wire instead of eight; the two sources are mutually exclusive."
+        },
+        {
           "name": "mode",
           "label": "Fusion Mode",
           "type": "select",
@@ -36324,7 +36633,7 @@
           "description": "Hard cap on the input area. Median holds every input plus the output in memory, so a full-resolution stack multiplies quickly."
         }
       ],
-      "description": "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time. For synchronized multi-camera frames use frameset.image first.",
+      "description": "Fuse 2..8 aligned frames pixel by pixel: mean, median, min or max. Wire: image1..image8 -> image, or sourceMode=frameSet + frameSet (synchronized capture) -> image. All inputs must share size, channel count and depth - a mismatched stack fails instead of producing a smeared result. Accumulation runs in float32 and converts back to the source depth with saturation. Median is 8-bit only and noticeably slower than mean; use it when transient specks matter more than cycle time.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -38818,7 +39127,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -39450,12 +39759,24 @@
         {
           "name": "image1",
           "dataType": "Image",
-          "required": true
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "images"
+            ]
+          }
         },
         {
           "name": "image2",
           "dataType": "Image",
-          "required": true
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "images"
+            ]
+          }
         },
         {
           "name": "image3",
@@ -39486,6 +39807,17 @@
           "name": "image8",
           "dataType": "Image",
           "required": false
+        },
+        {
+          "name": "frameSet",
+          "dataType": "FrameSet",
+          "required": false,
+          "requiredWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "frameSet"
+            ]
+          }
         }
       ],
       "outputs": [
@@ -39527,6 +39859,38 @@
       ],
       "parameters": [
         {
+          "name": "sourceMode",
+          "label": "Input Source",
+          "type": "select",
+          "defaultValue": "images",
+          "options": [
+            {
+              "label": "Image ports (image1..image8)",
+              "value": "images"
+            },
+            {
+              "label": "Synchronized FrameSet",
+              "value": "frameSet"
+            }
+          ],
+          "group": "Stitching",
+          "description": "images reads image1..image8. frameSet reads a camera.syncCapture FrameSet; use Camera Order to set the stitching order because panorama quality depends on it. The two sources are mutually exclusive."
+        },
+        {
+          "name": "cameraOrder",
+          "label": "Camera Order",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Stitching",
+          "description": "Comma-separated camera ids in stitching order (left to right). Empty sorts by camera id. Every id must exist in the FrameSet; unknown ids fail before stitching.",
+          "visibleWhen": {
+            "parameter": "sourceMode",
+            "values": [
+              "frameSet"
+            ]
+          }
+        },
+        {
           "name": "mode",
           "label": "Stitch Mode",
           "type": "select",
@@ -39556,7 +39920,7 @@
           "description": "Total pixel budget across all connected inputs. Exceeding it fails before cloning or stitching, so a mistaken full-resolution batch cannot exhaust memory."
         }
       ],
-      "description": "Stitch 2..8 overlapping 8-bit images into one panorama with OpenCV Stitcher (features, homography, bundle adjustment, seam and blend). Inputs must share the same channel count. A stitch failure returns the OpenCV status in the error instead of a half-composed image. algorithmBackend=opencv.",
+      "description": "Stitch 2..8 overlapping 8-bit images into one panorama with OpenCV Stitcher (features, homography, bundle adjustment, seam and blend). Wire: image1..image8, or sourceMode=frameSet + frameSet (+ optional cameraOrder) for a synchronized capture. Inputs must share the same channel count. A stitch failure returns the OpenCV status in the error instead of a half-composed image. algorithmBackend=opencv.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -41928,7 +42292,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -47240,7 +47604,7 @@
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
-        "emitsOverlay": false,
+        "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
@@ -47770,6 +48134,21 @@
           "required": true
         },
         {
+          "name": "emitted",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "truncated",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "totalArea",
+          "dataType": "Double",
+          "required": true
+        },
+        {
           "name": "next",
           "dataType": "Control",
           "required": true
@@ -47825,7 +48204,7 @@
           "description": "When the result region is empty: emit empty keeps outputs with found=false; fail stops the graph."
         }
       ],
-      "description": "Convert each existing region object to one detection, preserving pixel area, centroid and bounding geometry. Does not split or reorder objects. Optional maxCount truncates the list. Emits diagnostics. Connect to collection nodes or flow.forEach.",
+      "description": "Convert each existing region object to one detection, preserving pixel area, centroid and bounding geometry. Does not split or reorder objects. Optional maxCount truncates the list; when it does, truncated=true and diagnostics keep sourceCount so a capped result is never mistaken for a complete one. emitted equals count, totalArea sums the emitted areas. Connect to collection nodes or flow.forEach.",
       "pluginId": "builtin",
       "actions": [],
       "outputFrames": [
@@ -49322,7 +49701,7 @@
           "name": "source",
           "label": "Script Source",
           "type": "textarea",
-          "defaultValue": "var a = Input.Number(\"a\");\r\nOutput.Number = a * 2;",
+          "defaultValue": "var a = Input.Number(\"a\");\nOutput.Number = a * 2;",
           "group": "Script",
           "description": "C# script body. Use Input.Number/Integer/Boolean/Text/Numbers/Points, Image (Mat), Output.Result/Number/Text/Boolean/Json/Image, Log and Fail. Top-level return also becomes result when Output.Result is not set. Use a using block or explicit Dispose for working Mats; top-level 'using var' declarations are not accepted by the Roslyn script parser in this build."
         },

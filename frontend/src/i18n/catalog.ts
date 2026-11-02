@@ -42,7 +42,7 @@ const nodeNames: Record<string, string> = {
   'measure.caliperCircle': '卡尺找圆', 'measure.fitEllipse': '椭圆拟合',
   'match.shape': '形状匹配', 'roi.transform': '定位修正 ROI',
   'match.feature': '特征点匹配',
-  'tolerance.datum': '基准坐标系', 'tolerance.position': '真实位置度', 'tolerance.runout': '圆跳动 / 全跳动',
+  'tolerance.datum': '基准坐标系（A + B 投影）', 'tolerance.position': '真实位置度', 'tolerance.runout': '圆跳动 / 全跳动',
   'image.convolve': '自定义卷积', 'image.fftFilter': '频域滤波（FFT）',
   'recognition.barcode': '条码 / 二维码识别', 'recognition.ocr': '文字识别 / OCR',
   'inference.classification': '图像分类', 'inference.detection': '目标检测', 'inference.obb': '旋转框检测',
@@ -751,6 +751,9 @@ const parameterNames: Record<string, string> = {
   'Max Samples': '最大样本数',
   'Crop Margin (px)': '裁剪边距（px）',
   'On Existing File': '文件已存在时',
+  // output.notify（2026-10-29）：执行器一直在读 source，但目录漏声明，界面上看不到也填不了。
+  // 补声明的同时必须补词条，否则本地化守卫会以「output.notify.source label 缺中文」失败。
+  'Source Tag': '来源标签',
 };
 
 const parameterGroups: Record<string, string> = {
@@ -1931,7 +1934,7 @@ const descriptions: Record<string, string> = {
   'match.template': '灰度 NCC 多目标定位（JLVision CreateNccModel/FindNccModel 金字塔）。接线：image=场景，template 端口或 templatePath；可选 templateRoi（建模前 ReduceDomain）、searchRoi、ignoreRoi；输出 found/score/x/y/angle/detections，可接 roi.transform 或测量。关键参数：minScore、角度窗（searchAngleStart/End 或 angleRangeDeg）、pyramidLevels、maxTargets、duplicateOverlapThreshold；ignorePolarity；默认 hard NMS 吃满 Find MaxOverlap。后端 algorithmBackend=jlvision；soft ignore / Soft-NMS 仅显式可选（托管近似，非库 soft-NCC）；尺度为离散重采样多模型；scoreMap 为诊断用 OpenCV 单位尺度平面，非金字塔 score 立方体。无杂波/变形/连续缩放 NCC（请用 match.shape）。found=false：分数不够、角度窗外、被忽略区挡住或模板未接。',
   'roi.transform': '定位后的刚性 ROI 跟随：先保存基准图与基准位姿，再画基准 ROI；运行时用当前位姿把 ROI 变到工件上。接线：currentPose（或 currentX/Y/Theta）来自匹配；roi 输出接测量区域，transform 接测量 transform；debugImage 用于采基准与叠加。输出变换为 ReferenceImage→CurrentImage；若再裁剪，与 image.crop 的 transform 组合（A=本节点，B=裁剪）。anglePeriodDeg：180° 用于半周对称模板，360° 用于方向唯一。矩形旋转后变为多边形。已修正几何不要重复变换。',
   'flow.ifBoolean': '根据布尔条件选择真或假分支，再在汇合节点继续执行。',
-  'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；节点只显示已配置的分支端口，未匹配走默认路径，各路径在多路汇合节点汇合。',
+  'flow.switch': '配置 1–16 个唯一分支值，按顺序连接对应分支；节点只显示已配置的分支端口，未匹配走默认路径，各路径在多路汇合节点汇合。默认精确匹配；扫码/OCR 文本可用"去除首尾空白"和"忽略大小写"放宽，只差大小写的标签会被拒绝。',
   'flow.forEach': '按输入目标列表逐个执行循环体，提供当前目标位置、索引及可选的类别和置信度；完成后走 done 路径。',
   'flow.try': '执行体失败后可重试，最终转入错误分支或终止流程。支持错误堆栈诊断和警告即失败，取消不会被重试。',
   'output.saveImage': '支持连续图像归档：时间戳/模板/固定命名、按日期与 OK/NG 分类、同名报错/覆盖/另存/跳过。path/partId 可动态接入，sequence 来自上游，runId 使用本次流程运行标识。原子发布并返回实际 path；saved=false 时通过 reason 区分跳过原因。旧流程保留固定路径与覆盖语义。',
@@ -2062,7 +2065,7 @@ const descriptions: Record<string, string> = {
   'value.string': '对条码文本、OCR 文本、时间戳等字符串做加工，补齐此前只能原样转交下发的空白。接线：可选字符串输入 a/b/c/d 与可选数值输入 value；textValue 为结果，charCount 是 UTF-16 码元长度，truncated 表示子串被裁剪，numberValue 仅由"文本转数值"输出。模板模式用 {a}..{d}、{value} 与 {0}..{3} 组装，{{ 与 }} 输出字面花括号；拼接跳过空段；数值转文本用固定区域性的格式串；文本转数值按浮点规则严格解析，非数字与非有限值直接失败；截取越界自动裁剪并置 truncated；去空白、替换、补齐、大小写与求长度都作用于输入 a。查找内容为空、补齐字符不是单字符、占位符未知、数字格式非法都会明确失败；未接线的字符串输入按空串处理。',
   'color.classify': '按颜色对 8 位图像做聚类或分类。cluster 用确定性的 K-means 在 ROI 内学习主色，输出 1..N 的标签图、各类像素数与主导类别；reference 把像素归到给定参考色，容差外标为 0，并统计未匹配像素。输出 image 为单通道标签图，0 表示背景/未匹配。可用 ROI 排除背景。失败：非 8 位图、采样点不足、参考色为空、名称重复或容差非法。algorithmBackend=opencv。',
   'image.denoise': '在测量前对低照/高感图像做非局部均值降噪，尽量保留边缘。仅接受 8 位 1 或 3 通道图；16 位/浮点请先转换。ROI 只替换选区内的像素，选区外保持原图。失败：非 8 位、通道与模式不匹配、窗口为偶数或强度越界。algorithmBackend=opencv。',
-  'image.stitch': '把 2..8 张有重叠的 8 位图像拼成一张全景图（特征匹配、单应估计、束调整、接缝与混合）。所有输入必须通道数一致；灰度输入会先转 BGR 供 Stitcher 使用，输出再转回灰度。拼接失败时返回 OpenCV 状态码并明确报错，不输出半成品。algorithmBackend=opencv。',
+  'image.stitch': '把 2..8 张有重叠的 8 位图像拼成一张全景图（特征匹配、单应估计、束调整、接缝与混合）。输入来源二选一：image1..image8 逐根接线，或 sourceMode=frameSet 直接吃 camera.syncCapture 帧组（用"相机顺序"指定左→右次序）。所有输入必须通道数一致；灰度输入会先转 BGR 供 Stitcher 使用，输出再转回灰度。拼接失败时返回 OpenCV 状态码并明确报错，不输出半成品。algorithmBackend=opencv。',
   'recognition.aruco': '识别 ArUco/AprilTag 标记，并在提供相机标定时求解标记到相机的 3D 位姿。输出标记 ID、类型化检测列表、角点 JSON；有 calibrationJson 时额外输出 poses JSON 与首个标记的 Transform3D。位姿使用针孔 Brown-Conrady 模型，鱼眼/远心模型会被拒绝。失败：空图、未知字典、标记数超过上限、标定 JSON 非法或位姿参数非法。algorithmBackend=opencv。',
   'calibration.charuco': '用 OpenCV 5 CharucoDetector 检测 ChArUco 标定板：ArUco 标记定位棋盘格角点，角点插值后按 ID 映射到板坐标。接线：image + 可选累计 calibrationDataJson → charucoCorners/charucoIds、markerCount、viewJson，并把当前视图追加到 calibrationDataJson 供 calibration.cameraIntrinsics 使用。质量门限与 calibration.detectBoard 一致。失败：板尺寸非法、标记边长不小于方格边长、角点不足、角点共线或累计超过 100 个视图。algorithmBackend=opencv。',
   'script.csharp': '运行受信 C# 脚本：可读取类型化输入 a..h 与可选 OpenCV Mat 图像，写入 Output.Result/Number/Text/Boolean/Json/Image。运行时只引用最小 BCL + OpenCvSharp + VisionStudio.Scripting，并通过语法树拒绝文件/网络/反射/进程/线程 API 与 #r/#load；循环和函数入口注入协作式预算。至少需要一个输出。脚本是受信工程师代码，不是硬沙箱；导入含脚本的工作流需要审批。algorithmBackend=roslyn。',
@@ -2079,7 +2082,7 @@ const descriptions: Record<string, string> = {
   'value.counter': '跨轮计数器与良率统计：可接 pass / reset，输出 count/total/passCount/failCount/rate。复位在累加之前求值，所以触发复位的那一件算第 1 件而不是第 0 件——连续 NG 门限的差一件问题就出在这里。状态按 workflow（默认，跨 run 保留）或 run（每轮重置）隔离，并行分支下线程安全，进程内存储，重启清零。',
   'defect.cluster': '把相邻的检测并成一个缺陷：两个外接矩形的间隙 ≤ linkDistancePx 就连成一簇。现场意义很直接——聚类前几百个斑点是几百条 NG，聚类后是两条划痕，人工复判量差两个数量级。合并面积取成员之和，合并周长也取成员之和，因此簇的圆度只能作粗筛；需要真实轮廓请回 region/contour 节点重算。只有成员类别完全一致时才保留类别。按 x 扫描线实现，结果与输入顺序无关。',
   'defect.classify': '按有序规则表给每个检测打类别：面积、长宽比、圆度，首条命中生效。规则字段 name/classId/minArea/maxArea/minAspect/maxAspect/minCircularity/maxCircularity，0 或省略表示该边界不生效。未命中记为未分类（ClassId=0），默认计为 NG；调规则时可关掉 rejectUnclassified 避免误判停机。重名、classId 重复、区间倒置都会直接报错，而不是静默永不匹配。灰度类分级需要源图，另配节点。',
-  'image.fuse': '把 2~8 帧逐像素融合：均值（随机噪声压到 1/√N）、中值（去掉只在单帧出现的亮点）、最小/最大值（多曝光融合或明暗场参考）。所有输入必须同尺寸、同通道数、同位深，否则直接失败——尺寸不一致的"平均"没有意义。float32 累加后按源位深饱和回写。中值仅支持 8 位，且比均值慢一个数量级：瞬时亮点比节拍更重要时才用。多相机同步帧先用 frameset.image 拆。',
+  'image.fuse': '把 2~8 帧逐像素融合：均值（随机噪声压到 1/√N）、中值（去掉只在单帧出现的亮点）、最小/最大值（多曝光融合或明暗场参考）。输入来源二选一：image1..image8 逐根接线，或 sourceMode=frameSet 直接吃 camera.syncCapture 的帧组（按相机 id 排序，多相机只接一根线）。所有输入必须同尺寸、同通道数、同位深，否则直接失败——尺寸不一致的"平均"没有意义。float32 累加后按源位深饱和回写。中值仅支持 8 位，且比均值慢一个数量级：瞬时亮点比节拍更重要时才用。',
   'calibration.conveyor': '传送带跟踪换算：编码器计数 → 工程位置，并补上触发延迟期间工件继续前进的距离。position = counts/countsPerUnit；triggerOffset = 线速度 × 触发延迟；compensatedPosition = position ± offset（反向线体用 subtract）。本节点不读任何硬件：编码器计数由宿主锁存，标定参数因此能进配方、能追溯，也不会因为换相机品牌而重写。countsPerUnit ≤ 0、延迟或线速为负都会报错。',
   'tolerance.profile': '轮廓度：逐点算实测轮廓到理论轮廓的有符号法向距离。直线正值在 +90° 法向侧（右向线的图像下方），圆正值在圆外。双侧模式取 max−min（公差带总宽）；单侧外侧/内侧只取允许侧，且有任何点跨到另一侧就判不合格并在 crossedSampleCount 里写明——这是计量室的口径。少于 3 个样本返回 found=false。单位跟随输入坐标，理论轮廓必须是图纸值而不是金标件拟合值。',
 };
@@ -3495,6 +3498,11 @@ const parameterDescriptions: Record<string, string> = {
   'defect.classify.rejectUnclassified': '未命中任何规则的检测计为 NG（默认）。调一套新规则时关掉它，避免未命中斑点导致整件判废。',
   'image.fuse.mode': '均值是降噪的快速默认；中值能剔掉只在单帧出现的亮点，但每像素 O(N)；最小/最大值适合多曝光融合与明暗场参考构建。',
   'image.fuse.maxPixels': '输入面积的硬上限。中值要同时持有全部输入加输出，全分辨率叠图很容易把内存吃满。',
+  'image.fuse.sourceMode': 'images 读取 image1..image8；frameSet 读取 camera.syncCapture 帧组里的全部相机图像（按相机 id 排序），多相机叠加只需一根线。两种来源互斥，选 frameSet 时不要同时接图像端口。',
+  'image.stitch.sourceMode': 'images 读取 image1..image8；frameSet 读取 camera.syncCapture 帧组。全景拼接对输入顺序敏感，选 frameSet 时用"相机顺序"显式指定左→右次序。两种来源互斥。',
+  'image.stitch.cameraOrder': '逗号分隔的相机 id，按拼接顺序（左→右）排列。留空按相机 id 排序；id 必须存在于帧组，未知 id 在拼接前报错并列出可用 id。',
+  'flow.switch.trimValues': '匹配前去掉输入值和每条分支标签的首尾空白。扫码/OCR 文本常带尾随空格或 CR，默认关闭以保持既有流程的精确匹配。',
+  'flow.switch.ignoreCase': '忽略大小写比较；只差大小写的标签会被视为重复而拒绝，而不是悄悄匹配第一个。',
   'calibration.conveyor.encoder': 'encoder 端口未连接时的备用计数；连了端口以端口为准，可由触发时刻锁存的计数驱动。',
   'calibration.conveyor.countsPerUnit': '每工程单位的编码器计数（每毫米计数）。每条线体测一次：走一段已知距离，用计数差除以距离。',
   'calibration.conveyor.unit': '位置输出的单位标注（1..16 字符）。不做换算，比例已经在 countsPerUnit 里。',
@@ -3503,6 +3511,7 @@ const parameterDescriptions: Record<string, string> = {
   'calibration.conveyor.compensationSign': '延迟期间工件还在走，所以它后来的位置比触发位置更靠前。线体反向时改成相减。',
   'tolerance.profile.mode': '双侧报的是 max−min 的整条带宽；单侧只报允许侧，并且任一点跨到另一侧即判不合格。',
   'tolerance.profile.tolerance': '轮廓度公差带的**总宽**（框格里的那个值）。填 0 关闭判定；节点不输出利用率，直接比较 profile。',
+  'output.notify.source': '只对 Webhook 生效：这个值会原样写进 webhook JSON 的 source 字段，接收方据此按线体、工位或产品过滤。企业微信与 SMTP 忽略它。',
 };
 
 const statusNames: Record<string, string> = {
@@ -3560,12 +3569,17 @@ const nodeParameterLabels: Record<string, Record<string, string>> = {
   'jlvision.restoration': { Operation: '操作', 'Kernel Width': '模糊核宽度', 'Kernel Height': '模糊核高度' },
   'jlvision.surface': { Operation: '操作' },
   'jlvision.segmentation': { Operation: '操作' },
-  'jlvision.regionAnalysis': { Operation: '操作' }
+  'jlvision.regionAnalysis': { Operation: '操作' },
+  'image.fuse': { 'Input Source': '输入来源' },
+  'image.stitch': { 'Input Source': '输入来源', 'Camera Order': '相机顺序' },
+  'flow.switch': { 'Trim Whitespace': '去除首尾空白' }
 };
 
 const nodeOptionLabels: Record<string, Record<string, string>> = {
   'output.saveImage': { Fail: '报错', Overwrite: '显式覆盖' },
-  'jlvision.regionAnalysis': { Chessboard: '棋盘距离' }
+  'jlvision.regionAnalysis': { Chessboard: '棋盘距离' },
+  'image.fuse': { 'Image ports (image1..image8)': '图像端口（image1..image8）', 'Synchronized FrameSet': '同步帧组' },
+  'image.stitch': { 'Image ports (image1..image8)': '图像端口（image1..image8）', 'Synchronized FrameSet': '同步帧组' }
 };
 
 /** 测量与几何专项补全批（13 个节点，node-gap-analysis.md 第八节）。
@@ -3582,7 +3596,7 @@ Object.assign(nodeNames, {
   'measure.thread': '螺纹测量',
   'measure.gear': '直齿轮几何',
   'tolerance.stackup': '公差叠加',
-  'tolerance.drf': '双基准基准系（A|B）',
+  'tolerance.drf': '双基准基准系（A|B 交点）',
   'geometry.lineConstruct': '线段构造',
   'coordinate.transformAffine': '仿射变换'
 } as Record<string, string>);

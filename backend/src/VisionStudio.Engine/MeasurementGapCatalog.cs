@@ -263,7 +263,7 @@ public static class MeasurementGapCatalog
             new VisionToolCapabilities(EmitsOverlay: false), Actions: []),
 
         // ── P2：多基准基准系 ─────────────────────────────────────────
-        new("tolerance.drf", "Datum Reference Frame (A|B)", "Measurement",
+        new("tolerance.drf", "Datum Frame (A|B intersection)", "Measurement",
             [Exec, new("primary", VisionDataType.Line2D), new("secondary", VisionDataType.Line2D),
              new("tertiary", VisionDataType.Point2D, Required: false)],
             [Found, new("pose", VisionDataType.Pose2D), new("origin", VisionDataType.Point2D),

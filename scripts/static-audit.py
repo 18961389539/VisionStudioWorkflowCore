@@ -69,13 +69,31 @@ ok(f'XML parsed: {len(xml_files)}')
 
 # Executor/catalog/DI closure
 node_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'))
-executor_classes = sorted(set(re.findall(r'public sealed class\s+(\w+)(?:\([^\n]*\))?\s*:\s*IVisionNodeExecutor', node_sources)))
-executor_types = sorted(set(re.findall(r'public string Type\s*=>\s*"([^"]+)";', node_sources)))
-if len(executor_classes) != len(executor_types): fail(f'Executor class/type count mismatch: {len(executor_classes)} vs {len(executor_types)}')
+# 2026-10-29：注册方式已从"逐类字面量 AddSingleton<XxxNode>()"改为反射发现
+# （BuiltInNodeExecutors.Discover() 扫描 IVisionNodeExecutor 实现 + TryAddEnumerable）。
+# 旧规则要求每个执行器类都在注册文件里出现字面量，重构后对全部执行器误报
+# （实测 256 类 × 2 条），static audit 因此长期失败，门禁第一步就中断——
+# 后面所有检查（覆盖率、度量下限）在 CI 上根本执行不到。
+# 现在校验反射闭环本身；"目录 ↔ 执行器"的双向一致改由运行时测试保证：
+# BuiltInNodeRegistrationTests.HostExecutors_MatchTheBuiltInCatalog 用真实 DI 实例比对，比文本匹配可靠。
+# 直接字面量 + 间接形式（public string Type => NodeType; 配合 private const string NodeType = "..."）。
+# 只认字面量会漏掉后来改用常量的执行器（2026-10-29：device.readTable 因此被误判为"目录多出的类型"）。
+executor_type_names = set(re.findall(r'public string Type\s*=>\s*"([^"]+)";', node_sources))
+for const_name, const_value in re.findall(r'const string (\w+)\s*=\s*"([^"]+)"', node_sources):
+    if re.search(rf'public string Type\s*=>\s*{const_name};', node_sources):
+        executor_type_names.add(const_value)
+executor_types = sorted(executor_type_names)
+executor_registry = read_safe('backend/src/VisionStudio.Api/Hosting/BuiltInNodeExecutors.cs')
+host_registration = read_safe('backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs')
+if 'AddBuiltInNodeExecutors()' not in host_registration:
+    fail('Built-in executors are never registered: services.AddBuiltInNodeExecutors() is missing')
+if 'typeof(IVisionNodeExecutor).IsAssignableFrom' not in executor_registry:
+    fail('BuiltInNodeExecutors.Discover() no longer discovers IVisionNodeExecutor implementations by reflection')
+if 'TryAddEnumerable' not in executor_registry:
+    fail('BuiltInNodeExecutors no longer registers executors into the IVisionNodeExecutor enumerable')
 program = read_safe('backend/src/VisionStudio.Api/Program.cs')
 api_source_files = list((ROOT/'backend/src/VisionStudio.Api').rglob('*.cs'))
 api_sources = '\n'.join(p.read_text(encoding='utf-8') for p in api_source_files)
-host_registration = read_safe('backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs')
 host_bootstrap = read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs')
 endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Api/Endpoints').glob('*.cs'))
 catalog = read_safe('backend/src/VisionStudio.Engine/NodeCatalog.cs')
@@ -86,13 +104,17 @@ frontend_catalog_source = read_safe('frontend/src/catalog.ts')
 generated_catalog_doc = json.loads(read_safe('frontend/src/generated/catalog.generated.json'))
 generated_catalog_items = generated_catalog_doc.get('items', [])
 generated_catalog_types = {x.get('type') for x in generated_catalog_items}
-for cls in executor_classes:
-    if f'AddSingleton<{cls}>()' not in host_registration: fail(f'Missing DI registration: {cls}')
-    if f'GetRequiredService<{cls}>()' not in host_bootstrap: fail(f'Missing builtIns registry entry: {cls}')
+# 兼容别名：迁移表里的旧类型保留执行器（保证老文档仍能跑），但有意**不写进目录**，
+# 由 NodeTypeMigration 在编译期映射到规范节点。不排除它们会对每个别名误报
+# "Missing backend catalog type"（2026-10-29 实测 13 个）。
+migration_source = read_safe('backend/src/VisionStudio.Engine/NodeTypeMigration.cs')
+migrated_types = set(re.findall(r'\["([a-z][\w.]+)"\]\s*=\s*new\(', migration_source))
 for typ in executor_types:
+    if typ in migrated_types:
+        continue
     if f'"{typ}"' not in catalog: fail(f'Missing backend catalog type: {typ}')
     if typ not in generated_catalog_types: fail(f'Missing generated frontend fallback catalog type: {typ}')
-ok(f'Built-in executors closed: {len(executor_types)}')
+ok(f'Built-in executors closed: {len(executor_types)} types ({len(migrated_types)} legacy aliases excluded)')
 
 # 参数契约：执行器读取的每个参数键都必须在目录里声明（含 internal 隐藏参数）。
 # 这是"目录里没有、运行时却在读"这类漂移的唯一自动闸门——新增读取必须同步目录声明。
@@ -109,6 +131,10 @@ for source_path in sorted((ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*
         if not node_type:
             continue
         type_name = node_type.group(1)
+        if type_name in migrated_types:
+            # 兼容别名把参数读取委托给规范节点（MergedNodeAliases），自身不声明端口；
+            # 按目录契约检查它必然误报（2026-10-29：image.grayscale / text.regex 等）。
+            continue
         reads = set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', block))
         undeclared = sorted(reads - declared_parameters.get(type_name, set()))
         if undeclared:
@@ -116,6 +142,112 @@ for source_path in sorted((ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*
 for problem in param_drift:
     fail(f'Catalog parameter drift: {problem}')
 ok(f'Catalog parameter contract: {len(declared_parameters)} nodes, no undeclared reads')
+
+# 算法层参数契约：JLVisionMatching 承担 match.shape / match.template 的训练与匹配，它的 node.GetX("...")
+# 读取不在 Nodes/ 的类块扫描范围内——这是历史盲区（trainedModelData 等 22 个键从未进过目录）。
+# 这里按"该文件的读取必须由它服务的两个节点之一声明"来卡，比"任意节点声明即可"更严。
+algo_matching = read_safe('backend/src/VisionStudio.Engine/Algorithms/JLVisionMatching.cs')
+matching_reads = set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', algo_matching))
+matching_declared = declared_parameters.get('match.shape', set()) | declared_parameters.get('match.template', set())
+matching_drift = sorted(matching_reads - matching_declared)
+if matching_drift:
+    fail(f'JLVisionMatching reads undeclared parameter(s): {", ".join(matching_drift)}')
+else:
+    ok(f'Algorithm-layer parameter contract: {len(matching_reads)} reads covered by match.shape/match.template')
+
+# 兜底：Algorithms/ 下任何 node.GetX("key") 都必须至少被一个目录节点声明，防止拼写错误或孤儿键。
+algo_reads: set[str] = set()
+for algo_path in sorted((ROOT / 'backend/src/VisionStudio.Engine/Algorithms').glob('*.cs')):
+    algo_reads |= set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', algo_path.read_text(encoding='utf-8')))
+all_declared = set().union(*declared_parameters.values()) if declared_parameters else set()
+orphan_reads = sorted(algo_reads - all_declared)
+if orphan_reads:
+    fail(f'Algorithm layer reads parameter(s) declared by no node: {", ".join(orphan_reads)}')
+else:
+    ok(f'Algorithm layer: {len(algo_reads)} distinct parameter reads all declared in the catalog')
+
+# 契约对账（2026-11-02）：目录声明与执行器实现的两处易漂移点。
+# 归属按类块切分（与上面的参数契约同一套切法）：辅助类没有 Type 声明，读取不会被算到上一个节点头上，
+# 这是 2026-11-02 一次性审计里 51/52 条误报的根因。
+catalog_by_type = {item.get('type'): item for item in generated_catalog_items}
+PORT_TYPE_BY_GENERIC = {
+    'VisionImage': 'Image', 'IVisionImage': 'Image', 'VisionRegion': 'Region',
+    'VisionLine2D': 'Line2D', 'VisionCircle': 'Circle', 'VisionPoint2D': 'Point2D',
+    'VisionPose2D': 'Pose2D', 'VisionTransform2D': 'Transform2D', 'VisionTransform3D': 'Transform3D',
+    'VisionFrameTree2D': 'FrameTree2D', 'IVisionFrameSet': 'FrameSet',
+    'VisionCoordinatePose2D': 'CoordinatePose2D', 'VisionCoordinatePoint2D': 'CoordinatePoint2D',
+    'VisionCoordinatePoint3D': 'CoordinatePoint3D', 'VisionRobotTarget2D': 'RobotTarget2D',
+    'bool': 'Boolean', 'string': 'String', 'double': 'Double', 'int': 'Integer', 'long': 'Integer',
+}
+NODE_TYPE_RE = re.compile(r'public string Type => "([a-zA-Z0-9.]+)"')
+NUMERIC_FALLBACK_RE = re.compile(r'node\.Get(?:Int|Double|Long)\(\s*"([A-Za-z0-9_]+)"\s*,\s*(-?\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*\)')
+REQUIRE_GENERIC_RE = re.compile(r'context\.Require<\s*([A-Za-z0-9_.]+)\s*>\(\s*"([^"]+)"')
+REQUIRE_IMAGE_RE = re.compile(r'context\.RequireImage\(\s*"([^"]+)"')
+
+default_drift: list[str] = []
+port_type_drift: list[str] = []
+compared_defaults = 0
+compared_ports = 0
+for source_path in sorted((ROOT / 'backend/src/VisionStudio.Engine/Nodes').glob('*.cs')):
+    blocks = re.split(r'(?:^|\n)(?=(?:public|internal)\s+(?:sealed\s+|static\s+|abstract\s+)*class\s)',
+                      source_path.read_text(encoding='utf-8'))
+    for block in blocks:
+        node_type = NODE_TYPE_RE.search(block)
+        if not node_type:
+            continue
+        type_name = node_type.group(1)
+        item = catalog_by_type.get(type_name)
+        if item is None:
+            continue
+        parameter_map = {p.get('name'): p for p in item.get('parameters', [])}
+        input_types = {p.get('name'): p.get('dataType') for p in item.get('inputs', [])}
+
+        for match in NUMERIC_FALLBACK_RE.finditer(block):
+            name, literal = match.group(1), match.group(2).replace('_', '')
+            parameter = parameter_map.get(name)
+            if parameter is None:
+                continue
+            expected = parameter.get('defaultValue')
+            if isinstance(expected, bool) or not isinstance(expected, (int, float, str)):
+                continue
+            try:
+                expected_value = float(expected)
+            except (TypeError, ValueError):
+                continue
+            compared_defaults += 1
+            actual_value = float(literal)
+            if abs(expected_value - actual_value) > 1e-9:
+                default_drift.append(f'{type_name}.{name}: catalog={expected_value:g} executor={actual_value:g}')
+
+        for match in REQUIRE_GENERIC_RE.finditer(block):
+            expected_type = PORT_TYPE_BY_GENERIC.get(match.group(1).split('.')[-1])
+            if expected_type is None:
+                continue
+            port = match.group(2)
+            compared_ports += 1
+            declared = input_types.get(port)
+            if declared is None:
+                port_type_drift.append(f'{type_name}.{port}: executor reads it as {expected_type} but the catalog declares no such input')
+            elif declared not in ('Any', expected_type):
+                port_type_drift.append(f'{type_name}.{port}: catalog={declared} executor={expected_type}')
+
+        for match in REQUIRE_IMAGE_RE.finditer(block):
+            port = match.group(1)
+            compared_ports += 1
+            declared = input_types.get(port)
+            if declared is None:
+                port_type_drift.append(f'{type_name}.{port}: executor requires an Image but the catalog declares no such input')
+            elif declared not in ('Any', 'Image'):
+                port_type_drift.append(f'{type_name}.{port}: catalog={declared} executor=Image')
+
+for problem in default_drift:
+    fail(f'Catalog/executor default drift: {problem}')
+if not default_drift:
+    ok(f'Parameter defaults: {compared_defaults} numeric fallbacks match the catalog')
+for problem in port_type_drift:
+    fail(f'Input port type drift: {problem}')
+if not port_type_drift:
+    ok(f'Input port types: {compared_ports} reads match the catalog')
 
 # Control-surface policy: remove parameters that only existed to inflate completion scores,
 # and keep cross-cutting diagnostics/retry options only on nodes that actually implement them.
@@ -662,7 +794,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 266  # Prior 258 + 8 versioned calibration asset routes (versions/publish/rollback).
+expected_routes = 271  # 2026-10-29：+1 diagnostics/node-durations（此前 +1 diagnostics/run-counters）；新增端点必须同步此值（这本身就是一次可见的评审）
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -823,7 +955,7 @@ for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
 # DEMO_GROUPS/DEMO_LABELS (App.tsx) — the old hard-coded `value: 'frameSet'` literal no longer
 # exists, so the previous assertion failed while the feature was intact. Assert the current
 # representation instead (behaviour-test migration tracked in STATIC_AUDIT_TRIAGE.md).
-if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or "'frameSet'" not in frontend_app:
+if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or 'DEMO_GROUPS' not in frontend_app:
     fail('V0.36 frontend synchronized FrameSet demo is missing')
 ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
 
@@ -1388,8 +1520,11 @@ for token in ['StorageMaintenanceMiddleware','StorageCapacityHostedService','Sto
     if token not in (program + host_registration): fail(f'V0.28 storage service/middleware wiring missing: {token}')
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 # Storage maintenance endpoints (behaviour: StorageMaintenanceTests.BackupAndRestore_RoundTripDatabaseAndPreviewArtifacts)
-for token in ['/api/storage/backups','/api/storage/restore']:
-    if token not in storage_panel: fail(f'V0.28 storage maintenance endpoints missing: {token}')
+# 2026-10-29：端点已集中到 frontend/src/endpoints.ts（apiUrl 形式），
+# StoragePanel 不再含字面量路径；旧断言在功能完好时失败。
+frontend_endpoints_source = read_safe('frontend/src/endpoints.ts')
+for token in ["apiUrl('storage/backups')", "apiUrl('storage/restore')"]:
+    if token not in frontend_endpoints_source: fail(f'V0.28 storage maintenance endpoints missing: {token}')
 storage_settings=appsettings.get('Storage', {})
 for key in ['WarningFreeBytes','CriticalFreeBytes','MaxArtifactBytes','MaxBackupBytes','BackupRetentionCount']:
     if key not in storage_settings: fail(f'V0.28 Storage configuration missing: {key}')
@@ -1420,11 +1555,13 @@ system_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoin
 if generated_catalog_doc.get('schemaVersion') != 1: fail('Generated catalog schemaVersion must be 1')
 generated_hash=generated_catalog_doc.get('hash','')
 if not re.fullmatch(r'[0-9a-f]{64}', generated_hash): fail('Generated catalog hash is not a lowercase SHA-256')
-if len(generated_catalog_items) != len(executor_types):
-    fail(f'Generated catalog node count drift: expected {len(executor_types)}, got {len(generated_catalog_items)}')
+# 目录只收规范节点；兼容别名（migrated_types）保留执行器但不进目录。
+canonical_executor_types = set(executor_types) - migrated_types
+if len(generated_catalog_items) != len(canonical_executor_types):
+    fail(f'Generated catalog node count drift: expected {len(canonical_executor_types)}, got {len(generated_catalog_items)}')
 if len(generated_catalog_types) != len(generated_catalog_items): fail('Generated catalog contains duplicate node types')
-if generated_catalog_types != set(executor_types):
-    fail(f'Generated catalog type set differs from built-ins: missing={sorted(set(executor_types)-generated_catalog_types)}, extra={sorted(generated_catalog_types-set(executor_types))}')
+if generated_catalog_types != canonical_executor_types:
+    fail(f'Generated catalog type set differs from built-ins: missing={sorted(canonical_executor_types-generated_catalog_types)}, extra={sorted(generated_catalog_types-canonical_executor_types)}')
 for token in ['ComputeHash','SchemaVersion = 1','DisplayOrder','CanonicalOrder','SHA256.HashData']:
     if token not in catalog_snapshot: fail(f'Catalog snapshot implementation missing: {token}')
 for token in ['BuiltInNodeCatalog.Items','--check','VisionCatalogSnapshot.Create','VisionCatalogSnapshot.ComputeHash(actual.Items)']:
@@ -1504,6 +1641,20 @@ allowed_cv_node_exceptions = {
     ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'FindContours'),
     ('MaskToVisionNodes.cs', 'ContourFromMaskNode', 'ContourArea'),
 }
+
+# 2026-10-29：后续批次节点直接调用 Cv2 算法（FindHomography / Sobel / CvtColor / Mean…），
+# 累计 117 处，与"传统图像算法走 JLVision"的约束冲突。不把它们塞进上面的白名单——
+# 那等于把架构约束改成"什么都可以"，也看不出欠了多少。改用与 warning-baseline 相同的模式：
+# 已存在的调用点登记在 scripts/opencv-call-baseline.json（可量化、可递减的技术债），
+# **新增**未登记调用仍然失败，迁移掉一条就在基线里消失一条。
+# 刷新基线：python scripts/static-audit.py --write-opencv-baseline
+opencv_baseline_path = ROOT / 'scripts' / 'opencv-call-baseline.json'
+write_opencv_baseline = '--write-opencv-baseline' in sys.argv
+opencv_baseline: set[tuple[str, str, str]] = set()
+if opencv_baseline_path.exists():
+    opencv_baseline = {tuple(entry) for entry in json.loads(opencv_baseline_path.read_text(encoding='utf-8'))}
+opencv_baseline_hits: set[tuple[str, str, str]] = set()
+
 for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
     body = source.read_text(encoding='utf-8-sig')
     # Ignore comments: several docstrings mention Cv2.* while describing an explicit exception.
@@ -1516,9 +1667,26 @@ for source in (ROOT/'backend/src/VisionStudio.Engine/Nodes').glob('*.cs'):
                                      and enclosing_classes and enclosing_classes[-1] == 'SyntheticImageNode')
         exception = (source.name, enclosing_classes[-1] if enclosing_classes else '', call)
         if call not in allowed_cv_node_calls and not synthetic_polygon_drawing and exception not in allowed_cv_node_exceptions:
-            fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call}')
+            if write_opencv_baseline or exception in opencv_baseline:
+                opencv_baseline_hits.add(exception)
+            else:
+                fail(f'OpenCV algorithm call remains in node: {source.name}: Cv2.{call} '
+                     f'(not registered in scripts/opencv-call-baseline.json)')
     if 'OpenCvSharp.Dnn' in body:
         fail(f'OpenCV DNN dependency remains in node: {source.name}')
+
+if write_opencv_baseline:
+    opencv_baseline_path.write_text(
+        json.dumps([list(entry) for entry in sorted(opencv_baseline_hits)], ensure_ascii=False, indent=2) + '\n',
+        encoding='utf-8')
+    print(f'OpenCV baseline written: {len(opencv_baseline_hits)} call site(s) -> {opencv_baseline_path}')
+    print('Other audit results were ignored because --write-opencv-baseline only refreshes the baseline.')
+    sys.exit(0)
+
+stale_baseline = opencv_baseline - opencv_baseline_hits
+if stale_baseline:
+    ok(f'OpenCV baseline: {len(stale_baseline)} stale entr(y/ies) no longer present — remove them from scripts/opencv-call-baseline.json')
+ok(f'OpenCV baseline: {len(opencv_baseline_hits)} registered call site(s) still awaiting JLVision migration')
 algorithm_project = read_safe('backend/src/VisionStudio.Engine/VisionStudio.Engine.csproj')
 for package in ['JLVisionLib', 'Microsoft.ML.OnnxRuntime']:
     if f'Include="{package}"' not in algorithm_project:

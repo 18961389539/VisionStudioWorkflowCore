@@ -132,6 +132,27 @@ public sealed class BatchHValueFlowCollectionTests
         var res=await new ResultDispositionNode().ExecuteAsync(Ctx(new(){{"pass",VisionValue.Boolean(false)}}),Def("flow.result"),CancellationToken.None); Assert.Equal("NG",(string)res.Outputs["disposition"].Value!);
         var d=await new DelayNode().ExecuteAsync(Ctx(new()),Def("flow.delay","{\"delayMs\":1}"),CancellationToken.None); Assert.Contains("requestedMs",(string)d.Outputs["diagnostics"].Value!);
     }
+    [Fact] public async Task Switch_TrimsAndIgnoresCaseOnlyWhenConfigured()
+    {
+        const string cases = "{\"casesJson\":\"[\\\"OK\\\",\\\"NG\\\"]\"}";
+        // 默认仍是精确匹配：带空格的扫码文本不会误命中。
+        var exact = await new SwitchNode().ExecuteAsync(Ctx(new() { { "value", VisionValue.String(" ok ") } }),
+            Def("flow.switch", cases), CancellationToken.None);
+        Assert.False((bool)exact.Outputs["matched"].Value!);
+        Assert.Equal("default", (string)exact.Outputs["selected"].Value!);
+
+        var loose = await new SwitchNode().ExecuteAsync(Ctx(new() { { "value", VisionValue.String(" ok ") } }),
+            Def("flow.switch", "{\"casesJson\":\"[\\\"OK\\\",\\\"NG\\\"]\",\"trimValues\":true,\"ignoreCase\":true}"), CancellationToken.None);
+        Assert.True((bool)loose.Outputs["matched"].Value!);
+        Assert.Equal("case1", (string)loose.Outputs["selected"].Value!);
+
+        // ignoreCase 下只差大小写的标签视为重复，编译期拒绝而不是"匹配到第一个"。
+        var ambiguous = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new SwitchNode().ExecuteAsync(Ctx(new() { { "value", VisionValue.String("OK") } }),
+                Def("flow.switch", "{\"casesJson\":\"[\\\"OK\\\",\\\"ok\\\"]\",\"ignoreCase\":true}"), CancellationToken.None));
+        Assert.Contains("ambiguous", ambiguous.Message);
+    }
+
     [Fact] public async Task CollectionNodes_CountsDiagnosticsAndConfidenceSort()
     {
         var list=new List<VisionDetection>{Det(10,0.5),Det(100,0.9),Det(50,0.7)};

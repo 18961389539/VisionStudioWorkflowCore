@@ -9,6 +9,9 @@
           <Exclude>[*.Tests]*,[VisionStudio.Plugin.Sample]*</Exclude>
           <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute</ExcludeByAttribute>
           <DeterministicReport>true</DeterministicReport>
+          <!-- SingleHit 保持 true（2026-10-29 复核）：覆盖率门禁只看 hits 是否大于 0，
+               改成 false 不会改变任何覆盖结论，只会让报告体积和采集开销变大。
+               它影响的是"热点行"统计（性能与死代码分析），不属于门禁范围。 -->
           <SingleHit>true</SingleHit>
         </Configuration>
       </DataCollector>

@@ -14,6 +14,9 @@ namespace VisionStudio.Engine.Nodes;
 /// 本节点直接使用 OpenCV 5 Stitcher（特征匹配 → 单应估计 → 束调整 → 接缝/混合），
 /// 固定 8 路可选输入，最少两路。输入必须同为 8 位 1/3 通道；stitching 失败时不返回
 /// 半成品，而是带 OpenCV 状态码明确报错。
+///
+/// 2026-11-02：补 `sourceMode=frameSet`，可直接吃 `camera.syncCapture` 的帧组；
+/// 全景对顺序敏感，因此新增 `cameraOrder`（逗号分隔相机 id）显式指定拼接顺序，留空按相机 id 排序。
 /// </summary>
 public sealed class ImageStitchNode : IVisionNodeExecutor
 {
@@ -29,13 +32,18 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
         var mode = node.GetString("mode", "panorama").Trim().ToLowerInvariant();
         if (mode is not ("panorama" or "scans"))
             throw new InvalidOperationException("image.stitch mode must be panorama or scans.");
+        var sourceMode = node.GetString("sourceMode", "images").Trim().ToLowerInvariant();
+        if (sourceMode is not ("images" or "frameset"))
+            throw new InvalidOperationException("image.stitch sourceMode must be images or frameSet.");
         var maxInputPixels = node.GetInt("maxInputPixels", 64_000_000);
         if (maxInputPixels is < 1 or > 500_000_000)
             throw new InvalidOperationException("image.stitch maxInputPixels must be within 1..500000000.");
 
-        var images = CollectImages(context);
+        var images = CollectImages(context, node, sourceMode);
         if (images.Count < 2)
-            throw new InvalidOperationException("image.stitch requires at least two connected images (image1 and image2).");
+            throw new InvalidOperationException(sourceMode == "frameset"
+                ? "image.stitch requires at least two camera images in the FrameSet."
+                : "image.stitch requires at least two connected images (image1 and image2).");
 
         var channels = images[0].Mat.Channels();
         if (channels is not (1 or 3))
@@ -108,6 +116,7 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
                 var diagnostics = CoordinateValidation.Diagnostics(
                     Type,
                     ("mode", mode),
+                    ("sourceMode", sourceMode),
                     ("inputCount", images.Count),
                     ("inputPixels", totalPixels),
                     ("width", result.Width),
@@ -151,17 +160,52 @@ public sealed class ImageStitchNode : IVisionNodeExecutor
         }
     }
 
-    private static List<VisionImage> CollectImages(NodeExecutionContext context)
+    private static List<VisionImage> CollectImages(NodeExecutionContext context, NodeDefinition node, string sourceMode)
     {
-        var images = new List<VisionImage>(8);
+        if (sourceMode == "images")
+        {
+            var wired = new List<VisionImage>(8);
+            for (var index = 1; index <= 8; index++)
+            {
+                var port = $"image{index}";
+                if (!context.TryGetValue(port, out var value)) continue;
+                var image = value.Require<IVisionImage>(port);
+                if (image is not VisionImage engineImage)
+                    throw new InvalidOperationException($"Input '{port}' must be an engine VisionImage; got '{image.GetType().FullName}'.");
+                wired.Add(engineImage);
+            }
+            return wired;
+        }
+
         for (var index = 1; index <= 8; index++)
         {
-            var port = $"image{index}";
-            if (!context.TryGetValue(port, out var value)) continue;
-            var image = value.Require<IVisionImage>(port);
-            if (image is not VisionImage engineImage)
-                throw new InvalidOperationException($"Input '{port}' must be an engine VisionImage; got '{image.GetType().FullName}'.");
-            images.Add(engineImage);
+            if (context.TryGetValue($"image{index}", out _))
+                throw new InvalidOperationException(
+                    "image.stitch sourceMode=frameSet ignores image1..image8; disconnect them or switch sourceMode=images.");
+        }
+        var frameSet = context.TryGetValue("frameSet", out var frameSetValue)
+            ? frameSetValue.Require<IVisionFrameSet>("frameSet")
+            : throw new InvalidOperationException("image.stitch sourceMode=frameSet requires a frameSet input.");
+
+        var available = frameSet.Images.Keys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase).ToArray();
+        var requested = (node.GetString("cameraOrder", "") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var order = requested.Length > 0 ? requested : available;
+        foreach (var cameraId in order)
+        {
+            if (!frameSet.Images.ContainsKey(cameraId))
+                throw new InvalidOperationException(
+                    $"image.stitch cameraOrder id '{cameraId}' is not in the FrameSet. Available: {string.Join(", ", available)}.");
+        }
+
+        var images = new List<VisionImage>(order.Length);
+        foreach (var cameraId in order)
+        {
+            if (frameSet.Images[cameraId] is not VisionImage frame)
+                throw new InvalidOperationException($"image.stitch frameSet image '{cameraId}' is not a VisionImage.");
+            images.Add(frame);
         }
         return images;
     }

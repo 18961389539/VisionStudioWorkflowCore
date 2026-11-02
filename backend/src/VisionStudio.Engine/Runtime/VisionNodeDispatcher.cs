@@ -2,7 +2,16 @@ using VisionStudio.Engine.Camera;
 
 namespace VisionStudio.Engine.Runtime;
 
-public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
+/// <summary>
+/// 节点执行入口。
+/// </summary>
+/// <param name="registry">节点注册表。</param>
+/// <param name="durations">
+/// 可选的每节点耗时统计。**默认 null**：绝大多数单元测试与嵌入式用法不需要它，
+/// 加一个必填参数会逼着几十个调用点凭空构造一个从不使用的对象。
+/// 宿主在 DI 里注册 <see cref="NodeDurationStatistics"/> 后它会被自动注入。
+/// </param>
+public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurationStatistics? durations = null)
 {
     public IReadOnlyDictionary<string, VisionValue> ResolveInputs(VisionWorkflowData data, NodeDefinition node)
         => ResolveInputs(node, data.IncomingDataEdges(node.Id), data.OutputsByNode, registry);
@@ -24,7 +33,28 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
-        var result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, cancellationToken);
+        var timeoutMs = NodeTimeoutPolicy.Resolve(node);
+        var timedOut = false;
+        NodeExecutorResult result;
+        try
+        {
+            result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, timeoutMs, cancellationToken);
+        }
+        catch (NodeTimeoutException)
+        {
+            timedOut = true;
+            throw;
+        }
+        finally
+        {
+            // 只统计、不改变任何控制流：耗时样本用于给 __timeoutMs 选值（见 NodeDurationStatistics）。
+            // 放在 finally 里是为了把"超时"和"抛异常"两类执行也计入——恰恰是最需要被看到的样本。
+            durations?.Record(
+                node.Type,
+                System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                timeoutMs,
+                timedOut);
+        }
         try
         {
             result = NodeOutputContracts.Telemetry(node, registration.Catalog, result, System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
@@ -54,10 +84,10 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry)
         IReadOnlyDictionary<string, VisionValue> inputs,
         string? workflowScope,
         string? runId,
+        int timeoutMs,
         CancellationToken cancellationToken)
     {
         var context = new NodeExecutionContext(inputs, workflowScope, runId);
-        var timeoutMs = NodeTimeoutPolicy.Resolve(node);
         if (timeoutMs == 0)
             return await registration.ExecuteAsync(context, node, cancellationToken);
 
