@@ -328,6 +328,29 @@
   修正归属与映射表后为 0——所以端口类型本身就是一致的。
 
 
+## 第六十二轮：EmitsOverlay 的语义澄清（2026-11-02）
+
+**事实**：82 个节点声明 `EmitsOverlay=true`，但只有 16 个发布 `overlay` 图像端口。该能力位唯一的消费方是
+配置对话框的"技术信息"标签，文案写的是**"输出覆盖层"**——于是 66 个只画 viewer 叠加（`result.Overlays`）、
+并不发布图像端口的节点，看起来像"少了一个输出端口"。
+
+**结论：不分裂字段**。`VisionToolCapabilities` 是插件 SDK 的公开记录，拆字段会动序列化与第三方插件；
+真正的问题在语义没写清、文案没说准。
+
+| 变更 | 说明 |
+| --- | --- |
+| 语义写进代码 | `VisionToolCapabilities` 补 XML 文档，逐字段说明；`EmitsOverlay` 明确定义为**可视化产物**——viewer 叠加和/或 `overlay` 图像端口，两者独立 |
+| 文案拆成两个真实标签 | 发布 `overlay` 端口的节点显示「overlay 图像端口」；只有能力位的显示「可视化叠加」。端口存在性一律查 `outputs`，不再从能力位推断 |
+| 新增闸门 | `static-audit.py`：发布 `overlay` 图像端口的节点必须声明 `EmitsOverlay`；反方向不要求（viewer 叠加不产生端口） |
+
+### 验证
+
+- 审计：`Overlay capability: 16 overlay image ports all declare EmitsOverlay`，exit 0。
+- 前端：`tsc -b` 0 error；全量 91 文件 / 1138 项通过（1 个文件因 vitest worker 启动超时未跑，单独复测通过）；
+  8 个配置对话框测试全通过。
+- 无目录变更：本轮只改能力位文档、UI 文案与审计脚本，`catalog.generated.json` 保持 `fcc87040…`。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

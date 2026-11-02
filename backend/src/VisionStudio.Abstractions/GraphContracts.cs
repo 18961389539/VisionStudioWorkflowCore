@@ -122,6 +122,18 @@ public enum VisionExecutionMode
     Pipeline
 }
 
+/// <summary>
+/// 节点能力声明。字段语义（2026-11-02 明确，此前 <see cref="EmitsOverlay"/> 被误读为"一定有一个 overlay 图像端口"）：
+/// <list type="bullet">
+/// <item><see cref="SupportsRoi"/>：接受 ROI（参数或 roi 端口）。</item>
+/// <item><see cref="EmitsOverlay"/>：**可视化产物**——运行结果会带 viewer 覆盖层（<c>NodeExecutorResult.Overlays</c>），
+/// 和/或发布一个 <c>overlay</c> 图像输出端口。两者是独立的：16 个节点发布 overlay 图像端口，82 个节点声明该能力位，
+/// 因此"有 overlay 端口"必须从 <see cref="NodeCatalogItem.Outputs"/> 查，不能拿这个位当端口存在性用。</item>
+/// <item><see cref="Deterministic"/>：同一输入与参数可复现；false 表示运行期会重采样（如随机纹理合成），不进自动重试。</item>
+/// <item><see cref="SupportsRunNode"/>：允许"只运行到此节点"的调试方式。</item>
+/// <item><see cref="SupportsParallel"/>：允许出现在 flow.parallel 的分支里。</item>
+/// </list>
+/// </summary>
 public sealed record VisionToolCapabilities(
     bool SupportsRoi = false,
     bool EmitsOverlay = false,

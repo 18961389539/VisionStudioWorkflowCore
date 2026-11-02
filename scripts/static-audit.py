@@ -249,6 +249,18 @@ for problem in port_type_drift:
 if not port_type_drift:
     ok(f'Input port types: {compared_ports} reads match the catalog')
 
+# 能力位与端口一致性：发布 overlay 图像端口的节点必须声明 EmitsOverlay。
+# 反方向不要求——该位表示"有可视化产物"，viewer 叠加（result.Overlays）不产生端口，
+# 拿它当"端口存在性"用会误判 66 个节点（2026-11-02 明确语义后加的闸门）。
+overlay_ports = [item.get('type') for item in generated_catalog_items
+                 if any(port.get('name') == 'overlay' for port in item.get('outputs', []))]
+overlay_without_capability = [node_type for node_type in overlay_ports
+                              if not (catalog_by_type.get(node_type, {}).get('capabilities') or {}).get('emitsOverlay')]
+for node_type in overlay_without_capability:
+    fail(f'{node_type} publishes an overlay image port but EmitsOverlay is false')
+if not overlay_without_capability:
+    ok(f'Overlay capability: {len(overlay_ports)} overlay image ports all declare EmitsOverlay')
+
 # Control-surface policy: remove parameters that only existed to inflate completion scores,
 # and keep cross-cutting diagnostics/retry options only on nodes that actually implement them.
 retired_parameters = {

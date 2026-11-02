@@ -89,6 +89,9 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const cropMaskFramePreservingNodeTypes = useMemo(() => imageFramePreservingNodeTypes(catalogItems), [catalogItems]);
   // 成熟度只在标题栏画一次徽标：Stable 不画（目录里该字段缺省即 Stable）。
   const catalogMaturity = maturityLevel(catalogItem);
+  // EmitsOverlay 是"可视化产物"能力位（viewer 叠加和/或 overlay 图像端口），不等于一定有端口；
+  // 端口存在性只看 outputs，避免把 66 个只画 viewer 叠加的节点标成"缺端口"。
+  const hasOverlayPort = catalogItem.outputs.some((port) => port.name === 'overlay');
   // result 是节点“详情”的定位入口，结果统一在配置页展示。
   const [activeTab, setActiveTab] = useState<string>(initialTab === 'details' ? 'details' : 'workspace');
   const [maximized, setMaximized] = useState(false);
@@ -1091,7 +1094,8 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       <span>来源：{catalogItem.pluginId ?? 'builtin'}</span>
       <div>
         {catalogItem.capabilities?.supportsRoi && <Tag>支持 ROI</Tag>}
-        {catalogItem.capabilities?.emitsOverlay && <Tag>输出覆盖层</Tag>}
+        {hasOverlayPort && <Tag>overlay 图像端口</Tag>}
+        {catalogItem.capabilities?.emitsOverlay && !hasOverlayPort && <Tag>可视化叠加</Tag>}
         {catalogItem.capabilities?.deterministic !== undefined && <Tag>{catalogItem.capabilities.deterministic ? '确定性执行' : '非确定性执行'}</Tag>}
       </div>
     </div> }]} />
