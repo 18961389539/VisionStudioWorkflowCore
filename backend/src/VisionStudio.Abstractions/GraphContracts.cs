@@ -89,6 +89,13 @@ public sealed record ParameterDescriptor(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool Internal = false)
 {
+    /// <summary>
+    /// 参数首屏折叠标记：目录按声明顺序放置核心参数，ParameterTierCatalog 把超出首屏预算的参数
+    /// 标记为 Advanced。只影响配置页默认展示，不影响执行器读取与校验。
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Advanced { get; init; }
+
     /// <summary>Additional visibility conditions; every condition must match.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ParameterVisibility>? VisibleWhenAll { get; init; }

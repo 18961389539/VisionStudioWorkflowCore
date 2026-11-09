@@ -354,7 +354,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 @media (max-width: 560px) { .node-configuration-modal .property-row { grid-template-columns: minmax(0, 1fr); } }
 .property-heading { padding: 14px 12px 2px; font-weight: 700; }
 .property-subtitle { padding: 0 12px 12px; color: var(--vs-text-6); font-size: 11px; }
-.property-actions { padding: 0 8px 6px; display: flex; justify-content: flex-end; }
+.property-actions { padding: 0 8px 6px; display: flex; justify-content: flex-end; gap: 8px; }
 .property-actions .ant-btn { color: var(--vs-text-5); font-size: 11px; }
 .property-filter { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px; }
 .property-filter .ant-input-affix-wrapper { flex: 1 1 auto; min-width: 0; }

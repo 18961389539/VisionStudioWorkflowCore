@@ -180,7 +180,8 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
     parameters: catalogItem.parameters.map(parameter => parameterPresentation(parameter, catalogItem.parameters,
       (node?.data.parameters ?? {}) as Record<string, unknown>)) } : undefined), [catalogItem, node?.data.parameters]);
   const [parameterFilter, setParameterFilter] = useState('');
-  useEffect(() => { setParameterFilter(''); }, [node?.id, catalogItem?.type]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  useEffect(() => { setParameterFilter(''); setShowAdvanced(false); }, [node?.id, catalogItem?.type]);
 
   if (!node || !catalogItem) {
     return (
@@ -196,24 +197,40 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
   const matchesParameterFilter = (parameter: ParameterDescriptor) => !filterKeyword
     || [parameter.label, parameter.name, parameter.group, parameter.description]
       .some((value) => String(value ?? '').toLowerCase().includes(filterKeyword));
+
+  // 参数值预检（与“校验”问题列表共用同一套判定）：数字缺失/非法/越界、选择项越界
+  const paramIssues = new Map(validateParameterValues(catalogItem.parameters, parameters).map((issue) => [issue.name, issue.message]));
+  const modified = catalogItem.parameters.filter((parameter) => parameters[parameter.name] !== undefined
+    && parameter.defaultValue !== undefined
+    && !sameValue(parameters[parameter.name], parameter.defaultValue));
+  const modifiedNames = new Set(modified.map((parameter) => parameter.name));
+
+  /** 高级参数默认折叠；上下文参数（由 visibleWhen 控制）保持原有“条件满足即出现”的行为，
+   *  已修改、有错误或正在筛选时也始终露出，避免“改了却看不见”。 */
+  const shouldShowParameter = (parameter: ParameterDescriptor) => !parameter.advanced
+    || showAdvanced
+    || Boolean(parameter.visibleWhen)
+    || Boolean(parameter.visibleWhenAll?.length)
+    || Boolean(filterKeyword)
+    || paramIssues.has(parameter.name)
+    || modifiedNames.has(parameter.name);
+
   /** 可见且未被专用编辑器接管的参数；筛选计数与分组渲染共用这一口径。 */
+  const eligibleParameters = sections.flatMap((section) => section.parameters.filter((parameter) =>
+    !hiddenParameterNames?.includes(parameter.name)
+    && isParameterVisible(parameter, catalogItem.parameters, parameters)));
   const visibleSections = sections.map((section) => ({
     ...section,
     parameters: section.parameters.filter((parameter) => !hiddenParameterNames?.includes(parameter.name)
       && isParameterVisible(parameter, catalogItem.parameters, parameters)
-      && matchesParameterFilter(parameter)),
+      && matchesParameterFilter(parameter)
+      && shouldShowParameter(parameter)),
   })).filter((section) => section.parameters.length > 0);
   const visibleParameterCount = visibleSections.reduce((total, section) => total + section.parameters.length, 0);
-  const filterableParameterCount = sections.reduce((total, section) => total + section.parameters.filter((parameter) =>
-    !hiddenParameterNames?.includes(parameter.name) && isParameterVisible(parameter, catalogItem.parameters, parameters)).length, 0);
+  const filterableParameterCount = eligibleParameters.length;
+  const advancedParameterCount = eligibleParameters.filter((parameter) => parameter.advanced).length;
   const showParameterFilter = filterableParameterCount > PARAMETER_FILTER_THRESHOLD;
   const configuredRoiFields = roiFields ?? [{ key: 'roi', label: '感兴趣区域' }];
-  const modified = catalogItem.parameters.filter((parameter) => parameters[parameter.name] !== undefined
-    && parameter.defaultValue !== undefined
-    && !sameValue(parameters[parameter.name], parameter.defaultValue));
-
-  // 参数值预检（与“校验”问题列表共用同一套判定）：数字缺失/非法/越界、选择项越界
-  const paramIssues = new Map(validateParameterValues(catalogItem.parameters, parameters).map((issue) => [issue.name, issue.message]));
 
   const resetAll = () => modified.forEach((parameter) => onChange(parameter.name, parameter.defaultValue));
 
@@ -369,6 +386,11 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
       {catalogItem.parameters.length > 0 && <div className="property-subtitle property-actions">
         {/* 单条操作不再藏在“更多参数操作 ···”菜单里：直接可见、一次点击（与“还原为打开时”互补：
             本按钮回到节点出厂默认值，弹窗标题栏的“还原为打开时”回到打开弹窗那一刻的值） */}
+        {advancedParameterCount > 0 && <Button size="small" type="text" aria-pressed={showAdvanced}
+          title={showAdvanced ? '只展示首屏常用参数；已修改与有错误的参数始终可见' : '展开首屏之外的参数；已修改与有错误的参数始终可见'}
+          onClick={() => setShowAdvanced((value) => !value)}>
+          {showAdvanced ? '仅显示常用参数' : `显示全部参数（还有 ${advancedParameterCount} 项）`}
+        </Button>}
         <Button size="small" type="text" disabled={disabled || modified.length === 0}
           title="把已改参数恢复为节点出厂默认值；如需恢复为打开弹窗时的值，用标题栏的“还原为打开时”"
           onClick={resetAll}>恢复出厂默认（{modified.length}）</Button>
@@ -379,7 +401,9 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
           prefix={<span aria-hidden="true">⌕</span>}
           onChange={(event) => setParameterFilter(event.target.value)} />
         <span className="property-filter-count" role="status">
-          {filterKeyword ? `${visibleParameterCount}/${filterableParameterCount} 个参数` : `共 ${filterableParameterCount} 个参数`}
+          {filterKeyword ? `${visibleParameterCount}/${filterableParameterCount} 个参数`
+            : advancedParameterCount > 0 ? `常用 ${visibleParameterCount} / 共 ${filterableParameterCount} 个参数`
+              : `共 ${filterableParameterCount} 个参数`}
         </span>
       </div>}
 

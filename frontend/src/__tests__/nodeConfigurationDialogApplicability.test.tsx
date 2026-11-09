@@ -30,6 +30,7 @@ describe('numeric conditional parameters', () => {
     const { dialog } = mount({ node: templateNode, nodes: [templateNode], catalogItem: templateCatalog });
     expect(dialog.queryByRole('spinbutton', { name: '搜索缩放步长' })).toBeNull();
     fireEvent.change(dialog.getByRole('spinbutton', { name: '最大缩放（%）' }), { target: { value: '120' } });
+    fireEvent.click(dialog.getByRole('button', { name: /显示全部参数/ }));
     expect(dialog.getByRole('spinbutton', { name: '搜索缩放步长' })).toBeTruthy();
   });
 });

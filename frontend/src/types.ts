@@ -37,6 +37,11 @@ export type ParameterDescriptor = {
    * 目录必须声明以便执行器读取，但不渲染到配置面板、不写入新节点默认值。
    */
   internal?: boolean;
+  /**
+   * 首屏折叠参数：配置页默认只展示核心参数，把这些参数折叠到“显示全部参数”。
+   * 只影响展示，不影响执行器读取或校验。
+   */
+  advanced?: boolean;
   variantParameter?: string;
   variants?: Record<string, { label?: string | null; description?: string | null; suggestions?: ParameterOption[] | null; min?: number | null; max?: number | null; step?: number | null; defaultValue?: unknown; unit?: string | null }>;
   /** 连接这些输入端口时忽略本参数（端口优先）。 */

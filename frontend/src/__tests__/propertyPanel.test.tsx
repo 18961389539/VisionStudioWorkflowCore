@@ -103,6 +103,40 @@ describe('PropertyPanel parameter filtering', () => {
   });
 });
 
+describe('PropertyPanel parameter tiers', () => {
+  const tieredParameters = Array.from({ length: 12 }, (_, index) => ({
+    name: `field${index}`,
+    label: `参数 ${index}`,
+    type: 'number' as const,
+    defaultValue: 0,
+    advanced: index >= 8
+  }));
+  const tieredCatalog: NodeCatalogItem = { ...catalog, type: 'test.tiered', parameters: tieredParameters };
+
+  it('collapses advanced parameters by default and reveals them on demand', () => {
+    const node: Node = { id: 'tiered', position: { x: 0, y: 0 }, data: { parameters: {} } };
+    render(<PropertyPanel node={node} catalogItem={tieredCatalog} onChange={vi.fn()} />);
+
+    expect(screen.getByText('常用 8 / 共 12 个参数')).toBeTruthy();
+    expect(screen.queryByRole('spinbutton', { name: '参数 8' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '显示全部参数（还有 4 项）' }));
+    expect(screen.getByRole('spinbutton', { name: '参数 8' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '仅显示常用参数' }));
+    expect(screen.queryByRole('spinbutton', { name: '参数 8' })).toBeNull();
+  });
+
+  it('keeps modified advanced parameters visible and lets the filter reach them', () => {
+    const node: Node = { id: 'tiered', position: { x: 0, y: 0 }, data: { parameters: { field9: 7 } } };
+    render(<PropertyPanel node={node} catalogItem={tieredCatalog} onChange={vi.fn()} />);
+
+    expect(screen.getByRole('spinbutton', { name: '参数 9' })).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: '筛选参数' }), { target: { value: '参数 10' } });
+    expect(screen.getByRole('spinbutton', { name: '参数 10' })).toBeTruthy();
+    expect(screen.getByText('1/12 个参数')).toBeTruthy();
+  });
+});
+
+
 describe('PropertyPanel polygon ROI editing', () => {
   it('inserts a midpoint on the selected edge, including the closing edge', () => {
     const roi: VisionRoi = { type: 'Polygon', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] };

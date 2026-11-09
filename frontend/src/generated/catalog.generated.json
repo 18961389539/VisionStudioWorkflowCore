@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "fcc8704005832c6309bdc4baf1b47aa5294cf37c32ae0d6daf24b20a6690f011",
+  "hash": "b21f48315f6c3b369d1b4f50e390bc86c592bba59a20be62b2f7f65e9f103d1c",
   "items": [
     {
       "type": "image.acquire",
@@ -1161,7 +1161,8 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Frames",
-          "description": "Coordinate / measurement unit emitted on outputs."
+          "description": "Coordinate / measurement unit emitted on outputs.",
+          "advanced": true
         }
       ],
       "description": "Planar SE(2) hand-eye (algorithmBackend=managed; not OpenCV/JLVision). Fill samplesJson with robot/vision pose pairs → pose/transform; eye-in-hand or eye-to-hand. Key params: angularWeight, translation/angle residual gates. Rotation coverage and translation spans are reported as metrics, and a minimum of 8 deg rotation span plus 0.001 translation spread is required to avoid ill-conditioned planar fits. Needs rotation and translation in both streams; rejects duplicate robot poses; not 3D (use handEye3D). Failures: poor diversity, residual gates, near-pure translation.",
@@ -1358,7 +1359,8 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Frames",
-          "description": "Translation unit carried on the solved transform, e.g. mm."
+          "description": "Translation unit carried on the solved transform, e.g. mm.",
+          "advanced": true
         }
       ],
       "description": "Full SE(3) hand-eye (algorithmBackend=opencv, Cv2.CalibrateHandEye; no JLVision hand-eye API). Fill samplesJson with row-major 4×4 robotToBase and targetToCamera → Transform3D. Key params: mode, OpenCV method, residual gates, frame names/units. Requires ≥6 samples with two non-parallel rotation axes. Failures: non-rigid matrices, single-axis/translation-only motion, residual gates.",
@@ -2069,7 +2071,8 @@
           "max": 1000,
           "step": 1,
           "group": "Detection",
-          "description": "Minimum detected ArUco markers required by the detector; 0 disables the gate."
+          "description": "Minimum detected ArUco markers required by the detector; 0 disables the gate.",
+          "advanced": true
         },
         {
           "name": "minBlurVariance",
@@ -2080,7 +2083,8 @@
           "max": 1000000000,
           "step": 0.1,
           "group": "Quality",
-          "description": "Laplacian variance gate for sharpness. 0 disables the gate; raise it to reject blurred views."
+          "description": "Laplacian variance gate for sharpness. 0 disables the gate; raise it to reject blurred views.",
+          "advanced": true
         },
         {
           "name": "minCoverage",
@@ -2091,7 +2095,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Quality",
-          "description": "Minimum corner coverage of the image area. 0 disables the gate; raise it to reject views clustered in one corner."
+          "description": "Minimum corner coverage of the image area. 0 disables the gate; raise it to reject views clustered in one corner.",
+          "advanced": true
         },
         {
           "name": "rejectWeakViews",
@@ -2099,7 +2104,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Quality",
-          "description": "When true, a view that fails the blur/coverage quality gates is not appended to calibrationDataJson."
+          "description": "When true, a view that fails the blur/coverage quality gates is not appended to calibrationDataJson.",
+          "advanced": true
         }
       ],
       "description": "Detect a ChArUco board with OpenCV 5 CharucoDetector: ArUco markers locate chessboard corners, then corners are interpolated and mapped to board coordinates. Wire: image + optional accumulated calibrationDataJson -> charucoCorners/charucoIds, marker count, viewJson and an appended calibrationDataJson view for calibration.cameraIntrinsics. Quality gates reuse calibration.detectBoard semantics. Failures: invalid board geometry, marker length not smaller than square length, too few corners, collinear corners, or more than 100 accumulated views. algorithmBackend=opencv.",
@@ -4257,7 +4263,8 @@
           "step": 1,
           "unit": "px",
           "group": "Position",
-          "description": "Position-window height in pixels; 0 disables the window."
+          "description": "Position-window height in pixels; 0 disables the window.",
+          "advanced": true
         },
         {
           "name": "maxCount",
@@ -4268,7 +4275,8 @@
           "max": 2000,
           "step": 1,
           "group": "Limit",
-          "description": "Hard cap on kept contours (1..2000). truncated is true only when qualifying contours exceed this cap; ordinary filtering does not count as truncation."
+          "description": "Hard cap on kept contours (1..2000). truncated is true only when qualifying contours exceed this cap; ordinary filtering does not count as truncation.",
+          "advanced": true
         }
       ],
       "description": "Filter an existing Contour list by area, circularity, hierarchy and a position window (bbox center inside the window). Wire: contours → filtered contours; compose after contour.extract (no re-extraction). Over-strict gates clear the list; window must share the image coordinate frame.",
@@ -6596,7 +6604,8 @@
           "type": "text",
           "defaultValue": "px",
           "group": "Frames",
-          "description": "Unit label of the source coordinates."
+          "description": "Unit label of the source coordinates.",
+          "advanced": true
         },
         {
           "name": "targetUnit",
@@ -6604,7 +6613,8 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Frames",
-          "description": "Unit label of the target coordinates."
+          "description": "Unit label of the target coordinates.",
+          "advanced": true
         }
       ],
       "description": "Affine (non-rigid) transform between named frames: scale, shear, rotation and translation, with the determinant exposed for downstream validation. coordinate.transformConstant is rigid-only and coordinate.transformCompose rejects non-rigid input, so anisotropic or skewed mapping had no entry point. Pixel-to-mm anisotropy is already covered by calibration.planar's homography; this node is for engineering-frame scaling and skew. A zero scale on either axis fails hard.",
@@ -9444,7 +9454,8 @@
           "max": 10000,
           "step": 1,
           "group": "Limit",
-          "description": "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image."
+          "description": "Keep at most this many defects, largest first. 0 keeps all. Useful to bound downstream cost when a lighting fault floods the image.",
+          "advanced": true
         }
       ],
       "description": "Suppress false positives with an explicit, attributable rule set instead of one global threshold. Each rejected defect is counted per reason (area / aspect / circularity / contrast / edge margin / count), so a sudden jump in one bucket tells you which knob to move - the usual alternative is lowering the threshold and silently accepting missed defects. Contrast and edge margin need the image or canvas ports; without them those two gates are skipped and reported as such rather than silently passing everything. All gates are AND-combined: a defect is kept only when it survives every enabled rule.",
@@ -9674,7 +9685,8 @@
             }
           ],
           "group": "Reference",
-          "description": "gainOffset=(image-dark)/(bright-dark)*target; gain=image/bright*target; offset=image-dark+target. Auto target uses mean gain or mean dark for offset mode."
+          "description": "gainOffset=(image-dark)/(bright-dark)*target; gain=image/bright*target; offset=image-dark+target. Auto target uses mean gain or mean dark for offset mode.",
+          "advanced": true
         },
         {
           "name": "darkPolicy",
@@ -9699,7 +9711,8 @@
               "gainOffset",
               "offset"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "diagnosticsLevel",
@@ -9721,7 +9734,8 @@
             }
           ],
           "group": "Diagnostics",
-          "description": "Controls how many fields are included in the diagnostics JSON payload."
+          "description": "Controls how many fields are included in the diagnostics JSON payload.",
+          "advanced": true
         }
       ],
       "description": "Flat-field correction with gain+offset, gain-only or offset-only models. Optional dark reference follows darkPolicy. Percentile clipping precedes correction; finite/minimum-magnitude/positive/maximum gain guards protect division. Statistics describe the selected byte or real output.",
@@ -10148,7 +10162,8 @@
             }
           ],
           "group": "Correction",
-          "description": "Least-squares fit of the reference toward the inspected image using only pixels inside the effective inspection domain before differencing (variation-model style)."
+          "description": "Least-squares fit of the reference toward the inspected image using only pixels inside the effective inspection domain before differencing (variation-model style).",
+          "advanced": true
         },
         {
           "name": "morphologyOpen",
@@ -10160,7 +10175,8 @@
           "step": 1,
           "unit": "px",
           "group": "Morphology",
-          "description": "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd."
+          "description": "Opening kernel applied to the defect mask before splitting; 0 disables, otherwise 3-15 odd.",
+          "advanced": true
         },
         {
           "name": "morphologyClose",
@@ -10172,7 +10188,8 @@
           "step": 1,
           "unit": "px",
           "group": "Morphology",
-          "description": "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd."
+          "description": "Closing kernel applied after opening; 0 disables, otherwise 3-15 odd.",
+          "advanced": true
         },
         {
           "name": "variationK",
@@ -10183,7 +10200,8 @@
           "max": 20,
           "step": 0.5,
           "group": "Variation",
-          "description": "When > 0, a pixel must differ by at least threshold + K * reference standard deviation. With multiple references, deviation is learned per pixel from aligned samples; with one reference, it is estimated locally."
+          "description": "When > 0, a pixel must differ by at least threshold + K * reference standard deviation. With multiple references, deviation is learned per pixel from aligned samples; with one reference, it is estimated locally.",
+          "advanced": true
         },
         {
           "name": "variationWindow",
@@ -10195,7 +10213,8 @@
           "step": 2,
           "unit": "px",
           "group": "Variation",
-          "description": "Odd neighborhood for local variation when only one reference image is connected; ignored by a multi-reference model."
+          "description": "Odd neighborhood for local variation when only one reference image is connected; ignored by a multi-reference model.",
+          "advanced": true
         },
         {
           "name": "majorArea",
@@ -10207,7 +10226,8 @@
           "step": 1,
           "unit": "px²",
           "group": "Grading",
-          "description": "Blob area at or above which a defect is reported as major; 0 disables the major class."
+          "description": "Blob area at or above which a defect is reported as major; 0 disables the major class.",
+          "advanced": true
         },
         {
           "name": "criticalArea",
@@ -10219,7 +10239,8 @@
           "step": 1,
           "unit": "px²",
           "group": "Grading",
-          "description": "Blob area at or above which a defect is reported as critical; must be at least Major Defect Area. 0 disables the critical class."
+          "description": "Blob area at or above which a defect is reported as critical; must be at least Major Defect Area. 0 disables the critical class.",
+          "advanced": true
         }
       ],
       "description": "Golden-template defect compare (algorithmBackend=hybrid): JLVision differencing/threshold/morphology/connection; managed MAD translation search and gain/offset fit (no JL domain-masked registration API); apply shift with JLVision WarpAffine and illumination with ScaleImage. Wire: image under test + 1–5 same-size/depth references; optional region; outputs found/count/area/grade/defects. Key params: threshold, area gates, registrationTolerance, compensation, variationK, morphology, grade areas. No learned variation-model operator — multi-sample std-dev and single-ref local texture stay managed. Bright=image−reference, dark=reference−image. Failures: size/depth mismatch, registration error over gate, threshold too strict, missing references.",
@@ -10469,7 +10490,8 @@
             }
           ],
           "group": "Result",
-          "description": "Standard/verbose diagnostics include effective region, measurements, limits and failed gate names."
+          "description": "Standard/verbose diagnostics include effective region, measurements, limits and failed gate names.",
+          "advanced": true
         },
         {
           "name": "requireNonEmpty",
@@ -10976,7 +10998,8 @@
           "max": 8,
           "step": 1,
           "group": "Endpoint",
-          "description": "Data bits (5-8)."
+          "description": "Data bits (5-8).",
+          "advanced": true
         },
         {
           "name": "parity",
@@ -11006,7 +11029,8 @@
             }
           ],
           "group": "Endpoint",
-          "description": "Parity mode."
+          "description": "Parity mode.",
+          "advanced": true
         },
         {
           "name": "stopBits",
@@ -11028,7 +11052,8 @@
             }
           ],
           "group": "Endpoint",
-          "description": "Stop bits."
+          "description": "Stop bits.",
+          "advanced": true
         },
         {
           "name": "dtrEnable",
@@ -11036,7 +11061,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Endpoint",
-          "description": "Assert DTR while the port is open; some RS-485 converters need it."
+          "description": "Assert DTR while the port is open; some RS-485 converters need it.",
+          "advanced": true
         },
         {
           "name": "rtsEnable",
@@ -11044,7 +11070,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Endpoint",
-          "description": "Assert RTS while the port is open; no handshake is used."
+          "description": "Assert RTS while the port is open; no handshake is used.",
+          "advanced": true
         },
         {
           "name": "timeoutMs",
@@ -11161,7 +11188,8 @@
             "values": [
               "untilTerminator"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "readLength",
@@ -11189,7 +11217,8 @@
           "max": 1048576,
           "step": 1,
           "group": "Response",
-          "description": "Hard reply cap; exceeding it fails instead of truncating."
+          "description": "Hard reply cap; exceeding it fails instead of truncating.",
+          "advanced": true
         },
         {
           "name": "expectPattern",
@@ -11197,7 +11226,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Validation",
-          "description": "Optional regular expression over the reply text; empty disables it."
+          "description": "Optional regular expression over the reply text; empty disables it.",
+          "advanced": true
         },
         {
           "name": "requireMatch",
@@ -11205,7 +11235,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false."
+          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false.",
+          "advanced": true
         },
         {
           "name": "ignoreCase",
@@ -11213,7 +11244,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "Case-insensitive expectPattern matching."
+          "description": "Case-insensitive expectPattern matching.",
+          "advanced": true
         }
       ],
       "description": "Talk to RS-232/485 devices that only speak a private ASCII or binary protocol (light controllers, handheld scanners, torque tools): open the port, send, read per readMode, close — the port is not held between requests so a stuck recipe cannot block the station. Same payload encoding, terminator and expectPattern semantics as TCP Request. UnauthorizedAccessException is reported as 'port held by another program'. Because the .NET serial stream ignores cancellation, replies are read byte by byte with ReadTimeout and a cancellation check between bytes.",
@@ -11441,7 +11473,8 @@
             "values": [
               "untilTerminator"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "readLength",
@@ -11469,7 +11502,8 @@
           "max": 1048576,
           "step": 1,
           "group": "Response",
-          "description": "Hard reply cap. Exceeding it fails the node instead of silently truncating."
+          "description": "Hard reply cap. Exceeding it fails the node instead of silently truncating.",
+          "advanced": true
         },
         {
           "name": "expectPattern",
@@ -11477,7 +11511,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Validation",
-          "description": "Optional .NET regular expression evaluated against the reply text (100 ms budget). Empty disables the check."
+          "description": "Optional .NET regular expression evaluated against the reply text (100 ms budget). Empty disables the check.",
+          "advanced": true
         },
         {
           "name": "requireMatch",
@@ -11485,7 +11520,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "When true a reply that does not match expectPattern fails the node; when false it only sets matched=false."
+          "description": "When true a reply that does not match expectPattern fails the node; when false it only sets matched=false.",
+          "advanced": true
         },
         {
           "name": "ignoreCase",
@@ -11493,7 +11529,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "Case-insensitive expectPattern matching."
+          "description": "Case-insensitive expectPattern matching.",
+          "advanced": true
         }
       ],
       "description": "Talk to devices that only speak a private TCP protocol (scanners, light controllers, torque tools). One connection per request: connect, send, read per readMode, close. The request may be binary (payloadEncoding=hex) and the reply is exposed both as UTF-8 text and as hex. Responses are capped by maxResponseBytes; timeouts close the connection and fail with a message that states the request may already have reached the peer. The dispatch is guarded by the device ownership permit for deviceId, so a released lease blocks the send.",
@@ -11687,7 +11724,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Validation",
-          "description": "Optional regular expression over the reply text; empty disables it."
+          "description": "Optional regular expression over the reply text; empty disables it.",
+          "advanced": true
         },
         {
           "name": "requireMatch",
@@ -11695,7 +11733,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false."
+          "description": "Fail when the reply does not match expectPattern instead of only reporting matched=false.",
+          "advanced": true
         },
         {
           "name": "ignoreCase",
@@ -11703,7 +11742,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Validation",
-          "description": "Case-insensitive expectPattern matching."
+          "description": "Case-insensitive expectPattern matching.",
+          "advanced": true
         }
       ],
       "description": "Send one UDP datagram to a private-protocol device and optionally wait for a single reply datagram. Same payload encoding, terminator and expectPattern semantics as TCP Request, but no connection state: suitable for broadcast-style devices and simple ASCII protocols over Ethernet.",
@@ -11972,7 +12012,8 @@
             }
           ],
           "group": "Condition",
-          "description": "Samples outside the accepted quality do not match, do not move the edge memory, and do not count toward the stable hold."
+          "description": "Samples outside the accepted quality do not match, do not move the edge memory, and do not count toward the stable hold.",
+          "advanced": true
         },
         {
           "name": "onTimeout",
@@ -11990,7 +12031,8 @@
             }
           ],
           "group": "Wait",
-          "description": "Fail throws the existing timeout error. Continue succeeds with matched=false so a downstream branch can handle the miss."
+          "description": "Fail throws the existing timeout error. Continue succeeds with matched=false so a downstream branch can handle the miss.",
+          "advanced": true
         }
       ],
       "description": "Poll a device tag until a condition/edge has held for the requested duration or timeout. Elapsed time is independent of wall-clock changes. Integer comparisons preserve Int64 precision. Conversion validity ports describe the last sample. Timeout Continue returns matched=false; external cancellation still cancels.",
@@ -13065,7 +13107,8 @@
           "max": 200,
           "step": 1,
           "group": "Limits",
-          "description": "Maximum number of returned ellipses, strongest support first."
+          "description": "Maximum number of returned ellipses, strongest support first.",
+          "advanced": true
         },
         {
           "name": "minPoints",
@@ -13076,7 +13119,8 @@
           "max": 100000,
           "step": 1,
           "group": "Limits",
-          "description": "Minimum contour points backing one ellipse; OpenCV needs 5, but 20+ is what actually separates a real ellipse from a noisy arc."
+          "description": "Minimum contour points backing one ellipse; OpenCV needs 5, but 20+ is what actually separates a real ellipse from a noisy arc.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -13874,7 +13918,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Enable subpixel refinement of the edge location."
+          "description": "Enable subpixel refinement of the edge location.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -19531,7 +19576,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -19542,7 +19588,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -19553,7 +19600,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -19564,7 +19612,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -19572,7 +19621,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -19580,7 +19630,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "scoreOutputName",
@@ -19588,7 +19639,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Output",
-          "description": "Optional scalar image-level anomaly score output. Set together with mapOutputName when the model exposes both outputs."
+          "description": "Optional scalar image-level anomaly score output. Set together with mapOutputName when the model exposes both outputs.",
+          "advanced": true
         },
         {
           "name": "mapOutputName",
@@ -19596,7 +19648,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Output",
-          "description": "Optional spatial anomaly map output. Set together with scoreOutputName for image-level gating plus pixel localization."
+          "description": "Optional spatial anomaly map output. Set together with scoreOutputName for image-level gating plus pixel localization.",
+          "advanced": true
         },
         {
           "name": "mapLayout",
@@ -19618,7 +19671,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Spatial output may be [1,1,H,W], [1,H,W], [H,W], [1,H,W,1], or [H,W,1]. Explicitly select a layout when a narrow map shape is ambiguous."
+          "description": "Spatial output may be [1,1,H,W], [1,H,W], [H,W], [1,H,W,1], or [H,W,1]. Explicitly select a layout when a narrow map shape is ambiguous.",
+          "advanced": true
         },
         {
           "name": "threshold",
@@ -19782,7 +19836,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Model",
-          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output.",
+          "advanced": true
         },
         {
           "name": "inputWidth",
@@ -19817,7 +19872,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -19828,7 +19884,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -19839,7 +19896,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -19850,7 +19908,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -19858,7 +19917,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -19884,7 +19944,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "YOLO26-cls ONNX exports [1,C] probabilities with softmax already in the graph; choose yolo26 to skip a second softmax."
+          "description": "YOLO26-cls ONNX exports [1,C] probabilities with softmax already in the graph; choose yolo26 to skip a second softmax.",
+          "advanced": true
         },
         {
           "name": "letterbox",
@@ -19892,7 +19953,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Preserve aspect with gray (114) padding. Usually off for classifiers."
+          "description": "Preserve aspect with gray (114) padding. Usually off for classifiers.",
+          "advanced": true
         },
         {
           "name": "multiCrop",
@@ -19914,7 +19976,8 @@
             }
           ],
           "group": "Inference",
-          "description": "Optionally average predictions from the center and four corner crops. The ten-view mode also evaluates horizontal flips. Each view runs independently through the model."
+          "description": "Optionally average predictions from the center and four corner crops. The ten-view mode also evaluates horizontal flips. Each view runs independently through the model.",
+          "advanced": true
         },
         {
           "name": "viewCropFraction",
@@ -19954,7 +20017,8 @@
             "values": [
               "scores"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "topK",
@@ -20106,7 +20170,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -20117,7 +20182,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -20128,7 +20194,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -20139,7 +20206,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -20147,7 +20215,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -20155,7 +20224,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "layout",
@@ -20199,7 +20269,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes."
+          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes.",
+          "advanced": true
         },
         {
           "name": "coordinates",
@@ -20217,7 +20288,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Whether network box coordinates are normalized 0-1 or in input pixels."
+          "description": "Whether network box coordinates are normalized 0-1 or in input pixels.",
+          "advanced": true
         },
         {
           "name": "letterbox",
@@ -20225,7 +20297,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for Ultralytics YOLO: preprocess uses gray (114) letterbox AND coordinates are un-padded before mapping to the source."
+          "description": "Enable for Ultralytics YOLO: preprocess uses gray (114) letterbox AND coordinates are un-padded before mapping to the source.",
+          "advanced": true
         },
         {
           "name": "confidenceThreshold",
@@ -20258,7 +20331,8 @@
           "max": 1000,
           "step": 1,
           "group": "Postprocessing",
-          "description": "Hard cap on detections returned after NMS (1..1000)."
+          "description": "Hard cap on detections returned after NMS (1..1000).",
+          "advanced": true
         }
       ],
       "description": "Run an ONNX detector. Layout xyxy expects rows [x1,y1,x2,y2,score,classId] as [N,6] or [1,N,6] (YOLO26 end-to-end nms=False export is typically [1,300,6]); layout yolo expects YOLOv8/YOLO26 raw cx,cy,w,h plus per-class scores as [1,C,N]; layout yolov5 adds objectness. Enable letterbox so preprocess pads like Ultralytics and coordinates un-pad correctly. Class-aware NMS is applied here (not embedded). count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
@@ -20398,7 +20472,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -20409,7 +20484,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -20420,7 +20496,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -20431,7 +20508,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -20439,7 +20517,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -20447,7 +20526,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "protoOutputName",
@@ -20455,7 +20535,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Model",
-          "description": "Second ONNX output (mask prototypes). Leave empty with outputName empty to use the model's first two outputs in order."
+          "description": "Second ONNX output (mask prototypes). Leave empty with outputName empty to use the model's first two outputs in order.",
+          "advanced": true
         },
         {
           "name": "layout",
@@ -20473,7 +20554,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Raw head: [1,4+nc+maskDim,N]. YOLO26 end-to-end: [1,N,6+maskDim] rows [x1,y1,x2,y2,score,class,coeffs]. Both use the prototype tensor [1,maskDim,H,W]."
+          "description": "Raw head: [1,4+nc+maskDim,N]. YOLO26 end-to-end: [1,N,6+maskDim] rows [x1,y1,x2,y2,score,class,coeffs]. Both use the prototype tensor [1,maskDim,H,W].",
+          "advanced": true
         },
         {
           "name": "tensorOrder",
@@ -20495,7 +20577,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes."
+          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes.",
+          "advanced": true
         },
         {
           "name": "coordinates",
@@ -20513,7 +20596,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Whether model box coordinates are normalized or absolute pixels."
+          "description": "Whether model box coordinates are normalized or absolute pixels.",
+          "advanced": true
         },
         {
           "name": "letterbox",
@@ -20521,7 +20605,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on: Ultralytics exports assume letterbox preprocess; disable only for stretch-trained custom exports."
+          "description": "Default on: Ultralytics exports assume letterbox preprocess; disable only for stretch-trained custom exports.",
+          "advanced": true
         },
         {
           "name": "confidenceThreshold",
@@ -20565,7 +20650,8 @@
             }
           ],
           "group": "Postprocessing",
-          "description": "YOLO26 end-to-end output is already NMS-free top detections; automatic mode skips duplicate suppression there and applies class-aware NMS to raw heads."
+          "description": "YOLO26 end-to-end output is already NMS-free top detections; automatic mode skips duplicate suppression there and applies class-aware NMS to raw heads.",
+          "advanced": true
         },
         {
           "name": "maskThreshold",
@@ -20584,7 +20670,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Output",
-          "description": "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available."
+          "description": "Include each binary mask in instances JSON as row-major alternating background/foreground run lengths. Turn off to reduce payload size; the combined class mask remains available.",
+          "advanced": true
         },
         {
           "name": "maxCount",
@@ -20595,7 +20682,8 @@
           "max": 1000,
           "step": 1,
           "group": "Postprocessing",
-          "description": "Hard cap on instances retained after NMS (1..1000)."
+          "description": "Hard cap on instances retained after NMS (1..1000).",
+          "advanced": true
         }
       ],
       "description": "Run Ultralytics YOLO26/YOLOv8 instance-seg ONNX with raw or YOLO26 end-to-end rows plus mask prototypes. Raw heads use class-aware NMS; end-to-end rows skip it in automatic mode. Composes each mask from sigmoid(coeff·proto), crops to the box, and maps through letterboxing. The class-id label mask is a highest-score-wins composite; instances JSON can preserve overlapping masks independently with row-major run-length encoding. For semantic masks use inference.segmentation; for rotated boxes use inference.obb; for keypoints use inference.pose. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
@@ -20731,7 +20819,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -20742,7 +20831,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -20753,7 +20843,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -20764,7 +20855,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -20772,7 +20864,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -20780,7 +20873,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "layout",
@@ -20798,7 +20892,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Raw head: [1,5+nc,N] (cx,cy,w,h,class scores,angle rad). End-to-end: [1,N,7] rows (cx,cy,w,h,score,classId,angle rad)."
+          "description": "Raw head: [1,5+nc,N] (cx,cy,w,h,class scores,angle rad). End-to-end: [1,N,7] rows (cx,cy,w,h,score,classId,angle rad).",
+          "advanced": true
         },
         {
           "name": "tensorOrder",
@@ -20820,7 +20915,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes."
+          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes.",
+          "advanced": true
         },
         {
           "name": "coordinates",
@@ -20838,7 +20934,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Whether model box coordinates are normalized or absolute pixels."
+          "description": "Whether model box coordinates are normalized or absolute pixels.",
+          "advanced": true
         },
         {
           "name": "letterbox",
@@ -20846,7 +20943,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on: Ultralytics gray (114) letterbox with exact padding removal. Disable only when source/model aspect ratios match."
+          "description": "Default on: Ultralytics gray (114) letterbox with exact padding removal. Disable only when source/model aspect ratios match.",
+          "advanced": true
         },
         {
           "name": "confidenceThreshold",
@@ -20890,7 +20988,8 @@
             }
           ],
           "group": "Postprocessing",
-          "description": "Uses exact oriented polygon IoU and class-aware suppression. Automatic mode skips NMS on YOLO26 end-to-end predictions."
+          "description": "Uses exact oriented polygon IoU and class-aware suppression. Automatic mode skips NMS on YOLO26 end-to-end predictions.",
+          "advanced": true
         },
         {
           "name": "maxCount",
@@ -20909,7 +21008,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Model",
-          "description": "Optional comma-separated labels in model class order; leave empty to emit class_N labels."
+          "description": "Optional comma-separated labels in model class order; leave empty to emit class_N labels.",
+          "advanced": true
         }
       ],
       "description": "Run YOLOv8/YOLO26 oriented object detection. Supports raw OBB heads and YOLO26 end-to-end xywhr rows; angles are radians. Raw candidates receive class-aware rotated IoU NMS, while automatic mode skips suppression for end-to-end output. Returns DetectionList with an oriented Rectangle2D, polygon/angle JSON, and a labeled overlay image. Letterbox is enabled by default; stretch resizing is rejected when its unequal axis scaling would distort rotated boxes. count is the emitted length; truncated=true means maxCount stopped NMS while more survivors were still available.",
@@ -21010,7 +21110,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Model",
-          "description": "Optional ONNX output/layer name; leave empty for the model's default output."
+          "description": "Optional ONNX output/layer name; leave empty for the model's default output.",
+          "advanced": true
         },
         {
           "name": "inputWidth",
@@ -21045,7 +21146,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -21056,7 +21158,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -21067,7 +21170,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -21078,7 +21182,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -21086,7 +21191,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Default on for RGB-trained Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -21094,7 +21200,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "layout",
@@ -21112,7 +21219,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57]."
+          "description": "yolo: [1,4+nc+K*D,N] e.g. COCO [1,56,8400]. xyxy: [1,N,6+K*D] e.g. YOLO26 nms=False [1,300,57].",
+          "advanced": true
         },
         {
           "name": "tensorOrder",
@@ -21134,7 +21242,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes."
+          "description": "Only used for raw 3D tensors. Auto treats the smaller dimension as channels; select an explicit order for unusual class counts or ambiguous square shapes.",
+          "advanced": true
         },
         {
           "name": "coordinates",
@@ -21152,7 +21261,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Whether model box coordinates are normalized or absolute pixels."
+          "description": "Whether model box coordinates are normalized or absolute pixels.",
+          "advanced": true
         },
         {
           "name": "letterbox",
@@ -21160,7 +21270,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Preprocessing",
-          "description": "Default on: Ultralytics letterbox preprocess and coordinate un-padding."
+          "description": "Default on: Ultralytics letterbox preprocess and coordinate un-padding.",
+          "advanced": true
         },
         {
           "name": "numKeypoints",
@@ -21182,7 +21293,8 @@
           "max": 3,
           "step": 1,
           "group": "Model",
-          "description": "3 = x,y,conf (Ultralytics default); 2 = x,y only."
+          "description": "3 = x,y,conf (Ultralytics default); 2 = x,y only.",
+          "advanced": true
         },
         {
           "name": "confidenceThreshold",
@@ -21204,7 +21316,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Postprocessing",
-          "description": "IoU threshold for non-maximum suppression."
+          "description": "IoU threshold for non-maximum suppression.",
+          "advanced": true
         },
         {
           "name": "keypointThreshold",
@@ -21229,7 +21342,8 @@
             "values": [
               "17"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "maxCount",
@@ -21386,7 +21500,8 @@
           "max": 100,
           "step": 0.0001,
           "group": "Preprocessing",
-          "description": "Per-pixel scale applied before mean subtraction (1/255 default)."
+          "description": "Per-pixel scale applied before mean subtraction (1/255 default).",
+          "advanced": true
         },
         {
           "name": "meanB",
@@ -21397,7 +21512,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Blue-channel mean subtracted after scaling."
+          "description": "Blue-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanG",
@@ -21408,7 +21524,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Green-channel mean subtracted after scaling."
+          "description": "Green-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "meanR",
@@ -21419,7 +21536,8 @@
           "max": 255,
           "step": 1,
           "group": "Preprocessing",
-          "description": "Red-channel mean subtracted after scaling."
+          "description": "Red-channel mean subtracted after scaling.",
+          "advanced": true
         },
         {
           "name": "swapRB",
@@ -21427,7 +21545,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR)."
+          "description": "Enable for RGB-trained models such as Ultralytics YOLO (OpenCV loads BGR).",
+          "advanced": true
         },
         {
           "name": "crop",
@@ -21435,7 +21554,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop."
+          "description": "Center crop after resize. Supported only for classification; rejected by detection, segmentation, OBB, pose, instance segmentation and anomaly because spatial outputs cannot be remapped through the crop.",
+          "advanced": true
         },
         {
           "name": "layout",
@@ -21461,7 +21581,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Preserve aspect with gray (114) padding. Enable when the YOLO26-sem export used letterbox."
+          "description": "Preserve aspect with gray (114) padding. Enable when the YOLO26-sem export used letterbox.",
+          "advanced": true
         },
         {
           "name": "binaryThreshold",
@@ -21985,7 +22106,8 @@
           "max": 500,
           "step": 1,
           "group": "Gates",
-          "description": "Minimum RANSAC inliers for a valid result. Too low a value lets accidental alignments pass; 6-10 is typical for textured parts."
+          "description": "Minimum RANSAC inliers for a valid result. Too low a value lets accidental alignments pass; 6-10 is typical for textured parts.",
+          "advanced": true
         },
         {
           "name": "minInlierRatio",
@@ -21996,7 +22118,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Gates",
-          "description": "Minimum inliers/matches. Low ratios mean the matches disagreed, which usually indicates a repeated texture rather than a real target."
+          "description": "Minimum inliers/matches. Low ratios mean the matches disagreed, which usually indicates a repeated texture rather than a real target.",
+          "advanced": true
         },
         {
           "name": "angleRangeDeg",
@@ -22008,7 +22131,8 @@
           "step": 1,
           "unit": "deg",
           "group": "Gates",
-          "description": "Reject results whose rotation exceeds this half-width. 180 disables the gate."
+          "description": "Reject results whose rotation exceeds this half-width. 180 disables the gate.",
+          "advanced": true
         },
         {
           "name": "scaleMinPercent",
@@ -22020,7 +22144,8 @@
           "step": 1,
           "unit": "%",
           "group": "Gates",
-          "description": "Lower accepted scale bound relative to the template. Results below it return found=false with reason=scale-out-of-range."
+          "description": "Lower accepted scale bound relative to the template. Results below it return found=false with reason=scale-out-of-range.",
+          "advanced": true
         },
         {
           "name": "scaleMaxPercent",
@@ -22032,7 +22157,8 @@
           "step": 1,
           "unit": "%",
           "group": "Gates",
-          "description": "Upper accepted scale bound relative to the template. Must be at least Minimum Scale."
+          "description": "Upper accepted scale bound relative to the template. Must be at least Minimum Scale.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -22483,7 +22609,8 @@
           "type": "text",
           "defaultValue": "object",
           "group": "Frames",
-          "description": "Frame name stamped on the produced Transform3D source side."
+          "description": "Frame name stamped on the produced Transform3D source side.",
+          "advanced": true
         },
         {
           "name": "cameraFrame",
@@ -22491,7 +22618,8 @@
           "type": "text",
           "defaultValue": "camera",
           "group": "Frames",
-          "description": "Frame name stamped on the produced Transform3D target side."
+          "description": "Frame name stamped on the produced Transform3D target side.",
+          "advanced": true
         },
         {
           "name": "maxReprojectionRms",
@@ -22502,7 +22630,8 @@
           "max": 1000,
           "step": 0.1,
           "group": "Gates",
-          "description": "Quality gate: fail when the reprojection RMS exceeds this. 0 disables it. A clean planar target usually lands below 0.5 px; 2 px usually means a wrong correspondence order."
+          "description": "Quality gate: fail when the reprojection RMS exceeds this. 0 disables it. A clean planar target usually lands below 0.5 px; 2 px usually means a wrong correspondence order.",
+          "advanced": true
         }
       ],
       "description": "Solve PnP: image points plus their known 3D coordinates give the object-to-camera SE(3), reported as a 4x4 Transform3D plus translation and ZYX Euler angles. This is the missing link between 2D detection and robot picking for anything that is not an ArUco board. Correspondence order is what defines the pose - the points are matched by index, not by geometry - so a shuffled object list yields a plausible but wrong pose; the reprojection RMS gate is the cheapest guard against it. At least 4 pairs are required, and 3 near-collinear points make the solution ambiguous. Failure returns found=false with the reason rather than a zero pose, because a zero pose silently commands the robot to the origin.",
@@ -22907,7 +23036,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Model",
-          "description": "Used only when the template port is not connected."
+          "description": "Used only when the template port is not connected.",
+          "advanced": true
         },
         {
           "name": "modelMode",
@@ -22947,7 +23077,8 @@
             }
           ],
           "group": "Origin Estimation",
-          "description": "Estimates the default origin only. Model features are trained from the original gray image."
+          "description": "Estimates the default origin only. Model features are trained from the original gray image.",
+          "advanced": true
         },
         {
           "name": "threshold",
@@ -22958,7 +23089,8 @@
           "max": 255,
           "step": 1,
           "group": "Origin Estimation",
-          "description": "Used when origin estimation uses a fixed threshold; this does not binarize the shape model."
+          "description": "Used when origin estimation uses a fixed threshold; this does not binarize the shape model.",
+          "advanced": true
         },
         {
           "name": "invert",
@@ -22966,7 +23098,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Origin Estimation",
-          "description": "Invert only the automatic foreground used to estimate the origin."
+          "description": "Invert only the automatic foreground used to estimate the origin.",
+          "advanced": true
         },
         {
           "name": "minArea",
@@ -22978,7 +23111,8 @@
           "step": 1,
           "unit": "px²",
           "group": "Candidates",
-          "description": "Minimum candidate area (px²) for shape-match candidates."
+          "description": "Minimum candidate area (px²) for shape-match candidates.",
+          "advanced": true
         },
         {
           "name": "angleRangeDeg",
@@ -22990,7 +23124,8 @@
           "step": 1,
           "unit": "deg",
           "group": "Search",
-          "description": "Compatibility setting for older shape workflows that use an image template directly. Template Match defaults the same key to 0 (no rotation search); here the default is the full 180° coverage."
+          "description": "Compatibility setting for older shape workflows that use an image template directly. Template Match defaults the same key to 0 (no rotation search); here the default is the full 180° coverage.",
+          "advanced": true
         },
         {
           "name": "trainingAngleRangeDeg",
@@ -23062,7 +23197,8 @@
           "step": 0.1,
           "unit": "deg",
           "group": "Training",
-          "description": "Model training angle step. Smaller steps improve angular coverage at additional model size. Note: Template Match's same-named key is a search step (default 5°), not a training step."
+          "description": "Model training angle step. Smaller steps improve angular coverage at additional model size. Note: Template Match's same-named key is a search step (default 5°), not a training step.",
+          "advanced": true
         },
         {
           "name": "pyramidLevels",
@@ -23091,7 +23227,8 @@
             }
           ],
           "group": "Auto Tune",
-          "description": "manual keeps every existing recipe bit-identical. auto calls JLVision determine_shape_model_params on the training ROI and overrides Pyramid Levels, Angle Step and Minimum Feature Contrast at training time; the resolved values are reported in the training summary. The run-time search never calls determine."
+          "description": "manual keeps every existing recipe bit-identical. auto calls JLVision determine_shape_model_params on the training ROI and overrides Pyramid Levels, Angle Step and Minimum Feature Contrast at training time; the resolved values are reported in the training summary. The run-time search never calls determine.",
+          "advanced": true
         },
         {
           "name": "autoTuneProfile",
@@ -23157,7 +23294,8 @@
           "step": 1,
           "unit": "%",
           "group": "Training",
-          "description": "Independent horizontal scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance."
+          "description": "Independent horizontal scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance.",
+          "advanced": true
         },
         {
           "name": "scaleToleranceYPercent",
@@ -23169,7 +23307,8 @@
           "step": 1,
           "unit": "%",
           "group": "Training",
-          "description": "Independent vertical scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance."
+          "description": "Independent vertical scale tolerance for anisotropic shape matching. If either X/Y tolerance is non-zero, these axis values take precedence over uniform Scale Tolerance.",
+          "advanced": true
         },
         {
           "name": "scaleStepPercent",
@@ -23181,7 +23320,8 @@
           "step": 0.1,
           "unit": "%",
           "group": "Training",
-          "description": "Scale sampling step used when scale tolerance is enabled. Note: Template Match's same-named key is a search resampling step (default 10%)."
+          "description": "Scale sampling step used when scale tolerance is enabled. Note: Template Match's same-named key is a search resampling step (default 10%).",
+          "advanced": true
         },
         {
           "name": "trainingMinSampleFraction",
@@ -23192,7 +23332,8 @@
           "max": 1,
           "step": 0.05,
           "group": "Training",
-          "description": "Minimum fraction of aligned samples that must contain a contour feature for it to enter the composite model."
+          "description": "Minimum fraction of aligned samples that must contain a contour feature for it to enter the composite model.",
+          "advanced": true
         },
         {
           "name": "trainingFeatureTolerancePx",
@@ -23204,7 +23345,8 @@
           "step": 0.5,
           "unit": "px",
           "group": "Training",
-          "description": "Maximum point distance used to treat contour features from different samples as the same feature."
+          "description": "Maximum point distance used to treat contour features from different samples as the same feature.",
+          "advanced": true
         },
         {
           "name": "ignorePolarity",
@@ -23212,7 +23354,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Training",
-          "description": "Match the same contour when its light/dark polarity is reversed."
+          "description": "Match the same contour when its light/dark polarity is reversed.",
+          "advanced": true
         },
         {
           "name": "minContrast",
@@ -23223,7 +23366,8 @@
           "max": 255,
           "step": 1,
           "group": "Training",
-          "description": "Reject weak boundaries while training the shape model."
+          "description": "Reject weak boundaries while training the shape model.",
+          "advanced": true
         },
         {
           "name": "clutterContrast",
@@ -23234,7 +23378,8 @@
           "max": 255,
           "step": 1,
           "group": "Training",
-          "description": "Minimum edge contrast counted inside the optional Clutter ROI; must be at least Minimum Feature Contrast."
+          "description": "Minimum edge contrast counted inside the optional Clutter ROI; must be at least Minimum Feature Contrast.",
+          "advanced": true
         },
         {
           "name": "trainingOriginMode",
@@ -23252,7 +23397,8 @@
             }
           ],
           "group": "Training",
-          "description": "Use the dominant thresholded component centroid when available; fall back to the selected model region centroid. Model features still use the original grayscale image."
+          "description": "Use the dominant thresholded component centroid when available; fall back to the selected model region centroid. Model features still use the original grayscale image.",
+          "advanced": true
         },
         {
           "name": "trainingOriginX",
@@ -23299,7 +23445,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Matching",
-          "description": "Acceptance threshold for a candidate pose. Template Match defaults the same key to 0.5, so switching node types changes the effective threshold unless it is set explicitly."
+          "description": "Acceptance threshold for a candidate pose. Template Match defaults the same key to 0.5, so switching node types changes the effective threshold unless it is set explicitly.",
+          "advanced": true
         },
         {
           "name": "maxDeformationPx",
@@ -23311,7 +23458,8 @@
           "step": 1,
           "unit": "px",
           "group": "Matching",
-          "description": "Allow each model point to move locally by up to this many pixels during pose refinement. Uses least-squares adjustment and does not require retraining; 0 disables deformation tolerance."
+          "description": "Allow each model point to move locally by up to this many pixels during pose refinement. Uses least-squares adjustment and does not require retraining; 0 disables deformation tolerance.",
+          "advanced": true
         },
         {
           "name": "maxClutterScore",
@@ -23322,7 +23470,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Matching",
-          "description": "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value."
+          "description": "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value.",
+          "advanced": true
         },
         {
           "name": "scoreUsingClutter",
@@ -23330,7 +23479,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Matching",
-          "description": "When a Clutter ROI is trained, multiply the native match score by (1 - clutter score). The unadjusted score is also available as nativeScore."
+          "description": "When a Clutter ROI is trained, multiply the native match score by (1 - clutter score). The unadjusted score is also available as nativeScore.",
+          "advanced": true
         },
         {
           "name": "runtimeContrastThreshold",
@@ -23341,7 +23491,8 @@
           "max": 255,
           "step": 1,
           "group": "Matching",
-          "description": "Minimum average gradient strength (0–255) at matched model features. Zero disables this run-time filter; it does not require retraining."
+          "description": "Minimum average gradient strength (0–255) at matched model features. Zero disables this run-time filter; it does not require retraining.",
+          "advanced": true
         },
         {
           "name": "contrastFractionThreshold",
@@ -23352,7 +23503,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Matching",
-          "description": "Minimum run-time feature contrast divided by the trained-image feature contrast, capped at 1. Zero disables this check; it needs the lossless original training image."
+          "description": "Minimum run-time feature contrast divided by the trained-image feature contrast, capped at 1. Zero disables this check; it needs the lossless original training image.",
+          "advanced": true
         },
         {
           "name": "maxTargets",
@@ -23363,7 +23515,8 @@
           "max": 100,
           "step": 1,
           "group": "Multi-target",
-          "description": "Accepted matches per run. Template Match defaults the same key to 1 (single result), so a switched-in shape node returns up to 5 unless this is set explicitly."
+          "description": "Accepted matches per run. Template Match defaults the same key to 1 (single result), so a switched-in shape node returns up to 5 unless this is set explicitly.",
+          "advanced": true
         },
         {
           "name": "minCenterDistance",
@@ -23375,7 +23528,8 @@
           "step": 1,
           "unit": "px",
           "group": "Multi-target",
-          "description": "Candidates closer than this to a better match are dropped. Template Match defaults the same key to 0 (keep every accepted center)."
+          "description": "Candidates closer than this to a better match are dropped. Template Match defaults the same key to 0 (keep every accepted center).",
+          "advanced": true
         },
         {
           "name": "engine",
@@ -23397,7 +23551,8 @@
             }
           ],
           "group": "Managed Chamfer",
-          "description": "Default/product path is native JLVision. managedChamfer builds a contour model from the template image (templateRoi crop, centre origin) and searches a chamfer distance transform; it ignores trained native models. auto is an alias of native and never silently falls back to chamfer — set managedChamfer explicitly for the lab path."
+          "description": "Default/product path is native JLVision. managedChamfer builds a contour model from the template image (templateRoi crop, centre origin) and searches a chamfer distance transform; it ignores trained native models. auto is an alias of native and never silently falls back to chamfer — set managedChamfer explicitly for the lab path.",
+          "advanced": true
         },
         {
           "name": "chamferPolarityCosine",
@@ -23569,7 +23724,8 @@
             }
           ],
           "group": "Diagnostics",
-          "description": "Controls how many fields are included in the diagnostics JSON payload."
+          "description": "Controls how many fields are included in the diagnostics JSON payload.",
+          "advanced": true
         },
         {
           "name": "trainingMode",
@@ -24027,7 +24183,8 @@
           "step": 0.5,
           "unit": "deg",
           "group": "Rotation",
-          "description": "Angular search step in degrees inside the configured angle range."
+          "description": "Angular search step in degrees inside the configured angle range.",
+          "advanced": true
         },
         {
           "name": "pyramidLevels",
@@ -24038,7 +24195,8 @@
           "max": 8,
           "step": 1,
           "group": "Rotation",
-          "description": "0 derives a coarse-to-fine pyramid from the template size. 1 forces single-level search; models are cached by pixel content, levels, angle coverage and polarity."
+          "description": "0 derives a coarse-to-fine pyramid from the template size. 1 forces single-level search; models are cached by pixel content, levels, angle coverage and polarity.",
+          "advanced": true
         },
         {
           "name": "parameterSource",
@@ -24056,7 +24214,8 @@
             }
           ],
           "group": "Auto Tune",
-          "description": "manual keeps existing NCC recipes unchanged. auto calls determine_ncc_model_params once per template (cached by templatePath+mtime, or by a sampled pixel fingerprint for port templates) and overrides Pyramid Levels and Angle Step before CreateNccModel. The find path is untouched."
+          "description": "manual keeps existing NCC recipes unchanged. auto calls determine_ncc_model_params once per template (cached by templatePath+mtime, or by a sampled pixel fingerprint for port templates) and overrides Pyramid Levels and Angle Step before CreateNccModel. The find path is untouched.",
+          "advanced": true
         },
         {
           "name": "autoTuneProfile",
@@ -24106,7 +24265,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Matching",
-          "description": "When true, CreateNccModel uses ignore_global_polarity so light/dark inverted copies can still match. Default use_polarity requires the same contrast polarity as the template."
+          "description": "When true, CreateNccModel uses ignore_global_polarity so light/dark inverted copies can still match. Default use_polarity requires the same contrast polarity as the template.",
+          "advanced": true
         },
         {
           "name": "emitScoreMap",
@@ -24114,7 +24274,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Diagnostics",
-          "description": "When true, emit an 8-bit OpenCV unit-scale NCC response image on scoreMap (full scene size, template top-left convention). Angle comes from scoreMapAngleMode. Not the JLVision pyramid search surface. Default off for speed."
+          "description": "When true, emit an 8-bit OpenCV unit-scale NCC response image on scoreMap (full scene size, template top-left convention). Angle comes from scoreMapAngleMode. Not the JLVision pyramid search surface. Default off for speed.",
+          "advanced": true
         },
         {
           "name": "scoreMapAngleMode",
@@ -24205,7 +24366,8 @@
             }
           ],
           "group": "Ignore Region",
-          "description": "Default hard uses JLVision ReduceDomain + reject centers inside ignoreRoi. soft is explicit engine-managed mean-lerp (not JL soft-NCC): lerp ignored pixels toward scene mean by (1-ignoreSoftWeight), optional feather, and multiply candidate scores by residual weight."
+          "description": "Default hard uses JLVision ReduceDomain + reject centers inside ignoreRoi. soft is explicit engine-managed mean-lerp (not JL soft-NCC): lerp ignored pixels toward scene mean by (1-ignoreSoftWeight), optional feather, and multiply candidate scores by residual weight.",
+          "advanced": true
         },
         {
           "name": "ignoreSoftWeight",
@@ -24280,7 +24442,8 @@
           "max": 50,
           "step": 1,
           "group": "Multi-target",
-          "description": "Accepted matches. found/score/x/y/angle stay the best match. Default 1 keeps older single-result workflows."
+          "description": "Accepted matches. found/score/x/y/angle stay the best match. Default 1 keeps older single-result workflows.",
+          "advanced": true
         },
         {
           "name": "minCenterDistance",
@@ -24292,7 +24455,8 @@
           "step": 1,
           "unit": "px",
           "group": "Multi-target",
-          "description": "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one."
+          "description": "0 keeps every accepted center. A positive distance drops a later match whose center is closer than this to a better one.",
+          "advanced": true
         },
         {
           "name": "duplicateOverlapThreshold",
@@ -24303,7 +24467,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Multi-target",
-          "description": "IoU gate for multi-match NMS on axis-aligned boxes. hard: drop later overlaps; soft: linear Soft-NMS decay score*=(1-IoU). 0 disables overlap NMS (center distance still applies)."
+          "description": "IoU gate for multi-match NMS on axis-aligned boxes. hard: drop later overlaps; soft: linear Soft-NMS decay score*=(1-IoU). 0 disables overlap NMS (center distance still applies).",
+          "advanced": true
         },
         {
           "name": "nmsMode",
@@ -24321,7 +24486,8 @@
             }
           ],
           "group": "Multi-target",
-          "description": "Default hard prefers JLVision FindNccModel MaxOverlap for primary multi-match dedupe, with a light AABB fine pass. soft (advanced): raise native MaxOverlap and apply linear Soft-NMS in C#. AABB IoU only; not oriented-box NMS."
+          "description": "Default hard prefers JLVision FindNccModel MaxOverlap for primary multi-match dedupe, with a light AABB fine pass. soft (advanced): raise native MaxOverlap and apply linear Soft-NMS in C#. AABB IoU only; not oriented-box NMS.",
+          "advanced": true
         },
         {
           "name": "nmsSortKey",
@@ -24343,7 +24509,8 @@
             }
           ],
           "group": "Multi-target",
-          "description": "Candidate order before NMS. scoreThenAbsAngle prefers nearer 0 deg on ties; scoreThenScale prefers nearer 100% scale. Primary key is always match score (after soft-ignore weight)."
+          "description": "Candidate order before NMS. scoreThenAbsAngle prefers nearer 0 deg on ties; scoreThenScale prefers nearer 100% scale. Primary key is always match score (after soft-ignore weight).",
+          "advanced": true
         },
         {
           "name": "nmsAngleToleranceDeg",
@@ -24355,7 +24522,8 @@
           "step": 1,
           "unit": "deg",
           "group": "Multi-target",
-          "description": "Angle-aware suppress: when >0, IoU NMS only applies if |delta angle| is within this tolerance (circular). Distinct orientations at the same place can both survive. 0 = classic angle-blind IoU."
+          "description": "Angle-aware suppress: when >0, IoU NMS only applies if |delta angle| is within this tolerance (circular). Distinct orientations at the same place can both survive. 0 = classic angle-blind IoU.",
+          "advanced": true
         },
         {
           "name": "scaleMinPercent",
@@ -24391,7 +24559,8 @@
           "step": 1,
           "unit": "%",
           "group": "Scale",
-          "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected."
+          "description": "Ignored when min and max are both 100. At most 41 samples; widen the step or narrow the range if the search is rejected.",
+          "advanced": true
         },
         {
           "name": "diagnosticsLevel",
@@ -24413,7 +24582,8 @@
             }
           ],
           "group": "Diagnostics",
-          "description": "Controls how many fields are included in the diagnostics JSON payload."
+          "description": "Controls how many fields are included in the diagnostics JSON payload.",
+          "advanced": true
         },
         {
           "name": "searchRoi",
@@ -24760,7 +24930,8 @@
               "measurePairs",
               "measureThresh"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "transition",
@@ -24789,7 +24960,8 @@
               "measurePos",
               "measurePairs"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "select",
@@ -24819,7 +24991,8 @@
               "measurePairs",
               "measureThresh"
             ]
-          }
+          },
+          "advanced": true
         }
       ],
       "description": "JLVision native 1D measure object: builds a rectangle2 or arc measure, then runs MeasurePos, MeasurePairs, MeasureThresh or MeasureProjection. Edges are returned as a JSON array (row/column/amplitude/distance per edge, or pair columns for MeasurePairs). Unlike measure.caliper this node goes through the native measure object, which is what enables arc profiles and gray projection. Native quirks of JLVisionLib 1.0.0 honored here: output tuples have inconsistent lengths (the pair width tuple is empty, so width is dropped instead of faked), and TranslateMeasure / GetMeasureParam / ResetFuzzyMeasure corrupt or fail the measure handle, so translateRow/translateColumn are intentionally ignored.",
@@ -25376,7 +25549,8 @@
           "step": 1,
           "unit": "px",
           "group": "Array",
-          "description": "Distance along the edge (perpendicular to the search line) over which stations are distributed. 0 uses the search-line length."
+          "description": "Distance along the edge (perpendicular to the search line) over which stations are distributed. 0 uses the search-line length.",
+          "advanced": true
         },
         {
           "name": "caliperCount",
@@ -25398,7 +25572,8 @@
           "max": 101,
           "step": 1,
           "group": "Array",
-          "description": "found=true only when at least this many stations return a qualifying pair (and maxWidthStd gate passes)."
+          "description": "found=true only when at least this many stations return a qualifying pair (and maxWidthStd gate passes).",
+          "advanced": true
         },
         {
           "name": "sampleWidth",
@@ -25410,7 +25585,8 @@
           "step": 2,
           "unit": "px",
           "group": "Sampling",
-          "description": "Odd projection width; even values round up. Average across the strip perpendicular to each station search line."
+          "description": "Odd projection width; even values round up. Average across the strip perpendicular to each station search line.",
+          "advanced": true
         },
         {
           "name": "edgeThreshold",
@@ -25470,7 +25646,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Scan direction along the search geometry."
+          "description": "Scan direction along the search geometry.",
+          "advanced": true
         },
         {
           "name": "minWidth",
@@ -25482,7 +25659,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Validation",
-          "description": "Minimum accepted width in pixels; 0 disables."
+          "description": "Minimum accepted width in pixels; 0 disables.",
+          "advanced": true
         },
         {
           "name": "maxWidth",
@@ -25494,7 +25672,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Validation",
-          "description": "Maximum accepted width in pixels; 0 disables."
+          "description": "Maximum accepted width in pixels; 0 disables.",
+          "advanced": true
         },
         {
           "name": "nominalWidth",
@@ -25518,7 +25697,8 @@
           "step": 0.01,
           "unit": "px",
           "group": "Validation",
-          "description": "Reject the array (found=false) when the population std of valid widths exceeds this value. 0 disables the gate."
+          "description": "Reject the array (found=false) when the population std of valid widths exceeds this value. 0 disables the gate.",
+          "advanced": true
         },
         {
           "name": "includeProfiles",
@@ -25526,7 +25706,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Diagnostics",
-          "description": "When true, calipersJson embeds a downsampled grayscale profile per station for edge-curve diagnostics."
+          "description": "When true, calipersJson embeds a downsampled grayscale profile per station for edge-curve diagnostics.",
+          "advanced": true
         },
         {
           "name": "profileSampleCap",
@@ -25761,7 +25942,8 @@
             }
           ],
           "group": "Arc",
-          "description": "Distribute radial calipers by count or by fixed angular step."
+          "description": "Distribute radial calipers by count or by fixed angular step.",
+          "advanced": true
         },
         {
           "name": "caliperCount",
@@ -25809,7 +25991,8 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Searches from max(0, nominal radius minus this value) to nominal radius plus this value; the radial search never crosses the center."
+          "description": "Searches from max(0, nominal radius minus this value) to nominal radius plus this value; the radial search never crosses the center.",
+          "advanced": true
         },
         {
           "name": "minContrast",
@@ -25865,7 +26048,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Which edge along the radial band is retained for the fit."
+          "description": "Which edge along the radial band is retained for the fit.",
+          "advanced": true
         },
         {
           "name": "sampleWidth",
@@ -25877,7 +26061,8 @@
           "step": 2,
           "unit": "px",
           "group": "Sampling",
-          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."
+          "description": "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges.",
+          "advanced": true
         },
         {
           "name": "maxRadiusDeviation",
@@ -25889,7 +26074,8 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."
+          "description": "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius.",
+          "advanced": true
         },
         {
           "name": "minValidCalipers",
@@ -25900,7 +26086,8 @@
           "max": 361,
           "step": 1,
           "group": "Fit",
-          "description": "Require at least this many edge points to remain after outlier rejection; increase it to prevent sparse arcs from producing a measurement."
+          "description": "Require at least this many edge points to remain after outlier rejection; increase it to prevent sparse arcs from producing a measurement.",
+          "advanced": true
         },
         {
           "name": "maxFitOutliers",
@@ -25911,7 +26098,8 @@
           "max": 16,
           "step": 1,
           "group": "Fit",
-          "description": "After an initial fit, discard up to this many points whose radial residual exceeds the threshold."
+          "description": "After an initial fit, discard up to this many points whose radial residual exceeds the threshold.",
+          "advanced": true
         },
         {
           "name": "fitOutlierThreshold",
@@ -25923,7 +26111,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Fit",
-          "description": "Maximum allowed point-to-circle residual before a point can be excluded from the refit."
+          "description": "Maximum allowed point-to-circle residual before a point can be excluded from the refit.",
+          "advanced": true
         },
         {
           "name": "fitRadiusTolerance",
@@ -25935,7 +26124,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Fit",
-          "description": "Reject the fitted circle when its radius differs from the nominal radius by more than this amount."
+          "description": "Reject the fitted circle when its radius differs from the nominal radius by more than this amount.",
+          "advanced": true
         },
         {
           "name": "maxFitError",
@@ -25947,7 +26137,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Fit",
-          "description": "Return found=false when the final radial RMS fit error exceeds this value; zero disables this quality gate."
+          "description": "Return found=false when the final radial RMS fit error exceeds this value; zero disables this quality gate.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -26204,7 +26395,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Enable subpixel refinement of the edge location."
+          "description": "Enable subpixel refinement of the edge location.",
+          "advanced": true
         },
         {
           "name": "diagnosticsLevel",
@@ -26225,7 +26417,8 @@
               "value": "verbose"
             }
           ],
-          "description": "Diagnostic detail level."
+          "description": "Diagnostic detail level.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -26452,7 +26645,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Accept only rising (dark-to-light), falling (light-to-dark), or any edge along each profile."
+          "description": "Accept only rising (dark-to-light), falling (light-to-dark), or any edge along each profile.",
+          "advanced": true
         },
         {
           "name": "direction",
@@ -26492,7 +26686,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Parabolic interpolation around the strongest profile sample for subpixel edge position, or whole-pixel only."
+          "description": "Parabolic interpolation around the strongest profile sample for subpixel edge position, or whole-pixel only.",
+          "advanced": true
         },
         {
           "name": "edgeLength",
@@ -26504,7 +26699,8 @@
           "step": 1,
           "unit": "px",
           "group": "Sampling",
-          "description": "Spread of parallel profiles along the expected edge; zero uses the search-line length."
+          "description": "Spread of parallel profiles along the expected edge; zero uses the search-line length.",
+          "advanced": true
         },
         {
           "name": "caliperCount",
@@ -26526,7 +26722,8 @@
           "max": 101,
           "step": 1,
           "group": "Fit",
-          "description": "Require at least this many edge points to remain after outlier rejection; the default preserves the three-point fit minimum."
+          "description": "Require at least this many edge points to remain after outlier rejection; the default preserves the three-point fit minimum.",
+          "advanced": true
         },
         {
           "name": "maxFitOutliers",
@@ -26537,7 +26734,8 @@
           "max": 16,
           "step": 1,
           "group": "Fit",
-          "description": "Ignore up to this many edge points when their orthogonal residual exceeds the threshold."
+          "description": "Ignore up to this many edge points when their orthogonal residual exceeds the threshold.",
+          "advanced": true
         },
         {
           "name": "fitOutlierThreshold",
@@ -26549,7 +26747,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Fit",
-          "description": "A point can be excluded when its distance from the fitted line exceeds this value."
+          "description": "A point can be excluded when its distance from the fitted line exceeds this value.",
+          "advanced": true
         },
         {
           "name": "maxFitError",
@@ -26561,7 +26760,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Fit",
-          "description": "Return found=false when the final orthogonal RMS fit error exceeds this value; zero disables this quality gate."
+          "description": "Return found=false when the final orthogonal RMS fit error exceeds this value; zero disables this quality gate.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -26771,7 +26971,8 @@
           "step": 1,
           "unit": "gray",
           "group": "Sampling",
-          "description": "Minimum amplitude of both edges after 8-bit grayscale conversion. UInt16 uses full-range scaling."
+          "description": "Minimum amplitude of both edges after 8-bit grayscale conversion. UInt16 uses full-range scaling.",
+          "advanced": true
         },
         {
           "name": "polarity",
@@ -26831,7 +27032,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Validation",
-          "description": "Minimum accepted width in pixels; 0 disables."
+          "description": "Minimum accepted width in pixels; 0 disables.",
+          "advanced": true
         },
         {
           "name": "maxWidth",
@@ -26843,7 +27045,8 @@
           "step": 0.1,
           "unit": "px",
           "group": "Validation",
-          "description": "Maximum accepted width in pixels; 0 disables."
+          "description": "Maximum accepted width in pixels; 0 disables.",
+          "advanced": true
         },
         {
           "name": "nominalWidth",
@@ -29998,7 +30201,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Measure",
-          "description": "Native minimum fuzzy score for a measure region to contribute."
+          "description": "Native minimum fuzzy score for a measure region to contribute.",
+          "advanced": true
         },
         {
           "name": "requireAllFound",
@@ -30006,7 +30210,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "Result",
-          "description": "true = found requires every object to produce a result; false = found when at least one object succeeds. Per-object results are always returned in measurements."
+          "description": "true = found requires every object to produce a result; false = found when at least one object succeeds. Per-object results are always returned in measurements.",
+          "advanced": true
         }
       ],
       "description": "One JLVision metrology model with mixed line / circle / ellipse / rectangle2 measurement objects, applied once per image. Objects can be rigidly aligned by a pose input (dynamic ROI) or fixed offsets, which is the intended way to measure at a located position. Outputs one JSON row per object in image coordinates: circle -> row/column/radius; ellipse -> row/column/phiDeg/radius1/radius2; rectangle2 -> row/column/phiDeg/length1/length2; line -> ny/nx/distancePx (Hesse normal form) plus normalAngleDeg. Real limits of JLVisionLib 1.0.0: get_metrology_object_result returns a fixed value tuple per object type and no native score, so quality is reported as residualPx computed from the native measure points for circle and line only; ellipse/rectangle2 carry no residual. Alignment is applied to the object geometry before measuring (AlignMetrologyModel is not used because its pose semantics are undocumented in this wrapper). No fuzzy-score map, no per-region rejection list, and no multi-instance (instance='all' only) in this version.",
@@ -30449,7 +30654,8 @@
             "values": [
               "all"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "maxCount",
@@ -30466,7 +30672,8 @@
             "values": [
               "all"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "sortBy",
@@ -30498,7 +30705,8 @@
             "values": [
               "all"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "descending",
@@ -30512,7 +30720,8 @@
             "values": [
               "all"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "roi",
@@ -33835,7 +34044,8 @@
             }
           ],
           "group": "Format",
-          "description": "Newline style for text exports."
+          "description": "Newline style for text exports.",
+          "advanced": true
         },
         {
           "name": "diagnosticsLevel",
@@ -33857,7 +34067,8 @@
             }
           ],
           "group": "Diagnostics",
-          "description": "Controls how many fields are included in the diagnostics JSON payload."
+          "description": "Controls how many fields are included in the diagnostics JSON payload.",
+          "advanced": true
         },
         {
           "name": "retryPolicy",
@@ -33879,7 +34090,8 @@
             }
           ],
           "group": "Diagnostics",
-          "description": "Optional soft retry when the first attempt hits a transient IO/timeout warning; does not mask hard validation failures."
+          "description": "Optional soft retry when the first attempt hits a transient IO/timeout warning; does not mask hard validation failures.",
+          "advanced": true
         }
       ],
       "description": "Write one typed result value to JSON or a quoted CSV row with an atomic temp-file commit, payload size gate, and diagnostics.",
@@ -34411,7 +34623,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "归档命名",
-          "description": "Appends a yyyy-MM-dd folder using the host's local time; combined with result classification the folder becomes Date/OK or Date/NG."
+          "description": "Appends a yyyy-MM-dd folder using the host's local time; combined with result classification the folder becomes Date/OK or Date/NG.",
+          "advanced": true
         },
         {
           "name": "resultMode",
@@ -34480,7 +34693,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "归档命名",
-          "description": "Create missing parent directories before saving."
+          "description": "Create missing parent directories before saving.",
+          "advanced": true
         },
         {
           "name": "format",
@@ -34542,7 +34756,8 @@
               "auto",
               "png"
             ]
-          }
+          },
+          "advanced": true
         },
         {
           "name": "colorMode",
@@ -34564,7 +34779,8 @@
             }
           ],
           "group": "编码与像素",
-          "description": "Optional color conversion before encoding."
+          "description": "Optional color conversion before encoding.",
+          "advanced": true
         },
         {
           "name": "pixelPolicy",
@@ -34586,7 +34802,8 @@
             }
           ],
           "group": "编码与像素",
-          "description": "Saturating depth conversion before encoding, without intensity normalization."
+          "description": "Saturating depth conversion before encoding, without intensity normalization.",
+          "advanced": true
         },
         {
           "name": "maxWidth",
@@ -34597,7 +34814,8 @@
           "max": 32768,
           "step": 1,
           "group": "尺寸限制",
-          "description": "Optional max width; larger images fail rather than silently resize; 0 disables."
+          "description": "Optional max width; larger images fail rather than silently resize; 0 disables.",
+          "advanced": true
         },
         {
           "name": "maxHeight",
@@ -34608,7 +34826,8 @@
           "max": 32768,
           "step": 1,
           "group": "尺寸限制",
-          "description": "Optional max height; 0 disables."
+          "description": "Optional max height; 0 disables.",
+          "advanced": true
         },
         {
           "name": "failOnEmpty",
@@ -34616,7 +34835,8 @@
           "type": "boolean",
           "defaultValue": true,
           "group": "失败与诊断",
-          "description": "Fail when the input image is empty."
+          "description": "Fail when the input image is empty.",
+          "advanced": true
         },
         {
           "name": "diagnosticsLevel",
@@ -34638,7 +34858,8 @@
             }
           ],
           "group": "失败与诊断",
-          "description": "Controls how many fields are included in the diagnostics JSON payload."
+          "description": "Controls how many fields are included in the diagnostics JSON payload.",
+          "advanced": true
         },
         {
           "name": "retryPolicy",
@@ -34660,7 +34881,8 @@
             }
           ],
           "group": "失败与诊断",
-          "description": "Retries only temporary-file writes before atomic publish and publish-time IO errors; encoding, directory creation and parameter errors fail immediately."
+          "description": "Retries only temporary-file writes before atomic publish and publish-time IO errors; encoding, directory creation and parameter errors fail immediately.",
+          "advanced": true
         }
       ],
       "description": "Supports continuous image archiving: timestamp/template/fixed naming, date and OK/NG folders, and error/overwrite/unique-name/skip conflict handling. path/partId can be wired, sequence comes from upstream, and runId is this workflow run's identity. Files are published atomically and the actual path is returned; when saved=false, reason distinguishes the skip cause. Legacy workflows keep fixed-path and overwrite semantics.",
@@ -34849,7 +35071,8 @@
           "step": 100,
           "unit": "ms",
           "group": "Delivery",
-          "description": "Wait between attempts so a briefly unavailable endpoint has time to come back."
+          "description": "Wait between attempts so a briefly unavailable endpoint has time to come back.",
+          "advanced": true
         },
         {
           "name": "maxPayloadBytes",
@@ -34860,7 +35083,8 @@
           "max": 1048576,
           "step": 1024,
           "group": "Delivery",
-          "description": "Reject oversized notifications before sending. WeCom text is additionally capped at 2048 bytes and truncated with truncated=true."
+          "description": "Reject oversized notifications before sending. WeCom text is additionally capped at 2048 bytes and truncated with truncated=true.",
+          "advanced": true
         },
         {
           "name": "smtpHost",
@@ -36445,7 +36669,8 @@
           "max": 64000000,
           "step": 1000000,
           "group": "Limits",
-          "description": "Budget on the padded FFT size (width and height are rounded up to a fast DFT size). FFT memory grows with the padded area and runs per channel; exceeding the budget fails with a size message instead of exhausting memory."
+          "description": "Budget on the padded FFT size (width and height are rounded up to a fast DFT size). FFT memory grows with the padded area and runs per channel; exceeding the budget fails with a size message instead of exhausting memory.",
+          "advanced": true
         }
       ],
       "description": "Frequency-domain filtering by feature period. The image is padded to a fast DFT size, transformed, multiplied by a gain mask, and transformed back; DC sits at (0,0) and wrap-around is handled by distance to the nearest corner, so no shift is needed. Wavelengths are given in pixels (period), not normalized frequency. Optional direction window turns a rotationally symmetric band into a directional notch for brushed/woven/turned textures. maskPassRatio exposes how much of the spectrum survived, which makes an over-wide or over-narrow band obvious in the trace. Failures: unsupported depth, wavelengthMin > wavelengthMax, empty mask (band rejects every frequency), or a padded size above maxPixels. algorithmBackend=opencv.",
@@ -41015,6 +41240,7 @@
           "unit": "px",
           "group": "Output",
           "description": "Rectified output width in pixels (2..16384). Leave empty to derive it from the average top/bottom edge length of the source quadrilateral.",
+          "advanced": true,
           "optional": true
         },
         {
@@ -41027,6 +41253,7 @@
           "unit": "px",
           "group": "Output",
           "description": "Rectified output height in pixels (2..16384). Leave empty to derive it from the average left/right edge length of the source quadrilateral.",
+          "advanced": true,
           "optional": true
         },
         {
@@ -41049,7 +41276,8 @@
             }
           ],
           "group": "Output",
-          "description": "Interpolation used when warping."
+          "description": "Interpolation used when warping.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -41276,7 +41504,8 @@
             }
           ],
           "group": "Sampling",
-          "description": "Resampling used by the polar remap. Linear is the usual choice; nearest is only sensible when the source is a hard-edged mask."
+          "description": "Resampling used by the polar remap. Linear is the usual choice; nearest is only sensible when the source is a hard-edged mask.",
+          "advanced": true
         },
         {
           "name": "direction",
@@ -41294,7 +41523,8 @@
             }
           ],
           "group": "Angular",
-          "description": "Which way the angle grows across the strip. Image coordinates are y-down, so clockwise here means increasing image angle."
+          "description": "Which way the angle grows across the strip. Image coordinates are y-down, so clockwise here means increasing image angle.",
+          "advanced": true
         }
       ],
       "description": "Maps an annular band onto a straight strip: X = angle, Y = radius. Straightening is what lets calipers, FFT filters and thread/gear nodes work on round parts (gears, bearings, O-rings, bores) whose features are periodic in angle. Neither a homography (image.perspective) nor an affine warp can express this. Wire: image + optional circle -> strip image. Auto radii keep the band inside the image; the pixel budget is rejected instead of allocating a huge Mat.",
@@ -42925,7 +43155,8 @@
           "max": 200,
           "step": 1,
           "group": "Detection",
-          "description": "Markers closer than this many pixels to the image border are rejected. Keep a quiet zone around the marker."
+          "description": "Markers closer than this many pixels to the image border are rejected. Keep a quiet zone around the marker.",
+          "advanced": true
         },
         {
           "name": "errorCorrectionRate",
@@ -42936,7 +43167,8 @@
           "max": 1,
           "step": 0.05,
           "group": "Detection",
-          "description": "Fraction of erroneous bits the decoder may correct. Higher values tolerate damaged markers but increase false IDs."
+          "description": "Fraction of erroneous bits the decoder may correct. Higher values tolerate damaged markers but increase false IDs.",
+          "advanced": true
         },
         {
           "name": "markerSize",
@@ -42947,7 +43179,8 @@
           "max": 1000000,
           "step": 0.1,
           "group": "Pose",
-          "description": "Physical marker side length used by solvePnP. Only read when calibrationJson is connected or filled."
+          "description": "Physical marker side length used by solvePnP. Only read when calibrationJson is connected or filled.",
+          "advanced": true
         },
         {
           "name": "markerSizeUnit",
@@ -42955,7 +43188,8 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Pose",
-          "description": "Unit of Marker Size and of the emitted 3D transform. 1..16 characters, for example mm or m."
+          "description": "Unit of Marker Size and of the emitted 3D transform. 1..16 characters, for example mm or m.",
+          "advanced": true
         },
         {
           "name": "calibrationJson",
@@ -42964,6 +43198,7 @@
           "defaultValue": "{}",
           "group": "Pose",
           "description": "Optional CameraCalibrationModel JSON from calibration.cameraIntrinsics. Connected calibrationJson takes precedence. Without calibration the node still detects markers but poseAvailable=false; fisheye and telecentric models are rejected for pose.",
+          "advanced": true,
           "overriddenByPorts": [
             "calibrationJson"
           ]
@@ -43186,7 +43421,8 @@
           "max": 512,
           "step": 1,
           "group": "Decoding",
-          "description": "Two reads with the same format and text merge only when their centres are within this distance. Identical payloads in different places stay separate so duplicate labels are counted twice; the same symbol re-read by another preprocessing pass or polarity merges."
+          "description": "Two reads with the same format and text merge only when their centres are within this distance. Identical payloads in different places stay separate so duplicate labels are counted twice; the same symbol re-read by another preprocessing pass or polarity merges.",
+          "advanced": true
         },
         {
           "name": "tileSearch",
@@ -43204,7 +43440,8 @@
             }
           ],
           "group": "Decoding",
-          "description": "Retry empty or partial DataMatrix multi-code reads on bounded two-level 2D tiles and exact quadrants. Every tile uses the enabled preprocessing and inverted-polarity passes. Source coordinates and duplicate suppression are preserved; Off disables all tiled recovery."
+          "description": "Retry empty or partial DataMatrix multi-code reads on bounded two-level 2D tiles and exact quadrants. Every tile uses the enabled preprocessing and inverted-polarity passes. Source coordinates and duplicate suppression are preserved; Off disables all tiled recovery.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -43843,7 +44080,8 @@
           "max": 4,
           "step": 0.25,
           "group": "Preprocessing",
-          "description": "Resize before OCR; small print often reads better at 2x. Word boxes are mapped back to source pixels."
+          "description": "Resize before OCR; small print often reads better at 2x. Word boxes are mapped back to source pixels.",
+          "advanced": true
         },
         {
           "name": "binarize",
@@ -43865,7 +44103,8 @@
             }
           ],
           "group": "Preprocessing",
-          "description": "Optional binarization before OCR. None keeps grayscale; Otsu is global; adaptive Gaussian handles uneven lighting."
+          "description": "Optional binarization before OCR. None keeps grayscale; Otsu is global; adaptive Gaussian handles uneven lighting.",
+          "advanced": true
         },
         {
           "name": "invert",
@@ -43873,7 +44112,8 @@
           "type": "boolean",
           "defaultValue": false,
           "group": "Preprocessing",
-          "description": "Enable for light text on a dark background."
+          "description": "Enable for light text on a dark background.",
+          "advanced": true
         },
         {
           "name": "minConfidence",
@@ -43884,7 +44124,8 @@
           "max": 1,
           "step": 0.01,
           "group": "Output",
-          "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words."
+          "description": "Words below this confidence are dropped; when > 0, text is rebuilt from the kept words.",
+          "advanced": true
         },
         {
           "name": "roi",
@@ -49253,7 +49494,8 @@
           "max": 360,
           "step": 0.1,
           "group": "Limits",
-          "description": "Optional magnitude gate on compensation angle; 0 disables."
+          "description": "Optional magnitude gate on compensation angle; 0 disables.",
+          "advanced": true
         }
       ],
       "description": "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",

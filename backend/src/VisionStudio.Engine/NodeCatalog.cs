@@ -1553,6 +1553,7 @@ public static class BuiltInNodeCatalog
                 : item)
         .Select(OperatorParameterForms.Apply)
         .Select(DeclareLocalRoiParameters)
+        .Select(ParameterTierCatalog.Apply)
         .Select(NodeMaturityCatalog.Apply)
         .ToArray();
 

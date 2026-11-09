@@ -203,6 +203,7 @@ describe('node configuration draft', () => {
     expect(dialog.queryByRole('spinbutton', { name: '原点 X' })).toBeNull();
     expect(dialog.queryByRole('spinbutton', { name: '阈值' })).toBeNull();
     fireEvent.change(dialog.getByRole('spinbutton', { name: '缩放容差' }), { target: { value: '10' } });
+    fireEvent.click(dialog.getByRole('button', { name: /显示全部参数/ }));
     expect(dialog.getByRole('spinbutton', { name: '训练缩放步长' })).toBeTruthy();
   });
 
@@ -219,6 +220,7 @@ describe('node configuration draft', () => {
     expect(dialog.getByRole('spinbutton', { name: '搜索结束角' })).toBeTruthy();
     expect(dialog.getByRole('spinbutton', { name: '搜索最小尺度' })).toBeTruthy();
     expect(dialog.getByRole('spinbutton', { name: '搜索最大尺度' })).toBeTruthy();
+    fireEvent.click(dialog.getByRole('button', { name: /显示全部参数/ }));
     fireEvent.change(dialog.getByRole('spinbutton', { name: '最大局部形变' }), { target: { value: '2' } });
     fireEvent.change(dialog.getByRole('spinbutton', { name: '搜索起始角' }), { target: { value: '-15' } });
     fireEvent.change(dialog.getByRole('spinbutton', { name: '搜索最小尺度' }), { target: { value: '90' } });
