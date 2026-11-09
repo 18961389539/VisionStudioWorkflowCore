@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b21f48315f6c3b369d1b4f50e390bc86c592bba59a20be62b2f7f65e9f103d1c",
+  "hash": "93e8cc2b1bd8429dfff4663926db0d22cd3c3e5aafab1f5e3f24511c4d7c4870",
   "items": [
     {
       "type": "image.acquire",
@@ -23037,6 +23037,36 @@
           "defaultValue": "",
           "group": "Model",
           "description": "Used only when the template port is not connected.",
+          "advanced": true
+        },
+        {
+          "name": "modelAssetId",
+          "label": "Model Asset",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Model",
+          "description": "Optional shape-model asset id from /api/model-assets. When set, the node loads that asset version instead of the inline trained model; a missing asset or hash mismatch fails the run instead of silently falling back.",
+          "advanced": true
+        },
+        {
+          "name": "modelAssetVersion",
+          "label": "Model Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Model",
+          "description": "0 loads the asset's latest version; a positive number pins an immutable version (recommended for production).",
+          "advanced": true
+        },
+        {
+          "name": "modelAssetSha256",
+          "label": "Model Asset SHA-256",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Model",
+          "description": "Optional pin: when set, the loaded asset bytes must match this SHA-256 or the run fails. Use the value reported by the asset API.",
           "advanced": true
         },
         {

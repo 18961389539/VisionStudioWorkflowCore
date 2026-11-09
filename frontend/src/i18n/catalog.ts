@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Catalog and runtime-status localization.
  *
  * The backend catalog is authored in English (node display names, categories, parameter
@@ -3176,6 +3176,9 @@ const parameterDescriptions: Record<string, string> = {
   'geometry.intersection.requireWithinSegments': '为真时拒绝落在线段外的交点；为假时按无限直线求交。',
   'geometry.distance.metric': '两点之间的距离度量。',
   'match.shape.modelMode': '新节点要求显式训练模型；旧流程缺少该设置时保持原模板图行为。',
+  'match.shape.modelAssetId': '可选：模型资产 id（/api/model-assets）。设置后优先使用该资产版本而非节点内联模型；资产缺失或哈希不符会直接失败，不会静默回退。',
+  'match.shape.modelAssetVersion': '0 表示取资产最新版本；正数固定到不可变版本（生产建议固定版本号）。',
+  'match.shape.modelAssetSha256': '可选校验：与加载到的资产字节哈希不一致就失败。填资产接口返回的哈希值。',
   'match.shape.minScore': '候选位姿接受阈值；Template Match 同键默认 0.5，切换节点类型会改变有效阈值，除非显式设置。',
   'match.shape.maxTargets': '每次运行接受的匹配数；切换节点类型时默认值不同，需显式设置。',
   'match.shape.minCenterDistance': '距离更优匹配过近的候选会被丢弃；模板匹配默认 0。',
@@ -3572,7 +3575,8 @@ const nodeParameterLabels: Record<string, Record<string, string>> = {
   'jlvision.regionAnalysis': { Operation: '操作' },
   'image.fuse': { 'Input Source': '输入来源' },
   'image.stitch': { 'Input Source': '输入来源', 'Camera Order': '相机顺序' },
-  'flow.switch': { 'Trim Whitespace': '去除首尾空白' }
+  'flow.switch': { 'Trim Whitespace': '去除首尾空白' },
+  'match.shape': { 'Model Asset': '模型资产', 'Model Asset Version': '模型资产版本', 'Model Asset SHA-256': '模型资产 SHA-256' }
 };
 
 const nodeOptionLabels: Record<string, Record<string, string>> = {

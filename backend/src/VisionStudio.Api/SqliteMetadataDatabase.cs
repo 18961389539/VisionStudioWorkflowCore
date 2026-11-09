@@ -28,6 +28,21 @@ public sealed class SqliteMetadataDatabase
     public string DatabasePath => _databasePath;
     public int CurrentSchemaVersion => SqliteSchemaMigrationRunner.CurrentVersion;
 
+    /// <summary>
+    /// 同步打开连接：仅供 <see cref="IModelAssetSource"/> 这类必须同步返回的读路径使用。
+    /// 本地 SQLite 打开是微秒级操作，这里用同步 ADO.NET 而不是 sync-over-async。
+    /// </summary>
+    public SqliteConnection OpenConnection()
+    {
+        EnsureInitializedAsync().GetAwaiter().GetResult();
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;";
+        pragma.ExecuteNonQuery();
+        return connection;
+    }
+
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken ct = default, bool strongDurability = false)
     {
         await EnsureInitializedAsync(ct);

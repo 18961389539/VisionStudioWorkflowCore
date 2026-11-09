@@ -88,6 +88,38 @@ internal static class JLVisionMatching
             var fromPort = context.TryGetValue("template", out _);
             var legacyMode = shape && node.GetString("modelMode", string.Empty).Equals("legacy", StringComparison.OrdinalIgnoreCase);
             var savedModel = shape && !legacyMode ? node.GetString("trainedModelData", string.Empty).Trim() : string.Empty;
+            // P0：modelAssetId 优先于内联模型。资产缺失/哈希不符必须失败——静默退回内联等于偷偷换模型。
+            var modelSource = savedModel.Length > 0 ? "workflow-asset" : string.Empty;
+            if (shape && !legacyMode)
+            {
+                var assetId = node.GetString("modelAssetId", string.Empty).Trim();
+                if (assetId.Length > 0)
+                {
+                    var assetVersion = node.GetInt("modelAssetVersion", 0);
+                    if (assetVersion < 0)
+                        throw new InvalidOperationException($"Shape node '{node.Id}' modelAssetVersion must be >= 0 (0 means the asset's latest version).");
+                    var assetSource = context.ModelAssets
+                        ?? throw new InvalidOperationException(
+                            $"Shape node '{node.Id}' references model asset '{assetId}', but this host did not provide a model asset source. " +
+                            "Run the node through a host that registers IModelAssetSource, or clear modelAssetId to use the inline trained model.");
+                    var assetBytes = assetSource.TryRead(assetId, assetVersion)
+                        ?? throw new InvalidOperationException(
+                            $"Shape node '{node.Id}' references model asset '{assetId}' v{(assetVersion == 0 ? "latest" : assetVersion.ToString())}, " +
+                            "which does not exist or was deleted. Repoint the node or restore the asset.");
+                    if (assetBytes.Length == 0)
+                        throw new InvalidOperationException($"Shape node '{node.Id}' model asset '{assetId}' contains no model bytes.");
+                    if (assetBytes.Length > 16 * 1024 * 1024)
+                        throw new InvalidOperationException($"Shape node '{node.Id}' model asset '{assetId}' is {assetBytes.Length} bytes, above the 16 MB limit.");
+                    var assetSha = Convert.ToHexString(SHA256.HashData(assetBytes));
+                    var expectedSha = node.GetString("modelAssetSha256", string.Empty).Trim();
+                    if (expectedSha.Length > 0 && !string.Equals(expectedSha, assetSha, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(
+                            $"Shape node '{node.Id}' model asset '{assetId}' hash mismatch: pinned {expectedSha}, loaded {assetSha}. " +
+                            "The asset bytes changed; repin the node or restore the expected version.");
+                    savedModel = Convert.ToBase64String(assetBytes);
+                    modelSource = "model-asset";
+                }
+            }
             if (shape && node.GetBool("searchPreviewOnly", false))
                 return new NodeExecutorResult(
                     new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(source.CloneOwned()), ["found"] = VisionValue.Boolean(false), ["score"] = VisionValue.Double(0), ["scale"] = VisionValue.Double(1), ["count"] = VisionValue.Integer(0) },
@@ -518,7 +550,8 @@ internal static class JLVisionMatching
                     });
                     model = (JlShapeModel)shapeLease.Model;
                     summary["modelCacheHit"] = shapeLease.Hit;
-                    summary["modelSource"] = "workflow-asset";
+                    summary["modelSource"] = modelSource.Length > 0 ? modelSource : "workflow-asset";
+                    summary["modelSha256"] = Convert.ToHexString(SHA256.HashData(modelBytes));
                 }
                 else
                 {

@@ -50,7 +50,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             NodeExecutorResult result;
             using (captureCaliperDiagnostic ? CaliperCircleDiagnosticCapture.Begin(diagnostic => caliperDiagnostic = diagnostic) : null)
             using (captureCaliperEdgeDiagnostic ? CaliperEdgeDiagnosticCapture.Begin(diagnostic => caliperEdgeDiagnostic = diagnostic) : null)
-                result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken, data.RunId);
+                result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken, data.RunId, data.ModelAssets);
             if (node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase))
                 result = await ExecuteTryBodyAsync(data, node, result, cancellationToken);
             sw.Stop();

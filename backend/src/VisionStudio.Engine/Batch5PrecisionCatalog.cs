@@ -437,6 +437,9 @@ public static class Batch5PrecisionCatalog
             ],
             [
                 new("templatePath", "Template Path", "text", "", Group: "Model", Description: "Used only when the template port is not connected."),
+                new("modelAssetId", "Model Asset", "text", "", Group: "Model", Description: "Optional shape-model asset id from /api/model-assets. When set, the node loads that asset version instead of the inline trained model; a missing asset or hash mismatch fails the run instead of silently falling back."),
+                new("modelAssetVersion", "Model Asset Version", "number", 0, 0, 1000000, 1, Group: "Model", Description: "0 loads the asset's latest version; a positive number pins an immutable version (recommended for production)."),
+                new("modelAssetSha256", "Model Asset SHA-256", "text", "", Group: "Model", Description: "Optional pin: when set, the loaded asset bytes must match this SHA-256 or the run fails. Use the value reported by the asset API."),
                 new("modelMode", "Model Lifecycle", "select", "trained", Options:
                 [
                     new("Trained model (recommended)", "trained"),

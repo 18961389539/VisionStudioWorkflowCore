@@ -188,6 +188,38 @@ WHERE v.asset_id = $id AND v.version = $version;
         return await reader.ReadAsync(ct) ? (byte[])reader["bytes"] : null;
     }
 
+    /// <summary>
+    /// 同步读取模型字节（供 <see cref="VisionStudio.Abstractions.IModelAssetSource"/> 使用）。
+    /// version=0 表示取 latest_version；资产已删除/版本不存在返回 null，由节点给出明确错误。
+    /// </summary>
+    public byte[]? ReadBytesSync(string assetId, int version)
+    {
+        using var connection = db.OpenConnection();
+        var effective = version;
+        if (effective <= 0)
+        {
+            using var latest = connection.CreateCommand();
+            latest.CommandText = "SELECT latest_version FROM shape_model_assets WHERE id=$id AND deleted_at IS NULL;";
+            latest.Parameters.AddWithValue("$id", assetId);
+            var value = latest.ExecuteScalar();
+            if (value is null or System.DBNull) return null;
+            effective = Convert.ToInt32(value);
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT b.bytes
+FROM shape_model_versions v
+JOIN shape_model_assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
+JOIN shape_model_blobs b ON b.sha256 = v.sha256
+WHERE v.asset_id = $id AND v.version = $version;
+""";
+        command.Parameters.AddWithValue("$id", assetId);
+        command.Parameters.AddWithValue("$version", effective);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? (byte[])reader["bytes"] : null;
+    }
+
     /// <summary>软删除：保留历史版本供已发布配方回指；返回 false 表示资产不存在或已删除。</summary>
     public async Task<bool> DeleteAsync(string id, CancellationToken ct)
     {

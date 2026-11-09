@@ -351,6 +351,33 @@
 - 无目录变更：本轮只改能力位文档、UI 文案与审计脚本，`catalog.generated.json` 保持 `fcc87040…`。
 
 
+## 第六十五轮：模型资产 P0 · M2（引擎解析）（2026-11-09）
+
+M1 只让资产能存能取，节点不认识 `modelAssetId`。M2 把这条链路打通，关键约束是**失败语义**：
+资产缺失、哈希不符、宿主没提供资产源，都必须明确失败——静默退回内联模型等于偷偷换模型。
+
+| 层 | 变更 |
+| --- | --- |
+| 契约（Abstractions） | 新增 `IModelAssetSource.TryRead(assetId, version)`；`NodeExecutionContext` 增加 `ModelAssets`（可选，null 表示宿主未提供） |
+| 运行时（Engine） | `VisionRunOptions.ModelAssets` → `VisionWorkflowData.ModelAssets` → 派发器 → 执行上下文逐层传递；`WorkflowCoreVisionRunner` 与 `WorkflowDebugSessionService` 支持宿主注入默认实现 |
+| 宿主（Api） | `ShapeModelAssetSource` 适配器 + `IModelAssetSource` 注册；`ShapeModelAssetStore.ReadBytesSync`（同步 ADO.NET，`version=0` 解析 latest），避免把 async 传染到匹配算法 |
+| 节点 | `match.shape` 新增 `modelAssetId` / `modelAssetVersion` / `modelAssetSha256`；资产优先于内联；运行摘要增加 `modelSource=model-asset` 与 `modelSha256` |
+
+失败语义（都有测试锁定）：
+
+- 有 `modelAssetId` 但 `context.ModelAssets == null` → "host did not provide a model asset source"，并提示清除该参数走内联；
+- 资产/版本不存在或已删除 → 报出 id 与请求的版本（`v3` / `latest`）；
+- 16 MB 上限与空字节单独报错；
+- `modelAssetSha256` 非空时逐字节校验，不符报出 pinned 与实际哈希。
+
+### 验证
+
+- 新增 `ShapeModelAssetResolutionTests` 5 项：无宿主源、资产缺失、`version=0` 原样传递（由资产源解析 latest）、哈希不符、哈希吻合后继续走到模型反序列化。
+- Engine **2145 项通过**；Api 467 项通过；前端 `tsc -b` 0 error、本地化 2 项通过。
+- 目录快照 `b21f4831…` → `93e8cc2b…`，新增 3 个参数与中文标签/说明。
+- 仍未做（M3/M4）：训练工作区的「保存为资产」按钮（调 `extract`）、端到端集成测试与 `modelAssets.enabled` 开关。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

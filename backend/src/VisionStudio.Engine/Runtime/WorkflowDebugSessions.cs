@@ -145,7 +145,8 @@ public sealed class WorkflowDebugSession : IDisposable
 public sealed class WorkflowDebugSessionService(
     WorkflowPlanCache plans,
     ISyncWorkflowRunner syncRunner,
-    VisionNodeRuntime nodeRuntime)
+    VisionNodeRuntime nodeRuntime,
+    IModelAssetSource? modelAssets = null)
 {
     public async Task<(WorkflowDebugSession Session, WorkflowRunResult Result)> StartAsync(
         WorkflowDefinition workflow,
@@ -174,6 +175,7 @@ public sealed class WorkflowDebugSessionService(
         data.Configure(options);
         // A02：捕获会话创建入口租约环境的所有权令牌——片段执行的真实派发沿用会话租约身份。
         data.Ownership = DeviceCommandOwnership.Current;
+        data.ModelAssets = options.ModelAssets ?? modelAssets;
         var lease = await plans.AcquireAsync(workflow, ct);
         try
         {

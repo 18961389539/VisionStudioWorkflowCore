@@ -8,7 +8,8 @@ namespace VisionStudio.Engine.Runtime;
 public sealed class WorkflowCoreVisionRunner(
     WorkflowPlanCache plans,
     ISyncWorkflowRunner syncRunner,
-    IVisionRunExceptionObserver? exceptionObserver = null) : IVisionWorkflowRunner
+    IVisionRunExceptionObserver? exceptionObserver = null,
+    IModelAssetSource? modelAssets = null) : IVisionWorkflowRunner
 {
 
     public async Task<WorkflowRunResult> RunAsync(
@@ -24,6 +25,8 @@ public sealed class WorkflowCoreVisionRunner(
         data.Configure(options);
         // A02：捕获入口租约环境的所有权令牌——节点真实派发前在节点运行时重入。
         data.Ownership = DeviceCommandOwnership.Current;
+        // 模型资产源：显式选项优先（测试/离线回放可注入），否则用宿主注册的实现。
+        data.ModelAssets = options?.ModelAssets ?? modelAssets;
 
         try
         {

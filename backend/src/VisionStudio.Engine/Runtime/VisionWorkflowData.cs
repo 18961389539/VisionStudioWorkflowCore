@@ -87,6 +87,12 @@ public sealed class VisionWorkflowData : IDisposable
     /// </summary>
     public IDeviceCommandOwnershipToken? Ownership { get; set; }
 
+    /// <summary>
+    /// 模型资产读取端口（P0）：由运行入口从 <see cref="VisionRunOptions.ModelAssets"/> 或宿主注册的实现注入，
+    /// 沿 数据 → 派发器 → 执行上下文 传下去，节点据此解析 modelAssetId，不依赖 Api 程序集。
+    /// </summary>
+    public IModelAssetSource? ModelAssets { get; set; }
+
     public NodeDefinition RequireNode(string nodeId) => _nodesById.TryGetValue(nodeId, out var node)
         ? node
         : throw new InvalidOperationException($"Node '{nodeId}' was not found in the visual workflow definition.");

@@ -28,7 +28,8 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         IReadOnlyDictionary<string, VisionValue> inputs,
         string? workflowScope,
         CancellationToken cancellationToken,
-        string? runId)
+        string? runId,
+        IModelAssetSource? modelAssets = null)
     {
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
@@ -38,7 +39,7 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         NodeExecutorResult result;
         try
         {
-            result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, timeoutMs, cancellationToken);
+            result = await ExecuteWithTimeoutAsync(registration, node, inputs, workflowScope, runId, modelAssets, timeoutMs, cancellationToken);
         }
         catch (NodeTimeoutException)
         {
@@ -84,10 +85,11 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         IReadOnlyDictionary<string, VisionValue> inputs,
         string? workflowScope,
         string? runId,
+        IModelAssetSource? modelAssets,
         int timeoutMs,
         CancellationToken cancellationToken)
     {
-        var context = new NodeExecutionContext(inputs, workflowScope, runId);
+        var context = new NodeExecutionContext(inputs, workflowScope, runId, modelAssets);
         if (timeoutMs == 0)
             return await registration.ExecuteAsync(context, node, cancellationToken);
 

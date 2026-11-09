@@ -40,7 +40,8 @@ public sealed record VisionRunOptions(
     int TimeoutMs = 10000,
     [property: System.Text.Json.Serialization.JsonIgnore] RunArtifactOptions? Artifacts = null,
     bool AllowSideEffects = false,
-    bool CaptureNodeImages = false);
+    bool CaptureNodeImages = false,
+    [property: System.Text.Json.Serialization.JsonIgnore] IModelAssetSource? ModelAssets = null);
 
 public sealed record ControlFlowDecision(
     string NodeId,

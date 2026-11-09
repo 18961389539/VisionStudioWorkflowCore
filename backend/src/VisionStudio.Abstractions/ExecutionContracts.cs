@@ -31,13 +31,30 @@ public sealed class NodeExecutionContext
     }
 
     public NodeExecutionContext(IReadOnlyDictionary<string, VisionValue> inputs, string? workflowScope, string? runId)
+        : this(inputs, workflowScope, runId, modelAssets: null)
+    {
+    }
+
+    /// <param name="modelAssets">
+    /// 模型资产读取端口（P0）。为 null 时，引用 modelAssetId 的节点必须失败并说明宿主未提供资产源，
+    /// 而不是回退到内联模型——静默换模型比报错危险得多。
+    /// </param>
+    public NodeExecutionContext(
+        IReadOnlyDictionary<string, VisionValue> inputs,
+        string? workflowScope,
+        string? runId,
+        IModelAssetSource? modelAssets)
     {
         _inputs = inputs;
         WorkflowScope = workflowScope;
         RunId = runId;
+        ModelAssets = modelAssets;
     }
 
     public IReadOnlyDictionary<string, VisionValue> Inputs => _inputs;
+
+    /// <summary>模型资产读取端口；由运行时从当前运行的宿主注入，节点不直接依赖 Api。</summary>
+    public IModelAssetSource? ModelAssets { get; }
 
     /// <summary>Workflow plan identity of this execution; null when the caller does not track one.</summary>
     public string? WorkflowScope { get; }
