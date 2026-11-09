@@ -90,6 +90,7 @@ internal static class JLVisionMatching
             var savedModel = shape && !legacyMode ? node.GetString("trainedModelData", string.Empty).Trim() : string.Empty;
             // P0：modelAssetId 优先于内联模型。资产缺失/哈希不符必须失败——静默退回内联等于偷偷换模型。
             var modelSource = savedModel.Length > 0 ? "workflow-asset" : string.Empty;
+            var assetDisabledFallback = false;
             if (shape && !legacyMode)
             {
                 var assetId = node.GetString("modelAssetId", string.Empty).Trim();
@@ -102,6 +103,18 @@ internal static class JLVisionMatching
                         ?? throw new InvalidOperationException(
                             $"Shape node '{node.Id}' references model asset '{assetId}', but this host did not provide a model asset source. " +
                             "Run the node through a host that registers IModelAssetSource, or clear modelAssetId to use the inline trained model.");
+                    if (!assetSource.IsEnabled)
+                    {
+                        // 运维回滚开关：显式关闭时用内联模型并标注，不当作"资产缺失"。
+                        if (savedModel.Length == 0)
+                            throw new InvalidOperationException(
+                                $"Shape node '{node.Id}' has modelAssets disabled (ModelAssets:Enabled=false) and no inline trained model. " +
+                                "Enable model assets or restore an inline model before running.");
+                        modelSource = "inline-fallback";
+                        assetDisabledFallback = true;
+                    }
+                    else
+                    {
                     var assetBytes = assetSource.TryRead(assetId, assetVersion)
                         ?? throw new InvalidOperationException(
                             $"Shape node '{node.Id}' references model asset '{assetId}' v{(assetVersion == 0 ? "latest" : assetVersion.ToString())}, " +
@@ -118,6 +131,7 @@ internal static class JLVisionMatching
                             "The asset bytes changed; repin the node or restore the expected version.");
                     savedModel = Convert.ToBase64String(assetBytes);
                     modelSource = "model-asset";
+                    }
                 }
             }
             if (shape && node.GetBool("searchPreviewOnly", false))
@@ -552,6 +566,7 @@ internal static class JLVisionMatching
                     summary["modelCacheHit"] = shapeLease.Hit;
                     summary["modelSource"] = modelSource.Length > 0 ? modelSource : "workflow-asset";
                     summary["modelSha256"] = Convert.ToHexString(SHA256.HashData(modelBytes));
+                    if (assetDisabledFallback) summary["modelAssetDisabled"] = true;
                 }
                 else
                 {

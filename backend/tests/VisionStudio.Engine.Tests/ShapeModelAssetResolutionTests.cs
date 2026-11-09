@@ -25,6 +25,12 @@ public sealed class ShapeModelAssetResolutionTests
         }
     }
 
+    private sealed class DisabledSource : IModelAssetSource
+    {
+        public bool IsEnabled => false;
+        public byte[]? TryRead(string assetId, int version) => throw new InvalidOperationException("disabled source must not read bytes");
+    }
+
     private static NodeDefinition Node(string parameters)
         => new("shape-1", "match.shape", null, null,
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(parameters));
@@ -99,5 +105,25 @@ public sealed class ShapeModelAssetResolutionTests
         Assert.DoesNotContain("model asset source", error.Message);
         Assert.DoesNotContain("does not exist or was deleted", error.Message);
         Assert.DoesNotContain("hash mismatch", error.Message);
+    }
+
+    [Fact]
+    public async Task DisabledSwitch_WithoutInlineModel_FailsWithRollbackHint()
+    {
+        var error = await RunExpectingFailureAsync(new DisabledSource(),
+            """{"modelMode":"trained","modelAssetId":"shape-f","modelAssetVersion":1}""");
+        Assert.Contains("modelAssets disabled", error.Message);
+        Assert.Contains("no inline trained model", error.Message);
+    }
+
+    [Fact]
+    public async Task DisabledSwitch_WithInlineModel_UsesInlineInsteadOfReadingTheAsset()
+    {
+        // 关闭资产库是运维回退路径：有内联模型就继续跑，不访问资产（DisabledSource.TryRead 一旦被调用就抛错）。
+        var error = await RunExpectingFailureAsync(new DisabledSource(),
+            """{"modelMode":"trained","modelAssetId":"shape-g","modelAssetVersion":1,"trainedModelData":"QUJD"}""");
+        Assert.DoesNotContain("disabled", error.Message);
+        Assert.DoesNotContain("model asset source", error.Message);
+        Assert.DoesNotContain("does not exist or was deleted", error.Message);
     }
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 
@@ -70,57 +69,15 @@ public static class ModelAssetEndpoints
         }).RequireEngineer("model-asset.delete", "model-assets");
 
         // 内联 → 资产：把节点参数里的 trainedModelData 存成资产，然后把节点切到 modelAssetId/modelAssetVersion。
-        // 只改这两个键，其余参数原样保留；工作流保存带 expectedRevision，避免覆盖别人的并发编辑。
         app.MapPost("/api/model-assets/extract", async (
             ExtractShapeModelAssetRequest request,
-            ShapeModelAssetStore store,
-            WorkflowStore workflows,
+            ShapeModelAssetExtraction extraction,
             CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(request.WorkflowId) || string.IsNullOrWhiteSpace(request.NodeId))
-                throw new ApiValidationException("workflowId and nodeId are required.");
-
-            var loaded = await workflows.LoadWithRevisionAsync(request.WorkflowId, ct)
-                ?? throw new ApiNotFoundException($"Workflow '{request.WorkflowId}' does not exist.");
-            var node = loaded.Workflow.Nodes.FirstOrDefault(x => x.Id.Equals(request.NodeId, StringComparison.OrdinalIgnoreCase))
-                ?? throw new ApiNotFoundException($"Workflow '{request.WorkflowId}' has no node '{request.NodeId}'.");
-            if (!node.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
-                throw new ApiValidationException($"Node '{node.Id}' is '{node.Type}'; only match.shape nodes carry an inline shape model.");
-
-            var parameters = node.Parameters ?? new Dictionary<string, JsonElement>();
-            if (!parameters.TryGetValue("trainedModelData", out var modelElement) || modelElement.ValueKind != JsonValueKind.String
-                || string.IsNullOrWhiteSpace(modelElement.GetString()))
-                throw new ApiValidationException(
-                    $"Node '{node.Id}' has no inline trainedModelData to extract. Train the model first, or it already references a model asset.");
-            var trainingConfig = parameters.TryGetValue("trainedModelConfig", out var configElement) && configElement.ValueKind == JsonValueKind.String
-                ? configElement.GetString() ?? string.Empty
-                : string.Empty;
-
-            var created = await store.CreateAsync(new CreateShapeModelAssetRequest(
-                Id: null,
-                Name: string.IsNullOrWhiteSpace(request.Name) ? $"{loaded.Workflow.Name}/{node.Name ?? node.Id}" : request.Name.Trim(),
-                Description: $"Extracted from workflow '{loaded.Workflow.Id}' node '{node.Id}'.",
-                ModelBase64: modelElement.GetString()!,
-                TrainingConfig: trainingConfig,
-                SourceImageSha256: request.SourceImageSha256,
-                Note: "Extracted from inline node model",
-                CreatedBy: request.CreatedBy), ct);
-
-            var updatedParameters = new Dictionary<string, JsonElement>(parameters, StringComparer.OrdinalIgnoreCase)
-            {
-                ["modelAssetId"] = JsonSerializer.SerializeToElement(created.Id),
-                ["modelAssetVersion"] = JsonSerializer.SerializeToElement(created.LatestVersion)
-            };
-            updatedParameters.Remove("trainedModelData");
-            var updatedNode = node with { Parameters = updatedParameters };
-            var updatedWorkflow = loaded.Workflow with
-            {
-                Nodes = loaded.Workflow.Nodes.Select(x => ReferenceEquals(x, node) || x.Id == node.Id ? updatedNode : x).ToArray()
-            };
-            var outcome = await workflows.SaveAsync(loaded.Workflow.Id, updatedWorkflow, ct, loaded.Revision);
-            var version = created.Versions.Single(x => x.Version == created.LatestVersion);
+            var result = await extraction.ExtractAsync(
+                request.WorkflowId, request.NodeId, request.Name, request.SourceImageSha256, request.CreatedBy, ct);
             return Results.Ok(new ExtractShapeModelAssetResponse(
-                created.Id, created.LatestVersion, version.Sha256, version.SizeBytes, outcome.Revision, outcome.RevisionRecordDeferred));
+                result.AssetId, result.Version, result.Sha256, result.SizeBytes, result.Revision, result.RevisionRecordDeferred));
         }).RequireEngineer("model-asset.extract", "model-assets");
 
         return app;

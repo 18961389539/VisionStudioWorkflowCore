@@ -9,6 +9,12 @@ namespace VisionStudio.Abstractions;
 /// </summary>
 public interface IModelAssetSource
 {
+    /// <summary>
+    /// 全局开关（ModelAssets:Enabled）。关闭时节点回退到内联模型并在运行摘要里标注；
+    /// 没有内联模型则明确失败——这是运维级回滚开关，不是"资产缺失"。
+    /// </summary>
+    bool IsEnabled => true;
+
     /// <summary>读取指定资产版本的模型字节；资产/版本不存在或已删除时返回 null。</summary>
     byte[]? TryRead(string assetId, int version);
 }
