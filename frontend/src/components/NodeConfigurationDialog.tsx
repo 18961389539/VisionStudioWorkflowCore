@@ -1,4 +1,4 @@
-﻿import MetrologyObjectEditor from './MetrologyObjectEditor';
+import MetrologyObjectEditor from './MetrologyObjectEditor';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, InputNumber, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
@@ -19,7 +19,8 @@ import { caliperProfilePoint, useCaliperEdgeDiagnostics } from '../caliperEdgeDi
 import SplitHandle from './SplitHandle';
 import SwitchCaseEditor from './SwitchCaseEditor';
 import { runImageEntryForPort, runImagePortLabel, useRunImages } from '../useRunImages';
-import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, type NodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, stripInlineModelWhenAssetBound, withParameter, type NodeParameters } from '../nodeConfigurationState';
+import { appendShapeModelVersion, createShapeModelAsset, fetchShapeModelBase64 } from '../modelAssets';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { withSwitchPorts } from '../switchPorts';
 import { maturityLabel, maturityLevel, maturityTitle } from '../nodeMaturity';
@@ -122,7 +123,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     }
   }, [open, initialTab, activeTab]);
   const [baseline] = useState(() => configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem));
+  // 资产引用节点打开时会把模型回读到草稿；基线同时补齐，避免"刚打开就显示未保存修改"。
+  const [baselineOverride, setBaselineOverride] = useState<NodeParameters>();
+  const effectiveBaseline = baselineOverride ?? baseline;
   const [draft, setDraft] = useState(() => cloneParameters(baseline));
+  const [assetBusy, setAssetBusy] = useState(false);
+  const [assetMessage, setAssetMessage] = useState<string>();
   const [cropClearUndo, setCropClearUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
   const [measurementFitUndo, setMeasurementFitUndo] = useState<{ previous: NodeParameters; afterFingerprint: string }>();
   const [previewNodeId, setPreviewNodeId] = useState(node.id);
@@ -144,7 +150,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   useEffect(() => {
     if (measurementFitUndo && measurementFitUndo.afterFingerprint !== draftFingerprint) setMeasurementFitUndo(undefined);
   }, [measurementFitUndo, draftFingerprint]);
-  const dirty = draftFingerprint !== parameterFingerprint(baseline);
+  const dirty = draftFingerprint !== parameterFingerprint(effectiveBaseline);
   // 与打开弹窗时的值不同的参数项数：用于参数区“已改 N 项”与关闭确认
   const changedCount = [...new Set([...Object.keys(baseline), ...Object.keys(draft)])]
     .filter((key) => parameterFingerprint(draft[key]) !== parameterFingerprint(baseline[key])).length;
@@ -204,6 +210,32 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
   const connectedInputPorts = catalogItem.inputs.filter((input) => hasInputEdge(edges, node.id, input.name)).map((input) => input.name);
   const connectedRoiInput = Boolean(roiInputEdge && connectedInputPorts.some((port) => port.toLowerCase() === 'roi'));
   const isShapeMatch = catalogItem.type === 'match.shape';
+  const modelAssetId = typeof draft.modelAssetId === 'string' ? draft.modelAssetId.trim() : '';
+  const modelAssetVersion = Number(draft.modelAssetVersion ?? 0);
+  const hydratedAssetRef = useRef('');
+  // P0 M3：资产引用节点打开时把模型回读到草稿，训练/搜索工作区照常可用；应用时再剥离内联模型。
+  useEffect(() => {
+    if (!open) { hydratedAssetRef.current = ''; return; }
+    if (!isShapeMatch || !modelAssetId) return;
+    if (typeof draft.trainedModelData === 'string' && draft.trainedModelData) return;
+    const key = `${node.id}:${modelAssetId}@${modelAssetVersion > 0 ? modelAssetVersion : 'latest'}`;
+    if (hydratedAssetRef.current === key) return;
+    hydratedAssetRef.current = key;
+    let cancelled = false;
+    setAssetBusy(true);
+    void fetchShapeModelBase64(modelAssetId, modelAssetVersion)
+      .then((base64) => {
+        if (cancelled) return;
+        setDraft((previous) => (previous.trainedModelData ? previous : { ...previous, trainedModelData: base64 }));
+        setBaselineOverride((previous) => ({ ...(previous ?? baseline), trainedModelData: base64 }));
+        setAssetMessage(`已从资产 ${modelAssetId} 载入模型。`);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setAssetMessage(error instanceof Error ? `读取模型资产失败：${error.message}` : '读取模型资产失败。');
+      })
+      .finally(() => { if (!cancelled) setAssetBusy(false); });
+    return () => { cancelled = true; };
+  }, [open, isShapeMatch, modelAssetId, modelAssetVersion, draft.trainedModelData, node.id, baseline]);
   const isImageCrop = catalogItem.type === 'image.crop';
   const isPerspective = catalogItem.type === 'image.perspective';
   const isRoiTransform = catalogItem.type === 'roi.transform';
@@ -1006,9 +1038,39 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       setPreviewError(error instanceof Error ? error.message : '基准建立失败。'); setResultExpanded(true);
     } finally { setPreviewBusy(false); }
   };
+  const saveAsAsset = async () => {
+    const modelBase64 = typeof draft.trainedModelData === 'string' ? draft.trainedModelData : '';
+    if (!modelBase64) return;
+    const trainingConfig = typeof draft.trainedModelConfig === 'string' ? draft.trainedModelConfig : '';
+    setAssetBusy(true);
+    try {
+      if (modelAssetId) {
+        const version = await appendShapeModelVersion(modelAssetId, { modelBase64, trainingConfig, note: 'Saved from training workspace' });
+        setDraft((previous) => ({ ...previous, modelAssetVersion: version.version, modelAssetSha256: version.sha256 }));
+        setAssetMessage(`已追加为资产 ${modelAssetId} v${version.version}；应用后节点优先使用该版本。`);
+      } else {
+        const created = await createShapeModelAsset({
+          name: `${catalogItem.displayName} · ${node.id}`,
+          description: `Saved from node ${node.id}`,
+          modelBase64,
+          trainingConfig,
+          note: 'Saved from training workspace'
+        });
+        const latest = created.versions.find((item) => item.version === created.latestVersion);
+        setDraft((previous) => ({ ...previous, modelAssetId: created.id, modelAssetVersion: created.latestVersion, modelAssetSha256: latest?.sha256 ?? '' }));
+        setAssetMessage(`已保存为资产 ${created.id} v${created.latestVersion}；应用后节点优先使用该资产。`);
+      }
+    } catch (error) {
+      setAssetMessage(error instanceof Error ? `保存模型资产失败：${error.message}` : '保存模型资产失败。');
+    } finally {
+      setAssetBusy(false);
+    }
+  };
   const apply = () => {
     if (locked || issues.length || externalChange || referenceMismatch || !dirty || isShapeMatch && !legacyWorkflow && trainingStale) return;
-    if (onApply(cloneParameters(draft)) !== false) onClose();
+    // 已保存为资产后不再把内联模型写回文档：体积从 MB 级降到 KB 级；再次调参时由资产回读。
+    const parameters = stripInlineModelWhenAssetBound(catalogItem.type, cloneParameters(draft));
+    if (onApply(parameters) !== false) onClose();
   };
 
   // P0（评审，实测复现）：预览结束后运行按钮短暂 disabled，焦点落回 body——antd Modal 的 Esc
@@ -1389,6 +1451,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
               ? <Alert showIcon type={trainingStale ? 'warning' : 'success'} title={trainingStale ? '训练参数已变化，需要重新训练' : draft.trainedModelData !== baseline.trainedModelData ? '模型已训练，待应用到工作流' : '模型已保存在此工作流'} description={trainingStale ? `已修改：${changedTrainingLabels}。重新训练后即可测试搜索。` : `样本 ${draft.trainedSampleCount ?? 1} 张 · 模型尺寸 ${draft.trainedWidth ?? '—'} × ${draft.trainedHeight ?? '—'} px · ${Number(draft.trainedFeaturePointCount ?? 0).toLocaleString()} 个边缘特征点 · ${draft.trainedContourCount ?? 0} 段轮廓 · 可直接测试搜索，满意后点击“应用”。`} />
               : <Alert showIcon type="info" title="尚未训练" description="先获取训练图像并设置模型区域，再训练形状模型。" />}
           {Array.isArray(draft.trainedModelWarnings) && draft.trainedModelWarnings.length > 0 && <Alert showIcon type="warning" title="训练质量提示" description={(draft.trainedModelWarnings as string[]).join(' ')} />}
+          {trainedModelData && !legacyWorkflow && <div className="shape-asset-actions">
+            <Button size="small" loading={assetBusy} disabled={locked || issues.length > 0 || trainingStale}
+              onClick={() => void saveAsAsset()}>{modelAssetId ? '追加为资产版本' : '保存为资产'}</Button>
+            {modelAssetId && <span className="shape-asset-hint">资产 {modelAssetId} · v{modelAssetVersion > 0 ? modelAssetVersion : '最新'}</span>}
+            {assetMessage && <span className="shape-asset-hint">{assetMessage}</span>}
+          </div>}
           {trainedModelData && !trainingStale && !legacyWorkflow && <Button onClick={() => void runPreview()}
             disabled={locked || issues.length > 0 || externalChange || Boolean(previewBlockedReason)}>下一步：测试搜索</Button>}
         </div>}

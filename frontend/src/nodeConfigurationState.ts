@@ -519,3 +519,17 @@ export function workflowWithNodeParameters(workflow: WorkflowPayload, nodeId: st
   if (!workflow.nodes.some((node) => node.id === nodeId)) throw new Error('待测试节点已不存在。');
   return { ...workflow, nodes: workflow.nodes.map((node) => node.id === nodeId ? { ...node, parameters: cloneParameters(parameters) } : node) };
 }
+
+/**
+ * P0 M3：match.shape 绑定模型资产后，应用时剥离内联模型。
+ * 文档体积从 MB 级降到 KB 级；再次打开配置页时由资产按 version 回读（见 NodeConfigurationDialog 的 hydration）。
+ * 未绑定资产、或非形状匹配节点原样返回，保证既有流程与"内联模型"路径逐字节不变。
+ */
+export function stripInlineModelWhenAssetBound(type: string, parameters: NodeParameters): NodeParameters {
+  if (type !== 'match.shape') return parameters;
+  const assetId = typeof parameters.modelAssetId === 'string' ? parameters.modelAssetId.trim() : '';
+  if (!assetId) return parameters;
+  const next = { ...parameters };
+  delete next.trainedModelData;
+  return next;
+}

@@ -378,6 +378,27 @@ M1 只让资产能存能取，节点不认识 `modelAssetId`。M2 把这条链�
 - 仍未做（M3/M4）：训练工作区的「保存为资产」按钮（调 `extract`）、端到端集成测试与 `modelAssets.enabled` 开关。
 
 
+## 第六十六轮：模型资产 P0 · M3（训练工作区入口）（2026-11-09）
+
+按"放在训练工作区按钮旁"的决策实现。难点不是按钮，而是**应用时剥离内联模型后，工作区不能因此变成"未训练"**。
+
+| 变更 | 说明 |
+| --- | --- |
+| 入口 | 训练完成提示下方、`下一步：测试搜索` 旁新增「保存为资产」；已有 `modelAssetId` 时按钮变为「追加为资产版本」 |
+| 保存 | 首次 `POST /api/model-assets`，之后 `POST /api/model-assets/{id}/versions`；成功后写入 `modelAssetId` / `modelAssetVersion` / `modelAssetSha256`，草稿里的内联模型**本次会话仍保留**，搜索可继续 |
+| 应用 | `stripInlineModelWhenAssetBound`：绑定资产时从写回参数里删掉 `trainedModelData`，文档体积从 MB 级降到 KB 级；未绑定资产或非形状节点原样返回 |
+| 回读 | 打开已绑定资产的节点时按 version 拉取字节回填草稿，并把"回填后的参数"同时作为基线，避免刚打开就显示未保存修改 |
+| 客户端 | 新增 `modelAssets.ts`（创建/追加/取字节 + 进程内缓存）；路径统一收进 `endpoints.ts` 的 `modelAssets` 常量 |
+
+回读刻意做成"会话内回填、应用时再剥离"：既让训练/搜索工作区照常可用，又不让文档把模型字节带回去。
+
+### 验证
+
+- 前端 `tsc -b` 0 error；vitest **93 文件全通过**（+`modelAssets` 客户端 4 项、`stripInlineModelWhenAssetBound` 4 种边界）。
+- 路径守卫（`apiUsage` ratchet）抓到过一次硬编码 `/api/`，已改为 `endpoints.ts` 常量后通过。
+- 静态审计 exit 0；后端本轮无改动（Engine 2145 / Api 467 沿用 M2 结果）。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

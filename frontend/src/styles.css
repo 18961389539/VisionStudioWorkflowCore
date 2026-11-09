@@ -1213,3 +1213,7 @@ body.resizing-x, body.resizing-y { user-select: none; }
 .script-editor-preview-image figcaption { margin-top: 3px; color: var(--vs-text-5); font-size: 11px; }
 .script-editor.is-fullscreen .script-editor-preview-body { max-height: min(32vh, 300px); }
 @media (max-width: 760px) { .script-editor-main.with-api { grid-template-columns: minmax(0, 1fr); } .script-editor-api { max-height: 190px; border-top: 1px solid var(--vs-border-subtle); border-left: 0; } }
+
+/* P0 M3：形状训练工作区的模型资产入口 */
+.shape-asset-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shape-asset-hint { color: #8c8c8c; font-size: 12px; }

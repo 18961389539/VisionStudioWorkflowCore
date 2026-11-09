@@ -316,6 +316,17 @@ export const modules = {
   extract: apiUrl('modules/extract')
 } as const;
 
+// ── model assets (P0) ────────────────────────────────────────────────────────
+export const modelAssets = {
+  list: apiUrl('model-assets'),
+  create: apiUrl('model-assets'),
+  byId: (id: string) => apiUrl(`model-assets/${encodeURIComponent(id)}`),
+  versions: (id: string) => apiUrl(`model-assets/${encodeURIComponent(id)}/versions`),
+  version: (id: string, version: number) => apiUrl(`model-assets/${encodeURIComponent(id)}/versions/${version}`),
+  blob: (id: string, version: number) => apiUrl(`model-assets/${encodeURIComponent(id)}/versions/${version}/blob`),
+  extract: apiUrl('model-assets/extract')
+} as const;
+
 // ── diagnostics ───────────────────────────────────────────────────────────────
 export const diagnostics = {
   summary: apiUrl('diagnostics/summary'),

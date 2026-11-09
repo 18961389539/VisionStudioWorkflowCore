@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fallbackCatalogRaw, makeDefaultParameters } from '../catalog';
-import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, hydrateNodeParameters, measurementRoiOutsideImageIssue, parameterFingerprint, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
+import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, hydrateNodeParameters, measurementRoiOutsideImageIssue, parameterFingerprint, stripInlineModelWhenAssetBound, withParameter, workflowWithNodeParameters } from '../nodeConfigurationState';
 import type { NodeCatalogItem, WorkflowPayload } from '../types';
 
 describe('node configuration snapshots', () => {
@@ -191,5 +191,24 @@ describe('node configuration snapshots', () => {
     delete legacyParameters.samplingMode;
     const legacyCircle = configurationParameters(legacyParameters, circle);
     expect(configurationIssues(circle, legacyCircle)).toEqual([]);
+  });
+});
+
+describe('shape model asset binding', () => {
+  it('strips the inline model on apply only when a model asset is bound', () => {
+    const bound = stripInlineModelWhenAssetBound('match.shape', {
+      modelMode: 'trained', trainedModelData: 'BASE64', modelAssetId: 'shape-a', modelAssetVersion: 2
+    });
+    expect(bound.trainedModelData).toBeUndefined();
+    expect(bound.modelAssetId).toBe('shape-a');
+    expect(bound.modelAssetVersion).toBe(2);
+
+    // 未绑定资产：内联模型原样保留（既有流程逐字节不变）。
+    const inline = stripInlineModelWhenAssetBound('match.shape', { modelMode: 'trained', trainedModelData: 'BASE64' });
+    expect(inline.trainedModelData).toBe('BASE64');
+
+    // 空白 id 视为未绑定；非形状匹配节点完全不动。
+    expect(stripInlineModelWhenAssetBound('match.shape', { trainedModelData: 'X', modelAssetId: '   ' }).trainedModelData).toBe('X');
+    expect(stripInlineModelWhenAssetBound('image.threshold', { trainedModelData: 'X', modelAssetId: 'shape-a' }).trainedModelData).toBe('X');
   });
 });
