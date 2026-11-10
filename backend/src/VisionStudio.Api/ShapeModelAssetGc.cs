@@ -13,6 +13,13 @@ public sealed record ShapeModelAssetGcPlan(
     int ProtectedByReference);
 
 /// <summary>
+/// 未引用版本回收（P1；v25 起作用于通用 assets 表）。
+///
+/// 注意：候选范围是**所有 kind**，但引用扫描目前只覆盖 shape（match.shape 节点 + 发布清单）。
+/// 新增模板图/ONNX 资产类型时，必须同步扩展 <see cref="Collect"/> 与清单捕获，否则它们的
+/// 历史版本会被误回收——这是后续接入新 kind 的前置检查项。
+/// </summary>
+/// <remarks>
 /// 未引用版本回收（P1）。
 ///
 /// 保守优先：只回收"确定没人用"的版本，且每个版本的处置都能说清理由。
@@ -24,7 +31,7 @@ public sealed record ShapeModelAssetGcPlan(
 /// </list>
 /// 字节是内容寻址的：版本行删除后，只有"没有任何版本再引用"的 blob 才会被删。
 /// 预览与执行分离，执行必须显式 confirm。
-/// </summary>
+/// </remarks>
 public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore workflows)
 {
     public async Task<ShapeModelAssetGcPlan> PlanAsync(CancellationToken ct)
@@ -33,7 +40,7 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         var versions = new List<ShapeModelGcCandidate>();
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT asset_id, version, sha256, size_bytes FROM shape_model_versions;";
+            command.CommandText = "SELECT asset_id, version, sha256, size_bytes FROM asset_versions;";
             await using var reader = await command.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
                 versions.Add(new ShapeModelGcCandidate(reader.GetString(0), reader.GetInt32(1), reader.GetString(2), reader.GetInt64(3)));
@@ -42,7 +49,7 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         var latest = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT id, latest_version FROM shape_model_assets;";
+            command.CommandText = "SELECT id, latest_version FROM assets;";
             await using var reader = await command.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) latest[reader.GetString(0)] = reader.GetInt32(1);
         }
@@ -120,7 +127,7 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         {
             await using var deleteVersion = connection.CreateCommand();
             deleteVersion.Transaction = transaction;
-            deleteVersion.CommandText = "DELETE FROM shape_model_versions WHERE asset_id=$id AND version=$version;";
+            deleteVersion.CommandText = "DELETE FROM asset_versions WHERE asset_id=$id AND version=$version;";
             deleteVersion.Parameters.AddWithValue("$id", candidate.AssetId);
             deleteVersion.Parameters.AddWithValue("$version", candidate.Version);
             await deleteVersion.ExecuteNonQueryAsync(ct);
@@ -129,7 +136,7 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
         await using (var deleteBlobs = connection.CreateCommand())
         {
             deleteBlobs.Transaction = transaction;
-            deleteBlobs.CommandText = "DELETE FROM shape_model_blobs WHERE sha256 NOT IN (SELECT sha256 FROM shape_model_versions);";
+            deleteBlobs.CommandText = "DELETE FROM asset_blobs WHERE sha256 NOT IN (SELECT sha256 FROM asset_versions);";
             await deleteBlobs.ExecuteNonQueryAsync(ct);
         }
         await transaction.CommitAsync(ct);

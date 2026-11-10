@@ -16,7 +16,7 @@ public sealed class ShapeModelAssetExtractionTests
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        var store = new ShapeModelAssetStore(db);
+        var store = new ShapeModelAssetStore(new AssetStore(db));
         var workflows = new WorkflowStore(env);
         return (env, store, workflows, new ShapeModelAssetExtraction(store, workflows));
     }

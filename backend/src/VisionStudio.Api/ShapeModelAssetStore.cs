@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
-using Microsoft.Data.Sqlite;
+using System.Text.Json;
 using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
@@ -54,340 +52,123 @@ public sealed record AppendShapeModelVersionRequest(
     string? CreatedBy = null);
 
 /// <summary>
-/// v24 形状模型资产：版本不可变、字节内容寻址（同一份模型被多个资产或版本引用时只存一份）、软删除。
+/// 形状模型资产适配器（P2）：存储层已抽成通用 <see cref="AssetStore"/>，
+/// 这里只负责 kind="shape" 与类型字段（trainingConfig / sourceImageSha256）的映射。
 ///
-/// P0 只到"最新版本"，没有发布态与配方锁定（P1）。因此运行期解析固定取
-/// <c>modelAssetVersion=0 → latest_version</c>，不会出现"最新版被追加后悄悄换模型"的问题——
-/// 换版本必须显式写版本号，最新版只影响显式要 0 的节点。
+/// 对外 API 与改造前完全一致，端点、GC、发布清单、引擎读取与测试都不用改——
+/// 这也是这次重构的验收标准：shape 的 9 项存储测试与 5 项回收测试必须原样通过。
 /// </summary>
-public sealed class ShapeModelAssetStore(SqliteMetadataDatabase db)
+public sealed class ShapeModelAssetStore(AssetStore assets)
 {
     /// <summary>与引擎侧 match.shape 的 16 MB 模型上限保持一致；超限明确拒绝，不截断。</summary>
-    public const int MaxModelBytes = 16 * 1024 * 1024;
+    public const int MaxModelBytes = AssetStore.DefaultMaxBytes;
+    private const string Kind = "shape";
 
     public async Task<IReadOnlyList<ShapeModelAssetDescriptor>> ListAsync(CancellationToken ct)
-    {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        var ids = new List<string>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = "SELECT id FROM shape_model_assets WHERE deleted_at IS NULL ORDER BY updated_at DESC;";
-            await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) ids.Add(reader.GetString(0));
-        }
-        var result = new List<ShapeModelAssetDescriptor>(ids.Count);
-        foreach (var id in ids)
-        {
-            var descriptor = await BuildDescriptorAsync(connection, id, ct);
-            if (descriptor is not null) result.Add(descriptor);
-        }
-        return result;
-    }
+        => (await assets.ListAsync(Kind, ct)).Select(ToShapeDescriptor).ToArray();
 
     public async Task<ShapeModelAssetDescriptor?> GetAsync(string id, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        return await BuildDescriptorAsync(connection, id, ct);
+        var descriptor = await assets.GetAsync(id, ct);
+        return descriptor is null || !IsShape(descriptor) ? null : ToShapeDescriptor(descriptor);
     }
 
     public async Task<ShapeModelAssetDescriptor> CreateAsync(CreateShapeModelAssetRequest request, CancellationToken ct)
     {
-        var name = (request.Name ?? string.Empty).Trim();
-        if (name.Length == 0) throw new ApiValidationException("Shape model asset name is required.");
-        if (name.Length > 200) throw new ApiValidationException("Shape model asset name must be at most 200 characters.");
-        var id = string.IsNullOrWhiteSpace(request.Id) ? $"shape-{Guid.NewGuid():N}"[..14] : request.Id.Trim();
-        ValidateId(id);
-        var bytes = DecodeModel(request.ModelBase64, out var sha256);
-        var trainingConfig = (request.TrainingConfig ?? string.Empty).Trim();
-        if (trainingConfig.Length == 0)
-            throw new ApiValidationException("trainingConfig is required: it pins which training parameters produced this model.");
-        var now = DateTimeOffset.UtcNow;
-
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        try
-        {
-            await ExecuteAsync(connection, transaction,
-                "INSERT INTO shape_model_assets(id,name,description,created_at,updated_at,latest_version,deleted_at) VALUES($id,$name,$description,$created,$updated,1,NULL);",
-                ct, ("$id", id), ("$name", name), ("$description", (request.Description ?? string.Empty).Trim()),
-                ("$created", Iso(now)), ("$updated", Iso(now)));
-            await InsertBlobAsync(connection, transaction, sha256, bytes, now, ct);
-            await InsertVersionAsync(connection, transaction, id, 1, sha256, bytes.Length, trainingConfig,
-                request.SourceImageSha256, request.Note, request.CreatedBy, now, ct);
-            await transaction.CommitAsync(ct);
-        }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
-        {
-            throw new ApiConflictException($"Shape model asset '{id}' already exists.", ex);
-        }
-        return (await GetAsync(id, ct))!;
+        var created = await assets.CreateAsync(new CreateAssetRequest(
+            request.Id, Kind, request.Name, request.Description,
+            Metadata(request.TrainingConfig, request.SourceImageSha256),
+            request.ModelBase64, request.Note, request.CreatedBy), ct);
+        return ToShapeDescriptor(created);
     }
 
     public async Task<ShapeModelVersionInfo> AppendVersionAsync(string id, AppendShapeModelVersionRequest request, CancellationToken ct)
     {
-        var bytes = DecodeModel(request.ModelBase64, out var sha256);
-        var trainingConfig = (request.TrainingConfig ?? string.Empty).Trim();
-        if (trainingConfig.Length == 0)
-            throw new ApiValidationException("trainingConfig is required: it pins which training parameters produced this model.");
-        var now = DateTimeOffset.UtcNow;
-
-        // (asset_id, version) 唯一约束 + MAX+1：并发追加时重读一次最新版再试，仍冲突则 409。
-        for (var attempt = 0; ; attempt++)
-        {
-            await using var connection = await db.OpenConnectionAsync(ct);
-            await using var transaction = connection.BeginTransaction(deferred: false);
-            var row = await LoadAssetAsync(connection, id, transaction, ct)
-                ?? throw new ApiNotFoundException($"Shape model asset '{id}' does not exist.");
-            var version = checked(row.LatestVersion + 1);
-            try
-            {
-                await InsertBlobAsync(connection, transaction, sha256, bytes, now, ct);
-                await InsertVersionAsync(connection, transaction, id, version, sha256, bytes.Length, trainingConfig,
-                    request.SourceImageSha256, request.Note, request.CreatedBy, now, ct);
-                await ExecuteAsync(connection, transaction,
-                    "UPDATE shape_model_assets SET latest_version=$version,updated_at=$updated WHERE id=$id;",
-                    ct, ("$version", version), ("$updated", Iso(now)), ("$id", id));
-                await transaction.CommitAsync(ct);
-                return new ShapeModelVersionInfo(version, sha256, bytes.Length, trainingConfig,
-                    request.SourceImageSha256 ?? string.Empty, (request.Note ?? string.Empty).Trim(), now,
-                    (request.CreatedBy ?? string.Empty).Trim());
-            }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19 && attempt == 0)
-            {
-                // 版本号被并发追加抢占：整个事务回滚后重读 latest_version 再试一次。
-                await transaction.RollbackAsync(ct);
-            }
-            catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
-            {
-                throw new ApiConflictException($"Shape model asset '{id}' version was appended concurrently; reload and retry.", ex);
-            }
-        }
+        await RequireShapeAsync(id, ct);
+        var info = await assets.AppendVersionAsync(id, new AppendAssetVersionRequest(
+            Metadata(request.TrainingConfig, request.SourceImageSha256),
+            request.ModelBase64, request.Note, request.CreatedBy), ct);
+        return ToShapeVersion(info);
     }
 
     public async Task<ShapeModelVersionInfo?> GetVersionAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        return await ReadVersionInfoAsync(connection, id, version, ct);
+        var descriptor = await assets.GetAsync(id, ct);
+        if (descriptor is null || !IsShape(descriptor)) return null;
+        var info = await assets.GetVersionAsync(id, version, ct);
+        return info is null ? null : ToShapeVersion(info);
     }
 
-    /// <summary>读取指定版本的模型字节；资产/版本不存在或已删除时返回 null（调用方决定报 404 还是运行期失败）。</summary>
     public async Task<byte[]?> ReadBytesAsync(string id, int version, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.bytes
-FROM shape_model_versions v
-JOIN shape_model_assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-JOIN shape_model_blobs b ON b.sha256 = v.sha256
-WHERE v.asset_id = $id AND v.version = $version;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? (byte[])reader["bytes"] : null;
+        var descriptor = await assets.GetAsync(id, ct);
+        return descriptor is null || !IsShape(descriptor) ? null : await assets.ReadBytesAsync(id, version, ct);
     }
 
-    /// <summary>
-    /// 同步读取模型字节（供 <see cref="VisionStudio.Abstractions.IModelAssetSource"/> 使用）。
-    /// version=0 表示取 latest_version；资产已删除/版本不存在返回 null，由节点给出明确错误。
-    /// </summary>
-    public byte[]? ReadBytesSync(string assetId, int version)
-    {
-        using var connection = db.OpenConnection();
-        var effective = version;
-        if (effective <= 0)
-        {
-            using var latest = connection.CreateCommand();
-            latest.CommandText = "SELECT latest_version FROM shape_model_assets WHERE id=$id AND deleted_at IS NULL;";
-            latest.Parameters.AddWithValue("$id", assetId);
-            var value = latest.ExecuteScalar();
-            if (value is null or System.DBNull) return null;
-            effective = Convert.ToInt32(value);
-        }
+    /// <summary>同步读取（引擎侧 <c>IModelAssetSource</c>）；version&lt;=0 表示 latest。</summary>
+    public byte[]? ReadBytesSync(string id, int version) => assets.ReadBytesSync(id, version);
 
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT b.bytes
-FROM shape_model_versions v
-JOIN shape_model_assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-JOIN shape_model_blobs b ON b.sha256 = v.sha256
-WHERE v.asset_id = $id AND v.version = $version;
-""";
-        command.Parameters.AddWithValue("$id", assetId);
-        command.Parameters.AddWithValue("$version", effective);
-        using var reader = command.ExecuteReader();
-        return reader.Read() ? (byte[])reader["bytes"] : null;
-    }
+    public async Task<bool> DeleteAsync(string id, CancellationToken ct)
+        => await GetAsync(id, ct) is not null && await assets.DeleteAsync(id, ct);
 
-    /// <summary>重命名/改描述（版本字节不可变，只有元数据可变）；资产不存在返回 null。</summary>
     public async Task<ShapeModelAssetDescriptor?> UpdateAsync(string id, string? name, string? description, CancellationToken ct)
     {
-        var trimmedName = name?.Trim();
-        if (name is not null && string.IsNullOrEmpty(trimmedName))
-            throw new ApiValidationException("Shape model asset name cannot be blank.");
-        if (trimmedName is { Length: > 200 })
-            throw new ApiValidationException("Shape model asset name must be at most 200 characters.");
-
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-UPDATE shape_model_assets
-SET name = COALESCE($name, name),
-    description = COALESCE($description, description),
-    updated_at = $updated
-WHERE id = $id AND deleted_at IS NULL;
-""";
-        command.Parameters.AddWithValue("$name", (object?)trimmedName ?? DBNull.Value);
-        command.Parameters.AddWithValue("$description", (object?)(description?.Trim()) ?? DBNull.Value);
-        command.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", id);
-        if (await command.ExecuteNonQueryAsync(ct) == 0) return null;
-        return await GetAsync(id, ct);
+        if (await GetAsync(id, ct) is null) return null;
+        var updated = await assets.UpdateAsync(id, name, description, ct);
+        return updated is null ? null : ToShapeDescriptor(updated);
     }
 
-    /// <summary>软删除：保留历史版本供已发布配方回指；返回 false 表示资产不存在或已删除。</summary>
-    public async Task<bool> DeleteAsync(string id, CancellationToken ct)
+    internal static string ComputeSha256(byte[] bytes) => AssetStore.ComputeSha256(bytes);
+
+    private async Task RequireShapeAsync(string id, CancellationToken ct)
     {
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE shape_model_assets SET deleted_at=$at,updated_at=$at WHERE id=$id AND deleted_at IS NULL;";
-        command.Parameters.AddWithValue("$at", Iso(DateTimeOffset.UtcNow));
-        command.Parameters.AddWithValue("$id", id);
-        return await command.ExecuteNonQueryAsync(ct) > 0;
+        var descriptor = await assets.GetAsync(id, ct)
+            ?? throw new ApiNotFoundException($"Shape model asset '{id}' does not exist.");
+        if (!IsShape(descriptor))
+            throw new ApiValidationException($"Asset '{id}' has kind '{descriptor.Kind}', not '{Kind}'.");
     }
 
-    internal static string ComputeSha256(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
+    private static bool IsShape(AssetDescriptor descriptor)
+        => string.Equals(descriptor.Kind, Kind, StringComparison.OrdinalIgnoreCase);
 
-    private static byte[] DecodeModel(string? modelBase64, out string sha256)
+    private static ShapeModelAssetDescriptor ToShapeDescriptor(AssetDescriptor descriptor)
+        => new(descriptor.Id, descriptor.Name, descriptor.Description, descriptor.CreatedAt, descriptor.UpdatedAt,
+            descriptor.LatestVersion, descriptor.Versions.Select(ToShapeVersion).ToArray());
+
+    private static ShapeModelVersionInfo ToShapeVersion(AssetVersionInfo info)
     {
-        if (string.IsNullOrWhiteSpace(modelBase64))
-            throw new ApiValidationException("modelBase64 is required.");
-        byte[] bytes;
+        var (trainingConfig, sourceImageSha256) = ParseMetadata(info.MetadataJson);
+        return new ShapeModelVersionInfo(info.Version, info.Sha256, info.SizeBytes, trainingConfig, sourceImageSha256,
+            info.Note, info.CreatedAt, info.CreatedBy);
+    }
+
+    private static string Metadata(string trainingConfig, string? sourceImageSha256)
+    {
+        if (string.IsNullOrWhiteSpace(trainingConfig))
+            throw new ApiValidationException("trainingConfig is required: it pins which training parameters produced this model.");
+        return JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["trainingConfig"] = trainingConfig.Trim(),
+            ["sourceImageSha256"] = (sourceImageSha256 ?? string.Empty).Trim()
+        });
+    }
+
+    private static (string TrainingConfig, string SourceImageSha256) ParseMetadata(string metadataJson)
+    {
         try
         {
-            bytes = Convert.FromBase64String(modelBase64.Trim());
+            using var document = JsonDocument.Parse(metadataJson);
+            var root = document.RootElement;
+            var trainingConfig = root.TryGetProperty("trainingConfig", out var config) && config.ValueKind == JsonValueKind.String
+                ? config.GetString() ?? string.Empty : string.Empty;
+            var source = root.TryGetProperty("sourceImageSha256", out var sha) && sha.ValueKind == JsonValueKind.String
+                ? sha.GetString() ?? string.Empty : string.Empty;
+            return (trainingConfig, source);
         }
-        catch (FormatException ex)
+        catch (JsonException)
         {
-            throw new ApiValidationException("modelBase64 must be a valid base64 string.", ex);
+            // 历史/外部写入的 metadata 损坏时不阻断读取：类型字段按缺失处理，字节仍可取。
+            return (string.Empty, string.Empty);
         }
-        if (bytes.Length == 0) throw new ApiValidationException("modelBase64 decodes to an empty model.");
-        if (bytes.Length > MaxModelBytes)
-            throw new ApiValidationException($"Shape model is {bytes.Length} bytes, above the {MaxModelBytes} byte (16 MB) limit.");
-        sha256 = ComputeSha256(bytes);
-        return bytes;
     }
-
-    private static void ValidateId(string id)
-    {
-        if (id.Length is < 1 or > 64 || !id.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'))
-            throw new ApiValidationException("Shape model asset id must be 1-64 characters of letters, digits, '-', '_' or '.'.");
-    }
-
-    private static async Task<ShapeModelAssetDescriptor?> BuildDescriptorAsync(SqliteConnection connection, string id, CancellationToken ct)
-    {
-        var row = await LoadAssetAsync(connection, id, null, ct);
-        if (row is null) return null;
-        var versions = new List<ShapeModelVersionInfo>();
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT version,sha256,size_bytes,training_config,source_image_sha256,note,created_at,created_by
-FROM shape_model_versions WHERE asset_id=$id ORDER BY version DESC;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            versions.Add(new ShapeModelVersionInfo(
-                reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4),
-                reader.GetString(5), DateTimeOffset.Parse(reader.GetString(6)), reader.GetString(7)));
-        }
-        return new ShapeModelAssetDescriptor(row.Id, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.LatestVersion, versions);
-    }
-
-    private static async Task<ShapeModelVersionInfo?> ReadVersionInfoAsync(SqliteConnection connection, string id, int version, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-SELECT v.version,v.sha256,v.size_bytes,v.training_config,v.source_image_sha256,v.note,v.created_at,v.created_by
-FROM shape_model_versions v
-JOIN shape_model_assets a ON a.id = v.asset_id AND a.deleted_at IS NULL
-WHERE v.asset_id=$id AND v.version=$version;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        if (!await reader.ReadAsync(ct)) return null;
-        return new ShapeModelVersionInfo(
-            reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3), reader.GetString(4),
-            reader.GetString(5), DateTimeOffset.Parse(reader.GetString(6)), reader.GetString(7));
-    }
-
-    private static async Task<AssetRow?> LoadAssetAsync(SqliteConnection connection, string id, SqliteTransaction? transaction, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-SELECT id,name,description,created_at,updated_at,latest_version
-FROM shape_model_assets WHERE id=$id AND deleted_at IS NULL;
-""";
-        command.Parameters.AddWithValue("$id", id);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct)
-            ? new AssetRow(reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                DateTimeOffset.Parse(reader.GetString(3)), DateTimeOffset.Parse(reader.GetString(4)), reader.GetInt32(5))
-            : null;
-    }
-
-    private static async Task InsertBlobAsync(SqliteConnection connection, SqliteTransaction transaction, string sha256, byte[] bytes, DateTimeOffset createdAt, CancellationToken ct)
-    {
-        // 内容寻址：同一份字节只存一次；INSERT OR IGNORE 让重复写入变成空操作。
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-INSERT OR IGNORE INTO shape_model_blobs(sha256,size_bytes,bytes,created_at) VALUES($sha,$size,$bytes,$created);
-""";
-        command.Parameters.AddWithValue("$sha", sha256);
-        command.Parameters.AddWithValue("$size", bytes.Length);
-        command.Parameters.Add("$bytes", SqliteType.Blob).Value = bytes;
-        command.Parameters.AddWithValue("$created", Iso(createdAt));
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task InsertVersionAsync(SqliteConnection connection, SqliteTransaction transaction, string id, int version,
-        string sha256, long sizeBytes, string trainingConfig, string? sourceImageSha256, string? note, string? createdBy,
-        DateTimeOffset createdAt, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-INSERT INTO shape_model_versions(asset_id,version,sha256,size_bytes,training_config,source_image_sha256,note,created_at,created_by)
-VALUES($id,$version,$sha,$size,$config,$source,$note,$created,$by);
-""";
-        command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$version", version);
-        command.Parameters.AddWithValue("$sha", sha256);
-        command.Parameters.AddWithValue("$size", sizeBytes);
-        command.Parameters.AddWithValue("$config", trainingConfig);
-        command.Parameters.AddWithValue("$source", (sourceImageSha256 ?? string.Empty).Trim());
-        command.Parameters.AddWithValue("$note", (note ?? string.Empty).Trim());
-        command.Parameters.AddWithValue("$created", Iso(createdAt));
-        command.Parameters.AddWithValue("$by", (createdBy ?? string.Empty).Trim());
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static async Task ExecuteAsync(SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken ct,
-        params (string Name, object Value)[] parameters)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    private static string Iso(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
-
-    private sealed record AssetRow(string Id, string Name, string Description, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int LatestVersion);
 }

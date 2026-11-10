@@ -15,7 +15,7 @@ public sealed class ShapeModelAssetGcTests
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        var store = new ShapeModelAssetStore(db);
+        var store = new ShapeModelAssetStore(new AssetStore(db));
         var workflows = new WorkflowStore(env);
         return (env, db, store, new ShapeModelAssetGc(db, workflows));
     }
@@ -112,7 +112,7 @@ public sealed class ShapeModelAssetGcTests
 
         await using var connection = await db.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM shape_model_blobs;";
+        command.CommandText = "SELECT COUNT(*) FROM asset_blobs;";
         Assert.Equal(2L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 

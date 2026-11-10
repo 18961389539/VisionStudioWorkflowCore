@@ -505,6 +505,33 @@ P1 的第二块：让人能看见资产、改得动元数据、删得安全。**
 - 路由清单 283 → 285；审计 exit 0。
 
 
+## 第七十二轮：通用 blob 资产层 + 类型适配器（P2）（2026-11-10）
+
+三种资产（形状模型 / 模板图 / ONNX 包）各养一套表和一套 GC 是明显的重复。这轮把存储抽成通用层，
+**形状退化为适配器**，对外 API 与行为不变。
+
+| 层 | 变更 |
+| --- | --- |
+| schema v25 | 新增 `assets(kind)` + `asset_versions(metadata_json)` + `asset_blobs(sha256)`；把 v24 的 `shape_model_*` 数据**幂等搬迁**（`INSERT OR IGNORE` + `json_object`）；旧表保留一个版本用于回退 |
+| 通用存储 | `AssetStore`：kind 校验、metadata 必须是 JSON 对象、16 MB 上限、内容寻址去重、版本并发重试、同步读取（latest 解析） |
+| 适配器 | `ShapeModelAssetStore` 只做 `kind="shape"` 与 `trainingConfig/sourceImageSha256 ↔ metadata_json` 的映射；签名、异常文案、16 MB 限制全部保持原样 |
+| GC | 改为扫 `asset_versions`；**并写下前置警告**：候选覆盖所有 kind，但引用扫描目前只认 shape，新增类型必须同步扩展，否则会误回收 |
+| 隔离 | 形状适配器读不到别的 kind：`GetAsync` 返回 null、`AppendVersionAsync` 报 "not 'shape'" |
+
+### 验证
+
+- **回归护栏**：shape 既有 25 项测试（存储 9 / 回收 5 / 包 4 / 清单 4 / 抽取 3）在零改动下全部通过——
+  这是"抽取没有改变行为"的证据。
+- 新增通用层 4 项：kind 隔离、任意 JSON metadata 往返、同步读取解析 latest、非法 kind/metadata 被拒绝。
+- Api **488 项通过**；`static-audit.py` exit 0；`shape` 相关路由与前端无改动。
+
+### 后续接入新 kind 的检查项
+
+1. 适配器（kind + metadata 映射）；
+2. 引用扫描：`ShapeModelAssetGc.Collect` 与 `RuntimeDependencyManifestService` 捕获；
+3. 发布清单的 pin 类型（若要参与生产运行校验）。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

@@ -15,7 +15,7 @@ public sealed class ShapeModelAssetPackageTests
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        var store = new ShapeModelAssetStore(db);
+        var store = new ShapeModelAssetStore(new AssetStore(db));
         return (env, store, new ShapeModelAssetPackageService(store));
     }
 

@@ -360,6 +360,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<StorageBackupService>();
         services.AddSingleton<CalibrationWorkspaceService>();
         services.AddSingleton<CameraIntrinsicAssetStore>();
+        services.AddSingleton<AssetStore>();
         services.AddSingleton<ShapeModelAssetStore>();
         services.AddSingleton<ShapeModelAssetExtraction>();
         services.AddSingleton<ShapeModelAssetGc>();

@@ -24,7 +24,7 @@ public sealed class ShapeModelAssetManifestTests
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        var store = new ShapeModelAssetStore(db);
+        var store = new ShapeModelAssetStore(new AssetStore(db));
         var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("match.shape"), new ShapeMatchNode(), "builtin");
         var cameras = new CameraManager();

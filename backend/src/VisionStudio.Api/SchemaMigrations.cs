@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 24;
+    public const int CurrentVersion = 25;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -60,7 +60,8 @@ public sealed class SqliteSchemaMigrationRunner
             "jobs.requires_validation"),
         new(22, "Versioned camera intrinsic calibration assets", CameraIntrinsicAssetSchemaSql),
         new(23, "Run result records for database persistence", ResultRecordSchemaSql),
-        new(24, "Versioned shape model assets (content-addressed blobs)", ShapeModelAssetSchemaSql)
+        new(24, "Versioned shape model assets (content-addressed blobs)", ShapeModelAssetSchemaSql),
+        new(25, "Generic content-addressed assets (kind + metadata), shape data migrated", GenericAssetSchemaSql)
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -931,6 +932,54 @@ CREATE INDEX IF NOT EXISTS ix_camera_intrinsic_publication_history_asset ON came
     /// 版本行只记哈希与训练元数据；P0 不含发布态（published_version 属 P1）。
     /// 软删除用 deleted_at，保证仍被工作流引用的资产可以保留并给出 409 引用清单。
     /// </summary>
+    /// <summary>
+    /// v25：通用资产表（assets/asset_versions/asset_blobs），并把 v24 的 shape_model_* 数据原样搬迁。
+    /// 搬迁是幂等的（INSERT OR IGNORE）；旧表保留一个版本用于回退，后续迁移再清。
+    /// </summary>
+    private const string GenericAssetSchemaSql = """
+CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    latest_version INTEGER NOT NULL,
+    deleted_at TEXT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_assets_kind_updated ON assets(kind, updated_at DESC);
+CREATE TABLE IF NOT EXISTS asset_versions (
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    metadata_json TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    PRIMARY KEY(asset_id, version),
+    FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_asset_versions_created ON asset_versions(asset_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_asset_versions_sha ON asset_versions(sha256);
+CREATE TABLE IF NOT EXISTS asset_blobs (
+    sha256 TEXT PRIMARY KEY,
+    size_bytes INTEGER NOT NULL,
+    bytes BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO assets(id,kind,name,description,created_at,updated_at,latest_version,deleted_at)
+SELECT id,'shape',name,description,created_at,updated_at,latest_version,deleted_at FROM shape_model_assets;
+INSERT OR IGNORE INTO asset_versions(asset_id,version,sha256,size_bytes,metadata_json,note,created_at,created_by)
+SELECT asset_id,version,sha256,size_bytes,
+       json_object('trainingConfig',training_config,'sourceImageSha256',source_image_sha256),
+       note,created_at,created_by
+FROM shape_model_versions;
+INSERT OR IGNORE INTO asset_blobs(sha256,size_bytes,bytes,created_at)
+SELECT sha256,size_bytes,bytes,created_at FROM shape_model_blobs;
+""";
+
     private const string ShapeModelAssetSchemaSql = """
 CREATE TABLE IF NOT EXISTS shape_model_assets (
     id TEXT PRIMARY KEY,

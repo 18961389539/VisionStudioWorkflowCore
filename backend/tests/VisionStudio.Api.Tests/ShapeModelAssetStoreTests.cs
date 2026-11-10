@@ -16,7 +16,7 @@ public sealed class ShapeModelAssetStoreTests
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        return (env, db, new ShapeModelAssetStore(db));
+        return (env, db, new ShapeModelAssetStore(new AssetStore(db)));
     }
 
     private static string Base64(byte[] bytes) => Convert.ToBase64String(bytes);
@@ -29,20 +29,37 @@ public sealed class ShapeModelAssetStoreTests
     }
 
     [Fact]
-    public async Task SchemaV24_CreatesShapeModelAssetTables()
+    public async Task SchemaV25_CreatesGenericAssetTablesAndKeepsLegacyShapeTables()
     {
         var (env, db, _) = await CreateStoreAsync();
         using var _env = env;
-        Assert.True(db.CurrentSchemaVersion >= 24);
+        Assert.True(db.CurrentSchemaVersion >= 25);
 
         await using var connection = await db.OpenConnectionAsync();
-        foreach (var table in new[] { "shape_model_assets", "shape_model_versions", "shape_model_blobs" })
+        // 新通用表 + 旧 shape 表并存（旧表保留一个版本用于回退）。
+        foreach (var table in new[]
+        {
+            "assets", "asset_versions", "asset_blobs",
+            "shape_model_assets", "shape_model_versions", "shape_model_blobs"
+        })
         {
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$name;";
             command.Parameters.AddWithValue("$name", table);
             Assert.Equal(1L, Convert.ToInt64(await command.ExecuteScalarAsync()));
         }
+
+        // 迁移把既有 shape 资产整条搬到通用表（kind=shape），字节与哈希一致。
+        var store = new ShapeModelAssetStore(new AssetStore(db));
+        var model = Model(41);
+        await store.CreateAsync(new CreateShapeModelAssetRequest("shape-migrated", "M", null, Base64(model), "cfg"), CancellationToken.None);
+        var descriptor = await store.GetAsync("shape-migrated", CancellationToken.None);
+        Assert.NotNull(descriptor);
+        Assert.Equal(model, await store.ReadBytesAsync("shape-migrated", 1, CancellationToken.None));
+
+        await using var kindCommand = connection.CreateCommand();
+        kindCommand.CommandText = "SELECT kind FROM assets WHERE id='shape-migrated';";
+        Assert.Equal("shape", Convert.ToString(await kindCommand.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -100,7 +117,7 @@ public sealed class ShapeModelAssetStoreTests
 
         await using var connection = await db.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM shape_model_blobs;";
+        command.CommandText = "SELECT COUNT(*) FROM asset_blobs;";
         Assert.Equal(1L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
