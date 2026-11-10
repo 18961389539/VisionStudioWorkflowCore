@@ -374,6 +374,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
         var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
         var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
         var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", defaultRefine, "none", "parabolic");
+        var sigma = SubpixelEdgeCore.SigmaParameter(node);
         var roi = ContourNodesHelper.ResolveRoi(context, node);
 
         Mat? mask = null;
@@ -401,7 +402,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
                 SubpixelEdgeCore.EdgeResult SampleAndFind()
                 {
                     profile = SubpixelEdgeCore.SampleProfile(gray, mask, start, end, sampleWidth, out _, out spacing, cancellationToken);
-                    return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, cancellationToken, candidates);
+                    return SubpixelEdgeCore.FindEdge(profile, spacing, polarity, minContrast, direction, refine, sigma, cancellationToken, candidates);
                 }
                 var outputs = new Dictionary<string, VisionValue>
                 {
@@ -446,7 +447,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
 
                 var diag = NodeCompletionGuards.BuildDiagnostics(nodeType, NodeCompletionGuards.DiagnosticsLevel(node), 0, 1,
                     ("found", edge.Found), ("reason", edge.Reason), ("sampleCount", edge.SampleCount),
-                    ("polarity", polarity), ("direction", direction), ("refine", refine),
+                    ("polarity", polarity), ("direction", direction), ("refine", refine), ("sigma", sigma),
                     (contrastParameter, minContrast), ("sampleWidth", sampleWidth),
                     ("lineClampedToImage", clamped), ("roi", roi?.Type.ToString() ?? "FullImage"));
                 outputs["diagnostics"] = VisionValue.String(diag);
@@ -464,6 +465,7 @@ public sealed class CaliperNode : IVisionNodeExecutor
                         ["polarity"] = polarity,
                         ["direction"] = direction,
                         ["refine"] = refine,
+                        ["sigma"] = sigma,
                         [contrastParameter] = minContrast,
                         ["sampleWidth"] = sampleWidth,
                         ["lineClampedToImage"] = clamped,

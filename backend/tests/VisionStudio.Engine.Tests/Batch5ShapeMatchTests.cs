@@ -1086,6 +1086,60 @@ public sealed class Batch5ShapeMatchTests
     // ================= 素材与辅助 =================
 
     /// <summary>不对称 L 形模板（120×120，亮 255）：竖臂 + 横臂相连，质心偏左下。</summary>
+    [Fact]
+    public async Task ShapeMatch_GreedinessAndMaxOverlap_DefaultToLegacyValues()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(250, 180, 25))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var result = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"minScore":0.5,"angleRangeDeg":180,"angleStepDeg":1,"minArea":300}""");
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]), SummaryText(result));
+        Assert.Equal(0.8, Convert.ToDouble(result.Summary["greediness"]));
+        Assert.Equal(0.5, Convert.ToDouble(result.Summary["maxOverlap"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Fact]
+    public async Task ShapeMatch_ExplicitGreedinessAndMaxOverlap_StillRecoversPose()
+    {
+        using var template = BuildTemplate();
+        using var scene = new Mat(400, 400, MatType.CV_8UC1, Scalar.All(0));
+        using (var matrix = PasteMatrix(250, 180, 25))
+            Cv2.WarpAffine(template, scene, matrix, scene.Size(), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+
+        var result = await Run(new ShapeMatchNode(),
+            new Dictionary<string, VisionValue> { ["image"] = Image(scene), ["template"] = Image(template) },
+            """{"minScore":0.5,"angleRangeDeg":180,"angleStepDeg":1,"minArea":300,"greediness":0,"maxOverlap":0}""");
+
+        Assert.True(Convert.ToBoolean(result.Summary["found"]), SummaryText(result));
+        Assert.Equal(0d, Convert.ToDouble(result.Summary["greediness"]));
+        Assert.Equal(0d, Convert.ToDouble(result.Summary["maxOverlap"]));
+        Assert.InRange(result.Outputs["angle"].Require<double>("angle"), 23, 27);
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Theory]
+    [InlineData("\"greediness\":1.5", "greediness")]
+    [InlineData("\"greediness\":-0.1", "greediness")]
+    [InlineData("\"maxOverlap\":1.01", "maxOverlap")]
+    [InlineData("\"maxOverlap\":-0.5", "maxOverlap")]
+    public async Task ShapeMatch_RejectsOutOfRangeSearchTuning(string parameterJson, string parameter)
+    {
+        using var scene = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await Run(new ShapeMatchNode(),
+                new Dictionary<string, VisionValue> { ["image"] = Image(scene) },
+                "{" + parameterJson + "}"));
+
+        Assert.Contains(parameter, error.Message);
+    }
+
     private static Mat BuildTemplate()
     {
         var template = new Mat(120, 120, MatType.CV_8UC1, Scalar.All(0));

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "581ca3aebfddf4c5227bf28476b54dd2affe6bf6d2142c194e1b2b5405d6abd7",
+  "hash": "7a67866904715dc137c74752ef52aedeb11b2317c833b0130bcb123437a7c4e6",
   "items": [
     {
       "type": "image.acquire",
@@ -13922,6 +13922,18 @@
           "advanced": true
         },
         {
+          "name": "sigma",
+          "label": "Sigma",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.4,
+          "max": 100,
+          "step": 0.1,
+          "group": "Sampling",
+          "description": "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior.",
+          "advanced": true
+        },
+        {
           "name": "roi",
           "label": "ROI",
           "type": "roi",
@@ -23513,6 +23525,44 @@
           "advanced": true
         },
         {
+          "name": "greediness",
+          "label": "Greediness",
+          "type": "number",
+          "defaultValue": 0.8,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Matching",
+          "description": "Native search greediness: 0 evaluates every pyramid candidate completely (safest, slowest); 1 prunes candidates aggressively (fastest, may miss weak matches). The default 0.8 preserves previous behavior.",
+          "visibleWhen": {
+            "parameter": "engine",
+            "values": [
+              "native",
+              "auto"
+            ]
+          },
+          "advanced": true
+        },
+        {
+          "name": "maxOverlap",
+          "label": "Max Overlap",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "group": "Matching",
+          "description": "Maximum overlap fraction allowed between accepted matches: a worse match overlapping a better one by more than this fraction is suppressed. 0 keeps only the best match per object. The default 0.5 preserves previous behavior.",
+          "visibleWhen": {
+            "parameter": "engine",
+            "values": [
+              "native",
+              "auto"
+            ]
+          },
+          "advanced": true
+        },
+        {
           "name": "runtimeContrastThreshold",
           "label": "Runtime Contrast Threshold",
           "type": "number",
@@ -26116,6 +26166,18 @@
           "advanced": true
         },
         {
+          "name": "sigma",
+          "label": "Sigma",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.4,
+          "max": 100,
+          "step": 0.1,
+          "group": "Sampling",
+          "description": "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior.",
+          "advanced": true
+        },
+        {
           "name": "maxRadiusDeviation",
           "label": "Max Radius Deviation (0=off)",
           "type": "number",
@@ -26450,6 +26512,18 @@
           "advanced": true
         },
         {
+          "name": "sigma",
+          "label": "Sigma",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.4,
+          "max": 100,
+          "step": 0.1,
+          "group": "Sampling",
+          "description": "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior.",
+          "advanced": true
+        },
+        {
           "name": "diagnosticsLevel",
           "label": "Diagnostics Level",
           "type": "select",
@@ -26738,6 +26812,18 @@
           ],
           "group": "Sampling",
           "description": "Parabolic interpolation around the strongest profile sample for subpixel edge position, or whole-pixel only.",
+          "advanced": true
+        },
+        {
+          "name": "sigma",
+          "label": "Sigma",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 0.4,
+          "max": 100,
+          "step": 0.1,
+          "group": "Sampling",
+          "description": "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior.",
           "advanced": true
         },
         {

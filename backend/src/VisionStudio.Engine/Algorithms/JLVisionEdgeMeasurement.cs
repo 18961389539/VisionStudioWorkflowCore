@@ -9,7 +9,7 @@ internal static class JLVisionEdgeMeasurement
     private const int MinimumNativeSegmentLength = 8;
 
     public static Edge Find(double[] profile, double spacing, string polarity, double threshold, string direction, string refine,
-        CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
+        double sigma, CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var candidates = new List<(double Position, double Amplitude)>();
@@ -62,7 +62,7 @@ internal static class JLVisionEdgeMeasurement
                 using var measure = new JlMeasure();
                 measure.GenMeasureRectangle2(1d, (length - 1) / 2d, 0d, (length - 1) / 2d, 1d, length, 3, "bilinear");
                 cancellationToken.ThrowIfCancellationRequested();
-                measure.MeasurePos(image, 1d, Math.Max(threshold, .0001), polarity.ToLowerInvariant() switch { "rising" => "positive", "falling" => "negative", _ => "all" }, "all", out var rows, out var columns, out var amplitude, out var distance);
+                measure.MeasurePos(image, sigma, Math.Max(threshold, .0001), polarity.ToLowerInvariant() switch { "rising" => "positive", "falling" => "negative", _ => "all" }, "all", out var rows, out var columns, out var amplitude, out var distance);
                 using (rows) using (columns) using (amplitude) using (distance)
                 {
                     cancellationToken.ThrowIfCancellationRequested();

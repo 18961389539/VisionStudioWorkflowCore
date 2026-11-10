@@ -543,6 +543,7 @@ public static class BuiltInNodeCatalog
                     new("Parabolic (subpixel)", "parabolic"),
                     new("No parabolic refinement", "none")
                 ], Group: "Sampling", Description: "Enable subpixel refinement of the edge location."),
+                new("sigma", "Sigma", "number", 1, 0.4, 100, 0.1, Group: "Sampling", Description: "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior."),
                 new("diagnosticsLevel", "Diagnostics Level", "select", "standard", Options: [new("Minimal", "minimal"), new("Standard", "standard"), new("Verbose", "verbose")], Description: "Diagnostic detail level.")
             ],
             "Single-caliper grayscale edge location along a configurable search line. Measurements use 8-bit grayscale; UInt16 input is scaled linearly from its full range to 0..255. Select edge polarity and search order, refine to subpixel, and optionally mask with ROI. No qualified edge returns found=false. Optional rigid px-to-px transform maps reference searchLine/endpoint parameters and sampling direction into the current image.",

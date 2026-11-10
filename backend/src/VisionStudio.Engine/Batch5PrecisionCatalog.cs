@@ -208,7 +208,8 @@ public static class Batch5PrecisionCatalog
                 [
                     new("Parabolic (subpixel)", "parabolic"),
                     new("No parabolic refinement", "none")
-                ], Group: "Sampling", Description: "Enable subpixel refinement of the edge location.")
+                ], Group: "Sampling", Description: "Enable subpixel refinement of the edge location."),
+                new("sigma", "Sigma", "number", 1, 0.4, 100, 0.1, Group: "Sampling", Description: "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior.")
             ,
 
                 ],
@@ -263,6 +264,7 @@ public static class Batch5PrecisionCatalog
                     new("Parabolic (subpixel)", "parabolic"),
                     new("No parabolic refinement", "none")
                 ], Group: "Sampling", Description: "Parabolic interpolation around the strongest profile sample for subpixel edge position, or whole-pixel only."),
+                new("sigma", "Sigma", "number", 1, 0.4, 100, 0.1, Group: "Sampling", Description: "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior."),
                 new("edgeLength", "Caliper Span (0=auto)", "number", 0, 0, 10000, 1, Unit: "px", Group: "Sampling", Description: "Spread of parallel profiles along the expected edge; zero uses the search-line length."),
                 new("caliperCount", "Caliper Count", "number", 9, 3, 101, 1, Group: "Sampling", Description: "Number of parallel search profiles along the edge span."),
                 new("minValidCalipers", "Minimum Valid Calipers", "number", 3, 3, 101, 1, Group: "Fit",
@@ -338,6 +340,7 @@ public static class Batch5PrecisionCatalog
                 ], Group: "Sampling", Description: "Which edge along the radial band is retained for the fit."),
                 new("sampleWidth", "Projection Length", "number", 3, 1, 99, 2, Unit: "px", Group: "Sampling",
                     Description: "The projection width must be odd; even values are rounded up to the next odd value (for example, 4 becomes 5). Length is averaged along the circle tangent; larger values smooth local noise but may merge nearby edges."),
+                new("sigma", "Sigma", "number", 1, 0.4, 100, 0.1, Group: "Sampling", Description: "Gaussian smoothing sigma of the native 1D edge filter. Larger values suppress noise but can blur closely spaced edges; profiles shorter than 8 samples use a managed gradient fallback that ignores sigma. The default 1 preserves previous behavior."),
                 new("maxRadiusDeviation", "Max Radius Deviation (0=off)", "number", 0, 0, 5000, 1, Unit: "px", Group: "Sampling",
                     Description: "Reject each spoke before fitting when its edge radius is farther than this from the nominal radius."),
                 new("minValidCalipers", "Minimum Valid Calipers", "number", 3, 3, 361, 1, Group: "Fit",
@@ -494,6 +497,8 @@ public static class Batch5PrecisionCatalog
                 new("maxDeformationPx", "Maximum Local Deformation", "number", 0, 0, 32, 1, Unit: "px", Group: "Matching", Description: "Allow each model point to move locally by up to this many pixels during pose refinement. Uses least-squares adjustment and does not require retraining; 0 disables deformation tolerance."),
                 new("maxClutterScore", "Maximum Clutter Score", "number", 0.2, 0, 1, 0.01, Group: "Matching", Description: "When a Clutter ROI is trained, reject candidates whose clutter-region edge score exceeds this value."),
                 new("scoreUsingClutter", "Score Using Clutter", "boolean", false, Group: "Matching", Description: "When a Clutter ROI is trained, multiply the native match score by (1 - clutter score). The unadjusted score is also available as nativeScore."),
+                new("greediness", "Greediness", "number", 0.8, 0, 1, 0.05, Group: "Matching", VisibleWhen: new("engine", ["native", "auto"]), Description: "Native search greediness: 0 evaluates every pyramid candidate completely (safest, slowest); 1 prunes candidates aggressively (fastest, may miss weak matches). The default 0.8 preserves previous behavior."),
+                new("maxOverlap", "Max Overlap", "number", 0.5, 0, 1, 0.05, Group: "Matching", VisibleWhen: new("engine", ["native", "auto"]), Description: "Maximum overlap fraction allowed between accepted matches: a worse match overlapping a better one by more than this fraction is suppressed. 0 keeps only the best match per object. The default 0.5 preserves previous behavior."),
                 new("runtimeContrastThreshold", "Runtime Contrast Threshold", "number", 0, 0, 255, 1, Group: "Matching", Description: "Minimum average gradient strength (0–255) at matched model features. Zero disables this run-time filter; it does not require retraining."),
                 new("contrastFractionThreshold", "Contrast Fraction Threshold", "number", 0, 0, 1, 0.01, Group: "Matching", Description: "Minimum run-time feature contrast divided by the trained-image feature contrast, capped at 1. Zero disables this check; it needs the lossless original training image."),
                 new("maxTargets", "Max Targets", "number", 5, 1, 100, 1, Group: "Multi-target", Description: "Accepted matches per run. Template Match defaults the same key to 1 (single result), so a switched-in shape node returns up to 5 unless this is set explicitly."),

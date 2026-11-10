@@ -144,6 +144,12 @@ public sealed class ShapeMatchNode : IVisionNodeExecutor
         var maxClutter = node.GetDouble("maxClutterScore", 0.2);
         if (!double.IsFinite(maxClutter) || maxClutter is < 0 or > 1)
             throw new InvalidOperationException("maxClutterScore must be finite in [0,1].");
+        var greediness = node.GetDouble("greediness", 0.8);
+        if (!double.IsFinite(greediness) || greediness is < 0 or > 1)
+            throw new InvalidOperationException("greediness must be finite in [0,1].");
+        var maxOverlap = node.GetDouble("maxOverlap", 0.5);
+        if (!double.IsFinite(maxOverlap) || maxOverlap is < 0 or > 1)
+            throw new InvalidOperationException("maxOverlap must be finite in [0,1].");
         Math.Clamp(node.GetDouble("chamferPolarityCosine", 0), -1, 1);
         Math.Clamp(node.GetDouble("scaleTolerancePercent", 0), 0, 50);
         Math.Clamp(node.GetDouble("scaleToleranceXPercent", 0), 0, 50);

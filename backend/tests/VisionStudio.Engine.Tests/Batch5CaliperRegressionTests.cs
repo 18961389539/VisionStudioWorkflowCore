@@ -1180,6 +1180,82 @@ public sealed class Batch5CaliperRegressionTests
         (result.Outputs["image"].Value as IDisposable)?.Dispose();
     }
 
+    [Theory]
+    [InlineData("feature.edgeSubpixel", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"minContrast":30}""")]
+    [InlineData("measure.caliper", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"edgeThreshold":30}""")]
+    [InlineData("measure.caliperLine", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"minContrast":30,"caliperCount":5}""")]
+    [InlineData("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":0,"angleEndDeg":180,"caliperCount":9,"radialBand":6,"minContrast":30}""")]
+    public async Task CaliperNodes_SigmaDefaultsToOne(string type, string parameters)
+    {
+        using var image = VisionImage.Own(MakeEdgeImage(0));
+        IVisionNodeExecutor executor = type switch
+        {
+            "feature.edgeSubpixel" => new EdgeSubpixelNode(),
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+
+        var result = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(image)), Node(type, parameters), CancellationToken.None);
+
+        Assert.Equal(1d, Convert.ToDouble(result.Summary["sigma"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Theory]
+    [InlineData("feature.edgeSubpixel", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"minContrast":30,"sigma":2.5}""")]
+    [InlineData("measure.caliper", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"edgeThreshold":30,"sigma":2.5}""")]
+    [InlineData("measure.caliperLine", """{"startX":28,"startY":64,"endX":98,"endY":64,"sampleWidth":1,"minContrast":30,"caliperCount":5,"sigma":2.5}""")]
+    [InlineData("measure.caliperCircle", """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":0,"angleEndDeg":180,"caliperCount":9,"radialBand":6,"minContrast":30,"sigma":2.5}""")]
+    public async Task CaliperNodes_ExplicitSigmaIsReportedAndMeasures(string type, string parameters)
+    {
+        using var image = VisionImage.Own(MakeEdgeImage(0));
+        IVisionNodeExecutor executor = type switch
+        {
+            "feature.edgeSubpixel" => new EdgeSubpixelNode(),
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+
+        var result = await executor.ExecuteAsync(new NodeExecutionContext(Inputs(image)), Node(type, parameters), CancellationToken.None);
+
+        Assert.Equal(2.5, Convert.ToDouble(result.Summary["sigma"]));
+        if (type is "measure.caliper" or "feature.edgeSubpixel")
+            Assert.True(result.Outputs["found"].Require<bool>("found"), Convert.ToString(result.Summary["reason"]));
+        (result.Outputs["image"].Value as IDisposable)?.Dispose();
+    }
+
+    [Theory]
+    [InlineData("feature.edgeSubpixel", 0.3)]
+    [InlineData("feature.edgeSubpixel", 100.5)]
+    [InlineData("measure.caliper", 0.3)]
+    [InlineData("measure.caliper", 100.5)]
+    [InlineData("measure.caliperLine", 0.3)]
+    [InlineData("measure.caliperLine", 100.5)]
+    [InlineData("measure.caliperCircle", 0.3)]
+    [InlineData("measure.caliperCircle", 100.5)]
+    public async Task CaliperNodes_RejectOutOfRangeSigma(string type, double sigma)
+    {
+        using var image = VisionImage.Own(new Mat(128, 128, MatType.CV_8UC1, Scalar.All(80)));
+        IVisionNodeExecutor executor = type switch
+        {
+            "feature.edgeSubpixel" => new EdgeSubpixelNode(),
+            "measure.caliper" => new CaliperNode(),
+            "measure.caliperLine" => new CaliperLineNode(),
+            _ => new CaliperCircleNode()
+        };
+        var baseParameters = type == "measure.caliperCircle"
+            ? """{"centerX":64,"centerY":64,"radius":30,"angleStartDeg":0,"angleEndDeg":180"""
+            : """{"startX":28,"startY":64,"endX":98,"endY":64""";
+        var parameters = baseParameters + ",\"sigma\":" + sigma.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(
+            new NodeExecutionContext(Inputs(image)), Node(type, parameters), CancellationToken.None).AsTask());
+
+        Assert.Contains("sigma", error.Message);
+    }
+
     private static Mat MakeEdgeImage(double slope)
     {
         var image = new Mat(128, 128, MatType.CV_8UC1);

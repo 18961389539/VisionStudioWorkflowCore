@@ -126,11 +126,19 @@ internal static class SubpixelEdgeCore
     }
 
     public static EdgeResult FindEdge(double[] profile, double spacing, string polarity, double minContrast, string direction, string refine,
-        CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
+        double sigma, CancellationToken cancellationToken = default, List<CaliperEdgeCandidate>? diagnosticCandidates = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine, cancellationToken, diagnosticCandidates);
+        var edge = JLVisionEdgeMeasurement.Find(profile, spacing, polarity, minContrast, direction, refine, sigma, cancellationToken, diagnosticCandidates);
         return new(edge.Found, edge.Position, edge.Strength, edge.Error, edge.Count, edge.Reason);
+    }
+
+    public static double SigmaParameter(NodeDefinition node)
+    {
+        var sigma = RequireFiniteParameter(node, "sigma", 1);
+        if (sigma is < 0.4 or > 100)
+            throw new InvalidOperationException("Parameter 'sigma' must be between 0.4 and 100.");
+        return sigma;
     }
 
     public static double RequireFiniteParameter(NodeDefinition node, string name, double fallback)
@@ -261,6 +269,7 @@ var sourceImage = context.RequireImage("image");
         var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
         var direction = SubpixelEdgeCore.ChoiceParameter(node, "direction", "strongest", "strongest", "firstfromstart", "firstfromend");
         var refine = SubpixelEdgeCore.ChoiceParameter(node, "refine", "parabolic", "parabolic", "none");
+        var sigma = SubpixelEdgeCore.SigmaParameter(node);
         var edgeLength = Math.Clamp(SubpixelEdgeCore.RequireFiniteParameter(node, "edgeLength", 0), 0, 10000);
         var caliperCount = SubpixelEdgeCore.ClampedIntParameter(node, "caliperCount", 9, 3, 101);
         var minValidCalipers = SubpixelEdgeCore.ClampedIntParameter(node, "minValidCalipers", 3, 3, 101);
@@ -316,7 +325,7 @@ var sourceImage = context.RequireImage("image");
                         X: profileStart.X, Y: profileStart.Y, X2: profileEnd.X, Y2: profileEnd.Y,
                         Stroke: "#91d5ff", StrokeWidth: 0.8));
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var lineSpacing, cancellationToken);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine, cancellationToken);
+                    var edge = SubpixelEdgeCore.FindEdge(profile, lineSpacing, polarity, minContrast, direction, refine, sigma, cancellationToken);
                     if (!edge.Found)
                     {
                         failures++;
@@ -412,6 +421,7 @@ var sourceImage = context.RequireImage("image");
                         ["polarity"] = polarity,
                         ["direction"] = direction,
                         ["refine"] = refine,
+                        ["sigma"] = sigma,
                         ["lineClampedToImage"] = baseClamped || anyProfileClipped,
                         ["profilesIntersectingImage"] = caliperCount - outsideImage,
                         ["profilesOutsideImage"] = outsideImage,
@@ -559,6 +569,7 @@ var sourceImage = context.RequireImage("image");
         var polarity = SubpixelEdgeCore.ChoiceParameter(node, "polarity", "any", "any", "rising", "falling");
         var searchDirection = SubpixelEdgeCore.ChoiceParameter(node, "searchDirection", "strongest", "strongest", "firstfromstart", "firstfromend");
         var sampleWidth = SubpixelEdgeCore.NormalizeSampleWidth(SubpixelEdgeCore.ClampedIntParameter(node, "sampleWidth", 3, 1, 99));
+        var sigma = SubpixelEdgeCore.SigmaParameter(node);
         var maxDeviation = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "maxRadiusDeviation", 0));
         var maxFitOutliers = SubpixelEdgeCore.ClampedIntParameter(node, "maxFitOutliers", 0, 0, 16);
         var fitOutlierThreshold = Math.Max(0, SubpixelEdgeCore.RequireFiniteParameter(node, "fitOutlierThreshold", 2));
@@ -622,7 +633,7 @@ var sourceImage = context.RequireImage("image");
                     if (MeasurementMath.Hypot(profileEnd.X - profileStart.X, profileEnd.Y - profileStart.Y) < 2)
                     { rejected++; spokesTooShortAfterClip++; continue; }
                     var profile = SubpixelEdgeCore.SampleProfile(gray, mask, profileStart, profileEnd, sampleWidth, out _, out var spokeSpacing, cancellationToken);
-                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic", cancellationToken,
+                    var edge = SubpixelEdgeCore.FindEdge(profile, spokeSpacing, polarity, minContrast, searchDirection, "parabolic", sigma, cancellationToken,
                         diagnostic?.Candidates);
                     if (diagnostic is not null)
                     {
@@ -743,6 +754,7 @@ var sourceImage = context.RequireImage("image");
                     ["polarity"] = polarity,
                     ["searchDirection"] = searchDirection,
                     ["refine"] = "parabolic",
+                    ["sigma"] = sigma,
                     ["autoGray"] = autoGray,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage"
                 };

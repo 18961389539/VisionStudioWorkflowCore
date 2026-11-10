@@ -331,6 +331,8 @@ internal static class JLVisionMatching
             var scoreMapStackMaxPlanes = !shape ? Math.Clamp(node.GetInt("scoreMapStackMaxPlanes", 9), 1, 17) : 1;
             var maxClutterScore = Math.Clamp(node.GetDouble("maxClutterScore", .2), 0, 1);
             var maxDeformationPx = shape ? Math.Clamp(node.GetInt("maxDeformationPx", 0), 0, 32) : 0;
+            var greediness = shape ? Math.Clamp(node.GetDouble("greediness", .8), 0, 1) : .8;
+            var maxOverlap = shape ? Math.Clamp(node.GetDouble("maxOverlap", .5), 0, 1) : .5;
             var scoreUsingClutter = shape && node.GetBool("scoreUsingClutter", false);
             if (scoreUsingClutter && !clutterEnabled)
                 throw new InvalidOperationException("Score Using Clutter requires a trained Clutter ROI.");
@@ -397,6 +399,8 @@ internal static class JLVisionMatching
                 summary["contrastFractionThreshold"] = contrastFractionThreshold;
                 summary["contrastCheckEnabled"] = contrastEnabled;
                 summary["maxDeformationPx"] = maxDeformationPx;
+                summary["greediness"] = greediness;
+                summary["maxOverlap"] = maxOverlap;
                 summary["searchAngleStartDeg"] = searchStart * 180 / Math.PI;
                 summary["searchAngleEndDeg"] = searchEnd * 180 / Math.PI;
                 summary["searchScaleMinPercent"] = searchScaleMin * 100;
@@ -531,11 +535,11 @@ internal static class JLVisionMatching
                         if (maxDeformationPx > 0)
                             FindAnisoShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
                                 searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax, minScore, maxClutterScore,
-                                searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness,
                                 out rows, out cols, out angles, out scalesY, out scalesX, out scores);
                         else model.FindAnisoShapeModel(matchingScene, searchStart, searchEnd - searchStart,
                                 searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax,
-                                minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8,
+                                minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness,
                                 out rows, out cols, out angles, out scalesY, out scalesX, out scores);
                     }
                     else if (scaleTolerance > 0)
@@ -543,18 +547,18 @@ internal static class JLVisionMatching
                         if (maxDeformationPx > 0)
                             FindScaledShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
                                 searchScaleMin, searchScaleMax, minScore, maxClutterScore, searchMatchLimit,
-                                shapePyramidLevels, maxDeformationPx, clutterEnabled, out rows, out cols,
+                                shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness, out rows, out cols,
                                 out angles, out scalesX, out scores);
-                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness, out rows, out cols, out angles, out scalesX, out scores);
                         scalesY = new JlTuple(scalesX);
                     }
                     else
                     {
                         if (maxDeformationPx > 0)
                             FindShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart, minScore,
-                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness,
                                 out rows, out cols, out angles, out scores);
-                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scores);
+                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness, out rows, out cols, out angles, out scores);
                         scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
                         scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
                     }
@@ -678,11 +682,11 @@ internal static class JLVisionMatching
                         if (clutterEnabled || maxDeformationPx > 0)
                             FindAnisoShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
                                 searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax, minScore,
-                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness,
                                 out rows, out cols, out angles, out scalesY, out scalesX, out scores);
                         else model.FindAnisoShapeModel(matchingScene, searchStart, searchEnd - searchStart,
                             searchScaleYMin, searchScaleYMax, searchScaleXMin, searchScaleXMax,
-                            minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8,
+                            minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness,
                             out rows, out cols, out angles, out scalesY, out scalesX, out scores);
                     }
                     else if (scaleTolerance > 0)
@@ -690,18 +694,18 @@ internal static class JLVisionMatching
                         if (clutterEnabled || maxDeformationPx > 0)
                             FindScaledShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart,
                                 searchScaleMin, searchScaleMax, minScore, maxClutterScore, searchMatchLimit,
-                                shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness,
                                 out rows, out cols, out angles, out scalesX, out scores);
-                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scalesX, out scores);
+                        else model.FindScaledShapeModel(matchingScene, searchStart, searchEnd - searchStart, searchScaleMin, searchScaleMax, minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness, out rows, out cols, out angles, out scalesX, out scores);
                         scalesY = new JlTuple(Enumerable.Range(0, scalesX.Length).Select(index => scalesX[index].D).ToArray());
                     }
                     else
                     {
                         if (clutterEnabled || maxDeformationPx > 0)
                             FindShapeWithOptions(matchingScene, model, searchStart, searchEnd - searchStart, minScore,
-                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled,
+                                maxClutterScore, searchMatchLimit, shapePyramidLevels, maxDeformationPx, clutterEnabled, maxOverlap, greediness,
                                 out rows, out cols, out angles, out scores);
-                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, .5, "least_squares", shapePyramidLevels, .8, out rows, out cols, out angles, out scores);
+                        else matchingScene.FindShapeModel(model, searchStart, searchEnd - searchStart, minScore, searchMatchLimit, maxOverlap, "least_squares", shapePyramidLevels, greediness, out rows, out cols, out angles, out scores);
                         scalesX = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
                         scalesY = new JlTuple(Enumerable.Repeat(1d, scores.Length).ToArray());
                     }
@@ -1119,7 +1123,7 @@ internal static class JLVisionMatching
 
     private static void FindShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
         double minScore, double maxClutterScore, int numMatches, int numLevels, int maxDeformationPx, bool clutterEnabled,
-        out JlTuple rows, out JlTuple columns, out JlTuple angles, out JlTuple scores)
+        double maxOverlap, double greediness, out JlTuple rows, out JlTuple columns, out JlTuple angles, out JlTuple scores)
     {
         using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
         using var subPixel = CreateShapeSearchSubPixel(maxDeformationPx, clutterEnabled);
@@ -1128,15 +1132,15 @@ internal static class JLVisionMatching
         using var start = new JlTuple(angleStart);
         using var extent = new JlTuple(angleExtent);
         using var matches = new JlTuple(numMatches);
-        using var overlap = new JlTuple(.5);
-        using var greediness = new JlTuple(.8);
+        using var overlap = new JlTuple(maxOverlap);
+        using var searchGreediness = new JlTuple(greediness);
         JlOperatorSet.FindShapeModel(image, modelId, start, extent, minimumScores, matches, overlap, subPixel,
-            levels, greediness, out rows, out columns, out angles, out scores);
+            levels, searchGreediness, out rows, out columns, out angles, out scores);
     }
 
     private static void FindScaledShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
         double scaleMin, double scaleMax, double minScore, double maxClutterScore, int numMatches, int numLevels,
-        int maxDeformationPx, bool clutterEnabled, out JlTuple rows, out JlTuple columns, out JlTuple angles,
+        int maxDeformationPx, bool clutterEnabled, double maxOverlap, double greediness, out JlTuple rows, out JlTuple columns, out JlTuple angles,
         out JlTuple scales, out JlTuple scores)
     {
         using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
@@ -1148,15 +1152,15 @@ internal static class JLVisionMatching
         using var minimumScale = new JlTuple(scaleMin);
         using var maximumScale = new JlTuple(scaleMax);
         using var matches = new JlTuple(numMatches);
-        using var overlap = new JlTuple(.5);
-        using var greediness = new JlTuple(.8);
+        using var overlap = new JlTuple(maxOverlap);
+        using var searchGreediness = new JlTuple(greediness);
         JlOperatorSet.FindScaledShapeModel(image, modelId, start, extent, minimumScale, maximumScale, minimumScores,
-            matches, overlap, subPixel, levels, greediness, out rows, out columns, out angles, out scales, out scores);
+            matches, overlap, subPixel, levels, searchGreediness, out rows, out columns, out angles, out scales, out scores);
     }
 
     private static void FindAnisoShapeWithOptions(JlImage image, JlShapeModel model, double angleStart, double angleExtent,
         double scaleYMin, double scaleYMax, double scaleXMin, double scaleXMax, double minScore, double maxClutterScore,
-        int numMatches, int numLevels, int maxDeformationPx, bool clutterEnabled, out JlTuple rows,
+        int numMatches, int numLevels, int maxDeformationPx, bool clutterEnabled, double maxOverlap, double greediness, out JlTuple rows,
         out JlTuple columns, out JlTuple angles, out JlTuple scaleY, out JlTuple scaleX, out JlTuple scores)
     {
         using var minimumScores = CreateShapeSearchMinScore(minScore, maxClutterScore, clutterEnabled);
@@ -1170,10 +1174,10 @@ internal static class JLVisionMatching
         using var xMin = new JlTuple(scaleXMin);
         using var xMax = new JlTuple(scaleXMax);
         using var matches = new JlTuple(numMatches);
-        using var overlap = new JlTuple(.5);
-        using var greediness = new JlTuple(.8);
+        using var overlap = new JlTuple(maxOverlap);
+        using var searchGreediness = new JlTuple(greediness);
         JlOperatorSet.FindAnisoShapeModel(image, modelId, start, extent, yMin, yMax, xMin, xMax, minimumScores,
-            matches, overlap, subPixel, levels, greediness, out rows, out columns, out angles, out scaleY, out scaleX, out scores);
+            matches, overlap, subPixel, levels, searchGreediness, out rows, out columns, out angles, out scaleY, out scaleX, out scores);
     }
 
     private static ShapeModelSetEnvelope? DeserializeShapeModelSet(string savedModel)
