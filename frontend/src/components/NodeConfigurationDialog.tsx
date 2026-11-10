@@ -21,6 +21,7 @@ import SwitchCaseEditor from './SwitchCaseEditor';
 import { runImageEntryForPort, runImagePortLabel, useRunImages } from '../useRunImages';
 import { cloneParameters, configurationIssues, configurationParameters, cropRoiOutsideImageIssue, measurementRoiOutsideImageIssue, parameterFingerprint, stripInlineModelWhenAssetBound, withParameter, type NodeParameters } from '../nodeConfigurationState';
 import { appendShapeModelVersion, createShapeModelAsset, fetchShapeModelBase64 } from '../modelAssets';
+import TemplateAssetPicker from './TemplateAssetPicker';
 import { capturedReference, imageFrameFingerprint, poseSourceFingerprint } from '../roiReference';
 import { withSwitchPorts } from '../switchPorts';
 import { maturityLabel, maturityLevel, maturityTitle } from '../nodeMaturity';
@@ -1551,6 +1552,11 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         </div>
       </div>}>
       {externalChange && <Alert type="warning" showIcon title="流程中的节点参数已更新，请关闭后重新打开，避免覆盖其他修改。" />}
+      {catalogItem.type === 'match.template' && <TemplateAssetPicker
+        assetId={typeof draft.templateAssetId === 'string' ? draft.templateAssetId.trim() : ''}
+        version={Number(draft.templateAssetVersion ?? 0)}
+        disabled={locked}
+        onChange={(assetId, version) => setDraft((previous) => ({ ...previous, templateAssetId: assetId, templateAssetVersion: version }))} />}
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
         { key: 'workspace', label: '配置', forceRender: true, children: <>
           {isShapeMatch

@@ -1217,3 +1217,6 @@ body.resizing-x, body.resizing-y { user-select: none; }
 /* P0 M3：形状训练工作区的模型资产入口 */
 .shape-asset-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shape-asset-hint { color: #8c8c8c; font-size: 12px; }
+
+/* P2：match.template 的模板资产选择器 */
+.template-asset-picker { margin-bottom: 8px; }

@@ -316,6 +316,15 @@ export const modules = {
   extract: apiUrl('modules/extract')
 } as const;
 
+// ── template assets (P2) ─────────────────────────────────────────────────────
+export const templateAssets = {
+  list: apiUrl('template-assets'),
+  create: apiUrl('template-assets'),
+  byId: (id: string) => apiUrl(`template-assets/${encodeURIComponent(id)}`),
+  versions: (id: string) => apiUrl(`template-assets/${encodeURIComponent(id)}/versions`),
+  blob: (id: string, version: number) => apiUrl(`template-assets/${encodeURIComponent(id)}/versions/${version}/blob`)
+} as const;
+
 // ── model assets (P0) ────────────────────────────────────────────────────────
 export const modelAssets = {
   list: apiUrl('model-assets'),
