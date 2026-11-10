@@ -4,6 +4,10 @@ using VisionStudio.Api.Security;
 
 namespace VisionStudio.Api.Endpoints;
 
+public sealed record UpdateShapeModelAssetRequest(string? Name = null, string? Description = null);
+
+public sealed record ShapeModelAssetReference(string WorkflowId, string NodeId);
+
 public sealed record ExtractShapeModelAssetRequest(
     string WorkflowId,
     string NodeId,
@@ -58,12 +62,25 @@ public static class ModelAssetEndpoints
                 : Results.File(bytes, "application/octet-stream", $"{id}-v{version}.model");
         });
 
+        app.MapPatch("/api/model-assets/{id}", async (string id, UpdateShapeModelAssetRequest request, ShapeModelAssetStore store, CancellationToken ct) =>
+        {
+            var updated = await store.UpdateAsync(id, request.Name, request.Description, ct);
+            return updated is null ? Results.NotFound() : Results.Ok(updated);
+        }).RequireEngineer("model-asset.update", "model-assets");
+
+        app.MapGet("/api/model-assets/{id}/references", async (string id, ShapeModelAssetStore store, WorkflowStore workflows, CancellationToken ct) =>
+        {
+            if (await store.GetAsync(id, ct) is null) return Results.NotFound();
+            return Results.Ok(await FindReferencesAsync(id, workflows, ct));
+        });
+
         app.MapDelete("/api/model-assets/{id}", async (string id, ShapeModelAssetStore store, WorkflowStore workflows, CancellationToken ct) =>
         {
             var references = await FindReferencesAsync(id, workflows, ct);
             if (references.Count > 0)
                 throw new ApiConflictException(
-                    $"Shape model asset '{id}' is referenced by {references.Count} workflow node(s): {string.Join(", ", references.Take(8))}. " +
+                    $"Shape model asset '{id}' is referenced by {references.Count} workflow node(s): " +
+                    $"{string.Join(", ", references.Take(8).Select(x => $"{x.WorkflowId}/{x.NodeId}"))}. " +
                     "Repoint or clear those nodes before deleting the asset.");
             return await store.DeleteAsync(id, ct) ? Results.NoContent() : Results.NotFound();
         }).RequireEngineer("model-asset.delete", "model-assets");
@@ -83,9 +100,10 @@ public static class ModelAssetEndpoints
         return app;
     }
 
-    private static async Task<IReadOnlyList<string>> FindReferencesAsync(string assetId, WorkflowStore workflows, CancellationToken ct)
+    internal static async Task<IReadOnlyList<ShapeModelAssetReference>> FindReferencesAsync(
+        string assetId, WorkflowStore workflows, CancellationToken ct)
     {
-        var references = new List<string>();
+        var references = new List<ShapeModelAssetReference>();
         foreach (var summary in await workflows.ListAsync(ct))
         {
             var workflow = await workflows.LoadAsync(summary.Id, ct);
@@ -95,7 +113,7 @@ public static class ModelAssetEndpoints
                 if (node.Parameters is null || !node.Parameters.TryGetValue("modelAssetId", out var value)) continue;
                 var text = value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
                 if (string.Equals(text, assetId, StringComparison.OrdinalIgnoreCase))
-                    references.Add($"{workflow.Id}/{node.Id}");
+                    references.Add(new ShapeModelAssetReference(workflow.Id, node.Id));
             }
         }
         return references;

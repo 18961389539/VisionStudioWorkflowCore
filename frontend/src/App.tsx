@@ -66,6 +66,7 @@ const JobPanel = lazy(() => import('./components/JobPanel'));
 const TracePanel = lazy(() => import('./components/TracePanel'));
 const DatasetValidationPanel = lazy(() => import('./components/DatasetValidationPanel'));
 const ModelPackagePanel = lazy(() => import('./components/ModelPackagePanel'));
+const ModelAssetPanel = lazy(() => import('./components/ModelAssetPanel'));
 const ParameterTuningPanel = lazy(() => import('./components/ParameterTuningPanel'));
 const WorkflowModulePanel = lazy(() => import('./components/WorkflowModulePanel'));
 const CalibrationPanel = lazy(() => import('./components/CalibrationPanel'));
@@ -168,6 +169,7 @@ function Editor() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [validationOpen, setValidationOpen] = useState(false);
   const [modelPackagesOpen, setModelPackagesOpen] = useState(false);
+  const [modelAssetsOpen, setModelAssetsOpen] = useState(false);
   const [tuningOpen, setTuningOpen] = useState(false);
   const [modulesOpen, setModulesOpen] = useState(false);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
@@ -856,6 +858,7 @@ function Editor() {
     { key: 'panel:diagnostics', title: '诊断中心', group: '面板', keywords: 'diagnostics' },
     { key: 'panel:plugins', title: '插件包管理', group: '面板', keywords: 'plugin' },
     { key: 'panel:models', title: '外部训练包', group: '面板', keywords: 'model package' },
+    { key: 'panel:model-assets', title: '模型资产', group: '面板', keywords: 'model asset shape 资产' },
     { key: 'panel:frames', title: '坐标系树', group: '面板', keywords: 'frame 坐标' },
     { key: 'panel:provenance', title: '硬件溯源', group: '面板', keywords: 'provenance' }
   ], [focusMode]);
@@ -882,6 +885,7 @@ function Editor() {
       case 'panel:diagnostics': setDiagnosticsOpen(true); return;
       case 'panel:plugins': setPluginsOpen(true); return;
       case 'panel:models': setModelPackagesOpen(true); return;
+      case 'panel:model-assets': setModelAssetsOpen(true); return;
       case 'panel:frames': setFramesOpen(true); return;
       case 'panel:provenance': setHardwareProvenanceOpen(true); return;
       default: return;
@@ -1106,7 +1110,7 @@ function Editor() {
   // 用 document.querySelector 判断会让快捷键在第一次打开过面板之后永久失效。
   const overlayOpen = Boolean(
     pendingGuard || templateOpen || imagePreviewOpen || workflowPickerOpen || pluginsOpen || camerasOpen
-    || robotsOpen || devicesOpen || jobsOpen || tracesOpen || validationOpen || modelPackagesOpen
+    || robotsOpen || devicesOpen || jobsOpen || tracesOpen || validationOpen || modelPackagesOpen || modelAssetsOpen
     || tuningOpen || modulesOpen || calibrationOpen || framesOpen || productionOpen || diagnosticsOpen
     || hardwareProvenanceOpen || aboutOpen || shortcutsOpen
   );
@@ -1227,6 +1231,7 @@ function Editor() {
     { key: 'modules', label: '可复用模块', onClick: () => setModulesOpen(true) },
     { key: 'tuning', label: '参数调优', onClick: () => setTuningOpen(true) },
     { key: 'model-packages', label: '外部训练包', onClick: () => setModelPackagesOpen(true) },
+    { key: 'model-assets', label: '模型资产', onClick: () => setModelAssetsOpen(true) },
     { key: 'validation', label: '数据集验证', onClick: () => setValidationOpen(true) },
     { type: 'divider' },
     { key: 'layout-edit', label: '布局：标准布局' },
@@ -1641,6 +1646,7 @@ function Editor() {
         <TracePanel open initialRunId={traceRunId} onClose={() => { setTracesOpen(false); setTraceRunId(undefined); }} />
       </LazyPanel>
       <LazyPanel open={modelPackagesOpen} label="模型包" onClose={() => setModelPackagesOpen(false)}><ModelPackagePanel open onClose={() => setModelPackagesOpen(false)} /></LazyPanel>
+      <LazyPanel open={modelAssetsOpen} label="模型资产" onClose={() => setModelAssetsOpen(false)}><ModelAssetPanel open onClose={() => setModelAssetsOpen(false)} /></LazyPanel>
       <LazyPanel open={validationOpen} label="数据集验证" onClose={() => setValidationOpen(false)}><DatasetValidationPanel open onClose={() => setValidationOpen(false)} currentWorkflow={workflowPayload} /></LazyPanel>
       <LazyPanel open={tuningOpen} label="参数调优" onClose={() => setTuningOpen(false)}><ParameterTuningPanel open onClose={() => setTuningOpen(false)} currentWorkflow={workflowPayload} catalog={catalog} initialNodeId={selectedId} prepareWorkflowChange={workflowChanges.prepare} onApplied={() => { setTuningOpen(false); messageApi.success('已将调优后的候选方案应用到设计器'); }} /></LazyPanel>
       <LazyPanel open={modulesOpen} label="流程模块" onClose={() => setModulesOpen(false)}><WorkflowModulePanel open onClose={() => setModulesOpen(false)} currentWorkflow={workflowPayload} selectedNodeId={selectedId} selectedNodeType={String(selectedNode?.data.typeKey ?? '')} prepareWorkflowChange={workflowChanges.prepare} onInsertModule={insertModule} onUpgradeSelected={upgradeSelectedModule} /></LazyPanel>

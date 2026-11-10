@@ -150,6 +150,32 @@ public sealed class ShapeModelAssetStoreTests
     }
 
     [Fact]
+    public async Task Update_RenamesMetadataWithoutTouchingVersions()
+    {
+        var (env, _, store) = await CreateStoreAsync();
+        using var _ = env;
+        var bytes = Model(11);
+        await store.CreateAsync(new CreateShapeModelAssetRequest("shape-k", "K", "old note", Base64(bytes), "cfg"), CancellationToken.None);
+
+        var updated = await store.UpdateAsync("shape-k", "K renamed", "new note", CancellationToken.None);
+
+        Assert.NotNull(updated);
+        Assert.Equal("K renamed", updated!.Name);
+        Assert.Equal("new note", updated.Description);
+        Assert.Equal(1, updated.LatestVersion);
+        Assert.Equal(bytes, await store.ReadBytesAsync("shape-k", 1, CancellationToken.None));
+
+        // 只改描述、不改名字：name 传 null 时保持原值。
+        var descriptionOnly = await store.UpdateAsync("shape-k", null, "only description", CancellationToken.None);
+        Assert.Equal("K renamed", descriptionOnly!.Name);
+        Assert.Equal("only description", descriptionOnly.Description);
+
+        // 空白名字与不存在的资产都是明确结果，不是静默成功。
+        await Assert.ThrowsAsync<ApiValidationException>(() => store.UpdateAsync("shape-k", "   ", null, CancellationToken.None));
+        Assert.Null(await store.UpdateAsync("shape-missing", "x", null, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task DuplicateId_IsConflictNotSilentOverwrite()
     {
         var (env, _, store) = await CreateStoreAsync();

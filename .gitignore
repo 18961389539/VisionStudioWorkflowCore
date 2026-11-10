@@ -44,3 +44,6 @@ Thumbs.db
 
 # 发布脚本的 wwwroot 是前端 dist 的构建缓存（scripts/publish-runtime.* 每次生成），不入库。
 backend/src/VisionStudio.Api/wwwroot/
+
+# vitest 运行日志（临时）
+.v*.log

@@ -220,6 +220,32 @@ WHERE v.asset_id = $id AND v.version = $version;
         return reader.Read() ? (byte[])reader["bytes"] : null;
     }
 
+    /// <summary>重命名/改描述（版本字节不可变，只有元数据可变）；资产不存在返回 null。</summary>
+    public async Task<ShapeModelAssetDescriptor?> UpdateAsync(string id, string? name, string? description, CancellationToken ct)
+    {
+        var trimmedName = name?.Trim();
+        if (name is not null && string.IsNullOrEmpty(trimmedName))
+            throw new ApiValidationException("Shape model asset name cannot be blank.");
+        if (trimmedName is { Length: > 200 })
+            throw new ApiValidationException("Shape model asset name must be at most 200 characters.");
+
+        await using var connection = await db.OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+UPDATE shape_model_assets
+SET name = COALESCE($name, name),
+    description = COALESCE($description, description),
+    updated_at = $updated
+WHERE id = $id AND deleted_at IS NULL;
+""";
+        command.Parameters.AddWithValue("$name", (object?)trimmedName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$description", (object?)(description?.Trim()) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$updated", Iso(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$id", id);
+        if (await command.ExecuteNonQueryAsync(ct) == 0) return null;
+        return await GetAsync(id, ct);
+    }
+
     /// <summary>软删除：保留历史版本供已发布配方回指；返回 false 表示资产不存在或已删除。</summary>
     public async Task<bool> DeleteAsync(string id, CancellationToken ct)
     {
