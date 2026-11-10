@@ -109,7 +109,7 @@ public static class JlContourOperations
             a.Contour.ClipEndPointsContoursXld(a.Mode.Length == 0 ? "length" : a.Mode, a.Length1)),
         ["addNoiseWhiteContourXld"] = new("addNoiseWhiteContourXld", "Add white noise to contour", "count=回归点数, size=幅值", a =>
             a.Contour.AddNoiseWhiteContourXld(Math.Max(2, a.Count), a.Size)),
-        ["genContourPolygonRoundedXld"] = new("genContourPolygonRoundedXld", "Generate rounded polygon contour", "row/column 起点, size=边长, length1=圆角半径", a =>
+        ["genContourPolygonRoundedXld"] = new("genContourPolygonRoundedXld", "Generate rounded polygon contour", "row/column 起点, size=边长；圆角半径固定 0.1", a =>
         {
             using var rows = new JlTuple(new[] { a.Row, a.Row + a.Size, a.Row });
             using var cols = new JlTuple(new[] { a.Column, a.Column, a.Column + a.Size });

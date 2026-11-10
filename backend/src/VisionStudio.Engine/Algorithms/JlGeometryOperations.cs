@@ -199,7 +199,7 @@ public static class JlGeometryOperations
             using var files = JlMisc.ListFiles(a.Mode.Length == 0 ? "." : a.Mode, "files");
             return R(files.Length, ("count", files.Length));
         }),
-        ["selectLinesLongest"] = new("selectLinesLongest", "Select longest lines", "row1..column4=线段端点, count=条数", a =>
+        ["selectLinesLongest"] = new("selectLinesLongest", "Select longest lines", "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）", a =>
         {
             using var rb = new JlTuple(new[] { a.Row1 });
             using var cb = new JlTuple(new[] { a.Column1 });

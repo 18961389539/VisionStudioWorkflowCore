@@ -120,17 +120,17 @@ public sealed record WorkflowRuntimeReferences(
     IReadOnlyList<string> Devices,
     IReadOnlyList<string> Robots);
 
-/// <summary>
-/// Captures the exact runtime dependencies referenced by one Workflow. The resulting ManifestHash is
-/// semantic: CapturedAt and display-only timestamps are excluded, so unchanged runtime dependencies
-/// produce the same hash across repeated publications.
-/// </summary>
 /// <summary>恢复前设备状态核对结果；不通过时必须禁止自动恢复新周期。</summary>
 public sealed record DeviceStateVerification(bool Ok, IReadOnlyList<string> Issues)
 {
     public string Summary => Issues.Count == 0 ? "all devices verified" : string.Join("; ", Issues);
 }
 
+/// <summary>
+/// Captures the exact runtime dependencies referenced by one Workflow. The resulting ManifestHash is
+/// semantic: CapturedAt and display-only timestamps are excluded, so unchanged runtime dependencies
+/// produce the same hash across repeated publications.
+/// </summary>
 public sealed class RuntimeDependencyManifestService(
     VisionNodeRegistry registry,
     PluginManager plugins,
@@ -250,8 +250,7 @@ public sealed class RuntimeDependencyManifestService(
         return new DeviceStateVerification(issues.Count == 0, issues);
     }
 
-    /// <summary>Reject manual reconciliation while a robot command or underlying stop operation is still active.</summary>
-    /// <summary>C05：该设备当前是否有在途命令——核对前必须确认没有已知在途动作。</summary>
+    /// <summary>C05：该设备当前是否有在途命令——核对前必须确认没有已知在途动作；查询本身不拒绝/不阻断调用。</summary>
     public bool IsDeviceCommandInFlight(string deviceId)
     {
         try { return devices.IsCommandInFlight(deviceId); }

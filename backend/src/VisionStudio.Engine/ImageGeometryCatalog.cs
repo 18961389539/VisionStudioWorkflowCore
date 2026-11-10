@@ -68,7 +68,7 @@ public static class ImageGeometryCatalog
                     Description: "Odd Sobel kernel size in 1..7 (3/5/7 are the only sensible values). Ignored when operator=scharr."),
                 new("scaleMode", "Magnitude Scaling", "select", "none",
                     Options: [new("None (raw, saturated to source depth)", "none"), new("Stretch to 0..255 by P99", "stretch")],
-                    Description: "none keeps raw derivative magnitudes (recommended for measurement and Otsu work). stretch divides by the 99th percentile and clamps to 0..255 so weak gradients become visible in the preview; the numeric metrics always report raw values."),
+                    Description: "none keeps raw derivative magnitudes (recommended for measurement and Otsu work). stretch divides by the 99th percentile and clamps to 0..255 so weak gradients become visible in the output image; mean/max/p99 metrics are still computed from the raw magnitudes."),
                 new("emitDirection", "Emit Direction Image", "boolean", true,
                     Description: "When true, also emits a float32 direction image in degrees 0..360 measured by atan2(dy,dx), i.e. the direction of increasing gray. Texture analysis and anisotropic filtering need it; pure edge-strength work can turn it off to save a buffer.")
             ],

@@ -322,7 +322,8 @@ static int Restore(string checkpointDir, string targetDb, bool force, JsonSerial
         // staged 必须自身可验证，拒绝把坏文件换进目标。
         if (!TryVerify(staged, out var stagedIntegrity, out _, out var stagedError))
             throw new InvalidOperationException($"staged copy failed verification: {stagedIntegrity} ({stagedError})");
-        // sidecar 删除在此刻执行且其内容已在保护副本中：即使随后的主库替换失败，也能完整恢复。
+        // sidecar 随主库替换一起删除；保护副本只承诺主库文件（ProtectedFiles 固定为空），
+        // 因此回滚不会恢复 -wal/-shm，回滚后的数据库由 SQLite 重新建立日志文件。
         foreach (var suffix in new[] { "-wal", "-shm" })
         {
             var sidecar = targetDb + suffix;
@@ -332,7 +333,7 @@ static int Restore(string checkpointDir, string targetDb, bool force, JsonSerial
     }
     catch (Exception ex)
     {
-        // A01：失败回滚——从保护副本恢复原文件组，目标始终保持可读。
+        // A01：失败回滚——从保护副本恢复主库文件（-wal/-shm 不在保护范围内，不恢复），目标始终可读。
         // 复审（2026-10-13 R2）：错误信息带上目标路径与可操作提示——"Access denied" 这类
         // 失败的最常见原因是仍有进程（宿主/调试器/SQLite 工具）持有数据库句柄。
         Console.Error.WriteLine($"ERROR: restore failed: {ex.Message} (target: '{targetDb}'). " +
@@ -571,7 +572,7 @@ static RestoreMarker? ReadRestoreMarker(string transactionPath, string legacyInt
     return null;
 }
 
-/// <summary>Q04：把统一协议记录转换为内存标记（回滚核对用）。</summary>
+/// <summary>Q04：把统一协议记录转换为内存标记（回滚核对用）。ProtectedFiles 固定为空：保护副本只包含主库。</summary>
 static RestoreMarker ToMarker(RestoreTransactionRecord record)
     => new(record.Stage, record.TargetDatabase ?? string.Empty, DirectoryOf(record.SafetyDatabase),
         record.ExpectedDatabaseSha256, record.SafetyDatabaseSha256, [], string.Empty);

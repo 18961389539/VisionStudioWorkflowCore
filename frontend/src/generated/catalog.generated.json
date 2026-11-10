@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "7a67866904715dc137c74752ef52aedeb11b2317c833b0130bcb123437a7c4e6",
+  "hash": "79563517c340981b1f824afbc879b183240671abfe890deab523323010a443af",
   "items": [
     {
       "type": "image.acquire",
@@ -183,6 +183,14 @@
       ],
       "description": "Grab one frame from a running camera stream (CameraFrameHub). Wire: no image input; output image feeds preprocess/match; cameraId selects the device. Key params: frameMode Latest reuses the newest frame, Next waits for a newer sequence; timeoutMs; exposureUs=0 and gainDb=-1 leave device settings unchanged; triggerBeforeGrab fires a soft trigger before the grab. Backend is the camera device layer, not JLVision. Common failures: camera not open/autoStart, grab timeout, or camera rejects the exposure/gain set.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "actions": [
         {
           "kind": "CameraTrigger",
@@ -282,6 +290,14 @@
       ],
       "description": "Select one camera image from a synchronized FrameSet without cloning the underlying frame. Emits diagnostics with size and skew context.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "resources": [
         {
           "kind": "camera",
@@ -959,7 +975,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -1167,6 +1183,14 @@
       ],
       "description": "Planar SE(2) hand-eye (algorithmBackend=managed; not OpenCV/JLVision). Fill samplesJson with robot/vision pose pairs → pose/transform; eye-in-hand or eye-to-hand. Key params: angularWeight, translation/angle residual gates. Rotation coverage and translation spans are reported as metrics, and a minimum of 8 deg rotation span plus 0.001 translation spread is required to avoid ill-conditioned planar fits. Needs rotation and translation in both streams; rejects duplicate robot poses; not 3D (use handEye3D). Failures: poor diversity, residual gates, near-pure translation.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -1365,6 +1389,14 @@
       ],
       "description": "Full SE(3) hand-eye (algorithmBackend=opencv, Cv2.CalibrateHandEye; no JLVision hand-eye API). Fill samplesJson with row-major 4×4 robotToBase and targetToCamera → Transform3D. Key params: mode, OpenCV method, residual gates, frame names/units. Requires ≥6 samples with two non-parallel rotation axes. Failures: non-rigid matrices, single-axis/translation-only motion, residual gates.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -1641,6 +1673,14 @@
         }
       ],
       "description": "Projects an image or contour onto a calibrated world plane. applyMap must connect mapRows/mapColumns/mapInfo from the same generator node and use the same image source frame. At runtime the source size, map size/type and content fingerprint are verified; mixed or modified maps are rejected. Contour output uses the selected physical unit; the image remains plane-sampled pixels.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "frames": [
         {
           "policy": "NewFixedFrame",
@@ -1850,6 +1890,14 @@
       ],
       "description": "Calibrate intrinsics. Wire: calibrationDataJson (or views from detectBoard / Calibration Wizard) → calibrationJson/rms/viewStats for undistort, extrinsics, hand-eye. Key params: cameraModel pinhole (JLVision polynomial) / fisheye (OpenCV Kannala-Brandt) / telecentric (JLVision object-side); maxViewRms/maxPoseViewRms/maxRms gates. Need ≥3 varied views; telecentric needs magnification and pixel-pitch seeds. Failures: too few views, degenerate points, RMS gates.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -2262,7 +2310,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -2562,7 +2610,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -2820,6 +2868,14 @@
       ],
       "description": "Solve Camera A→B rigid SE(3) extrinsics (algorithmBackend=opencv; no JLVision stereo extrinsics API). Wire: synchronized shared-board pairsJson → transform/matrixJson/baseline for transformPoint3D / frame tree. Key params: inputMode poses|points, method average|stereoCalibrate, residual gates, frame names. Honest limits: no N-camera bundle adjustment, no live multi-cam session, average mode does not refine distortion, no stereo rectification maps. Failures: too few pairs, missing intrinsics for stereoCalibrate, residual gates.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -2993,7 +3049,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -3062,6 +3118,14 @@
       ],
       "description": "Return the number of items in a DetectionList, with an isEmpty flag and JSON diagnostics. The list is validated for finite geometry before counting.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -3182,6 +3246,14 @@
       ],
       "description": "Extract one DetectionList item as typed scalar and geometry outputs, including optional confidence and classId; an out-of-range index returns found=false.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -3300,6 +3372,14 @@
       ],
       "description": "Extract one numeric column from a DetectionList into a NumberList so it can be summarized by value.statistics. Optional fields that are absent on a detection are counted in skipped rather than treated as 0; non-finite values fail the node.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -3348,6 +3428,14 @@
       "parameters": [],
       "description": "Collect the detection centres into a PointList for geometry.fitFromPoints. Points keep image pixel coordinates and the source frame of the detection list.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -3487,6 +3575,14 @@
       ],
       "description": "Filter DetectionList items by area, circularity, optional confidence and class ID with strict finite/ordered bound validation; missing optional values do not match configured filters. Emits kept count, rejected count and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -3748,6 +3844,14 @@
       ],
       "description": "Sort a DetectionList by up to three fields and refresh result indices. Missing confidence or classId sorts last in either direction. Keep First limits the list after sorting. Emits count and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -3894,7 +3998,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -4079,7 +4183,7 @@
           "internal": true
         }
       ],
-      "description": "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
+      "description": "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -4087,7 +4191,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -4287,7 +4391,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -4531,7 +4635,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -4845,7 +4949,7 @@
               "description": "count=回归点数, size=幅值"
             },
             "genContourPolygonRoundedXld": {
-              "description": "row/column 起点, size=边长, length1=圆角半径"
+              "description": "row/column 起点, size=边长；圆角半径固定 0.1"
             },
             "unionCollinearContoursExtXld": {
               "description": "size=maxDistAbs, length1=maxDistRel, min=maxShift"
@@ -4959,7 +5063,7 @@
             },
             "genContourPolygonRoundedXld": {
               "label": "边长",
-              "description": "row/column 起点, size=边长, length1=圆角半径"
+              "description": "row/column 起点, size=边长；圆角半径固定 0.1"
             },
             "unionCollinearContoursExtXld": {
               "label": "maxDistAbs",
@@ -5071,7 +5175,7 @@
               "description": "row, column"
             },
             "genContourPolygonRoundedXld": {
-              "description": "row/column 起点, size=边长, length1=圆角半径"
+              "description": "row/column 起点, size=边长；圆角半径固定 0.1"
             }
           }
         },
@@ -5122,7 +5226,7 @@
               "description": "row, column"
             },
             "genContourPolygonRoundedXld": {
-              "description": "row/column 起点, size=边长, length1=圆角半径"
+              "description": "row/column 起点, size=边长；圆角半径固定 0.1"
             }
           }
         },
@@ -5405,7 +5509,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -5545,7 +5649,7 @@
             }
           ],
           "group": "Selection",
-          "description": "Which contour the scalar outputs describe: largest area or the index parameter."
+          "description": "Which contour the scalar outputs describe: largest/smallest area, first/last in the list, or an explicit index."
         },
         {
           "name": "index",
@@ -5573,7 +5677,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -5712,7 +5816,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -5933,6 +6037,14 @@
         }
       ],
       "description": "Imports or exports floating-point contours with the native DXF operators. Import explicitly sets the coordinate unit, scale, Y direction and origin offset; an unspecified unit stays unknown. Export preserves coordinate values verbatim and requires matching contour units and frames; no CAD unit header is written. status keeps the native read report.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -6394,6 +6506,14 @@
         }
       ],
       "description": "Extracts native subpixel edges, lines and corners; contours keep floating-point coordinates. Line/edge operators output contours; corner operators output a points JSON array and the selected point, and detections can feed collection or loop nodes. Förstner also outputs covariance details. Gray operators convert to gray automatically; color operators require three channels.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "outputFrames": [
         {
           "source": "ImageInput",
@@ -6625,7 +6745,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -6708,6 +6828,14 @@
       ],
       "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "transformFrames": {
         "policy": "Compose",
@@ -6862,6 +6990,14 @@
       ],
       "description": "Create a rigid 2D transform between named engineering or pixel coordinate frames with strict finite-value, frame and unit validation. Emits translation/rotation scalars, frame names, unit and JSON diagnostics (including determinant).",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -6943,6 +7079,14 @@
       ],
       "description": "Distance between two frame-aware points, only when frame and unit match exactly. Emits a Measurement, scalar distance, signed dx/dy and JSON diagnostics; mismatched or non-finite points fail deterministically.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7077,6 +7221,14 @@
       ],
       "description": "Create a coordinate-aware reference point. Optional X/Y inputs override the constants so a match or detection can drive the point. Values must be finite. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7251,6 +7403,14 @@
       ],
       "description": "Create a frame-aware 3D coordinate point. Optional X/Y/Z inputs override constants. Emits magnitude, XY magnitude, azimuth and elevation (deg) plus JSON diagnostics. Coordinates must be finite within +/-1e9; frame must be non-empty; unit is mm/cm/m.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7408,6 +7568,14 @@
       ],
       "description": "Create a frame-aware 2D pose. Optional X/Y/theta inputs override the constants so a match result can drive the pose. Values must be finite and theta is normalized to (-180, 180]. The frame must be non-empty; a connected frame tree checks it against known frames.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7470,6 +7638,14 @@
       ],
       "description": "Build a bidirectional frame graph from validated rigid transforms and resolve transforms by named frame path. Rejects empty, duplicate or non-finite edges deterministically; emits transform/frame counts, the frame list and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7533,6 +7709,14 @@
       "parameters": [],
       "description": "Invert a Transform2D and swap source/target frame and units. Validates every matrix element and rejects singular transforms deterministically; emits frame names, determinant and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "transformFrames": {
         "policy": "Invert",
@@ -7616,6 +7800,14 @@
       ],
       "description": "Interpret a pose expressed in its parent frame as a rigid transform from Source Frame to that parent frame, rejecting a source frame equal to the pose frame. Useful for dynamic Tool->RobotBase transforms. Emits scalars, frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7696,6 +7888,14 @@
       ],
       "description": "Resolve the shortest transform path in a FrameTree2D, automatically using inverse edges where required. Validates frame names and the resolved transform; emits hop count, frame names, path and JSON diagnostics, and fails when no path exists.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7769,6 +7969,14 @@
       "parameters": [],
       "description": "Transform a frame-aware 3D point through a rigid row-major Transform3D. Requires exact source-frame and translation-unit matches, validates the 4x4 rigid transform, and emits target coordinates plus frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7847,6 +8055,14 @@
       "parameters": [],
       "description": "Transform a frame-aware point through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the point plus scalar x/y, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -7920,6 +8136,14 @@
       "parameters": [],
       "description": "Transform a frame-aware pose through another engineering-frame Transform2D with strict frame/unit, finite-value and singularity validation. Emits the pose plus scalar x/y/theta, target frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -8004,6 +8228,14 @@
       ],
       "description": "Transform both endpoints of a pixel Line2D into a coordinate-aware line. Validates line degeneracy and transform singularity; emits length, direction angle, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -8072,6 +8304,14 @@
       "parameters": [],
       "description": "Map an image-space Point2D through a validated Transform2D into a frame/unit-aware point. Wire: point + transform → point + frame/unit/diagnostics. Rejects non-finite points and singular transforms. Typical after match/register.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -8145,6 +8385,14 @@
       "parameters": [],
       "description": "Transform X/Y and local orientation into a named target frame through a validated Transform2D. Rejects non-finite pose values and singular transforms; emits scalars, frame, unit and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -8236,7 +8484,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -8331,7 +8579,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -8470,7 +8718,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -8629,7 +8877,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -8788,7 +9036,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -8930,7 +9178,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -9091,7 +9339,7 @@
               "value": "mask"
             }
           ],
-          "description": "Legacy setting; region and mask are both emitted. Emit a VisionRegion (default) or an 8-bit mask image.",
+          "description": "Legacy setting kept for old documents; region and mask are always emitted together and this value no longer changes the output shape.",
           "internal": true
         },
         {
@@ -9121,7 +9369,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -9279,7 +9527,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -9466,7 +9714,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -9740,6 +9988,14 @@
       ],
       "description": "Flat-field correction with gain+offset, gain-only or offset-only models. Optional dark reference follows darkPolicy. Percentile clipping precedes correction; finite/minimum-magnitude/positive/maximum gain guards protect division. Statistics describe the selected byte or real output.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -9931,6 +10187,14 @@
       ],
       "description": "Compare aligned grayscale images with JLVision arithmetic. Default output is float32; outputType=byte explicitly saturates to 0..255. Signed float mode preserves negative differences, normalized mode computes an illumination ratio in [-1,1] before scale and offset. Mean/stdDev/min/max and a global SSIM-style similarity (whole-image statistics, 1 = identical) are always reported; when threshold > 0 the thresholded change region and changed-pixel count are also emitted. No automatic alignment is performed (use defect.referenceCompare for registration and grading).",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -10251,7 +10515,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -10523,7 +10787,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -10684,7 +10948,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "resources": [
         {
@@ -10759,6 +11023,16 @@
           "name": "rowJson",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "rowValues",
+          "dataType": "StringList",
+          "required": false
+        },
+        {
+          "name": "table",
+          "dataType": "Table",
+          "required": false
         },
         {
           "name": "rowObjectJson",
@@ -10891,7 +11165,7 @@
           "description": "Refuse files above this size before reading. A production table is kilobytes; a runaway log should not be swallowed as a table."
         }
       ],
-      "description": "Read one data row out of a CSV/TSV table so the flow can be driven by a work order list (one SN per part). Wire: path + optional sequence -> row/rowJson/rowObjectJson plus index/total for loop control. Parsing follows RFC4180 quoting, empty lines are skipped, and the parsed table is cached by (path, mtime, size, encoding, delimiter) so a batch run parses the file once. Reading requires host authorization (IReplayInputResolver). Out-of-range index with wrap off returns found=false. Deterministic=false: the file may change between runs.",
+      "description": "Read one data row out of a CSV/TSV table so the flow can be driven by a work order list (one SN per part). Wire: path + optional sequence -> row/rowJson/rowValues/rowObjectJson plus index/total for loop control; the full parsed table is also published as a typed Table on the table port. Parsing follows RFC4180 quoting including newlines inside quoted fields, empty lines are skipped, and the parsed table is cached by (path, mtime, size, encoding, delimiter) so a batch run parses the file once. Reading requires host authorization (IReplayInputResolver). Out-of-range index with wrap off returns found=false. Deterministic=false: the file may change between runs.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -10899,7 +11173,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [],
       "declaresActions": true,
@@ -11256,7 +11530,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -11541,7 +11815,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -11754,7 +12028,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -12043,7 +12317,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "resources": [
         {
@@ -12214,7 +12488,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -12410,7 +12684,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -12619,7 +12893,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -12700,9 +12974,14 @@
             {
               "label": "Harris",
               "value": "harris"
+            },
+            {
+              "label": "FAST (threshold, no response ranking)",
+              "value": "fast"
             }
           ],
-          "description": "Shi-Tomasi is the industrial default: stable ranking, one point per corner. Harris also responds to edges and needs a higher quality level to stay clean."
+          "group": "Detector",
+          "description": "Shi-Tomasi is the industrial default: stable ranking, one point per corner. Harris also responds to edges and needs a higher quality level to stay clean. FAST is threshold-based and ignores qualityLevel/blockSize/harrisK."
         },
         {
           "name": "maxCorners",
@@ -12712,6 +12991,7 @@
           "min": 1,
           "max": 5000,
           "step": 1,
+          "group": "Detector",
           "description": "Upper bound on returned points. Shi-Tomasi and Harris stop at the strongest maxCorners; FAST keeps everything above the threshold and is then distance-suppressed."
         },
         {
@@ -12722,6 +13002,7 @@
           "min": 1E-06,
           "max": 1,
           "step": 0.005,
+          "group": "Detector",
           "description": "Fraction of the strongest response kept (Shi-Tomasi/Harris). Raise it when the image is full of texture."
         },
         {
@@ -12732,6 +13013,7 @@
           "min": 0.5,
           "max": 5000,
           "step": 0.5,
+          "group": "Refinement",
           "description": "Non-maximum suppression radius: no two corners closer than this. Should be about the smallest feature spacing on the part, not the pixel noise scale."
         },
         {
@@ -12742,6 +13024,7 @@
           "min": 3,
           "max": 31,
           "step": 2,
+          "group": "Refinement",
           "description": "Averaging window for the structure tensor (odd, 3..31). Larger stabilises gradients on noisy images and blurs nearby corners together."
         },
         {
@@ -12752,13 +13035,32 @@
           "min": 0.001,
           "max": 0.25,
           "step": 0.001,
+          "group": "Refinement",
           "description": "Harris sensitivity constant; only used when method=harris."
+        },
+        {
+          "name": "fastThreshold",
+          "label": "FAST Threshold",
+          "type": "number",
+          "defaultValue": 10,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Detector",
+          "description": "FAST corner threshold (1..255); only used when method=fast. Lower values detect more corners, higher values reject low-contrast texture.",
+          "visibleWhen": {
+            "parameter": "method",
+            "values": [
+              "fast"
+            ]
+          }
         },
         {
           "name": "subpixel",
           "label": "Subpixel Refinement",
           "type": "boolean",
           "defaultValue": false,
+          "group": "Refinement",
           "description": "Refine every corner to sub-pixel accuracy with a 5x5 cornerSubPix window. Metrology needs this (0.05..0.2 px repeatability); leave it off for preview or coarse location work."
         },
         {
@@ -12770,7 +13072,7 @@
           "internal": true
         }
       ],
-      "description": "Corner detection with a ranked PointList output, so corners can feed measure.fitLine / measure.fitCircleFixedRadius / measure.bestFitAlign directly instead of going through an 8-operator dropdown. Shi-Tomasi and Harris use OpenCV good-features-to-track with an explicit non-maximum suppression radius; optional cornerSubPix refinement lifts the points off the pixel grid when sub-pixel centres matter. Responses are reported from the minimum-eigenvalue map so the ranking is comparable between the two detectors. Insufficient contrast, an empty ROI or a degenerate block size returns found=false with the reason in diagnostics.",
+      "description": "Corner detection with a ranked PointList output, so corners can feed measure.fitLine / measure.fitCircleFixedRadius / measure.bestFitAlign directly instead of going through an 8-operator dropdown. Shi-Tomasi and Harris use OpenCV good-features-to-track with an explicit non-maximum suppression radius; FAST uses OpenCV FAST with its own threshold, then applies maxCorners and minDistance in response order. Optional cornerSubPix refinement lifts the points off the pixel grid when sub-pixel centres matter. Responses are reported from the minimum-eigenvalue map so the ranking is comparable between detectors. Insufficient contrast, an empty ROI or a degenerate block size returns found=false with the reason in diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -12778,7 +13080,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -12907,7 +13209,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -13139,7 +13441,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -13169,6 +13471,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "directionMap",
+          "dataType": "Image",
+          "required": false
         },
         {
           "name": "energy",
@@ -13298,7 +13605,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -13492,7 +13799,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -13686,7 +13993,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -13950,7 +14257,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -14070,7 +14377,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -14898,6 +15205,14 @@
       ],
       "description": "Compare a number and branch true or false. Threshold mode keeps the original operators, with a configurable equality tolerance. Inside-range mode checks a closed window. Hysteresis uses the optional previous condition and does not remember state across runs. Emits condition, echoed value, signed margin and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -14955,6 +15270,14 @@
       "parameters": [],
       "description": "Structured branch join marker. Merges Parallel branch dispositions with any-NG semantics (NG wins) into the run disposition; emits a JSON diagnostics marker for tracing.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -15176,6 +15499,14 @@
       "parameters": [],
       "description": "Start two Workflow Core parallel paths. Emits a JSON diagnostics marker; branch scheduling and any-NG disposition merging are handled by the structured runtime.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -15331,6 +15662,14 @@
       ],
       "description": "Set the automatic inspection disposition (OK/NG) for traceability with JSON diagnostics. Inside Parallel branches the value is scoped to its branch and merged at Join with any-NG semantics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -15894,7 +16233,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -15973,6 +16312,14 @@
       ],
       "description": "Fit a line or a circle through a PointList. Line fitting needs at least 2 points and returns the segment spanning all points along the principal direction; circle fitting needs at least 3 non-collinear points. residualPx is the RMS orthogonal distance to the fitted geometry and is reported for both modes. Collinear circle input fails instead of returning an arbitrary centre.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -16110,6 +16457,14 @@
         }
       ],
       "description": "Line-circle uses line/circle (the line extends infinitely); circle-circle uses circle/circle2; segment intersection uses line/line2 (limited to the endpoints). points is a JSON list of every intersection; found=false when there are none. Use overlapping to detect coincident geometry.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "outputFrames": [
         {
           "source": "GeometryInput",
@@ -16411,7 +16766,7 @@
               "description": "mode=目录（默认 .）"
             },
             "selectLinesLongest": {
-              "description": "row1..column4=线段端点, count=条数"
+              "description": "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）"
             }
           }
         },
@@ -16522,7 +16877,7 @@
               "description": "row1..column4=链点"
             },
             "selectLinesLongest": {
-              "description": "row1..column4=线段端点, count=条数"
+              "description": "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）"
             }
           }
         },
@@ -16637,7 +16992,7 @@
               "description": "row1..column4=链点"
             },
             "selectLinesLongest": {
-              "description": "row1..column4=线段端点, count=条数"
+              "description": "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）"
             }
           }
         },
@@ -16736,7 +17091,7 @@
               "description": "row1..column4=链点"
             },
             "selectLinesLongest": {
-              "description": "row1..column4=线段端点, count=条数"
+              "description": "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）"
             }
           }
         },
@@ -16839,7 +17194,8 @@
               "description": "row1..column4=链点"
             },
             "selectLinesLongest": {
-              "description": "row1..column4=线段端点, count=条数"
+              "label": "单条线段端点",
+              "description": "row1/column1/row2/column2=单条线段端点；条数固定为 1（count 未使用）"
             }
           }
         },
@@ -17320,7 +17676,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -18083,7 +18439,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -18153,7 +18509,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -18249,7 +18605,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -18642,7 +18998,7 @@
               "description": "row, column, scalar"
             },
             "setDiagonal": {
-              "description": "rows=向量长度, count=对角线序号, scalar"
+              "description": "rows=向量长度且同时作为对角线序号, scalar（count 未使用）"
             },
             "copy": {
               "description": "无参数"
@@ -18837,7 +19193,7 @@
               "description": "row, column, scalar"
             },
             "setDiagonal": {
-              "description": "rows=向量长度, count=对角线序号, scalar"
+              "description": "rows=向量长度且同时作为对角线序号, scalar（count 未使用）"
             },
             "copy": {
               "description": "无参数"
@@ -18991,7 +19347,7 @@
               "description": "row, column, scalar"
             },
             "setDiagonal": {
-              "description": "rows=向量长度, count=对角线序号, scalar"
+              "description": "rows=向量长度且同时作为对角线序号, scalar（count 未使用）"
             }
           }
         },
@@ -19098,8 +19454,8 @@
               "step": 1
             },
             "setDiagonal": {
-              "label": "向量长度",
-              "description": "rows=向量长度, count=对角线序号, scalar",
+              "label": "向量长度且同时作为对角线序号",
+              "description": "rows=向量长度且同时作为对角线序号, scalar（count 未使用）",
               "step": 1
             }
           }
@@ -19335,7 +19691,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -19433,7 +19789,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -19749,7 +20105,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -20063,7 +20419,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -20355,7 +20711,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -20706,7 +21062,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "maturity": "Experimental",
       "declaresActions": false,
@@ -21032,7 +21388,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "maturity": "Experimental",
       "declaresActions": false,
@@ -21377,7 +21733,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "maturity": "Experimental",
       "declaresActions": false,
@@ -21633,7 +21989,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -21728,6 +22084,14 @@
       ],
       "description": "Combine boolean results with strict operation validation (NOT uses a only; unknown operations fail instead of defaulting to AND). Feeds flow.result / flow.if for the final OK/NG disposition; emits JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -21858,7 +22222,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -22434,7 +22798,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -22654,7 +23018,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -22816,7 +23180,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "frames": [
@@ -24024,7 +24388,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "transformFrames": {
@@ -24719,7 +25083,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -25104,7 +25468,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -25264,7 +25628,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -25464,6 +25828,14 @@
       ],
       "description": "Rigid (or similarity) best-fit alignment of a measured contour onto a reference contour, the step every GD&T node silently assumes. Trimmed ICP matches each measured point to the nearest segment of the reference polyline, drops the worst trimFraction, and solves the optimal 2D transform in closed form (Kabsch); no SVD and no randomness, so the same input always gives the same transform. Emits the transform, the aligned point list and the residual statistics BEFORE alignment is discarded — feed alignedPoints to tolerance.profile / measure.contourDeviation and the residual becomes the form error. Failure modes are explicit: fewer than 3 points, degenerate (collinear) point sets and non-convergence all return found=false with the reason in diagnostics. Budget: measured/reference are thinned to maxPoints, so a 20k-point contour is fitted on its envelope, not on every pixel.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -25844,7 +26216,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -26270,7 +26642,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -26562,7 +26934,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -26917,7 +27289,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -27214,7 +27586,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "roiImageBindings": [
@@ -27294,7 +27666,7 @@
           "description": "Optional concentricity tolerance in px; withinTolerance reports centreDistance <= limit (always true when off)."
         }
       ],
-      "description": "Planar centre offset between two fitted circles. Wire: circleA + circleB → centerDistance/diametralOffset/centerOffset/withinTolerance. Key params: maxCenterDistance, reportMode. Radii do not affect centre distance. Not 3D coaxility. Empty geometry follows emptyPolicy; out of tolerance → withinTolerance=false. Units: pixels.",
+      "description": "Planar centre offset between two fitted circles. Wire: circleA + circleB → centerDistance/diametralOffset/centerOffset/withinTolerance. Key param: maxCenterDistance. Radii do not affect centre distance. Not 3D coaxility. A missing circle fails explicitly instead of inventing geometry. Units: pixels.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -27302,7 +27674,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -27377,6 +27749,14 @@
       "parameters": [],
       "description": "Return center distance and gap=centerDistance-radiusA-radiusB; overlapping means gap<0. The gap is not the minimum circumference distance when one circle contains the other. Classify separate/tangent/overlapping/contained, including internal tangency. contained includes internal tangency and coincident circles; classification uses an absolute 1e-9 px tolerance.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -27536,7 +27916,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -27696,7 +28076,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -27822,6 +28202,14 @@
       ],
       "description": "Pixelwise CIE76 ΔE in sRGB/D65 Lab. Wire: aligned same-size reference image or a constant sRGB color; optional domain. deltaE is the mean of per-pixel distances, not the distance between mean colors. Empty regions omit scalars. For patch consistency, not semantic segmentation.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -27952,7 +28340,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -28129,7 +28517,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -28648,7 +29036,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -28866,7 +29254,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -28977,7 +29365,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -29115,7 +29503,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -29226,7 +29614,7 @@
             }
           ],
           "group": "Selection",
-          "description": "Which contour the ellipse outputs describe: largest area or the index parameter."
+          "description": "Which contour the ellipse outputs describe: largest/smallest area, first/last in the list, or an explicit index."
         },
         {
           "name": "index",
@@ -29248,7 +29636,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -29394,6 +29782,14 @@
       ],
       "description": "Fit 3..12 Point2D inputs with JLVision. Emit circle/center/radius plus robust inlier RMS, maximum residual and actual support count. Refinement retains at least three supporting points and supports cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -29548,6 +29944,14 @@
       ],
       "description": "Fit 2..12 Point2D inputs with JLVision. Emit line/length/angle plus robust inlier RMS, maximum residual and actual support count. Candidate search and refinement support cancellation. maxRmsError=0 disables the quality gate; insufficient inputs, degenerate geometry and excessive residuals fail clearly.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -29678,6 +30082,14 @@
       ],
       "description": "Least-squares circle fit with a known, fixed radius: it solves for the centre only, so every input point is judged as 'too close' or 'too far' and the centre cannot drift to absorb a bad arc. This is the circle-fit counterpart of measure.mzCircle for hole/shaft limits: use it when the radius comes from the drawing or from a calibrated artefact. Points come from a PointList (contour.toPoints / feature outputs); fewer than 3 points or a degenerate arc returns found=false. Residuals are radial distances (measured minus known radius) in pixels; rmsError and maxError are reported in the same unit as the input.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -29807,6 +30219,14 @@
       ],
       "description": "Native 256-bin histogram over selected pixels ∩ image domain. Connect exactly one of image or domainImage; optional region restricts further. 8-bit color converts to gray. An empty domain emits found=false, pixelCount=0 and zero bins/CDF; scalar statistics are omitted.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -29909,7 +30329,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -30065,7 +30485,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -30359,7 +30779,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -30523,7 +30943,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -30877,7 +31297,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "outputFrames": [
@@ -30981,6 +31401,14 @@
       ],
       "description": "distance/closestPoint follow the selected line or segment; projectedPoint, lineDistance and signedDistance always use the infinite line. For a horizontal line pointing along +X, points below the line have a negative signedDistance; reversing the line direction flips the sign. It is not an endpoint distance. rawProjectionT is the unclamped parameter, projectionT is the value actually used, and projectionClamped reports whether it was clamped to the endpoints.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -31135,7 +31563,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -31276,7 +31704,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -31446,7 +31874,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -31605,6 +32033,14 @@
         }
       ],
       "description": "Fits each input contour with FitRectangle2ContourXld. Unlike the minimum-area rectangle, this fits edge geometry rather than bounding extent; the output position is the center, sizes are full width/height, and the angle follows the image coordinate system. Empty input returns found=false without error.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "outputFrames": [
         {
           "source": "ContourInput",
@@ -32295,7 +32731,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -32520,7 +32956,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "frames": [
@@ -32653,7 +33089,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -32823,7 +33259,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -32966,7 +33402,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -33084,7 +33520,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -33209,7 +33645,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -33364,7 +33800,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -33530,7 +33966,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -33720,7 +34156,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -33981,7 +34417,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -35333,7 +35769,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -35555,7 +35991,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -35695,7 +36131,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -35820,7 +36256,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -35958,7 +36394,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -36057,6 +36493,14 @@
       ],
       "description": "Convert 8-bit sRGB/BGR(A) or replicated grayscale into three owned float32 channel images. RGB is 0..1; HSV is H=0..360 degrees and S/V=0..1; Lab uses D65 L*=0..100. Channels are scalar images, never packed pseudo-BGR.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -36188,7 +36632,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "frames": [
@@ -36494,7 +36938,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -36599,6 +37043,14 @@
       ],
       "description": "Per-pixel distance to the nearest zero pixel, emitted as float32 in pixels. Requires an 8-bit single-channel mask where non-zero means foreground; color or 16-bit input must be thresholded first instead of being silently guessed. Border handling assumes pixels outside the image are background, so objects touching the frame get a distance that saturates at the frame edge — pad the mask when the true distance matters.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -37003,7 +37455,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [],
       "declaresActions": true,
@@ -37113,7 +37565,7 @@
               "value": "stretch"
             }
           ],
-          "description": "none keeps raw derivative magnitudes (recommended for measurement and Otsu work). stretch divides by the 99th percentile and clamps to 0..255 so weak gradients become visible in the preview; the numeric metrics always report raw values."
+          "description": "none keeps raw derivative magnitudes (recommended for measurement and Otsu work). stretch divides by the 99th percentile and clamps to 0..255 so weak gradients become visible in the output image; mean/max/p99 metrics are still computed from the raw magnitudes."
         },
         {
           "name": "emitDirection",
@@ -37125,6 +37577,14 @@
       ],
       "description": "First-order gradient magnitude plus direction, as a single auditable step instead of wiring Sobel X, Sobel Y and a magnitude op by hand. Accepts 8/16-bit or float32, 1..4 channels (color is reduced to gray with the standard luminance weights). Magnitude keeps the source depth with saturation — negative lobes never wrap back into bright edges. Direction is float32 in degrees with 0 pointing along +x; undirected textures should fold it to 0..180.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -37285,7 +37745,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -37937,7 +38397,7 @@
               "description": "size=核尺寸, mode=sum_abs|sum_sqrt"
             },
             "smooth": {
-              "description": "mode=derivate_gauss, mult=alpha"
+              "description": "mult=alpha；滤波器固定 gauss（mode 未使用）"
             },
             "grayErosion": {
               "description": "第二输入图=结构元; size=自动结构元尺寸（未连接 image2 时）"
@@ -39111,7 +39571,7 @@
             },
             "smooth": {
               "label": "alpha",
-              "description": "mode=derivate_gauss, mult=alpha"
+              "description": "mult=alpha；滤波器固定 gauss（mode 未使用）"
             },
             "cropRectangle2": {
               "label": "phi",
@@ -39493,7 +39953,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "frames": [
         {
@@ -39634,7 +40094,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -40083,6 +40543,14 @@
         }
       ],
       "description": "Inpainting requires image and the region to restore; Wiener restoration requires a single-channel real PSF with the same size as the source. Blur-kernel generation may connect image to match its size automatically; otherwise the manual width/height are used. filteredImage must match the source size, channels and type. The output PSF is energy-normalized to 1 and width/height report the actual output size.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "frames": [
         {
           "policy": "NewFixedFrame",
@@ -40512,6 +40980,14 @@
         }
       ],
       "description": "Estimates relative height from a gray image or renders a real-valued height field. Reconstruction outputs heightField (resultKind=relativeHeight, unit=relative); rendering outputs shadingImage (resultKind=shading, unit=intensity); image remains a compatibility output. Gradient reconstruction requires same-size single-channel real row/column gradients. Height output is not an absolute 3D measurement in millimeters.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -40608,6 +41084,14 @@
       ],
       "description": "Exact pixel mirror with no interpolation and no size change, for inverted cameras, mirrored workpieces and template alignment. Pixel depth and channel count are preserved as-is (8/16-bit, int16, float32; 1..4 channels). Geometry that already carries coordinates (poses, ROIs, detections) must be mirrored separately with the same mode — this node only flips the image buffer.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -40837,7 +41321,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -41116,6 +41600,14 @@
       ],
       "description": "Convert 8-bit input to gray and linearly stretch the native min/max or percentile bounds into the requested gray range, clipping outliers to that range. Uniform images pass through unchanged. Returns an owned 8-bit grayscale image.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -41210,6 +41702,14 @@
       ],
       "description": "Estimate a local mean background on 8-bit grayscale, clamp it by minBackground, then output image/background*targetMean as clipped 8-bit gray. The window should exceed the feature size. This is local illumination normalization, not a substitute for calibrated flat-field references.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -41433,7 +41933,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "frames": [
@@ -41672,7 +42172,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -41785,6 +42285,14 @@
       ],
       "description": "Resize an image using an explicit interpolation method. Emits output dimensions, scale factors (in JSON diagnostics) and validates the size range deterministically.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "frames": [
         {
@@ -41875,6 +42383,14 @@
       ],
       "description": "Rotate around the image center; optionally expand the canvas to retain all pixels. Emits output dimensions, normalized angle (in JSON diagnostics) and rejects non-finite angles.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "frames": [
         {
@@ -41967,6 +42483,14 @@
       ],
       "description": "JLVision mean-based unsharp masking on 8-bit grayscale: image + amount*(image-localMean), clipped to 0..255. May amplify noise; amount=0 passes gray pixels through. Color input is converted to gray.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -42173,7 +42697,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -42663,7 +43187,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -42762,6 +43286,14 @@
       ],
       "description": "Correct lens distortion with JLVision native pinhole or object-side telecentric polynomial models, Brown-Conrady models, or OpenCV fisheye models. Intrinsics are scaled when image resolution differs. For fisheye, balance controls the rectified field of view. A pinned asset id/version is checked against calibrationJson during workflow execution, publication, and production dependency validation. Output pixels use an undistorted coordinate frame; create ROI and measurement geometry from this image because no pixel-coordinate transform is emitted.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "frames": [
         {
@@ -42872,6 +43404,14 @@
       ],
       "description": "Apply a nonsingular pixel-to-pixel affine transform with zero border. validRegion excludes unsupported border pixels; intersect it with inspection regions before reference comparison.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "frames": [
         {
@@ -43064,7 +43604,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -43597,7 +44137,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -44281,7 +44821,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -44594,6 +45134,14 @@
       ],
       "description": "Compare text literally or validate it with a culture-invariant .NET regular expression. Connected values override their fallback parameters. Regex mode exposes matchedText and groupsJson; a bounded timeout prevents a slow pattern from blocking the workflow.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -44815,6 +45363,14 @@
         }
       ],
       "description": "Watershed outputs basin regions and secondaryRegion holds the watershed boundary; count/found only count basin regions. For MSER, darkRegion/lightRegion hold dark/bright regions and remain available as region/secondaryRegion; darkCount/lightCount count each group and count/found count both. primaryCount/secondaryCount always refer to the two original ports.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -44901,7 +45457,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -44990,7 +45546,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -45115,7 +45671,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -45397,7 +45953,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -45529,7 +46085,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "outputFrames": [
@@ -45634,6 +46190,14 @@
       ],
       "description": "Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Emits found (area>0) and diagnostics; emptyPolicy=fail rejects an empty region while passthrough emits an empty domain. Connect domainImage to region.fromRange; regular Image ports deliberately reject it to prevent silent domain loss.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -45734,7 +46298,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -45850,7 +46414,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -45949,7 +46513,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -46064,7 +46628,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -46297,7 +46861,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -46912,7 +47476,7 @@
               "description": "size=行步长, length1=列步长, mode=类型（默认 lines）"
             },
             "genRandomRegions": {
-              "description": "size/length1=宽范围, row/column=高范围, count=个数"
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数"
             },
             "genRegionHline": {
               "description": "phi=方向, size=距离"
@@ -47161,7 +47725,7 @@
               "description": "size=行步长, length1=列步长, mode=类型（默认 lines）"
             },
             "genRandomRegions": {
-              "description": "size/length1=宽范围, row/column=高范围, count=个数"
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数"
             },
             "genRegionHline": {
               "label": "距离",
@@ -47369,7 +47933,7 @@
             },
             "genRandomRegions": {
               "label": "个数",
-              "description": "size/length1=宽范围, row/column=高范围, count=个数",
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数",
               "step": 1
             }
           }
@@ -47475,7 +48039,7 @@
               "description": "row, column, phi, size/length1=半径, length2=扇区角"
             },
             "genRandomRegions": {
-              "description": "size/length1=宽范围, row/column=高范围, count=个数"
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数"
             },
             "genRegionPoints": {
               "description": "row/column 与 size/length1=两点"
@@ -47729,7 +48293,7 @@
             },
             "genRandomRegions": {
               "label": "宽范围",
-              "description": "size/length1=宽范围, row/column=高范围, count=个数"
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数"
             },
             "genRegionPoints": {
               "label": "两点",
@@ -47761,7 +48325,8 @@
               "description": "row, column, phi, size/length1=半径, length2=扇区角"
             },
             "genRandomRegions": {
-              "description": "size/length1=宽范围, row/column=高范围, count=个数"
+              "label": "高范围",
+              "description": "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数"
             }
           }
         },
@@ -47986,7 +48551,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "declaresActions": false,
       "declaresFrames": false,
@@ -48128,6 +48693,14 @@
       ],
       "description": "Measure each existing region object, preserving pixel area and holes. propertiesJson contains all objects; scalar ports select index or largest. Empty or out-of-range index returns found=false and omits scalar measurements. Orientation is degrees in image x-right/y-down coordinates. Emits diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -48369,6 +48942,14 @@
         }
       ],
       "description": "Relation operators require a same-size region2; relations JSON uses zero-based region object indices. Nearest-point transform also outputs distance and nearest row/column maps. Skeleton splitting requires a region already thinned to a skeleton and outputs open segment contours.",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "WorkflowCore"
+      },
       "declaresActions": false,
       "declaresFrames": false,
       "declaresTransformFrames": false,
@@ -48465,7 +49046,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -48584,6 +49165,14 @@
       ],
       "description": "Convert each existing region object to one detection, preserving pixel area, centroid and bounding geometry. Does not split or reorder objects. Optional maxCount truncates the list; when it does, truncated=true and diagnostics keep sourceCount so a capped result is never mistaken for a complete one. emitted equals count, totalArea sums the emitted areas. Connect to collection nodes or flow.forEach.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "outputFrames": [
         {
@@ -48682,7 +49271,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -48804,7 +49393,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -49099,7 +49688,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -49196,7 +49785,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "outputFrames": [
@@ -49415,7 +50004,7 @@
         "deterministic": false,
         "supportsRunNode": false,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "actions": [
         {
@@ -49637,6 +50226,14 @@
       ],
       "description": "Planar compensation for J4 rotation-center/TCP eccentricity: converts a desired TCP pose into the J4 pivot command pose using (TCP offset - pivot offset) rotated by the commanded angle. Validates all finite inputs; emits eccentricity magnitude and JSON diagnostics. Outputs a target only; it does not send motion to hardware.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -49802,7 +50399,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": false,
-        "executionMode": "Auto"
+        "executionMode": "WorkflowCore"
       },
       "resources": [
         {
@@ -49970,6 +50567,14 @@
       ],
       "description": "Create a vendor-neutral RobotTarget2D from a pose already resolved into RobotBase (or another configured robot frame). Validates frame, finite pose/offsets and guidance mode; pick offset is applied in pose-local coordinates. Emits frame, unit and JSON diagnostics. Does not send motion to hardware.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -50275,7 +50880,7 @@
               "value": "clamp"
             }
           ],
-          "description": "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add."
+          "description": "One of add/subtract/multiply/divide/pow/sqrt/abs/min/max/clamp; unknown operations fail instead of defaulting to add."
         },
         {
           "name": "clampMin",
@@ -50331,6 +50936,14 @@
       ],
       "description": "Combine measurements. Add, subtract, multiply, divide, power, min, and max read a and b. Square root, absolute value, and clamp read a only. An unknown operation, division by zero, a negative square root, reversed clamp bounds, or a non-finite result fails instead of guessing. Emits JSON diagnostics with operands, operation and result.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -50384,6 +50997,11 @@
           "name": "json",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "document",
+          "dataType": "Json",
+          "required": false
         },
         {
           "name": "fieldCount",
@@ -50453,7 +51071,7 @@
           "description": "Hard cap on the produced UTF-8 payload. Exceeding it fails instead of sending a truncated packet that the receiver will reject later."
         }
       ],
-      "description": "Pack up to six scalar values into one JSON document. Wire: a..f -> json/fieldCount/bytes. Number, integer, boolean and text are packed with their own JSON type; images, regions and detection lists are rejected so a payload never silently becomes a wall of internal fields. Duplicate or over-long keys fail. Use it for the classic 'SN + OK/NG + X/Y + timestamp' message that device.writeVisionResult cannot express. Text mode consumes the json port directly; for nested objects chain value.jsonParse/jsonBuild or script.csharp.",
+      "description": "Pack up to six scalar values into one JSON document. Wire: a..f -> json/document/fieldCount/bytes. Number, integer, boolean, text, StringList and Json are packed with their own JSON type; images, regions and detection lists are rejected so a payload never silently becomes a wall of internal fields. Duplicate or over-long keys fail. Use it for the classic 'SN + OK/NG + X/Y + timestamp' message that device.writeVisionResult cannot express. json is the UTF-8 text for HTTP/MES; document is the same payload as a typed Json for chaining into value.jsonParse without re-serializing. For nested objects chain value.jsonParse/jsonBuild or script.csharp.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -50461,7 +51079,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -50587,6 +51205,14 @@
       ],
       "description": "Emit a constant number (with an integer variant and an isInteger flag) for comparisons, arithmetic and thresholds. Non-finite or out-of-range values are rejected instead of silently propagating; includes JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -50670,6 +51296,14 @@
       "parameters": [],
       "description": "Collect up to eight scalar measurements into one NumberList so value.statistics can summarize them. Only connected inputs are collected, in port order a..h: an unconnected input contributes nothing instead of a zero, because a silent zero would distort mean, range and CP/CPK. Non-finite inputs fail; connecting nothing fails with an explicit message rather than producing an empty list.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -50688,6 +51322,11 @@
           "required": true
         },
         {
+          "name": "document",
+          "dataType": "Json",
+          "required": false
+        },
+        {
           "name": "json",
           "dataType": "String",
           "required": false
@@ -50702,6 +51341,16 @@
         {
           "name": "value",
           "dataType": "Any",
+          "required": false
+        },
+        {
+          "name": "document",
+          "dataType": "Json",
+          "required": false
+        },
+        {
+          "name": "texts",
+          "dataType": "StringList",
           "required": false
         },
         {
@@ -50806,7 +51455,7 @@
           "description": "Reject oversized payloads before parsing. A 100 MB HTML error page should not become a JSON parse attempt."
         }
       ],
-      "description": "Read one field out of a JSON response. Wire: json -> found/value/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text so a second node can drill further. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
+      "description": "Read one field out of a JSON response. Wire: document (typed) or json (text) -> found/value/document/texts/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text plus a typed Json document, arrays of strings also produce a StringList on texts, so a second node can drill further without re-parsing text. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -50814,7 +51463,7 @@
         "deterministic": true,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "declaresActions": true,
@@ -50924,6 +51573,14 @@
       ],
       "description": "Inclusive range check. Reversed min/max are swapped and flagged in diagnostics. deviation is 0 inside the window and the signed distance outside it; clamped is the value limited to the window; margin is the signed distance to the nearest bound. invert flips pass only. Emits pass, inside, margin, deviation, clamped and JSON diagnostics.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -51052,7 +51709,7 @@
         "deterministic": false,
         "supportsRunNode": true,
         "supportsParallel": true,
-        "executionMode": "Auto"
+        "executionMode": "Pipeline"
       },
       "actions": [],
       "maturity": "Preview",
@@ -51209,6 +51866,14 @@
       ],
       "description": "Summarize a NumberList: count, mean, standard deviation, min, max, median, range and sum. Median averages the two middle samples for even counts. With spec limits enabled it also emits cp = (USL-LSL)/(6σ), cpk = min(USL-mean, mean-LSL)/(3σ) and pass = mean within [LSL, USL], using the selected deviation divisor; a zero standard deviation with limits enabled fails instead of returning infinity. Empty lists and non-finite samples fail.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,
@@ -51601,6 +52266,14 @@
       ],
       "description": "Compose and reshape strings that other nodes already produce (barcode text, OCR text, timestamps, paths). Wire: optional string inputs a/b/c/d and optional number input value; textValue is the result, charCount its UTF-16 length, truncated reports clamped substrings, numberValue is emitted only by Text to number. Template mode assembles {a}..{d} and {value}; Join skips empty parts; Number to text uses an invariant-culture format; Text to number parses with NumberStyles.Float and fails on non-numeric or non-finite text; Substring clamps out-of-range indexes and sets truncated; Trim/Replace/Pad/Uppercase/Lowercase/Length operate on input a. Empty find text, multi-character pad characters, unknown placeholders and invalid number formats fail deterministically; missing string inputs are treated as empty.",
       "pluginId": "builtin",
+      "capabilities": {
+        "supportsRoi": false,
+        "emitsOverlay": false,
+        "deterministic": true,
+        "supportsRunNode": true,
+        "supportsParallel": true,
+        "executionMode": "Pipeline"
+      },
       "actions": [],
       "declaresActions": true,
       "declaresFrames": false,

@@ -17,7 +17,7 @@ namespace VisionStudio.Engine.Nodes;
 /// 只有连接/填写相机标定 JSON 时才计算位姿，未标定时仍可用于"有没有标记、ID 是多少"。
 ///
 /// 位姿使用 OpenCV solvePnP（针孔 + Brown-Conrady 畸变），输出标记坐标系到相机坐标系的
-/// 4×4 变换；鱼眼/远心模型不做位姿，以免给出无法解释的 Z 值。
+/// 4×4 变换；鱼眼/远心标定不在此路径内——传入这两种镜头模型会显式失败，而不是给出无法解释的 Z 值。
 /// </summary>
 public sealed class ArucoMarkerNode : IVisionNodeExecutor
 {

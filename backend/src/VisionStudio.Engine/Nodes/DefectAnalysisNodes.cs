@@ -233,7 +233,7 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
         var entries = new List<object>();
         double maxLength = 0, maxWidth = 0, totalArea = 0;
         var elongated = 0;
-        double angleWeight = 0, angleSum = 0, plainAngleSum = 0;
+        double angleWeight = 0, angleSum = 0, plainAngleSum = 0, meanCos = 0, meanSin = 0;
         var plainCount = 0;
 
         for (var index = 0; index < detections.Length; index++)
@@ -271,9 +271,17 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
                 elongated++;
                 // 角度是轴向量：加权前先按 2θ 展开，否则 179 度和 1 度会互相抵消。
                 var radians = angle * 2 * Math.PI / 180.0;
-                angleWeight += length;
-                angleSum += Math.Cos(radians) * length;
-                plainAngleSum += Math.Sin(radians) * length;
+                if (angleMode == "mean")
+                {
+                    meanCos += Math.Cos(radians);
+                    meanSin += Math.Sin(radians);
+                }
+                else
+                {
+                    angleWeight += length;
+                    angleSum += Math.Cos(radians) * length;
+                    plainAngleSum += Math.Sin(radians) * length;
+                }
                 plainCount++;
             }
 
@@ -297,10 +305,13 @@ public sealed class DefectGeometryNode : IVisionNodeExecutor
         }
 
         var dominantAngle = 0d;
-        if (elongated > 0 && angleWeight > 1e-9)
+        if (elongated > 0)
         {
-            var meanAngle = angleMode == "mean" ? Math.Atan2(plainAngleSum, angleSum) : Math.Atan2(plainAngleSum, angleSum);
-            dominantAngle = DefectAnalysisHelpers.FoldAngle(meanAngle * 90.0 / Math.PI);
+            var meanAngle = angleMode == "mean"
+                ? Math.Atan2(meanSin, meanCos)
+                : angleWeight > 1e-9 ? Math.Atan2(plainAngleSum, angleSum) : double.NaN;
+            if (double.IsFinite(meanAngle))
+                dominantAngle = DefectAnalysisHelpers.FoldAngle(meanAngle * 90.0 / Math.PI);
         }
 
         timer.Stop();

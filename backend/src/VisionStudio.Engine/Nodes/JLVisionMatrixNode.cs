@@ -10,7 +10,7 @@ namespace VisionStudio.Engine.Nodes;
 
 /// <summary>
 /// JLVision 矩阵节点：输入 JSON 二维数组，输出主值 + 结果矩阵 JSON。
-/// 覆盖转置/求逆/行列式/加减乘/逐元素/范数/求和/极值/子矩阵/重复/线性求解/对称特征值/正交分解。
+/// 覆盖转置/求逆/行列式/加减乘/逐元素/求和/极值/子矩阵/重复/线性求解/对称特征值/正交分解（不含范数算子）。
 /// </summary>
 public sealed class JLVisionMatrixNode : IVisionNodeExecutor
 {

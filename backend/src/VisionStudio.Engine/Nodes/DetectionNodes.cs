@@ -123,6 +123,9 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 ["truncated"] = VisionValue.Boolean(truncated),
                 ["detections"] = VisionValue.Detections(detections)
             };
+            // 单斑点便利口永远描述"最大斑点"，与 sortBy 的展示顺序无关。
+            VisionDetection? best = null;
+            if (detections.Length > 0) best = detections.MaxBy(x => x.Area);
             var overlays = new List<VisionOverlay>();
             for (var i = 0; i < detections.Length; i++)
             {
@@ -137,7 +140,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                     Height: detection.Height,
                     Stroke: "#faad14",
                     StrokeWidth: 1.5));
-                if (largestOnly && i == 0)
+                if (largestOnly && best is not null && detection.Index == best.Value.Index)
                 {
                     overlays.Add(new VisionOverlay("blob-largest-circle", VisionOverlayType.Circle,
                         X: detection.Circle.X, Y: detection.Circle.Y, Radius: detection.Circle.Radius,
@@ -160,20 +163,20 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                 ["autoGray"] = converted,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             };
-            if (detections.Length > 0)
+            if (best is not null)
             {
-                var best = detections[0];
-                outputs["x"] = VisionValue.Double(best.Circle.X);
-                outputs["y"] = VisionValue.Double(best.Circle.Y);
-                outputs["area"] = VisionValue.Double(best.Area);
-                outputs["radius"] = VisionValue.Double(best.Circle.Radius);
-                outputs["center"] = VisionValue.Point(new VisionPoint2D(best.Circle.X, best.Circle.Y));
-                outputs["circle"] = VisionValue.Circle(best.Circle);
+                var top = best.Value;
+                outputs["x"] = VisionValue.Double(top.Circle.X);
+                outputs["y"] = VisionValue.Double(top.Circle.Y);
+                outputs["area"] = VisionValue.Double(top.Area);
+                outputs["radius"] = VisionValue.Double(top.Circle.Radius);
+                outputs["center"] = VisionValue.Point(new VisionPoint2D(top.Circle.X, top.Circle.Y));
+                outputs["circle"] = VisionValue.Circle(top.Circle);
                 // 单斑点便利口（原 measure.blob）：最大斑点的布尔、外接尺寸、圆度与完整列表。
                 outputs["found"] = VisionValue.Boolean(true);
-                outputs["circularity"] = VisionValue.Double(best.Circularity);
-                outputs["width"] = VisionValue.Double(best.Width);
-                outputs["height"] = VisionValue.Double(best.Height);
+                outputs["circularity"] = VisionValue.Double(top.Circularity);
+                outputs["width"] = VisionValue.Double(top.Width);
+                outputs["height"] = VisionValue.Double(top.Height);
                 outputs["blobs"] = VisionValue.String(System.Text.Json.JsonSerializer.Serialize(detections.Select(x => new
                 {
                     area = x.Area,
@@ -184,7 +187,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
                     width = x.Width,
                     height = x.Height
                 })));
-                summary["bestArea"] = best.Area;
+                summary["bestArea"] = top.Area;
             }
             else
             {

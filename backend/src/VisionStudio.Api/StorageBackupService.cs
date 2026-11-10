@@ -495,7 +495,8 @@ public sealed class StorageBackupService
                 // Commit only after the installed generation matches the hashes captured in the
                 // durable intent. This makes the transaction record evidence, not just a list of paths.
                 // Q08：SQLite Backup API 产生的是**语义等价、字节不同**的文件（页布局/头部字段/空闲页），
-                // 直接比较两份快照的文件哈希会误报——必须先把双方 VACUUM 规范化再比较逻辑内容。
+                // 直接比较两份快照的文件哈希会误报——这里按表名 + rowid 逐行规范化哈希（不做 VACUUM），
+                // 比较的是逻辑内容而不是文件字节。
                 var installedSnapshot = Path.Combine(workspace, "post-restore-verified.db");
                 await _database.CreateSnapshotAsync(installedSnapshot, ct);
                 if (!string.Equals(await ComputeSnapshotContentSha256Async(installedSnapshot, ct),

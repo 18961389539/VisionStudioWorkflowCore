@@ -168,7 +168,7 @@ internal sealed class StructuredWorkflowIrBuilder
             if (stopLoopEndId is not null && currentId.Equals(stopLoopEndId, StringComparison.OrdinalIgnoreCase))
             {
                 var loopEnd = _graph.Node(currentId);
-                if (!loopEnd.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
+                if (!FlowSemantics.IsLoopEnd(loopEnd.Type))
                     throw new InvalidOperationException($"Loop body '{ownerId}' expected flow.loopEnd '{stopLoopEndId}'.");
                 Claim(loopEnd.Id, ownerId);
                 _visualOrder.Add(loopEnd.Id);
@@ -189,7 +189,7 @@ internal sealed class StructuredWorkflowIrBuilder
             Claim(node.Id, ownerId);
             _visualOrder.Add(node.Id);
 
-            if (node.Type.Equals("flow.break", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsBreak(node.Type))
             {
                 // break 只支持直接写在 while/repeat 的循环体主序列里：它把"本轮剩余步骤"整体包进守卫，
                 // 若出现在 If/Switch/Try/Parallel 分支内，分支退出后外层还有步骤会继续执行，语义不成立，
@@ -224,7 +224,7 @@ internal sealed class StructuredWorkflowIrBuilder
                     throw new InvalidOperationException($"{label} '{node.Id}' has control edges from undeclared ports: {string.Join(", ", unexpected.Select(x => x.SourcePort))}.");
                 var bodyEdge = SinglePort(outgoing, "body", node.Id);
                 var doneEdge = SinglePort(outgoing, "done", node.Id);
-                var pairedEnds = _graph.Workflow.Nodes.Where(candidate => candidate.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase) &&
+                var pairedEnds = _graph.Workflow.Nodes.Where(candidate => FlowSemantics.IsLoopEnd(candidate.Type) &&
                     _graph.Outgoing(candidate.Id).Count == 1 &&
                     _graph.Outgoing(candidate.Id)[0].SourcePort.Equals("repeat", StringComparison.OrdinalIgnoreCase) &&
                     _graph.Outgoing(candidate.Id)[0].TargetNodeId.Equals(node.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -272,7 +272,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 continue;
             }
 
-            if (node.Type.Equals("flow.loopEnd", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsLoopEnd(node.Type))
                 throw new InvalidOperationException($"flow.loopEnd '{node.Id}' is not paired with its active flow.forEach / flow.while / flow.repeat body.");
 
             if (IsIfNode(node))
@@ -295,7 +295,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 items.Add(new StructuredIfIr(node, trueBranch, falseBranch, joinId, depth));
                 _regions.Add(new StructuredControlRegion(
                     node.Id,
-                    node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase) ? "IfBoolean" : "If",
+                    FlowSemantics.ConditionalLabel(node.Type),
                     joinId,
                     depth,
                     new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
@@ -310,7 +310,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 continue;
             }
 
-            if (node.Type.Equals("flow.switch", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsSwitch(node.Type))
             {
                 var cases = SwitchNode.ReadCases(node);
                 var outgoing = _graph.Outgoing(node.Id);
@@ -321,7 +321,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 var branchEdges = expectedPorts.Select(port => SinglePort(outgoing, port, node.Id)).ToArray();
                 var joinId = _graph.FindNearestCommonJoin(branchEdges.Select(x => x.TargetNodeId).ToArray(), stopJoinId, node.Id);
                 var merge = _graph.Node(joinId);
-                if (!merge.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
+                if (!FlowSemantics.IsMerge(merge.Type))
                     throw new InvalidOperationException($"Switch '{node.Id}' requires a flow.merge convergence node; found '{merge.Type}' at '{joinId}'.");
                 var mergeEdges = _graph.Incoming(joinId);
                 var mergePorts = expectedPorts.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -352,7 +352,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 continue;
             }
 
-            if (node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsTry(node.Type))
             {
                 var outgoing = _graph.Outgoing(node.Id);
                 var needsError = node.GetString("failurePolicy", "route") != "rethrow"
@@ -364,7 +364,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 var edges = expected.Select(port => SinglePort(outgoing, port, node.Id)).ToArray();
                 var joinId = _graph.FindNearestCommonJoin(edges.Select(x => x.TargetNodeId).ToArray(), stopJoinId, node.Id);
                 var merge = _graph.Node(joinId);
-                if (!merge.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
+                if (!FlowSemantics.IsMerge(merge.Type))
                     throw new InvalidOperationException($"Try '{node.Id}' requires a flow.merge convergence node; found '{merge.Type}' at '{joinId}'.");
                 var incoming = _graph.Incoming(joinId);
                 var targetPorts = needsError ? new[] { "case1", "case2", "default" } : ["case1", "case2"];
@@ -397,7 +397,7 @@ internal sealed class StructuredWorkflowIrBuilder
                 continue;
             }
 
-            if (node.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsParallel(node.Type))
             {
                 var outgoing = _graph.Outgoing(node.Id);
                 var branch1Edge = SinglePort(outgoing, "branch1", node.Id);
@@ -488,19 +488,11 @@ internal sealed class StructuredWorkflowIrBuilder
         return matches[0];
     }
 
-    private static bool IsIfNode(NodeDefinition node) =>
-        node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) ||
-        node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase);
+    private static bool IsIfNode(NodeDefinition node) => FlowSemantics.IsConditional(node.Type);
 
-    private static bool IsLoopNode(NodeDefinition node) =>
-        node.Type.Equals("flow.forEach", StringComparison.OrdinalIgnoreCase) ||
-        node.Type.Equals("flow.while", StringComparison.OrdinalIgnoreCase) ||
-        node.Type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase);
+    private static bool IsLoopNode(NodeDefinition node) => FlowSemantics.IsLoop(node.Type);
 
-    private static string LoopKindOf(string type) =>
-        type.Equals("flow.while", StringComparison.OrdinalIgnoreCase) ? "while"
-        : type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase) ? "repeat"
-        : "forEach";
+    private static string LoopKindOf(string type) => FlowSemantics.LoopKind(type);
 
     private static string LoopLabel(string kind) => kind switch
     {
@@ -537,9 +529,7 @@ internal sealed class StructuredWorkflowIrBuilder
             && edge.TargetNodeId.Equals(nodeId, StringComparison.OrdinalIgnoreCase)
             && edge.TargetPort.Equals(port, StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsMergeNode(NodeDefinition node) =>
-        node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) ||
-        node.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase);
+    private static bool IsMergeNode(NodeDefinition node) => FlowSemantics.IsJoinOrMerge(node.Type);
 
     private static void EnsureNonEmptyBranch(string nodeId, string branchName, string targetId, string joinId)
     {
@@ -630,8 +620,7 @@ internal sealed class StructuredControlGraph
                 continue;
 
             var node = Node(id);
-            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase) ||
-                node.Type.Equals("flow.merge", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsJoinOrMerge(node.Type))
                 result.TryAdd(id, d);
 
             foreach (var edge in Outgoing(id))

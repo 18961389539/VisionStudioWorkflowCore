@@ -341,7 +341,8 @@ public sealed class UdpMessageNode(IDeviceCommandOwnershipGate? ownershipGate = 
 /// <summary>
 /// 自定义串口协议（device.serialPort）。面向光源控制器、扫码枪、拧紧枪这类只有 RS-232/485 文本协议的设备。
 ///
-/// 语义与 TCP 节点一致（同参数命名、同应答模式、同正则校验），差别只在传输层：
+/// 参数命名与应答模式同 TCP 节点，但请求校验不同：串口总是要求非空负载，TCP 仅在 readMode != none 时要求。
+/// 传输层差异：
 /// - 每次请求打开-发送-接收-关闭；串口是独占资源，长期占用会挡住其他工位与手动调试；
 /// - DTR/RTS 可配（不少 485 转换器与老设备依赖其电平）；
 /// - 超时后关闭端口，不重发。

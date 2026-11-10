@@ -36,7 +36,7 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
     private long _flushFailures;
     private long _drainTimeouts;
 
-    /// <summary>满队列被丢弃的日志条数（BoundedChannelFullMode.DropWrite）。</summary>
+    /// <summary>满队列被丢弃的日志条数（Wait 模式下 TryWrite 返回 false，由调用方计数）。</summary>
     public long DroppedEntries => Interlocked.Read(ref _droppedEntries);
     /// <summary>写入单条日志失败的次数（磁盘/句柄错误；写入循环不回退、不阻塞，但必须可观测）。</summary>
     public long WriteFailures => Interlocked.Read(ref _writeFailures);

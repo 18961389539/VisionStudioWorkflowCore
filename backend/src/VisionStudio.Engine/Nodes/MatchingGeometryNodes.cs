@@ -299,6 +299,10 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
         if (camera.Length != 9)
             throw new InvalidOperationException("match.pose3d cameraMatrixJson must contain exactly 9 numbers (row-major 3x3).");
         var distortion = ParseNumberGrid(node.GetString("distortionJson", "[]"), "distortionJson");
+        // OpenCV accepts 0, 4 (k1,k2,p1,p2), 5 (+k3), 8 (+k4..k6), 12 (+p3,s1..s4) or 14 (+tauX,tauY).
+        if (distortion.Length is not (0 or 4 or 5 or 8 or 12 or 14))
+            throw new InvalidOperationException(
+                $"match.pose3d distortionJson must contain 0, 4, 5, 8, 12 or 14 numbers; got {distortion.Length}.");
 
         var solverName = (node.GetString("solver", "iterative") ?? "iterative").Trim().ToLowerInvariant();
         var solver = solverName switch

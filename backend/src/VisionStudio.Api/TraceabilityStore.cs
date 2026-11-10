@@ -167,8 +167,8 @@ public sealed class TraceabilityStore
 
     /// <summary>
     /// Records a run start before execution so an interrupted host still leaves trace evidence.
-    /// <see cref="RecordAsync"/> later updates this same row; production cycles skip the start record
-    /// and insert their full row at finalization.
+    /// <see cref="RecordAsync"/> later updates this same row; production cycles also write this start
+    /// record and finalize it with an upsert, so the row never disappears between begin and end.
     /// </summary>
     public async Task BeginAsync(string runId, DateTimeOffset startedAt, WorkflowDefinition workflow, RunTraceContext context, CancellationToken ct, bool strongDurability = false)
     {

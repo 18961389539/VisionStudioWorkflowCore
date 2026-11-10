@@ -1280,7 +1280,7 @@ public static class BuiltInNodeCatalog
             [ExecIn, new("a", VisionDataType.Double), new("b", VisionDataType.Double, Required: false) { RequiredWhen = new("op", ["add", "subtract", "multiply", "divide", "pow", "min", "max"]) }],
             [new("result", VisionDataType.Double), new("diagnostics", VisionDataType.String), new("isFinite", VisionDataType.Boolean), new("a", VisionDataType.Double), new("b", VisionDataType.Double), new("op", VisionDataType.String), Next],
             [
-                new("op", "Operation", "select", "add", Description: "Strictly one of add/subtract/multiply/divide; unknown operations fail instead of defaulting to add.", Options:
+                new("op", "Operation", "select", "add", Description: "One of add/subtract/multiply/divide/pow/sqrt/abs/min/max/clamp; unknown operations fail instead of defaulting to add.", Options:
                 [
                     new("Add (a + b)", "add"),
                     new("Subtract (a - b)", "subtract"),
@@ -1549,6 +1549,7 @@ public static class BuiltInNodeCatalog
     internal static IReadOnlyList<NodeCatalogItem> RawCatalog => RawItems;
 
     public static readonly IReadOnlyList<NodeCatalogItem> Items = RawItems
+        .Select(NodeExecutionModeCatalog.Apply)
         .Select(item => item.Type == "match.template"
             ? item with { Capabilities = (item.Capabilities ?? new VisionToolCapabilities()) with { Deterministic = false } }
             : item.Actions is null && Runtime.VisionExecutionPolicy.IsPipelineEligible(item)
@@ -1567,7 +1568,7 @@ public static class BuiltInNodeCatalog
     public static IReadOnlyList<string> RoiParameterNames(string type, VisionToolCapabilities? capabilities)
     {
         var names = new List<string>(3);
-        if (capabilities?.SupportsRoi == true || ReadsLocalRoiWithoutCapability(type)) names.Add("roi");
+        if (capabilities?.SupportsRoi == true) names.Add("roi");
         if (type.Equals("match.shape", StringComparison.OrdinalIgnoreCase))
             names.AddRange(["searchRoi", "templateRoi", "clutterRoi"]);
         if (type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
@@ -1576,12 +1577,6 @@ public static class BuiltInNodeCatalog
             names.Add("templateRoi");
         return names;
     }
-
-    // 这些节点运行时会读本地 ROI，但尚未声明 SupportsRoi（能力位待补）；契约仍必须暴露真实参数。
-    private static bool ReadsLocalRoiWithoutCapability(string type) =>
-        type.Equals("recognition.barcode", StringComparison.OrdinalIgnoreCase)
-        || type.Equals("recognition.ocr", StringComparison.OrdinalIgnoreCase)
-        || type.Equals("region.fromRoi", StringComparison.OrdinalIgnoreCase);
 
     private static NodeCatalogItem DeclareLocalRoiParameters(NodeCatalogItem item)
     {

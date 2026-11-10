@@ -166,7 +166,7 @@ public static class ExternalTrainPackage
 
     /// <summary>
     /// Structure + checksum smoke. Optional OpenCV load for reference packages and optional ONNX session open.
-    /// Does not train. Held-out inference runs only when a smoke image is present and openSession is true.
+    /// Does not train and does not run held-out inference: the smoke image is only validated as a required file.
     /// </summary>
     public static ExternalTrainSmokeResult SmokeEvaluate(string packageRoot, bool openOnnxSession = false)
     {

@@ -107,7 +107,7 @@ public static class JlImageOperations
             a.Image.LaplaceOfGauss(a.Mult <= 0 ? 1d : a.Mult)),
         ["sobelAmp"] = new("sobelAmp", "Sobel amplitude", "size=核尺寸, mode=sum_abs|sum_sqrt", a =>
             a.Image.SobelAmp(SobelMode(a.Mode), Kernel(a.Size))),
-        ["smooth"] = new("smooth", "Smooth image", "mode=derivate_gauss, mult=alpha", a =>
+        ["smooth"] = new("smooth", "Smooth image", "mult=alpha；滤波器固定 gauss（mode 未使用）", a =>
             a.Image.SmoothImage("gauss", a.Mult)),
 
         // ── 灰度形态学 ───────────────────────────────────────────────

@@ -1,8 +1,9 @@
 namespace VisionStudio.Scripting;
 
 /// <summary>
-/// Read-only editor services for script.csharp. They use the same reference set and forbidden-API
-/// walker as execution, but never execute code and never create Mat objects.
+/// Read-only editor services for script.csharp. Validate uses the same reference set and forbidden-API
+/// walker as execution; Format only checks the syntax tree and normalizes whitespace; Complete filters
+/// completion items with SemanticForbiddenNamespaces. None of them execute code or create Mat objects.
 /// </summary>
 public static class ScriptEditorService
 {

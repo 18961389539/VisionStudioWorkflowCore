@@ -62,8 +62,10 @@ public sealed class CSharpScriptNode : IVisionNodeExecutor
                     VisionDataType.NumberList => value.Require<IReadOnlyList<double>>(name).ToArray(),
                     VisionDataType.PointList => value.Require<IReadOnlyList<VisionPoint2D>>(name)
                         .Select(point => new ScriptPoint(point.X, point.Y)).ToArray(),
+                    VisionDataType.StringList => value.Require<IReadOnlyList<string>>(name).ToArray(),
+                    VisionDataType.Json => value.Require<VisionJson>(name).Text,
                     _ => throw new InvalidOperationException(
-                        $"script.csharp input '{name}' has type {value.Type}; supported script input types are Double, Integer, Boolean, String, NumberList and PointList. Connect images to the image port and use dedicated nodes for geometry.")
+                        $"script.csharp input '{name}' has type {value.Type}; supported script input types are Double, Integer, Boolean, String, NumberList, PointList, StringList and Json. Connect images to the image port and use dedicated nodes for geometry.")
                 };
             }
 

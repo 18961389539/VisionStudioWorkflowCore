@@ -88,7 +88,7 @@ public static class Batch5PrecisionCatalog
                 new("maxPoints", "Point Budget", "number", 2000, 16, 20000, 1, Group: "Filter",
                     Description: "Contours are evenly subsampled to this budget so graph data stays bounded.")
             ],
-            "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode, approximation. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
+            "Extract contours with hierarchy (external/holes). Wire: binary or Otsu-capable image → Contour list; empty → found=false (not a hard fail). Key params: hierarchy mode. count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 200) cut the list and more contours exist than the outputs show. Chain to contour.filter, thickness, roundness/straightness. Binarize first or rely on built-in Otsu.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true)),
         new(
@@ -155,7 +155,7 @@ public static class Batch5PrecisionCatalog
                     new("First", "first"),
                     new("Last", "last"),
                     new("By index", "index")
-                ], Group: "Selection", Description: "Which contour the scalar outputs describe: largest area or the index parameter."),
+                ], Group: "Selection", Description: "Which contour the scalar outputs describe: largest/smallest area, first/last in the list, or an explicit index."),
                 new("index", "Index", "number", 0, 0, 100000, 1, Group: "Selection", VisibleWhen: new("selectBy", ["index"]), Description: "Zero-based position in the input list, used only when Select = by index; out of range fails.")
             ],
             "Compute derived contour geometry (centroid, min-area rotated rectangle, solidity, extent, aspect ratio, equivalent diameter) with strict selectBy/index checks, scalar ports for the selected contour, overlays and diagnostics. Empty input or contours with fewer than 3 points fail.",
@@ -382,7 +382,7 @@ public static class Batch5PrecisionCatalog
                     new("First", "first"),
                     new("Last", "last"),
                     new("By index", "index")
-                ], Group: "Selection", Description: "Which contour the ellipse outputs describe: largest area or the index parameter."),
+                ], Group: "Selection", Description: "Which contour the ellipse outputs describe: largest/smallest area, first/last in the list, or an explicit index."),
                 new("index", "Index", "number", 0, 0, 100000, 1, Group: "Selection", Description: "Used when Select = by index; out of range fails.")
             ],
             "Fit an ellipse to a contour (needs >= 5 non-collinear points). Output is the rotated rectangle of the ellipse: width = major axis, height = minor axis, angle = major-axis direction (degrees, CCW), plus axisRatio and diagnostics. Strict selectBy/index validation.",

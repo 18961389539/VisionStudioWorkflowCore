@@ -14,12 +14,12 @@ namespace VisionStudio.Engine.Nodes;
 /// 或者解析响应里的 code/message 再回填流程，之前只能靠 script.csharp 写代码。
 ///
 /// 设计取舍：
-/// - JSON 文本走 `String` 端口而不是新增 `Json` 端口类型：`transformJson` / `detectionsJson` /
-///   `poses` 等既有输出本来就是 String 里的 JSON 文本，新增类型会与它们并存成两套方言；
-///   真正缺的是"构造与解析"这两个动作，不是类型。
+/// - JSON 文本继续走 `String` 端口（与 `transformJson` / `detectionsJson` 等既有输出一致），
+///   同时新增 `Json` 类型的 `document` 端口供类型化链式传递：两套表示并存，String 是对外协议文本，
+///   Json 是流程内部的强类型载荷，避免把所有 JSON 都降级成字符串。
 /// - 组包按键名列表映射端口顺序（`keys` = "sn,result,x,y"），标量类型从 VisionValue 的实际
-///   CLR 类型推断，避免让用户再写一遍类型声明；复杂类型（图像/区域/检测列表）明确拒绝，
-///   而不是序列化成一坨不可控的东西。
+///   CLR 类型推断，避免让用户再写一遍类型声明；StringList 直接打包成数组，复杂视觉对象
+///   （图像/区域/检测列表）明确拒绝，而不是序列化成一坨不可控的东西。
 /// - 解析用固定路径语法（$.a.b[0].c），缺字段默认硬失败：静默给 null 会让下游在几轮之后
 ///   才炸，那是最难查的一类问题。
 /// </summary>
@@ -103,6 +103,7 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
             new Dictionary<string, VisionValue>(StringComparer.OrdinalIgnoreCase)
             {
                 ["json"] = VisionValue.String(payload),
+                ["document"] = VisionValue.Json(new VisionJson(payload)),
                 ["fieldCount"] = VisionValue.Integer(fieldCount),
                 ["bytes"] = VisionValue.Integer(bytes),
                 ["diagnostics"] = VisionValue.String(diagnostics)
@@ -114,7 +115,7 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
             }));
     }
 
-    /// <summary>只接受标量与字符串；复杂视觉对象必须由用户先降级成编号/坐标再组包。</summary>
+    /// <summary>标量、字符串与文本列表；复杂视觉对象必须由用户先降级成编号/坐标再组包。</summary>
     private static object? Convert(VisionValue value, string port) => value.Value switch
     {
         null => null,
@@ -122,9 +123,12 @@ public sealed class JsonBuildNode : IVisionNodeExecutor
         bool flag => flag,
         byte or sbyte or short or ushort or int or uint or long or ulong => System.Convert.ToInt64(value.Value, CultureInfo.InvariantCulture),
         float or double or decimal => System.Convert.ToDouble(value.Value, CultureInfo.InvariantCulture),
+        IReadOnlyList<string> texts => texts,
+        VisionJson document => JsonNode.Parse(document.Text) ??
+            throw new InvalidOperationException($"value.jsonBuild input '{port}' is an empty JSON document."),
         _ => throw new InvalidOperationException(
             $"value.jsonBuild input '{port}' carries {value.Type} ({value.Value.GetType().Name}); " +
-            "only text, number, integer and boolean can be packed — reduce the value upstream (for example collection.detections.count or measure.* scalars).")
+            "only text, number, integer, boolean, StringList and Json can be packed — reduce the value upstream (for example collection.detections.count or measure.* scalars).")
     };
 }
 
@@ -142,9 +146,11 @@ public sealed class JsonParseNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        var text = context.TryGetValue("json", out var jsonInput)
-            ? jsonInput.Require<string>("json")
-            : node.GetString("json", string.Empty);
+        var text = context.TryGetValue("document", out var documentInput)
+            ? documentInput.Require<VisionJson>("document").Text
+            : context.TryGetValue("json", out var jsonInput)
+                ? jsonInput.Require<string>("json")
+                : node.GetString("json", string.Empty);
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("value.jsonParse requires a non-empty JSON input.");
 
@@ -197,6 +203,16 @@ public sealed class JsonParseNode : IVisionNodeExecutor
                     case double number: outputs["number"] = VisionValue.Double(number); break;
                     case bool flag: outputs["boolean"] = VisionValue.Boolean(flag); break;
                     case string str: outputs["text"] = VisionValue.String(str); break;
+                }
+                if (element.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    outputs["document"] = VisionValue.Json(new VisionJson(element.GetRawText()));
+                if (element.ValueKind == JsonValueKind.Array)
+                {
+                    var texts = element.EnumerateArray()
+                        .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
+                        .ToArray();
+                    if (texts.All(item => item is not null))
+                        outputs["texts"] = VisionValue.StringList([.. texts.Select(item => item!)]);
                 }
             }
 

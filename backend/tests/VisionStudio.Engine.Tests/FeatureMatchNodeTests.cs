@@ -57,6 +57,25 @@ public sealed class FeatureMatchNodeTests
     }
 
     [Fact]
+    public async Task FeatureMatch_Accepts16BitImages()
+    {
+        // 16 位输入必须真正压到 8 位再交给 SIFT；只做数值缩放仍留在 16U 会直接断言失败。
+        using var pattern8 = TexturedPattern();
+        using var scene8 = WarpedScene(pattern8, angleDeg: 15, scale: 1.1, centreX: 300, centreY: 260);
+        using var pattern = new Mat();
+        using var scene = new Mat();
+        pattern8.ConvertTo(pattern, MatType.CV_16U, 257);
+        scene8.ConvertTo(scene, MatType.CV_16U, 257);
+
+        var result = await Run(new FeatureMatchNode(), scene, pattern,
+            """{"detector":"sift","transformType":"similarity","minInliers":6}""");
+
+        Assert.True(result.Outputs["found"].Require<bool>("found"), Diagnostics(result));
+        Assert.InRange(result.Outputs["x"].Require<double>("x"), 295, 305);
+        Assert.InRange(result.Outputs["y"].Require<double>("y"), 255, 265);
+    }
+
+    [Fact]
     public async Task FeatureMatch_IsDeterministicForIdenticalInput()
     {
         using var pattern = TexturedPattern();

@@ -140,7 +140,7 @@ internal static class ProfileMath
         return result;
     }
 
-    /// <summary>Kåsa 代数圆拟合（先中心化再解 3×3 正规方程），逐样本调用也够快。</summary>
+    /// <summary>Kåsa 代数圆拟合（先中心化再解 2×2 正规方程），逐样本调用也够快。</summary>
     public static bool TryFitCircle(IReadOnlyList<VisionPoint2D> points, out VisionCircle circle)
     {
         circle = default;

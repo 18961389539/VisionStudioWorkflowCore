@@ -40,13 +40,17 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
         if (region.Width < 8 || region.Height < 8)
             throw new InvalidOperationException($"recognition.barcodeQuality requires an ROI of at least 8x8 px; got {region.Width}x{region.Height}.");
 
-        // ISO 15415 的 SC = Rmax − Rmin（符号区内极值）；ROI 里若有镜面反光点，应先把 ROI 收窄。
-        double rmin, rmax;
+        // ISO 15415 的 SC 取符号区 5%/95% 分位差而不是绝对极值：单个镜面反光点或坏像素
+        // 不应把对比度抬高到"看起来可读"的程度。
+        double low, high;
         using (var roiMat = new Mat(gray, region))
         {
-            Cv2.MinMaxLoc(roiMat, out rmin, out rmax);
+            var bins = PreprocessGapMath.Histogram(roiMat, null);
+            var pixelCount = (long)roiMat.Width * roiMat.Height;
+            low = PreprocessGapMath.Percentile(bins, pixelCount, 5);
+            high = PreprocessGapMath.Percentile(bins, pixelCount, 95);
         }
-        var symbolContrast = rmax - rmin;
+        var symbolContrast = high - low;
         if (!double.IsFinite(symbolContrast) || symbolContrast < 5)
             throw new InvalidOperationException(
                 $"recognition.barcodeQuality found symbol contrast {symbolContrast:0.#} in the ROI; there is no readable symbol (needs at least 5 gray levels).");
@@ -54,7 +58,7 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
         var gridMode = node.GetString("gridMode", "modules").Trim().ToLowerInvariant();
         var (rows, cols) = ResolveGrid(node, gridMode, region);
         var means = CellMeans(gray, region, rows, cols);
-        var mid = (rmin + rmax) / 2d;
+        var mid = (low + high) / 2d;
 
         var darkCells = means.Count(mean => mean < mid);
         var darkFraction = darkCells / (double)means.Count;
@@ -184,8 +188,8 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
     }
 
     /// <summary>
-    /// 模块网格：modules 用给定行列数；cellSize 由单元像素尺寸推算；whole 只算 SC。
-    /// 1D 码也可以走 cellSize（行数配 1）。
+    /// 模块网格：modules 用给定行列数；cellSize 由单元像素尺寸反推行列；whole 只算 SC。
+    /// cellSize 的行数恒由 ROI 高度/单元尺寸决定；1D 码要把 ROI 收到条码高度内，或改用 modules 显式给行数。
     /// </summary>
     private static (int Rows, int Cols) ResolveGrid(NodeDefinition node, string gridMode, Rect region)
     {

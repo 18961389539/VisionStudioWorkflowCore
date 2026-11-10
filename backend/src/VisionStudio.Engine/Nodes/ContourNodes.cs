@@ -13,7 +13,8 @@ namespace VisionStudio.Engine.Nodes;
 ///   · contour.filter   只负责按条件筛选既有轮廓列表（可反复组合）；
 ///   · contour.properties 只负责计算派生几何属性并转出 DetectionList 供集合/循环节点复用。
 /// 共享约定：
-///   · "没找到轮廓"是正常业务结果（count=0 / found=false），不是执行失败；
+///   · 提取/筛选取不到轮廓是正常业务结果（count=0 / found=false），不是执行失败；
+///   · contour.properties 例外：它必须选中一条轮廓才能产出几何量，空输入按配置错误显式失败；
 ///   · 输入图像为空、轮廓端口缺失才是参数/输入错误（InvalidOperationException）；
 ///   · ROI 既可来自参数也可来自 roi 输入端口（端口优先），供 roi.transform 动态驱动。
 /// </summary>

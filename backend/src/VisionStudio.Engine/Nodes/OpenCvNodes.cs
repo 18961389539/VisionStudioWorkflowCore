@@ -335,7 +335,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         {
             DefectNodeHelpers.AttachByteStats(outputs, summary, owned.Mat, "image.threshold", ("mode", mode), ("invert", invert));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
-            // 自适应/OTSU 分支已在内部算好前景占比；这里只补 manual 等没有该输出的分支。
+            // 调用方（adaptive/otsu）可能已产出部分字段；缺什么补什么。manual 分支不走本方法。
             var total = owned.Mat.Total();
             if (!outputs.ContainsKey("foregroundRatio") && total > 0)
                 outputs["foregroundRatio"] = VisionValue.Double(Convert.ToInt64(summary["nonZeroCount"]!) / total);

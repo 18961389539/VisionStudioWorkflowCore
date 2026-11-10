@@ -18,7 +18,8 @@ internal static class P0CompletionCatalog
              new("c", VisionDataType.Any, Required: false), new("d", VisionDataType.Any, Required: false),
              new("e", VisionDataType.Any, Required: false), new("f", VisionDataType.Any, Required: false)],
             [
-                new("json", VisionDataType.String), new("fieldCount", VisionDataType.Integer),
+                new("json", VisionDataType.String), new("document", VisionDataType.Json, Required: false),
+                new("fieldCount", VisionDataType.Integer),
                 new("bytes", VisionDataType.Integer), new("diagnostics", VisionDataType.String), Next
             ],
             [
@@ -34,15 +35,17 @@ internal static class P0CompletionCatalog
                 new("maxBytes", "Maximum Payload", "number", 65536, 64, 4194304, 1024, Group: "Limits",
                     Description: "Hard cap on the produced UTF-8 payload. Exceeding it fails instead of sending a truncated packet that the receiver will reject later."),
             ],
-            "Pack up to six scalar values into one JSON document. Wire: a..f -> json/fieldCount/bytes. Number, integer, boolean and text are packed with their own JSON type; images, regions and detection lists are rejected so a payload never silently becomes a wall of internal fields. Duplicate or over-long keys fail. Use it for the classic 'SN + OK/NG + X/Y + timestamp' message that device.writeVisionResult cannot express. Text mode consumes the json port directly; for nested objects chain value.jsonParse/jsonBuild or script.csharp.",
+            "Pack up to six scalar values into one JSON document. Wire: a..f -> json/document/fieldCount/bytes. Number, integer, boolean, text, StringList and Json are packed with their own JSON type; images, regions and detection lists are rejected so a payload never silently becomes a wall of internal fields. Duplicate or over-long keys fail. Use it for the classic 'SN + OK/NG + X/Y + timestamp' message that device.writeVisionResult cannot express. json is the UTF-8 text for HTTP/MES; document is the same payload as a typed Json for chaining into value.jsonParse without re-serializing. For nested objects chain value.jsonParse/jsonBuild or script.csharp.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 
         new("value.jsonParse", "Parse JSON", "Value",
-            [Exec, new("json", VisionDataType.String, Required: false)],
+            [Exec, new("document", VisionDataType.Json, Required: false), new("json", VisionDataType.String, Required: false)],
             [
                 new("found", VisionDataType.Boolean),
                 new("value", VisionDataType.Any, Required: false),
+                new("document", VisionDataType.Json, Required: false),
+                new("texts", VisionDataType.StringList, Required: false),
                 new("number", VisionDataType.Double, Required: false),
                 new("text", VisionDataType.String, Required: false),
                 new("boolean", VisionDataType.Boolean, Required: false),
@@ -67,7 +70,7 @@ internal static class P0CompletionCatalog
                 new("maxBytes", "Maximum Payload", "number", 1048576, 64, 16777216, 1024, Group: "Result",
                     Description: "Reject oversized payloads before parsing. A 100 MB HTML error page should not become a JSON parse attempt."),
             ],
-            "Read one field out of a JSON response. Wire: json -> found/value/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text so a second node can drill further. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
+            "Read one field out of a JSON response. Wire: document (typed) or json (text) -> found/value/document/texts/number/text/boolean/kind/count. Path syntax is $.a.b[0].c; objects and arrays come back as raw JSON text plus a typed Json document, arrays of strings also produce a StringList on texts, so a second node can drill further without re-parsing text. Missing paths fail by default, and forcing a type that the value cannot represent also fails instead of returning null. Failures: empty input, invalid JSON, payload above maxBytes.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: true),
             Actions: []),
 
@@ -79,6 +82,8 @@ internal static class P0CompletionCatalog
                 new("total", VisionDataType.Integer), new("cellCount", VisionDataType.Integer),
                 new("header", VisionDataType.String), new("columnsJson", VisionDataType.String),
                 new("row", VisionDataType.String), new("rowJson", VisionDataType.String),
+                new("rowValues", VisionDataType.StringList, Required: false),
+                new("table", VisionDataType.Table, Required: false),
                 new("rowObjectJson", VisionDataType.String, Required: false),
                 new("diagnostics", VisionDataType.String), Next
             ],
@@ -111,7 +116,7 @@ internal static class P0CompletionCatalog
                 new("maxMegabytes", "Maximum File Size", "number", 16, 1, 512, 1, Unit: "MB", Group: "Limits",
                     Description: "Refuse files above this size before reading. A production table is kilobytes; a runaway log should not be swallowed as a table."),
             ],
-            "Read one data row out of a CSV/TSV table so the flow can be driven by a work order list (one SN per part). Wire: path + optional sequence -> row/rowJson/rowObjectJson plus index/total for loop control. Parsing follows RFC4180 quoting, empty lines are skipped, and the parsed table is cached by (path, mtime, size, encoding, delimiter) so a batch run parses the file once. Reading requires host authorization (IReplayInputResolver). Out-of-range index with wrap off returns found=false. Deterministic=false: the file may change between runs.",
+            "Read one data row out of a CSV/TSV table so the flow can be driven by a work order list (one SN per part). Wire: path + optional sequence -> row/rowJson/rowValues/rowObjectJson plus index/total for loop control; the full parsed table is also published as a typed Table on the table port. Parsing follows RFC4180 quoting including newlines inside quoted fields, empty lines are skipped, and the parsed table is cached by (path, mtime, size, encoding, delimiter) so a batch run parses the file once. Reading requires host authorization (IReplayInputResolver). Out-of-range index with wrap off returns found=false. Deterministic=false: the file may change between runs.",
             "builtin", new VisionToolCapabilities(SupportsRoi: false, EmitsOverlay: false, Deterministic: false),
             Actions: []),
 

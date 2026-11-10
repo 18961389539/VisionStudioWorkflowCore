@@ -71,7 +71,7 @@ internal static class PreprocessGapMath
         return counts;
     }
 
-    /// <summary>按直方图求分位灰度（0..255，线性插值在箱内）。</summary>
+    /// <summary>按直方图求分位灰度（0..255）：返回首个累计计数达到目标的灰度箱，不做箱内插值。</summary>
     public static double Percentile(long[] histogram, long total, double percent)
     {
         if (total <= 0) return 0;

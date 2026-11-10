@@ -106,7 +106,7 @@ public static class JlMatrixOperations
             InPlace(a, m => m.PowScalarElementMatrixMod(a.Scalar))),
         ["setValue"] = new("setValue", "Set single element", "row, column, scalar", a =>
             InPlace(a, m => m.SetValueMatrix(a.Row, a.Column, a.Scalar))),
-        ["setDiagonal"] = new("setDiagonal", "Set diagonal", "rows=向量长度, count=对角线序号, scalar", a =>
+        ["setDiagonal"] = new("setDiagonal", "Set diagonal", "rows=向量长度且同时作为对角线序号, scalar（count 未使用）", a =>
         {
             using var vector = new JlMatrix();
             vector.CreateMatrix(1, Math.Max(1, a.Rows), a.Scalar);

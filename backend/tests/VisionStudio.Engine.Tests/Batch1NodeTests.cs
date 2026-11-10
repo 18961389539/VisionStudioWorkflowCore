@@ -270,7 +270,9 @@ public sealed class Batch1NodeTests
         Assert.IsType<VisionImage>(largest.Outputs["image"].Value);
 
         var leftFirst = await Run(new MultiBlobNode(), Image(image), """{"minArea":100,"sortBy":"x","descending":false}""");
-        Assert.Equal(40d, (double)leftFirst.Outputs["x"].Value!, 1);   // 最左
+        var leftDetections = leftFirst.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections");
+        Assert.InRange(leftDetections[0].Area, 250, 400);                 // 排序首项是最左的小斑点
+        Assert.InRange((double)leftFirst.Outputs["area"].Value!, 1150, 1400); // 单斑点便利口仍取最大斑点
 
         // 零目标是正常结果：count=0 且不产出首选几何（数量检查依赖这一语义）。
         using var empty = new Mat(50, 50, MatType.CV_8UC1, Scalar.All(0));
@@ -467,11 +469,10 @@ public sealed class Batch1NodeTests
         Assert.Equal(50d, (double)inside.Outputs["clamped"].Value!, 6);
         Assert.False((bool)(await Run(new ValueRangeNode(), Number(101), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
         Assert.True((bool)(await Run(new ValueRangeNode(), Number(100), """{"min":0,"max":100}""")).Outputs["pass"].Value!);
-        // Merge reconciliation: main (BatchH) swaps reversed bounds and flags boundsSwapped in diagnostics,
-        // superseding PR #1 reject-reversed-bounds behavior; deviation/clamped outputs from PR #1 are kept.
-        var reversed = await Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}""");
-        Assert.True((bool)reversed.Outputs["inside"].Value!);
-        Assert.Contains("boundsSwapped", (string)reversed.Outputs["diagnostics"].Value!);
+        // 家族约定：非法配置显式报错，不对调区间——静默纠正会掩盖配方错误。
+        var reversed = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Run(new ValueRangeNode(), Number(50), """{"min":100,"max":0}"""));
+        Assert.Contains("greater than", reversed.Message);
         var high = await Run(new ValueRangeNode(), Number(150), """{"min":0,"max":100,"invert":true}""");
         Assert.True((bool)high.Outputs["pass"].Value!);
         Assert.Equal(50d, (double)high.Outputs["deviation"].Value!, 6);

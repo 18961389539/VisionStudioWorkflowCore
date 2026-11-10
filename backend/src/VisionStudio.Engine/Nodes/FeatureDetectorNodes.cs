@@ -9,7 +9,7 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Engine.Nodes;
 
-/// <summary>特征检测四个节点的共用校验（2026-10-28）：8 位灰度 + ROI 掩膜，三处都走同一条路径。</summary>
+/// <summary>feature.corner / feature.ellipse / feature.gaborBank 的共用校验：8 位灰度 + ROI 掩膜；feature.ridge 直接走 VisionGeometryHelpers，不经过这里。</summary>
 internal static class FeatureDetectorHelpers
 {
     internal static Mat Prepare(VisionImage source, VisionRoi? roi, string nodeType)
@@ -43,8 +43,12 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
         if (context is null) throw new ArgumentNullException(nameof(context));
 
         var method = (node.GetString("method", "shi-tomasi") ?? "shi-tomasi").Trim().ToLowerInvariant();
-        if (method is not ("shi-tomasi" or "harris"))
-            throw new InvalidOperationException("feature.corner method must be shi-tomasi or harris.");
+        if (method is not ("shi-tomasi" or "harris" or "fast"))
+            throw new InvalidOperationException("feature.corner method must be shi-tomasi, harris or fast.");
+
+        var fastThreshold = node.GetInt("fastThreshold", 10);
+        if (fastThreshold is < 1 or > 255)
+            throw new InvalidOperationException("feature.corner fastThreshold must be within 1..255.");
 
         var maxCorners = node.GetInt("maxCorners", 200);
         if (maxCorners is < 1 or > 5000)
@@ -74,10 +78,18 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
 
         var points = new List<VisionPoint2D>();
         using var mask = new Mat();
-        var corners = Cv2.GoodFeaturesToTrack(
-            analysis, maxCorners, qualityLevel, minDistance, mask, blockSize,
-            useHarrisDetector: method == "harris", k: harrisK) ?? [];
-        foreach (var corner in corners) points.Add(new VisionPoint2D(corner.X, corner.Y));
+        if (method == "fast")
+        {
+            foreach (var keyPoint in Cv2.FAST(analysis, fastThreshold, true))
+                points.Add(new VisionPoint2D(keyPoint.Pt.X, keyPoint.Pt.Y));
+        }
+        else
+        {
+            var corners = Cv2.GoodFeaturesToTrack(
+                analysis, maxCorners, qualityLevel, minDistance, mask, blockSize,
+                useHarrisDetector: method == "harris", k: harrisK) ?? [];
+            foreach (var corner in corners) points.Add(new VisionPoint2D(corner.X, corner.Y));
+        }
 
         if (subpixel && points.Count > 0)
         {
@@ -91,14 +103,22 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         using var response = new Mat();
         Cv2.CornerMinEigenVal(analysis, response, blockSize);
-        Cv2.MinMaxLoc(response, out _, out var maxResponse, out _, out _);
-        var scaled = points
+        var ranked = points
             .Select(point => (Point: point, Response: SampleResponse(response, point)))
             .OrderByDescending(entry => entry.Response)
             .ToArray();
-        var ordered = scaled.Select(entry => entry.Point).ToArray();
-        var meanResponse = scaled.Length > 0 ? scaled.Average(entry => entry.Response) : 0d;
-        var peak = scaled.Length > 0 ? scaled.Max(entry => entry.Response) : 0d;
+        // FAST has no maxCorners/minDistance of its own: enforce the same suppression contract
+        // as the other detectors, in response order, so downstream geometry sees a stable point set.
+        var selected = new List<(VisionPoint2D Point, double Response)>();
+        foreach (var candidate in ranked)
+        {
+            if (method == "fast" && selected.Any(entry => Distance(entry.Point, candidate.Point) < minDistance)) continue;
+            selected.Add(candidate);
+            if (selected.Count >= maxCorners) break;
+        }
+        var ordered = selected.Select(entry => entry.Point).ToArray();
+        var meanResponse = selected.Count > 0 ? selected.Average(entry => entry.Response) : 0d;
+        var peak = selected.Count > 0 ? selected.Max(entry => entry.Response) : 0d;
 
         var overlays = new List<VisionOverlay>();
         for (var index = 0; index < Math.Min(ordered.Length, 400); index++)
@@ -111,6 +131,7 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
 
         var diagnostics = CoordinateValidation.Diagnostics(
             Type, ("method", method), ("count", ordered.Length), ("maxCorners", maxCorners),
+            ("fastThreshold", fastThreshold),
             ("qualityLevel", qualityLevel), ("minDistance", minDistance), ("blockSize", blockSize),
             ("subpixel", subpixel), ("maxResponse", peak), ("meanResponse", meanResponse),
             ("roi", roi?.Type.ToString() ?? "FullImage"),
@@ -130,6 +151,7 @@ public sealed class FeatureCornerNode : IVisionNodeExecutor
             new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["method"] = method, ["count"] = ordered.Length, ["maxCorners"] = maxCorners,
+                ["fastThreshold"] = fastThreshold,
                 ["qualityLevel"] = qualityLevel, ["minDistance"] = minDistance, ["blockSize"] = blockSize,
                 ["subpixel"] = subpixel,
                 ["maxResponse"] = Math.Round(peak, 4), ["meanResponse"] = Math.Round(meanResponse, 4),

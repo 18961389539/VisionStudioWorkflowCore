@@ -198,6 +198,12 @@ public sealed class ListTypeNodesTests
         Assert.Contains(BuiltInNodeCatalog.Require("collection.detectionPoints").Outputs, port => port.DataType == VisionDataType.PointList);
         Assert.Contains(BuiltInNodeCatalog.Require("geometry.fitFromPoints").Inputs, port => port.DataType == VisionDataType.PointList);
         Assert.Contains(BuiltInNodeCatalog.Require("collection.detectionNumbers").Outputs, port => port.DataType == VisionDataType.NumberList);
+        // 2026-11-10：补齐 StringList / Table / Json 三种列表型端口。
+        Assert.Contains(BuiltInNodeCatalog.Require("value.jsonBuild").Outputs, port => port.DataType == VisionDataType.Json);
+        Assert.Contains(BuiltInNodeCatalog.Require("value.jsonParse").Inputs, port => port.DataType == VisionDataType.Json);
+        Assert.Contains(BuiltInNodeCatalog.Require("value.jsonParse").Outputs, port => port.DataType == VisionDataType.StringList);
+        Assert.Contains(BuiltInNodeCatalog.Require("device.readTable").Outputs, port => port.DataType == VisionDataType.Table);
+        Assert.Contains(BuiltInNodeCatalog.Require("device.readTable").Outputs, port => port.DataType == VisionDataType.StringList);
     }
 
     // ===== 夹具 =====

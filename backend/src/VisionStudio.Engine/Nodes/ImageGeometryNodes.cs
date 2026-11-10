@@ -59,8 +59,8 @@ internal static class ImageGeometryMath
     }
 
     /// <summary>
-    /// 256 桶直方图近似百分位：60MP 图像上排序真值要几百毫秒，而 stretch 只用于预览，
-    /// 直方图误差（一个桶宽）对显示没有影响；数值指标仍用原始极值，不走这里。
+    /// 256 桶直方图近似百分位：60MP 图像上排序真值要几百毫秒。用于梯度幅值的 p99 数值指标
+    /// 以及 stretch 的分母；直方图误差为一个桶宽，对工程判定可接受。需要精确分位时用 measure.grayHistogram。
     /// </summary>
     internal static double HistogramPercentile(Mat single32, double fraction, double knownMin, double knownMax)
     {

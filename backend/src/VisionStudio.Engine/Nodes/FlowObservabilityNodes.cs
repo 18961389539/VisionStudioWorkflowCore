@@ -77,7 +77,7 @@ public sealed class FlowLogNode(ILogger<FlowLogNode>? logger = null) : IVisionNo
             }));
     }
 
-    /// <summary>严格解析级别：只接受 debug/info/warning/error，拼错时明确失败而不是默认成 info。</summary>
+    /// <summary>严格解析级别：接受 debug/info/warning（含 warn 别名）/error，拼错时明确失败而不是默认成 info。</summary>
     private static (string Level, int Severity) ReadLevel(NodeDefinition node)
     {
         var raw = node.GetString("level", "info").Trim().ToLowerInvariant();

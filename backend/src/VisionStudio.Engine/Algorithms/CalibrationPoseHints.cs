@@ -69,7 +69,7 @@ public static class CalibrationPoseHints
         if (enabled.Count < targetViews)
             hints.Add(new("more-views", $"Enabled views: {enabled.Count}/{targetViews}. Aim for {targetViews}+ well-distributed poses before trusting RMS.", "count"));
 
-        // Prefer empty corners, then mid cells, then tilt / count. Always keep tilt/count if present.
+        // 取覆盖类提示的前 4 条（3×3 网格行优先），再补 2 条中间格，最后放倾斜/数量提示。
         var corners = hints.Where(h => h.Code.StartsWith("cover-", StringComparison.Ordinal)).Take(4).ToList();
         var extras = hints.Where(h => h.Region is "tilt" or "count").ToList();
         var mid = hints.Where(h => h.Code.StartsWith("cover-", StringComparison.Ordinal) && !corners.Contains(h)).Take(2).ToList();

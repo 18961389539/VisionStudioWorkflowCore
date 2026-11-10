@@ -220,7 +220,7 @@ var mat = new Mat();
     }
 }
 
-/// <summary>Gaussian 平滑实现：只由 image.filter(method=gaussian) 调用，不再单独暴露为节点。</summary>
+/// <summary>Gaussian 平滑实现：image.filter(method=gaussian) 与历史别名 image.blur.gaussian 共用。</summary>
 internal static class GaussianBlurFilter
 {
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
@@ -296,7 +296,7 @@ internal static class GaussianBlurFilter
     }
 }
 
-/// <summary>中值滤波实现：只由 image.filter(method=median) 调用，不再单独暴露为节点。</summary>
+/// <summary>中值滤波实现：image.filter(method=median) 与历史别名 image.blur.median 共用。</summary>
 internal static class MedianBlurFilter
 {
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)

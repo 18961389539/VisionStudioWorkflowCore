@@ -457,8 +457,8 @@ public static class InferenceStats
 
     /// <summary>
     /// Compose one instance mask from prototype tensor [maskDim, protoH, protoW] and coefficients,
-    /// then crop to the box (in proto / input pixels) and bilinear-resize into an output buffer of outH×outW.
-    /// Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).
+    /// then crop to the box (in proto / input pixels) and nearest-neighbour resample into an output buffer
+    /// of outH×outW. Returns a binary 0/255 mask. Ultralytics-style: sigmoid(coeffs · prototypes).
     /// </summary>
     public static byte[] ComposeYoloSegMask(float[] prototypes, int maskDim, int protoH, int protoW, float[] coeffs, double boxLeft, double boxTop, double boxRight, double boxBottom, int inputWidth, int inputHeight, int outWidth, int outHeight, float maskThreshold = 0.5f, bool letterbox = false)
     {

@@ -130,6 +130,8 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
             ["columnsJson"] = VisionValue.String(columnsJson),
             ["row"] = VisionValue.String(string.Join(",", cells)),
             ["rowJson"] = VisionValue.String(rowJson),
+            ["rowValues"] = VisionValue.StringList(cells),
+            ["table"] = VisionValue.Table(new VisionTable(table.Header, table.Rows)),
             ["diagnostics"] = VisionValue.String(diagnostics)
         };
 
@@ -166,19 +168,14 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
     private static CachedTable? Load(string path, string cacheKey, Encoding encoding, string delimiterName,
         bool hasHeader, int maxRows, CancellationToken cancellationToken)
     {
-        var lines = new List<string>();
+        string text;
         using (var reader = new StreamReader(path, encoding, detectEncodingFromByteOrderMarks: true))
-        {
-            while (reader.ReadLine() is { } line)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (line.Length == 0) continue; // 空行不占序号，否则 Excel 末尾空行会让 total 虚高
-                lines.Add(line);
-                if (lines.Count > maxRows + (hasHeader ? 1 : 0))
-                    throw new InvalidOperationException(
-                        $"device.readTable file has more than maxRows={maxRows} rows; raise maxRows or split the table.");
-            }
-        }
+            text = reader.ReadToEnd();
+        cancellationToken.ThrowIfCancellationRequested();
+        var lines = SplitRecords(text, cancellationToken);
+        if (lines.Count > maxRows + (hasHeader ? 1 : 0))
+            throw new InvalidOperationException(
+                $"device.readTable file has more than maxRows={maxRows} rows; raise maxRows or split the table.");
 
         if (lines.Count == 0) return new CachedTable(cacheKey, [], [], string.Empty);
 
@@ -220,6 +217,37 @@ public sealed class TableReadNode(IReplayInputResolver? replayInput = null) : IV
             best = candidate;
         }
         return best;
+    }
+
+    /// <summary>按 RFC4180 切记录：引号内的 CR/LF 属于字段内容，空行不占序号。</summary>
+    private static List<string> SplitRecords(string text, CancellationToken cancellationToken)
+    {
+        var records = new List<string>();
+        var builder = new StringBuilder();
+        var inQuotes = false;
+        for (var index = 0; index < text.Length; index++)
+        {
+            if ((index & 8191) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var ch = text[index];
+            if (ch == '"')
+            {
+                // 两个连续引号是转义，翻转两次后仍处于引号内；SplitLine 再还原为单个引号。
+                inQuotes = !inQuotes;
+                builder.Append(ch);
+                continue;
+            }
+            if (!inQuotes && (ch == '\r' || ch == '\n'))
+            {
+                if (ch == '\r' && index + 1 < text.Length && text[index + 1] == '\n') index++;
+                var record = builder.ToString();
+                builder.Clear();
+                if (record.Length > 0) records.Add(record);
+                continue;
+            }
+            builder.Append(ch);
+        }
+        if (builder.Length > 0) records.Add(builder.ToString());
+        return records;
     }
 
     /// <summary>RFC4180 风格拆分：支持双引号包裹、字段内分隔符与换行、"" 转义。</summary>

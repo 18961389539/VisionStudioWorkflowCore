@@ -279,7 +279,7 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
         var working = source;
         if (source.Depth() == MatType.CV_16U)
         {
-            source.ConvertTo(scaled, MatType.CV_16U, 1d / 257d);
+            source.ConvertTo(scaled, MatType.CV_8U, 1d / 257d);
             working = scaled;
         }
         else if (source.Depth() != MatType.CV_8U)
@@ -588,13 +588,21 @@ public sealed class FeatureMatchNode : IVisionNodeExecutor
     private static VisionImage BuildOverlayImage(Mat scene, MatchOutcome outcome, CancellationToken cancellationToken)
     {
         Mat? overlay = new Mat();
+        using var displaySource = new Mat();
+        var display = scene;
+        if (scene.Depth() == MatType.CV_16U)
+        {
+            // 叠加层必须画在 8 位图上：PutText/Polylines 不接受 16U。
+            scene.ConvertTo(displaySource, MatType.CV_8U, 1d / 257d);
+            display = displaySource;
+        }
         try
         {
-            switch (scene.Channels())
+            switch (display.Channels())
             {
-                case 1: Cv2.CvtColor(scene, overlay, ColorConversionCodes.GRAY2BGR); break;
-                case 4: Cv2.CvtColor(scene, overlay, ColorConversionCodes.BGRA2BGR); break;
-                default: scene.CopyTo(overlay); break;
+                case 1: Cv2.CvtColor(display, overlay, ColorConversionCodes.GRAY2BGR); break;
+                case 4: Cv2.CvtColor(display, overlay, ColorConversionCodes.BGRA2BGR); break;
+                default: display.CopyTo(overlay); break;
             }
 
             var drawn = 0;

@@ -229,7 +229,7 @@ public static class ChamferShapeMatching
         return hits;
     }
 
-    /// <summary>Model contour metrics for train diagnostics (point count, oriented fraction, mean radius).</summary>
+    /// <summary>Model contour metrics for train diagnostics (point count, oriented point count, mean radius, mean normal magnitude).</summary>
     public static (int PointCount, int OrientedCount, double MeanRadiusPx, double MeanNormalMagnitude) ModelMetrics(IReadOnlyList<ModelPoint> model)
     {
         if (model.Count == 0) return (0, 0, 0, 0);

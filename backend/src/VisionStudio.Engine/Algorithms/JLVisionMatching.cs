@@ -2542,10 +2542,10 @@ internal static class JLVisionMatching
         token.ThrowIfCancellationRequested();
         Mat? rotatedOwned = null;
         Mat? rotatedMaskOwned = null;
+        Mat? probeMask = null;
         try
         {
             var probe = templateBuffer;
-            Mat? probeMask = null;
             if (useTemplateMask)
             {
                 using var mask = new Mat(templateBuffer.Height, templateBuffer.Width, MatType.CV_8UC1, Scalar.All(255));
@@ -2609,8 +2609,10 @@ internal static class JLVisionMatching
         }
         finally
         {
-            // rotatedMaskOwned disposed via probeMask path when assigned; avoid double-dispose
-            if (rotatedMaskOwned is null) { }
+            // MatchTemplate can throw after the rotated mask was assigned; dispose every owned
+            // buffer here instead of relying on the success path.
+            probeMask?.Dispose();
+            rotatedMaskOwned?.Dispose();
             rotatedOwned?.Dispose();
         }
     }

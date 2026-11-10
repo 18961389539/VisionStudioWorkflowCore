@@ -132,17 +132,18 @@ var value = CoordinateValidation.RequireFinite(context.RequireNumber("value"), "
         var invert = node.GetBool("invert", false);
         var boundPolicy = node.GetString("boundPolicy", "inclusive").Trim().ToLowerInvariant();
         if (boundPolicy is not ("inclusive" or "exclusive")) throw new InvalidOperationException("value.range boundPolicy must be inclusive or exclusive.");
-        var swapped = min > max; var lower = Math.Min(min, max); var upper = Math.Max(min, max);
+        if (min > max)
+            throw new InvalidOperationException($"value.range min {min} is greater than max {max}; swap them explicitly or fix the recipe instead of relying on silent reordering.");
         var inside = boundPolicy == "exclusive"
-            ? value > lower && value < upper
-            : value >= lower && value <= upper;
+            ? value > min && value < max
+            : value >= min && value <= max;
         var pass = invert ? !inside : inside;
-        var margin = inside ? Math.Min(value - lower, upper - value) : -Math.Min(Math.Abs(value - lower), Math.Abs(value - upper));
+        var margin = inside ? Math.Min(value - min, max - value) : -Math.Min(Math.Abs(value - min), Math.Abs(value - max));
         CoordinateValidation.RequireFinite(margin, "range.margin");
-        var deviation = value > upper ? value - upper : value < lower ? value - lower : 0d;
-        var clamped = Math.Clamp(value, lower, upper);
-        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("lower", lower), ("upper", upper), ("inside", inside), ("pass", pass), ("invert", invert), ("boundPolicy", boundPolicy), ("boundsSwapped", swapped), ("margin", margin), ("deviation", deviation), ("clamped", clamped));
-        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["inside"] = VisionValue.Boolean(inside), ["margin"] = VisionValue.Double(margin), ["deviation"] = VisionValue.Double(deviation), ["clamped"] = VisionValue.Double(clamped), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["min"] = lower, ["max"] = upper, ["invert"] = invert, ["boundPolicy"] = boundPolicy, ["pass"] = pass, ["deviation"] = deviation, ["clamped"] = clamped, ["diagnostics"] = diag }));
+        var deviation = value > max ? value - max : value < min ? value - min : 0d;
+        var clamped = Math.Clamp(value, min, max);
+        var diag = CoordinateValidation.Diagnostics(Type, ("value", value), ("lower", min), ("upper", max), ("inside", inside), ("pass", pass), ("invert", invert), ("boundPolicy", boundPolicy), ("margin", margin), ("deviation", deviation), ("clamped", clamped));
+        return ValueTask.FromResult(new NodeExecutorResult(new Dictionary<string, VisionValue> { ["pass"] = VisionValue.Boolean(pass), ["inside"] = VisionValue.Boolean(inside), ["margin"] = VisionValue.Double(margin), ["deviation"] = VisionValue.Double(deviation), ["clamped"] = VisionValue.Double(clamped), ["diagnostics"] = VisionValue.String(diag) }, new Dictionary<string, object?> { ["value"] = value, ["min"] = min, ["max"] = max, ["invert"] = invert, ["boundPolicy"] = boundPolicy, ["pass"] = pass, ["deviation"] = deviation, ["clamped"] = clamped, ["diagnostics"] = diag }));
     }
 }
 public sealed class LogicBooleanNode : IVisionNodeExecutor

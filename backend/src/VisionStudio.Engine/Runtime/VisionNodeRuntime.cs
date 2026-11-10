@@ -51,7 +51,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             using (captureCaliperDiagnostic ? CaliperCircleDiagnosticCapture.Begin(diagnostic => caliperDiagnostic = diagnostic) : null)
             using (captureCaliperEdgeDiagnostic ? CaliperEdgeDiagnosticCapture.Begin(diagnostic => caliperEdgeDiagnostic = diagnostic) : null)
                 result = await dispatcher.ExecuteAsync(node, inputs, data.WorkflowScope, cancellationToken, data.RunId, data.ModelAssets);
-            if (node.Type.Equals("flow.try", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsTry(node.Type))
                 result = await ExecuteTryBodyAsync(data, node, result, cancellationToken);
             sw.Stop();
 
@@ -80,35 +80,35 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                     ["caliperEdgeDiagnosticsAvailable"] = data.CaptureCaliperEdgeDiagnostic(node.Id, observation.Sequence, caliperEdgeDiagnostic)
                 };
 
-            if ((node.Type.Equals("flow.if", StringComparison.OrdinalIgnoreCase) || node.Type.Equals("flow.ifBoolean", StringComparison.OrdinalIgnoreCase)) &&
+            if (FlowSemantics.IsConditional(node.Type) &&
                 result.Outputs.TryGetValue("condition", out var condition) &&
                 condition.Type == VisionDataType.Boolean && condition.Value is bool branchCondition)
             {
                 data.SetBranchCondition(node.Id, branchCondition, node.Type);
             }
 
-            if (node.Type.Equals("flow.switch", StringComparison.OrdinalIgnoreCase) &&
+            if (FlowSemantics.IsSwitch(node.Type) &&
                 result.Outputs.TryGetValue("selected", out var selected) &&
                 selected.Type == VisionDataType.String && selected.Value is string selectedBranch)
                 data.SetSwitchSelection(node.Id, selectedBranch);
 
-            if (node.Type.Equals("flow.parallel", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsParallel(node.Type))
                 data.MarkParallelBranches(node.Id);
 
             // 通用循环：循环节点自身作为入口标记执行一次，在这里初始化跨迭代状态。
             // while 的预算是参数；repeat 的总次数由执行器解析（端口优先）后随 total 输出回传。
-            if (node.Type.Equals("flow.while", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsWhile(node.Type))
             {
                 data.BeginLoop(node.Id, "while", node.GetInt("maxIterations", 100));
             }
-            else if (node.Type.Equals("flow.repeat", StringComparison.OrdinalIgnoreCase))
+            else if (FlowSemantics.IsRepeat(node.Type))
             {
                 if (!result.Outputs.TryGetValue("total", out var totalValue) || totalValue.Value is not long total || total is < 1)
                     throw new InvalidOperationException($"flow.repeat '{node.Id}' did not publish a positive iteration total.");
                 data.BeginLoop(node.Id, "repeat", (int)total);
             }
 
-            if (node.Type.Equals("flow.result", StringComparison.OrdinalIgnoreCase) &&
+            if (FlowSemantics.IsResult(node.Type) &&
                 result.Outputs.TryGetValue("disposition", out var disposition) &&
                 disposition.Type == VisionDataType.String && disposition.Value is string qualityDisposition)
             {
@@ -125,7 +125,7 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
                 }
             }
 
-            if (node.Type.Equals("flow.join", StringComparison.OrdinalIgnoreCase))
+            if (FlowSemantics.IsJoin(node.Type))
             {
                 var aggregation = data.ApplyParallelJoin(node.Id);
                 if (aggregation?.Aggregate is { } parallelDisposition)
@@ -306,7 +306,8 @@ public sealed class VisionNodeRuntime(VisionNodeDispatcher dispatcher)
             VisionDataType.Circle or VisionDataType.Transform2D or VisionDataType.CoordinatePoint2D or
             VisionDataType.CoordinateLine2D or VisionDataType.CoordinatePose2D or VisionDataType.RobotTarget2D or
             VisionDataType.DeviceTagValue or VisionDataType.Measurement or VisionDataType.DetectionList or
-            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Region or VisionDataType.MetrologyResults => value.Value,
+            VisionDataType.Contour or VisionDataType.ContourProperties or VisionDataType.Region or VisionDataType.MetrologyResults or
+            VisionDataType.StringList or VisionDataType.Table or VisionDataType.Json => value.Value,
             _ => value.Value.ToString()
         };
         return new VisionValueSnapshot(value.Type.ToString(), value.Value.ToString() ?? value.Type.ToString(), payload);

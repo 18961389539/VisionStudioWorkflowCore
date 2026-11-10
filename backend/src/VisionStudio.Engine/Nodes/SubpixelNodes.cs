@@ -165,7 +165,7 @@ internal static class SubpixelEdgeCore
         return new VisionPoint2D(start.X + dx * position / length, start.Y + dy * position / length);
     }
 
-    /// <summary>Clip the segment to the image rectangle without changing its direction.</summary>
+    /// <summary>True when the whole search segment lies outside the image rectangle; no clipping happens here.</summary>
     public static bool SegmentBoundsOutsideImage(VisionPoint2D start, VisionPoint2D end, int width, int height) =>
         Math.Max(start.X, end.X) < 0 || Math.Min(start.X, end.X) > width - 1
         || Math.Max(start.Y, end.Y) < 0 || Math.Min(start.Y, end.Y) > height - 1;

@@ -27,7 +27,7 @@ public sealed class AuditEventStore(SqliteMetadataDatabase database)
     private DateTimeOffset? _lastPersistFailureAt;
     private string? _lastPersistFailure;
 
-    /// <summary>审计持久化失败计数（单例计数器）：数据库忙/磁盘故障时审计记录会静默丢失，此计数是唯一信号。</summary>
+    /// <summary>审计持久化失败计数（单例计数器）：数据库忙/磁盘故障时记录写入失败；同时会写错误日志并记录最近一次失败详情。</summary>
     public long PersistFailures => Interlocked.Read(ref _persistFailures);
     public DateTimeOffset? LastPersistFailureAt => _lastPersistFailureAt;
     public string? LastPersistFailure => _lastPersistFailure;

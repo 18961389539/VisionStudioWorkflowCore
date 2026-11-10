@@ -130,7 +130,7 @@ public static class CalibrationIntrinsicsWizard
                 var maxV = view.ImagePoints.Max(p => p[1]);
                 if (_imageWidth is null)
                 {
-                    // Prefer explicit size from quality path; otherwise pad to a safe even size.
+                    // 用点集极值反推尺寸（不读取 quality、不做偶数对齐）；JSON 导入的视图没有会话尺寸时走这里。
                     _imageWidth = Math.Max(16, (int)Math.Ceiling(maxU) + 1);
                     _imageHeight = Math.Max(16, (int)Math.Ceiling(maxV) + 1);
                 }

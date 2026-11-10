@@ -51,6 +51,35 @@ public sealed class P0CompletionNodeTests
     }
 
     [Fact]
+    public async Task JsonBuild_EmitsTypedDocumentAndPacksStringList()
+    {
+        var result = await Run(new JsonBuildNode(), "value.jsonBuild", new Dictionary<string, VisionValue>
+        {
+            ["a"] = VisionValue.String("SN001"),
+            ["b"] = VisionValue.StringList(["OK", "NG"])
+        }, """{"keys":"sn,flags"}""");
+
+        var document = result.Outputs["document"].Require<VisionJson>("document");
+        Assert.Equal(result.Outputs["json"].Require<string>("json"), document.Text);
+        using var parsed = JsonDocument.Parse(document.Text);
+        Assert.Equal("SN001", parsed.RootElement.GetProperty("sn").GetString());
+        Assert.Equal(2, parsed.RootElement.GetProperty("flags").GetArrayLength());
+
+        // 类型化文档可以直接回灌 jsonParse，不需要再走字符串端口。
+        var parsedAgain = await Run(new JsonParseNode(), "value.jsonParse", new Dictionary<string, VisionValue>
+        {
+            ["document"] = VisionValue.Json(new VisionJson("""{"items":["A","B"],"meta":{"code":1}}"""))
+        }, """{"path":"items"}""");
+        Assert.Equal(["A", "B"], parsedAgain.Outputs["texts"].Require<IReadOnlyList<string>>("texts"));
+
+        var meta = await Run(new JsonParseNode(), "value.jsonParse", new Dictionary<string, VisionValue>
+        {
+            ["document"] = VisionValue.Json(new VisionJson("""{"items":["A","B"],"meta":{"code":1}}"""))
+        }, """{"path":"meta"}""");
+        Assert.Contains("\"code\":1", meta.Outputs["document"].Require<VisionJson>("document").Text);
+    }
+
+    [Fact]
     public async Task JsonBuild_RejectsComplexValuesDuplicateKeysAndEmptyInput()
     {
         var detection = new VisionDetection(0, 1, 2, 3, 4, 5, 6, 1, new VisionCircle(1, 2, 3),
@@ -141,6 +170,11 @@ public sealed class P0CompletionNodeTests
             Assert.True(first.Outputs["found"].Require<bool>("found"));
             Assert.Equal(3L, first.Outputs["total"].Require<long>("total"));
             Assert.Equal("[\"SN001\",\"OK\",\"1.5\"]", first.Outputs["rowJson"].Require<string>("rowJson"));
+            Assert.Equal(["SN001", "OK", "1.5"], first.Outputs["rowValues"].Require<IReadOnlyList<string>>("rowValues"));
+            var table = first.Outputs["table"].Require<VisionTable>("table");
+            Assert.Equal(["sn", "result", "x"], table.Columns);
+            Assert.Equal(3, table.Rows.Count);
+            Assert.Equal(["SN001", "OK", "1.5"], table.Rows[0]);
             using var mapped = JsonDocument.Parse(first.Outputs["rowObjectJson"].Require<string>("rowObjectJson"));
             Assert.Equal("SN001", mapped.RootElement.GetProperty("sn").GetString());
 
@@ -202,6 +236,27 @@ public sealed class P0CompletionNodeTests
             Assert.Contains("SN-甲", result.Outputs["row"].Require<string>("row"));
         }
         finally { File.Delete(gbk); }
+    }
+
+    [Fact]
+    public async Task ReadTable_SupportsQuotedNewlines()
+    {
+        // 引号字段内的换行属于同一行记录：不能按物理行切，否则后续记录整体错位。
+        var file = WriteTable("sn,note\nSN001,\"line1\nline2\"\nSN002,ok\n");
+        try
+        {
+            var resolver = new StubResolver(file);
+            var first = await Run(new TableReadNode(resolver), "device.readTable",
+                new Dictionary<string, VisionValue> { ["path"] = VisionValue.String(file) }, """{"path":"x"}""");
+            Assert.Equal(2L, first.Outputs["total"].Require<long>("total"));
+            Assert.Contains("line1\\nline2", first.Outputs["rowJson"].Require<string>("rowJson"));
+
+            var second = await Run(new TableReadNode(resolver), "device.readTable",
+                new Dictionary<string, VisionValue> { ["path"] = VisionValue.String(file), ["sequence"] = VisionValue.Integer(1) },
+                """{"path":"x"}""");
+            Assert.Contains("SN002", second.Outputs["row"].Require<string>("row"));
+        }
+        finally { File.Delete(file); }
     }
 
     [Fact]

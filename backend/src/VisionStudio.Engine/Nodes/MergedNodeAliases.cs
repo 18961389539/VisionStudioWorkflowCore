@@ -48,7 +48,7 @@ public sealed class ImageTopHatNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "topHat", cancellationToken));
+        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "topHat", cancellationToken, applyRoi: true));
     }
 }
 
@@ -61,7 +61,7 @@ public sealed class ImageBottomHatNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "bottomHat", cancellationToken));
+        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "bottomHat", cancellationToken, applyRoi: true));
     }
 }
 
@@ -74,7 +74,7 @@ public sealed class ImageMorphGradientNode : IVisionNodeExecutor
         cancellationToken.ThrowIfCancellationRequested();
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "gradient", cancellationToken));
+        return ValueTask.FromResult(GrayMorphology.Execute(Type, context, node, "gradient", cancellationToken, applyRoi: true));
     }
 }
 

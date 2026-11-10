@@ -14,8 +14,9 @@ using OpenCvSharp;
 namespace VisionStudio.Scripting;
 
 /// <summary>
-/// Built-in C# script runner. Compiles with a minimal reference set, rejects host/IO/reflection
-/// APIs with a syntax-tree allowlist, injects a cooperative loop budget, and returns a typed result.
+/// Built-in C# script runner. Compiles with a minimal reference set, rejects listed host/IO/reflection
+/// APIs with a syntax-tree denylist (unlisted APIs are allowed), injects a cooperative loop budget,
+/// and returns a typed result.
 ///
 /// This is a trusted-code runtime: the syntax-tree gate is defense-in-depth, not a hard OS sandbox.
 /// The host should restrict script authoring to engineers and treat imported workflows with scripts

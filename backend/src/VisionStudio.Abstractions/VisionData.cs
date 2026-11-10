@@ -38,7 +38,11 @@ public enum VisionDataType
     MetrologyResults,
     // 2026-10-26：通用列表类型。此前只有 DetectionList 一种集合，导致统计/点集类节点无法在图上传递多值。
     NumberList,
-    PointList
+    PointList,
+    // 2026-11-10：JSON / 表格 / 文本列表。补齐缺口分析里"列表类型只有 3 个"的结构性缺口。
+    StringList,
+    Table,
+    Json
 }
 
 /// <summary>
@@ -181,6 +185,12 @@ public readonly record struct VisionDetection(
     double? Confidence = null,
     int? ClassId = null);
 
+/// <summary>表格值：列名 + 行（单元格保持 CSV 的文本表示）。</summary>
+public sealed record VisionTable(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows);
+
+/// <summary>JSON 值：保留原始文本，消费者按需解析。</summary>
+public sealed record VisionJson(string Text);
+
 /// <summary>Runtime payload tagged with its graph-visible type.</summary>
 public sealed record VisionValue(VisionDataType Type, object? Value)
 {
@@ -215,6 +225,15 @@ public sealed record VisionValue(VisionDataType Type, object? Value)
 
     /// <summary>2026-10-26：点集（二维点序列），供拟合/轮廓重建类节点消费。</summary>
     public static VisionValue PointList(IReadOnlyList<VisionPoint2D> value) => new(VisionDataType.PointList, value);
+
+    /// <summary>2026-11-10：文本列表（多文本/CSV 行/JSON 字符串数组）。</summary>
+    public static VisionValue StringList(IReadOnlyList<string> value) => new(VisionDataType.StringList, value);
+
+    /// <summary>2026-11-10：表格（列 + 行），device.readTable 等节点输出。</summary>
+    public static VisionValue Table(VisionTable value) => new(VisionDataType.Table, value);
+
+    /// <summary>2026-11-10：JSON 文档（保留原始文本）。</summary>
+    public static VisionValue Json(VisionJson value) => new(VisionDataType.Json, value);
 
     /// <summary>第五批：轮廓列表（contour.extract / contour.filter 输出）。</summary>
     public static VisionValue Contours(IReadOnlyList<VisionContour> value) => new(VisionDataType.Contour, value);

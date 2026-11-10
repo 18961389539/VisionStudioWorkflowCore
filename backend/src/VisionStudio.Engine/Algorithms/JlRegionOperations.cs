@@ -140,7 +140,7 @@ public static class JlRegionOperations
             Generated(region => region.GenEllipseSector(a.Row, a.Column, a.Phi, a.Size, a.Length1, a.Phi, a.Phi + Math.Clamp(a.Length2, 0.1, Math.PI * 2)))),
         ["genGridRegion"] = new("genGridRegion", "Generate grid region", "size=行步长, length1=列步长, mode=类型（默认 lines）", a =>
             Generated(region => region.GenGridRegion((int)a.Size, (int)a.Length1, a.Mode.Length == 0 ? "lines" : a.Mode, 64, 64))),
-        ["genRandomRegions"] = new("genRandomRegions", "Generate random regions", "size/length1=宽范围, row/column=高范围, count=个数", a =>
+        ["genRandomRegions"] = new("genRandomRegions", "Generate random regions", "size/length1=宽范围, row/length2=高范围（column 未使用）, count=个数", a =>
             Generated(region => region.GenRandomRegions("ellipse",
                 Math.Max(1, a.Size), Math.Max(2, a.Size) + Math.Max(1, a.Length1),
                 Math.Max(1, a.Row), Math.Max(2, a.Row) + Math.Max(1, a.Length2),

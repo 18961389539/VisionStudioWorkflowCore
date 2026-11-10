@@ -111,8 +111,7 @@ public sealed class BatchHValueFlowCollectionTests
     {
         var r=await new ValueRangeNode().ExecuteAsync(Ctx(new(){{"value",VisionValue.Double(150)}}),Def("value.range","{\"min\":0,\"max\":100}"),CancellationToken.None);
         Assert.False((bool)r.Outputs["pass"].Value!); Assert.Equal(-50d,(double)r.Outputs["margin"].Value!,6);
-        var inside=await new ValueRangeNode().ExecuteAsync(Ctx(new(){{"value",VisionValue.Double(50)}}),Def("value.range","{\"min\":100,\"max\":0}"),CancellationToken.None);
-        Assert.True((bool)inside.Outputs["inside"].Value!); Assert.Contains("boundsSwapped",(string)inside.Outputs["diagnostics"].Value!);
+        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new ValueRangeNode().ExecuteAsync(Ctx(new(){{"value",VisionValue.Double(50)}}),Def("value.range","{\"min\":100,\"max\":0}"),CancellationToken.None));
         var logic=await new LogicBooleanNode().ExecuteAsync(Ctx(new(){{"a",VisionValue.Boolean(true)}}),Def("logic.boolean","{\"op\":\"not\"}"),CancellationToken.None);
         Assert.False((bool)logic.Outputs["result"].Value!);
         await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new LogicBooleanNode().ExecuteAsync(Ctx(new(){{"a",VisionValue.Boolean(true)},{"b",VisionValue.Boolean(true)}}),Def("logic.boolean","{\"op\":\"nand\"}"),CancellationToken.None));

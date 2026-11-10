@@ -12,11 +12,6 @@ public static class SystemEndpoints
 {
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        // Q11：status 不再恒为 ok——审计/日志持久化失败或维护锁激活时返回 degraded，
-        // 并把原因显式列出（存活 ≠ 就绪）。ready 供编排/现场判断"能否接受业务"。
-        // R07：进一步区分 **API 服务就绪**（ready）与 **生产动作就绪**（productionReady）——
-        // 能响应 HTTP 不等于可以接受设备动作；未闭合动作意图、维护/待重启、生产 Faulted
-        // 都必须在这里显式表达，供现场监控使用正确的业务指标。
         // N04：管理员显式释放已放弃的租约（TTL 过期且持有者从未释放）——要求设备空闲并写入审计。
         // 自动接管被移除后，这是不重启进程时的唯一受控恢复路径。
         app.MapPost("/api/leases/{kind}/{id}/release", (string kind, string id, DeviceLeaseRegistry leases, HttpContext http) =>
@@ -27,6 +22,11 @@ public static class SystemEndpoints
             return Results.Ok(new { released = true, detail = reason });
         }).RequireAdministrator("lease.release", "lease");
 
+        // Q11：status 不再恒为 ok——审计/日志持久化失败或维护锁激活时返回 degraded，
+        // 并把原因显式列出（存活 ≠ 就绪）。ready 供编排/现场判断"能否接受业务"。
+        // R07：进一步区分 **API 服务就绪**（ready）与 **生产动作就绪**（productionReady）——
+        // 能响应 HTTP 不等于可以接受设备动作；未闭合动作意图、维护/待重启、生产 Faulted
+        // 都必须在这里显式表达，供现场监控使用正确的业务指标。
         app.MapGet("/api/health", (AuditEventStore audits, RollingFileLoggerProvider logs, StorageMaintenanceCoordinator maintenance,
             ProductionRuntimeService production, DeviceManager devices, RobotManager robots, DeviceActionAuthorizationService authorization,
             DeviceProfileStore deviceProfiles) =>

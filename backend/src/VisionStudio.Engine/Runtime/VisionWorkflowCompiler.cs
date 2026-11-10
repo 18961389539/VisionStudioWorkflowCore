@@ -1403,9 +1403,10 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         ValidateParallelCapabilities(parallel.Branch2, parallel.Node.Id, "branch2");
 
         var sequenceId = $"{parallel.Node.Id}.__parallel";
-        // V0.64: 两条分支若全部由可融合节点组成，则合并为一个流水线段，由 VisionPipelineExecutor
-        // 按分支分组并发执行（此前用 Sequence 顺序执行两条分支，时间线上永远不会重叠）。
-        // 含非融合节点（flow.result、设备节点等）的分支仍回退为顺序 Sequence，语义保守。
+        // V0.64: 非循环体（loopNodeId is null）内，两条分支若全部由可融合节点组成，则合并为一个流水线段，
+        // 由 VisionPipelineExecutor 按分支分组并发执行（此前用 Sequence 顺序执行两条分支，时间线上永远不会重叠）。
+        // 含非融合节点（flow.result、设备节点等）的分支仍回退为顺序 Sequence；while/repeat 体内的 Parallel 因
+        // loopNodeId 非空而不融合，保持串行语义。
         if (loopNodeId is null && TryCollectFusedBranchNodes(parallel.Branch1, out var branch1Nodes) &&
             TryCollectFusedBranchNodes(parallel.Branch2, out var branch2Nodes))
         {

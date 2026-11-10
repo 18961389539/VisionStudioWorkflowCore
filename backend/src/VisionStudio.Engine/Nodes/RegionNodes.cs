@@ -118,7 +118,7 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
     }
 }
 
-/// <summary>灰度区间分割实现：只由 region.fromRange(mode=gray) 调用，不再单独暴露为节点。</summary>
+/// <summary>灰度区间分割实现：region.fromRange(mode=gray) 与历史别名 region.fromThreshold 共用。</summary>
 internal static class RegionFromThresholdCore
 {
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)

@@ -66,6 +66,34 @@ public sealed class BatchFeatureDetectorTests
     }
 
     [Fact]
+    public async Task Corner_FastDetectorFindsRectangleCorners()
+    {
+        using var sharp = new Mat(120, 160, MatType.CV_8UC1, Scalar.All(20));
+        Cv2.Rectangle(sharp, new Rect(40, 30, 60, 40), Scalar.All(230), -1);
+        // 理想 90° 阶跃在 FAST-9 的 16 点圆环上凑不满 9 个连续亮/暗点；真实光学边缘有过渡带，
+        // 因此与 Harris 用例一样先做一次轻模糊。
+        using var image = new Mat();
+        Cv2.GaussianBlur(sharp, image, new Size(5, 5), 1.5);
+
+        var result = await new FeatureCornerNode().ExecuteAsync(
+            Ctx(new() { ["image"] = Img(image) }),
+            Def("feature.corner", """{"method":"fast","fastThreshold":10,"maxCorners":50,"minDistance":8}"""),
+            CancellationToken.None);
+
+        Assert.True((bool)result.Outputs["found"].Value!, (string)result.Outputs["diagnostics"].Value!);
+        var points = (IReadOnlyList<VisionPoint2D>)result.Outputs["points"].Value!;
+        Assert.InRange(points.Count, 4, 50);
+        foreach (var corner in new[] { (40d, 30d), (99d, 30d), (40d, 69d), (99d, 69d) })
+            Assert.Contains(points, point => Math.Abs(point.X - corner.Item1) < 3 && Math.Abs(point.Y - corner.Item2) < 3);
+        Assert.Contains("\"fastThreshold\":10", (string)result.Outputs["diagnostics"].Value!);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await new FeatureCornerNode().ExecuteAsync(
+                Ctx(new() { ["image"] = Img(image) }),
+                Def("feature.corner", """{"method":"fast","fastThreshold":0}"""), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Ellipse_RecoversCentreAndSemiAxes()
     {
         using var image = new Mat(160, 200, MatType.CV_8UC1, Scalar.All(0));

@@ -111,6 +111,18 @@ public sealed class BarcodeQualityNodeTests
     }
 
     [Fact]
+    public async Task IsolatedHotspotDoesNotInflateSymbolContrast()
+    {
+        // 99.6% 的像素是均匀深色底，只有一个 6x6 的镜面反光点。极值口径会得到 SC=215 并放行，
+        // 5%/95% 分位口径下反光点落在尾部 0.4%，SC≈0，必须按"没有可读符号"拒绝。
+        using var mat = new Mat(100, 100, MatType.CV_8UC1, Scalar.All(40));
+        Cv2.Rectangle(mat, new Rect(47, 47, 6, 6), Scalar.All(255), -1);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => Run(mat, Node()));
+        Assert.Contains("no readable symbol", error.Message);
+    }
+
+    [Fact]
     public async Task FlatImageFailsWithExplicitMessage()
     {
         using var mat = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(128));

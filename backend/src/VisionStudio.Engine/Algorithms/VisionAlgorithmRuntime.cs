@@ -24,7 +24,7 @@ public static class VisionAlgorithmRuntime
 
     /// <summary>
     /// Default algorithmBackend label for a node type when the executor did not set one.
-    /// Short vocabulary: jlvision | opencv | managed | zxing | tesseract | onnx | hybrid.
+    /// Short vocabulary: jlvision | opencv | managed | zxing | tesseract | onnx | roslyn | hybrid.
     /// Domain-specific keys (calibrationBackend, recognitionBackend, matchingBackend, inferenceBackend)
     /// are set by the node when relevant. Returns null for non-algorithm / device / flow nodes.
     /// </summary>

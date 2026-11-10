@@ -122,10 +122,11 @@ public static class TraceEndpoints
             return Results.Ok(await backups.RestoreAsync(request, ct));
         }).RequireAdministrator("storage.restore", "storage");
 
-        // F03：受控恢复入口——失败锁激活时唯一受认证 + 审计的解锁路径（中间件豁免使其在维护激活时
-        // 仍可达）。Q07：解锁条件从"数据库能打开、目录存在"强化为**可证明的资产自洽**：
-        // schema 版本有效、SQLite 完整性、关键表存在，且抽样核对追溯记录的附件引用在磁盘上真实存在。
-        // 任一项不通过 ⇒ 保持锁定并返回问题清单（"核对后解锁"，而不是"盲目放行写入"）。
+        // F03：受控恢复入口——失败锁激活时唯一仍可达的维护端点（中间件豁免使其在维护激活时
+        // 仍可登录并核对）。Q07：本端点**只做核验与诊断，永不直接清除失败锁**：没有哈希校验的
+        // 恢复事务证据时，"数据库可打开、资产齐全"无法证明 DB 与磁盘资产是同一代，盲目解锁会把
+        // 混合状态当成已验证恢复。解锁的唯一路径是管理员完整恢复端点——StorageBackupService
+        // 在校验并安装哈希匹配的备份后调用 ClearFailureLock。
         app.MapPost("/api/storage/maintenance/recover", async (StorageMaintenanceCoordinator coordinator, SqliteMetadataDatabase database,
             IWebHostEnvironment env, HttpContext http, CancellationToken ct) =>
         {
