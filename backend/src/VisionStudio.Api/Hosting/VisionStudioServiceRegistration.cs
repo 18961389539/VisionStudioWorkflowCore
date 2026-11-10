@@ -363,6 +363,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<ShapeModelAssetStore>();
         services.AddSingleton<ShapeModelAssetExtraction>();
         services.AddSingleton<ShapeModelAssetGc>();
+        services.AddSingleton<ShapeModelAssetPackageService>();
         services.AddSingleton<VisionStudio.Abstractions.IModelAssetSource, ShapeModelAssetSource>();
         services.AddSingleton<CalibrationWizardService>();
         services.AddSingleton<CalibrationAssetStore>(sp => new CalibrationAssetStore(

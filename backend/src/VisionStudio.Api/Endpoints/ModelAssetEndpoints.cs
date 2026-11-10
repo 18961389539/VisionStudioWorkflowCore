@@ -64,6 +64,18 @@ public static class ModelAssetEndpoints
                 : Results.File(bytes, "application/octet-stream", $"{id}-v{version}.model");
         });
 
+        // .vsasset：单版本可移植快照，导入自校验 sha256、永远创建新资产。
+        app.MapGet("/api/model-assets/{id}/versions/{version:int}/export", async (
+            string id, int version, ShapeModelAssetPackageService packages, CancellationToken ct) =>
+        {
+            var (package, bytes) = await packages.ExportAsync(id, version, ct);
+            return Results.File(bytes, "application/json", $"{package.SourceAssetId}-v{package.Version}.vsasset");
+        });
+
+        app.MapPost("/api/model-assets/import", async (
+            ShapeModelAssetPackage package, ShapeModelAssetPackageService packages, CancellationToken ct) =>
+            Results.Ok(await packages.ImportAsync(package, ct))).RequireEngineer("model-asset.import", "model-assets");
+
         // 未引用版本回收：预览与执行分离，执行必须显式 confirm。
         app.MapGet("/api/model-assets/gc/preview", async (ShapeModelAssetGc gc, CancellationToken ct) =>
             Results.Ok(await gc.PlanAsync(ct)));

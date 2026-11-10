@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
@@ -39,6 +39,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
   const [renaming, setRenaming] = useState<{ asset: AssetDescriptor; name: string; description: string } | null>(null);
   const [references, setReferences] = useState<{ asset: AssetDescriptor; items: AssetReference[] } | null>(null);
   const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [messageApi, holder] = message.useMessage();
 
   const load = async () => {
@@ -89,6 +90,28 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
     } finally { setBusy(false); }
   };
 
+  const importPackage = async (file: File) => {
+    setBusy(true);
+    try {
+      const text = await file.text();
+      let payload: unknown;
+      try { payload = JSON.parse(text); }
+      catch { throw new Error(`${file.name} 不是合法的 .vsasset（JSON 解析失败）`); }
+      const response = await apiFetch(modelAssets.importPackage, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, `导入失败（HTTP ${response.status}）`));
+      const imported: AssetDescriptor = await response.json();
+      messageApi.success(`已导入资产 ${imported.id}（v${imported.latestVersion}）`);
+      await load();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : '导入失败');
+    } finally {
+      setBusy(false);
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
   const previewGc = async () => {
     setBusy(true);
     try {
@@ -135,6 +158,9 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
           <Space wrap>
             <Button size="small" onClick={() => void load()} loading={busy}>刷新</Button>
             <Button size="small" onClick={() => void previewGc()} loading={busy}>清理未引用版本</Button>
+            <Button size="small" loading={busy} onClick={() => importInputRef.current?.click()}>导入 .vsasset</Button>
+            <input ref={importInputRef} type="file" accept=".vsasset,application/json" style={{ display: 'none' }}
+              onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPackage(file); }} />
             <Typography.Text type="secondary">
               模型字节按 SHA256 内容寻址保存；版本不可变，节点通过 modelAssetId/modelAssetVersion 引用。
             </Typography.Text>
@@ -159,7 +185,10 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
                     { title: '大小', dataIndex: 'sizeBytes', width: 100, render: (value: number) => formatBytes(value) },
                     { title: '训练配置指纹', dataIndex: 'trainingConfig', render: (value: string) => <Typography.Text type="secondary">{value || '—'}</Typography.Text> },
                     { title: '说明', dataIndex: 'note', render: (value: string) => value || '—' },
-                    { title: '创建时间', dataIndex: 'createdAt', width: 180, render: (value: string) => new Date(value).toLocaleString() }
+                    { title: '创建时间', dataIndex: 'createdAt', width: 180, render: (value: string) => new Date(value).toLocaleString() },
+                    { title: '导出', width: 80, render: (_: unknown, version) => (
+                      <Button size="small" onClick={() => { window.location.href = modelAssets.exportVersion(asset.id, version.version); }}>导出</Button>
+                    ) }
                   ]}
                 />
               )

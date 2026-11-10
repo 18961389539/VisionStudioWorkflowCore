@@ -126,3 +126,33 @@ describe('model asset reclaim', () => {
     });
   });
 });
+
+describe('model asset package import', () => {
+  it('posts the parsed .vsasset and reloads the list', async () => {
+    stubBrowserApis();
+    const calls: { url: string; method: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url === '/api/model-assets/import') return json({ ...asset, id: 'shape-imported' });
+      if (url === '/api/model-assets') return json([asset]);
+      return json({});
+    }));
+
+    render(<ModelAssetPanel open onClose={() => undefined} />);
+    await screen.findByText('上盖模型');
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const payload = JSON.stringify({ format: 'visionstudio.model-asset.v1', name: 'Pkg' });
+    const file = new File([payload], 'pkg.vsasset', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: async () => payload });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    fireEvent.change(input);
+
+    await waitFor(() => {
+      const post = calls.find((call) => call.url === '/api/model-assets/import');
+      expect(post?.method).toBe('POST');
+      expect(JSON.parse(post!.body!)).toEqual({ format: 'visionstudio.model-asset.v1', name: 'Pkg' });
+    });
+  });
+});
