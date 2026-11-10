@@ -8,6 +8,8 @@ public sealed record UpdateShapeModelAssetRequest(string? Name = null, string? D
 
 public sealed record ShapeModelAssetReference(string WorkflowId, string NodeId);
 
+public sealed record GcApplyRequest(bool Confirm = false);
+
 public sealed record ExtractShapeModelAssetRequest(
     string WorkflowId,
     string NodeId,
@@ -61,6 +63,17 @@ public static class ModelAssetEndpoints
                 ? Results.NotFound()
                 : Results.File(bytes, "application/octet-stream", $"{id}-v{version}.model");
         });
+
+        // 未引用版本回收：预览与执行分离，执行必须显式 confirm。
+        app.MapGet("/api/model-assets/gc/preview", async (ShapeModelAssetGc gc, CancellationToken ct) =>
+            Results.Ok(await gc.PlanAsync(ct)));
+
+        app.MapPost("/api/model-assets/gc", async (GcApplyRequest request, ShapeModelAssetGc gc, CancellationToken ct) =>
+        {
+            if (!request.Confirm)
+                throw new ApiValidationException("Reclaiming versions requires confirm=true; call gc/preview first and review the candidate list.");
+            return Results.Ok(await gc.ApplyAsync(ct));
+        }).RequireEngineer("model-asset.gc", "model-assets");
 
         app.MapPatch("/api/model-assets/{id}", async (string id, UpdateShapeModelAssetRequest request, ShapeModelAssetStore store, CancellationToken ct) =>
         {

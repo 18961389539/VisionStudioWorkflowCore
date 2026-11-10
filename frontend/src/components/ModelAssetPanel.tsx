@@ -14,6 +14,11 @@ type AssetDescriptor = {
   latestVersion: number; versions: VersionInfo[];
 };
 type AssetReference = { workflowId: string; nodeId: string };
+type GcCandidate = { assetId: string; version: number; sha256: string; sizeBytes: number };
+type GcPlan = {
+  candidates: GcCandidate[]; reclaimableBytes: number; totalVersions: number;
+  protectedAsLatest: number; protectedByReference: number;
+};
 
 type Props = { open: boolean; onClose: () => void };
 
@@ -33,6 +38,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
   const [loadError, setLoadError] = useState<string>();
   const [renaming, setRenaming] = useState<{ asset: AssetDescriptor; name: string; description: string } | null>(null);
   const [references, setReferences] = useState<{ asset: AssetDescriptor; items: AssetReference[] } | null>(null);
+  const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
   const [messageApi, holder] = message.useMessage();
 
   const load = async () => {
@@ -83,6 +89,33 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
     } finally { setBusy(false); }
   };
 
+  const previewGc = async () => {
+    setBusy(true);
+    try {
+      const response = await apiFetch(modelAssets.gcPreview);
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '读取回收计划失败'));
+      setGcPlan(await response.json());
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : '读取回收计划失败');
+    } finally { setBusy(false); }
+  };
+
+  const applyGc = async () => {
+    setBusy(true);
+    try {
+      const response = await apiFetch(modelAssets.gc, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true })
+      });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '回收失败'));
+      const applied: GcPlan = await response.json();
+      messageApi.success(`已回收 ${applied.candidates.length} 个版本，释放 ${formatBytes(applied.reclaimableBytes)}`);
+      setGcPlan(null);
+      await load();
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : '回收失败');
+    } finally { setBusy(false); }
+  };
+
   const showReferences = async (asset: AssetDescriptor) => {
     setBusy(true);
     try {
@@ -101,6 +134,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Space wrap>
             <Button size="small" onClick={() => void load()} loading={busy}>刷新</Button>
+            <Button size="small" onClick={() => void previewGc()} loading={busy}>清理未引用版本</Button>
             <Typography.Text type="secondary">
               模型字节按 SHA256 内容寻址保存；版本不可变，节点通过 modelAssetId/modelAssetVersion 引用。
             </Typography.Text>
@@ -177,6 +211,26 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
                 { title: '工作流', dataIndex: 'workflowId' },
                 { title: '节点', dataIndex: 'nodeId' }
               ]} />}
+      </Modal>
+      <Modal open={Boolean(gcPlan)} onCancel={() => setGcPlan(null)} title="回收未引用版本"
+        okText={`回收 ${gcPlan?.candidates?.length ?? 0} 个版本`} cancelText="取消"
+        okButtonProps={{ danger: true, disabled: !(gcPlan?.candidates?.length) }}
+        confirmLoading={busy} onOk={() => void applyGc()}>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert type="warning" showIcon message="只回收确定没人使用的版本"
+            description={`共 ${gcPlan?.totalVersions ?? 0} 个版本：${gcPlan?.protectedAsLatest ?? 0} 个是各资产最新版、${gcPlan?.protectedByReference ?? 0} 个被工作流或历史发布清单引用，全部保留。`} />
+          {gcPlan?.candidates?.length
+            ? <Table<GcCandidate> size="small" rowKey={(row) => `${row.assetId}@${row.version}`} pagination={false}
+                dataSource={gcPlan.candidates}
+                columns={[
+                  { title: '资产', dataIndex: 'assetId' },
+                  { title: '版本', dataIndex: 'version', width: 70, render: (value: number) => `v${value}` },
+                  { title: '大小', dataIndex: 'sizeBytes', width: 100, render: (value: number) => formatBytes(value) },
+                  { title: 'SHA-256', dataIndex: 'sha256', render: (value: string) => <Typography.Text code>{value.slice(0, 12)}…</Typography.Text> }
+                ]} />
+            : <Empty description="没有可回收的版本——所有历史版本都被工作流或发布清单引用" />}
+          <Typography.Text type="secondary">共可释放 {formatBytes(gcPlan?.reclaimableBytes ?? 0)}；字节按 SHA256 共享，只在没有任何版本引用时才删除。</Typography.Text>
+        </Space>
       </Modal>
     </>
   );

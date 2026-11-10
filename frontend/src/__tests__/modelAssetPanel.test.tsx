@@ -62,7 +62,7 @@ describe('model asset panel', () => {
     render(<ModelAssetPanel open onClose={() => undefined} />);
 
     // antd 会在两个汉字之间插入空格（autoInsertSpace），可访问名是「引 用」。
-    fireEvent.click(await screen.findByRole('button', { name: /引\s*用/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^引\s*用$/ }));
 
     await waitFor(() => expect(screen.getByText('wf-1')).toBeInTheDocument());
     expect(screen.getByText('shape-1')).toBeInTheDocument();
@@ -80,11 +80,49 @@ describe('model asset panel', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<ModelAssetPanel open onClose={() => undefined} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /删\s*除/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^删\s*除$/ }));
     // 行按钮与 Popconfirm 的确认按钮同名：取最后一个（弹出的确认按钮）。
-    const confirmButtons = await screen.findAllByRole('button', { name: /删\s*除/ });
+    const confirmButtons = await screen.findAllByRole('button', { name: /^删\s*除$/ });
     fireEvent.click(confirmButtons[confirmButtons.length - 1]);
 
     await waitFor(() => expect(screen.getByText(/referenced by 1 workflow node/)).toBeInTheDocument());
+  });
+});
+
+describe('model asset reclaim', () => {
+  const plan = {
+    candidates: [{ assetId: 'shape-a', version: 1, sha256: 'a'.repeat(64), sizeBytes: 1024 }],
+    reclaimableBytes: 1024, totalVersions: 2, protectedAsLatest: 1, protectedByReference: 0
+  };
+
+  it('previews candidates before deleting and posts an explicit confirm', async () => {
+    stubBrowserApis();
+    const calls: { url: string; method: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url === '/api/model-assets/gc/preview') return json(plan);
+      if (url === '/api/model-assets/gc') return json(plan);
+      if (url === '/api/model-assets') return json([asset]);
+      return json({});
+    }));
+
+    render(<ModelAssetPanel open onClose={() => undefined} />);
+    const reclaimButton = (await screen.findByText('清理未引用版本')).closest('button');
+    expect(reclaimButton).not.toBeNull();
+    fireEvent.click(reclaimButton!);
+
+    // 预览弹窗里能看到候选版本与被保护的数量，确认前不会发回收请求。
+    expect(await screen.findByText(/共 2 个版本：1 个是各资产最新版/)).toBeInTheDocument();
+    expect(screen.getAllByText('shape-a').length).toBeGreaterThan(0);
+    expect(calls.some((call) => call.url === '/api/model-assets/gc')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: /回收 1 个版本/ }));
+
+    await waitFor(() => {
+      const applyCall = calls.find((call) => call.url === '/api/model-assets/gc');
+      expect(applyCall?.method).toBe('POST');
+      expect(JSON.parse(applyCall!.body!)).toEqual({ confirm: true });
+    });
   });
 });

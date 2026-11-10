@@ -325,6 +325,8 @@ export const modelAssets = {
   version: (id: string, version: number) => apiUrl(`model-assets/${encodeURIComponent(id)}/versions/${version}`),
   blob: (id: string, version: number) => apiUrl(`model-assets/${encodeURIComponent(id)}/versions/${version}/blob`),
   references: (id: string) => apiUrl(`model-assets/${encodeURIComponent(id)}/references`),
+  gcPreview: apiUrl('model-assets/gc/preview'),
+  gc: apiUrl('model-assets/gc'),
   extract: apiUrl('model-assets/extract')
 } as const;
 
