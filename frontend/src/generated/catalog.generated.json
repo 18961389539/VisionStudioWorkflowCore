@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "93e8cc2b1bd8429dfff4663926db0d22cd3c3e5aafab1f5e3f24511c4d7c4870",
+  "hash": "581ca3aebfddf4c5227bf28476b54dd2affe6bf6d2142c194e1b2b5405d6abd7",
   "items": [
     {
       "type": "image.acquire",
@@ -24166,6 +24166,27 @@
           "defaultValue": "",
           "group": "Model",
           "description": "Used when the template input port is not connected (absolute path, or relative to the host working directory)."
+        },
+        {
+          "name": "templateAssetId",
+          "label": "Template Asset",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Model",
+          "description": "Optional template-image asset id (kind=template). Used when the template port is not connected and takes precedence over Template File; a missing asset fails instead of falling back.",
+          "advanced": true
+        },
+        {
+          "name": "templateAssetVersion",
+          "label": "Template Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000,
+          "step": 1,
+          "group": "Model",
+          "description": "0 loads the asset's latest version; a positive number pins an immutable version.",
+          "advanced": true
         },
         {
           "name": "angleRangeDeg",

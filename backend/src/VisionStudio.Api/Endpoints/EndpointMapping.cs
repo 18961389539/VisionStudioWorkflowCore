@@ -13,6 +13,7 @@ public static class EndpointMapping
         app.MapDiagnosticsEndpoints();
         app.MapCalibrationEndpoints();
         app.MapModelAssetEndpoints();
+        app.MapTemplateAssetEndpoints();
         app.MapMatchingEndpoints();
         app.MapCameraEndpoints();
         app.MapCameraFeatureProfileEndpoints();

@@ -1,4 +1,4 @@
-﻿namespace VisionStudio.Engine;
+namespace VisionStudio.Engine;
 
 public static class BuiltInNodeCatalog
 {
@@ -351,6 +351,8 @@ public static class BuiltInNodeCatalog
             ],
             [
                 new("templatePath", "Template File", "text", string.Empty, Group: "Model", Description: "Used when the template input port is not connected (absolute path, or relative to the host working directory)."),
+                new("templateAssetId", "Template Asset", "text", string.Empty, Group: "Model", Description: "Optional template-image asset id (kind=template). Used when the template port is not connected and takes precedence over Template File; a missing asset fails instead of falling back."),
+                new("templateAssetVersion", "Template Asset Version", "number", 0, 0, 1000000, 1, Group: "Model", Description: "0 loads the asset's latest version; a positive number pins an immutable version."),
                 new("angleRangeDeg", "Angle Range (deg)", "number", 0, 0, 180, 1, Unit: "deg", Group: "Rotation", Description: "Legacy symmetric half-width. When Search Start and End are both 0, a positive Angle Range still opens +/- that window. Set Angle Range to 0 when using an explicit Start/End window (including a true zero-only search)."),
                 new("searchAngleStartDeg", "Search Start Angle", "number", 0, -180, 180, 1, Unit: "deg", Group: "Rotation", Description: "Lower angle bound (HALCON find_ncc_model style). Default 0; with End also 0, Angle Range still applies as +/- half-width. Set both Start/End for asymmetric windows."),
                 new("searchAngleEndDeg", "Search End Angle", "number", 0, -180, 180, 1, Unit: "deg", Group: "Rotation", Description: "Upper angle bound. Must be >= Search Start. Together with Start, overrides the legacy Angle Range when either bound is non-zero (or Angle Range is 0)."),

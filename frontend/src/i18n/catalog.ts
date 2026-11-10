@@ -3179,6 +3179,8 @@ const parameterDescriptions: Record<string, string> = {
   'match.shape.modelAssetId': '可选：模型资产 id（/api/model-assets）。设置后优先使用该资产版本而非节点内联模型；资产缺失或哈希不符会直接失败，不会静默回退。',
   'match.shape.modelAssetVersion': '0 表示取资产最新版本；正数固定到不可变版本（生产建议固定版本号）。',
   'match.shape.modelAssetSha256': '可选校验：与加载到的资产字节哈希不一致就失败。填资产接口返回的哈希值。',
+  'match.template.templateAssetId': '可选：模板图资产 id（kind=template）。未连接模板端口时生效，优先于“模板文件”；资产缺失会直接失败，不回退到文件。',
+  'match.template.templateAssetVersion': '0 表示取资产最新版本；正数固定到不可变版本。',
   'match.shape.minScore': '候选位姿接受阈值；Template Match 同键默认 0.5，切换节点类型会改变有效阈值，除非显式设置。',
   'match.shape.maxTargets': '每次运行接受的匹配数；切换节点类型时默认值不同，需显式设置。',
   'match.shape.minCenterDistance': '距离更优匹配过近的候选会被丢弃；模板匹配默认 0。',
@@ -3576,7 +3578,8 @@ const nodeParameterLabels: Record<string, Record<string, string>> = {
   'image.fuse': { 'Input Source': '输入来源' },
   'image.stitch': { 'Input Source': '输入来源', 'Camera Order': '相机顺序' },
   'flow.switch': { 'Trim Whitespace': '去除首尾空白' },
-  'match.shape': { 'Model Asset': '模型资产', 'Model Asset Version': '模型资产版本', 'Model Asset SHA-256': '模型资产 SHA-256' }
+  'match.shape': { 'Model Asset': '模型资产', 'Model Asset Version': '模型资产版本', 'Model Asset SHA-256': '模型资产 SHA-256' },
+  'match.template': { 'Template Asset': '模板图资产', 'Template Asset Version': '模板图资产版本' }
 };
 
 const nodeOptionLabels: Record<string, Record<string, string>> = {

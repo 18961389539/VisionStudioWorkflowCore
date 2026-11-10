@@ -532,6 +532,33 @@ P1 的第二块：让人能看见资产、改得动元数据、删得安全。**
 3. 发布清单的 pin 类型（若要参与生产运行校验）。
 
 
+## 第七十三轮：模板图资产（第二种 kind）（2026-11-10）
+
+通用资产层是否成立，要用第二种类型来验证。这轮接 `match.template` 的模板图，只动了四处：
+
+| 层 | 变更 |
+| --- | --- |
+| 适配器 | `TemplateAssetStore`（kind=template）：metadata 存 `width/height/contentType`，没有训练指纹；content-type 白名单、宽高 1..16384 |
+| 节点 | `match.template` 新增 `templateAssetId` / `templateAssetVersion`；优先级 **端口 > 资产 > 模板文件**；资产缺失或解码失败都明确报错，不回退到文件 |
+| 发布清单 | 模板资产与模型资产**共用同一份 pin 列表**（`assetId/version/sha` 与 kind 无关），schema 仍是 8，历史哈希不变 |
+| 回收 | GC 的引用扫描补上 `match.template`，并继续保留"新增 kind 必须同步扩展"的前置警告 |
+| 端点 | 6 个：list/create/get/versions/blob/delete（删除前扫描引用，409 列节点）；路由 285 → 291 |
+
+### 验证
+
+- Api 4 项模板资产测试：元数据与字节往返、两种 kind 读隔离（互相读不到、串用报 `not 'template'`）、非法 content-type 与宽高拒绝、
+  引擎读取走同一条 `AssetStore.ReadBytesSync`。
+- 清单 1 项：`match.template` 引用模板资产时，`version=0` 在发布时落成具体版本并写入 sha。
+- Engine 2 项：无资产源 → 明确失败；字节无法解码 → 在解码处失败（不误报"资产不存在"）。
+- Api **493 项通过**；Engine **2149 项通过**；前端 `tsc -b` 0 error、93 文件通过
+  （`useTuningPreview` 因 worker 启动超时未计入，单独复跑通过）；审计 exit 0。
+
+### 未做
+
+模板资产目前只能通过 API 创建，管理页还没有上传入口；`.vsasset` 导出也只覆盖模型资产。
+这两块是后续小批次，不影响节点侧使用。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

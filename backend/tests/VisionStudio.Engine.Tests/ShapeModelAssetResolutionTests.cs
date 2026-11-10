@@ -31,12 +31,12 @@ public sealed class ShapeModelAssetResolutionTests
         public byte[]? TryRead(string assetId, int version) => throw new InvalidOperationException("disabled source must not read bytes");
     }
 
-    private static NodeDefinition Node(string parameters)
-        => new("shape-1", "match.shape", null, null,
+    private static NodeDefinition Node(string parameters, string type = "match.shape")
+        => new("shape-1", type, null, null,
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(parameters));
 
     private static async Task<InvalidOperationException> RunExpectingFailureAsync(
-        IModelAssetSource? source, string parameters)
+        IModelAssetSource? source, string parameters, string nodeType = "match.shape")
     {
         using var image = new Mat(240, 240, MatType.CV_8UC1, Scalar.All(0));
         Cv2.Circle(image, new Point(120, 120), 50, Scalar.All(255), -1);
@@ -45,8 +45,13 @@ public sealed class ShapeModelAssetResolutionTests
             new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(input) },
             workflowScope: null, runId: null, modelAssets: source);
         return await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new ShapeMatchNode().ExecuteAsync(context, Node(parameters), CancellationToken.None).AsTask());
+            ExecuteAsync(nodeType, context, parameters));
     }
+
+    private static Task ExecuteAsync(string nodeType, NodeExecutionContext context, string parameters)
+        => nodeType == "match.shape"
+            ? new ShapeMatchNode().ExecuteAsync(context, Node(parameters), CancellationToken.None).AsTask()
+            : new TemplateMatchNode().ExecuteAsync(context, Node(parameters, "match.template"), CancellationToken.None).AsTask();
 
     [Fact]
     public async Task AssetReference_WithoutHostSource_FailsInsteadOfFallingBackToInlineModel()
@@ -124,6 +129,26 @@ public sealed class ShapeModelAssetResolutionTests
             """{"modelMode":"trained","modelAssetId":"shape-g","modelAssetVersion":1,"trainedModelData":"QUJD"}""");
         Assert.DoesNotContain("disabled", error.Message);
         Assert.DoesNotContain("model asset source", error.Message);
+        Assert.DoesNotContain("does not exist or was deleted", error.Message);
+    }
+
+    [Fact]
+    public async Task TemplateAsset_WithoutHostSource_FailsInsteadOfFallingBackToTemplateFile()
+    {
+        var error = await RunExpectingFailureAsync(null,
+            """{"templateAssetId":"tpl-a","templateAssetVersion":1}""", "match.template");
+        Assert.Contains("did not provide an asset source", error.Message);
+        Assert.Contains("tpl-a", error.Message);
+    }
+
+    [Fact]
+    public async Task TemplateAsset_WithUndecodableBytes_FailsAtDecodeNotAtAssetLookup()
+    {
+        var source = new FakeSource();
+        source.Items[("tpl-b", 1)] = [1, 2, 3, 4];
+        var error = await RunExpectingFailureAsync(source,
+            """{"templateAssetId":"tpl-b","templateAssetVersion":1}""", "match.template");
+        Assert.Contains("could not be decoded as an image", error.Message);
         Assert.DoesNotContain("does not exist or was deleted", error.Message);
     }
 }

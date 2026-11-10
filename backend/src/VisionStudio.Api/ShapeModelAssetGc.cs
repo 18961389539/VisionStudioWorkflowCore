@@ -149,7 +149,20 @@ public sealed class ShapeModelAssetGc(SqliteMetadataDatabase db, WorkflowStore w
     {
         foreach (var node in workflow.Nodes)
         {
-            if (!node.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase) || node.Parameters is null) continue;
+            if (node.Parameters is null) continue;
+            if (node.Type.Equals("match.template", StringComparison.OrdinalIgnoreCase))
+            {
+                // 模板图资产：与模型资产共用同一份回收保护集合。
+                if (node.Parameters.TryGetValue("templateAssetId", out var templateId)
+                    && templateId.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(templateId.GetString()))
+                {
+                    var templateVersion = node.Parameters.TryGetValue("templateAssetVersion", out var tv) && tv.TryGetInt32(out var pinnedTemplateVersion) ? pinnedTemplateVersion : 0;
+                    if (templateVersion > 0) references.Add((templateId.GetString()!.Trim(), templateVersion));
+                }
+                continue;
+            }
+            if (!node.Type.Equals("match.shape", StringComparison.OrdinalIgnoreCase)) continue;
             if (!node.Parameters.TryGetValue("modelAssetId", out var idElement)) continue;
             var assetId = idElement.ValueKind == JsonValueKind.String ? idElement.GetString() : idElement.ToString();
             if (string.IsNullOrWhiteSpace(assetId)) continue;

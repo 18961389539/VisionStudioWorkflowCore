@@ -144,7 +144,7 @@ public sealed class RuntimeDependencyManifestService(
     CameraSynchronizationGroupStore? synchronizationGroups = null,
     DeviceLeaseRegistry? commandGate = null,
     CameraIntrinsicAssetStore? cameraIntrinsicAssets = null,
-    ShapeModelAssetStore? modelAssets = null)
+    AssetStore? assets = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -353,6 +353,13 @@ public sealed class RuntimeDependencyManifestService(
                 if (!string.IsNullOrWhiteSpace(modelAssetId))
                     modelAssetRefs.Add((modelAssetId!, ResolveInt(node, registration.Catalog, "modelAssetVersion")));
             }
+            if (string.Equals(node.Type, "match.template", StringComparison.OrdinalIgnoreCase))
+            {
+                // 模板图资产与模型资产共用同一份 pin 列表（assetId/version/sha 与 kind 无关）。
+                var templateAssetId = ResolveString(node, registration.Catalog, "templateAssetId");
+                if (!string.IsNullOrWhiteSpace(templateAssetId))
+                    modelAssetRefs.Add((templateAssetId!, ResolveInt(node, registration.Catalog, "templateAssetVersion")));
+            }
 
             if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
             {
@@ -380,7 +387,7 @@ public sealed class RuntimeDependencyManifestService(
         var deviceDependencies = await CaptureDevicesAsync(deviceIds, ct);
         var robotDependencies = await CaptureRobotsAsync(robotIds, ct);
         var calibrationDependencies = await CaptureCalibrationsAsync(calibrationRefs, ct);
-        var modelAssetDependencies = await CaptureModelAssetsAsync(modelAssetRefs, ct);
+        var modelAssetDependencies = await CaptureAssetPinsAsync(modelAssetRefs, ct);
 
         // ManifestHash deliberately excludes capture/display timestamps such as Device ProfileRevision.
         // SDK 2.0 plugin workflows advance to schema v5 so package-manifest + referenced tool versions become
@@ -887,25 +894,25 @@ public sealed class RuntimeDependencyManifestService(
     /// 捕获形状模型资产锁定项：version<=0（latest）在发布时就地落成具体版本号，
     /// 之后追加新版本不会改变已发布配方的锁定；资产/版本不存在直接拒绝发布。
     /// </summary>
-    private async Task<ModelAssetRuntimeDependency[]> CaptureModelAssetsAsync(
+    private async Task<ModelAssetRuntimeDependency[]> CaptureAssetPinsAsync(
         HashSet<(string AssetId, int Version)> references,
         CancellationToken ct)
     {
         if (references.Count == 0) return [];
-        if (modelAssets is null)
-            throw new InvalidOperationException("Workflow references shape model assets, but model asset storage is unavailable.");
+        if (assets is null)
+            throw new InvalidOperationException("Workflow references assets, but asset storage is unavailable.");
         var output = new List<ModelAssetRuntimeDependency>(references.Count);
         foreach (var reference in references.OrderBy(x => x.AssetId, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Version))
         {
             var version = reference.Version;
             if (version <= 0)
             {
-                var descriptor = await modelAssets.GetAsync(reference.AssetId, ct)
-                    ?? throw new InvalidOperationException($"Workflow references shape model asset '{reference.AssetId}', but it does not exist.");
+                var descriptor = await assets.GetAsync(reference.AssetId, ct)
+                    ?? throw new InvalidOperationException($"Workflow references asset '{reference.AssetId}', but it does not exist.");
                 version = descriptor.LatestVersion;
             }
-            var info = await modelAssets.GetVersionAsync(reference.AssetId, version, ct)
-                ?? throw new InvalidOperationException($"Workflow references shape model asset '{reference.AssetId}' v{version}, but that immutable version does not exist.");
+            var info = await assets.GetVersionAsync(reference.AssetId, version, ct)
+                ?? throw new InvalidOperationException($"Workflow references asset '{reference.AssetId}' v{version}, but that immutable version does not exist.");
             output.Add(new ModelAssetRuntimeDependency(reference.AssetId, info.Version, info.Sha256));
         }
         return [.. output];

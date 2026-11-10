@@ -18,15 +18,17 @@ namespace VisionStudio.Api.Tests;
 /// </summary>
 public sealed class ShapeModelAssetManifestTests
 {
-    private static async Task<(TempWebHostEnvironment Env, RuntimeDependencyManifestService Service, ShapeModelAssetStore Store)>
+    private static async Task<(TempWebHostEnvironment Env, RuntimeDependencyManifestService Service, ShapeModelAssetStore Store, TemplateAssetStore Templates)>
         CreateAsync()
     {
         var env = new TempWebHostEnvironment();
         var db = new SqliteMetadataDatabase(env);
         await db.EnsureInitializedAsync();
-        var store = new ShapeModelAssetStore(new AssetStore(db));
+        var assets = new AssetStore(db);
+        var store = new ShapeModelAssetStore(assets);
         var registry = new VisionNodeRegistry();
         registry.Register(BuiltInNodeCatalog.Require("match.shape"), new ShapeMatchNode(), "builtin");
+        registry.Register(BuiltInNodeCatalog.Require("match.template"), new TemplateMatchNode(), "builtin");
         var cameras = new CameraManager();
         var devices = new DeviceManager();
         var robots = new RobotManager();
@@ -38,8 +40,8 @@ public sealed class ShapeModelAssetManifestTests
             registry, plugins, cameras, devices,
             new DeviceProfileStore(Path.Combine(env.ContentRootPath, "data", "devices")), robots,
             new CalibrationAssetStore(db, new CalibrationWorkspaceService()), provenance,
-            modelAssets: store);
-        return (env, service, store);
+            assets: assets);
+        return (env, service, store, new TemplateAssetStore(assets));
     }
 
     private static WorkflowDefinition Workflow(params (string Id, string? AssetId, int Version)[] nodes)
@@ -54,7 +56,7 @@ public sealed class ShapeModelAssetManifestTests
     [Fact]
     public async Task Capture_PinsLatestVersionToAConcreteNumberAndSha()
     {
-        var (env, service, store) = await CreateAsync();
+        var (env, service, store, _) = await CreateAsync();
         using var _ = env;
         var created = await store.CreateAsync(new CreateShapeModelAssetRequest(
             "shape-a", "A", null, Convert.ToBase64String(new byte[32]), "cfg"), CancellationToken.None);
@@ -75,7 +77,7 @@ public sealed class ShapeModelAssetManifestTests
     [Fact]
     public async Task Capture_LeavesAssetFreeWorkflowsOnTheLegacySchema()
     {
-        var (env, service, _) = await CreateAsync();
+        var (env, service, _, _) = await CreateAsync();
         using var __ = env;
         var manifest = await service.CaptureAsync(Workflow(("shape-1", null, 0)), CancellationToken.None);
 
@@ -86,7 +88,7 @@ public sealed class ShapeModelAssetManifestTests
     [Fact]
     public async Task Validate_ReportsDriftWhenThePinnedVersionIsNoLongerTheOneInTheWorkflow()
     {
-        var (env, service, store) = await CreateAsync();
+        var (env, service, store, _) = await CreateAsync();
         using var _ = env;
         await store.CreateAsync(new CreateShapeModelAssetRequest(
             "shape-b", "B", null, Convert.ToBase64String(new byte[24]), "cfg"), CancellationToken.None);
@@ -106,11 +108,35 @@ public sealed class ShapeModelAssetManifestTests
     [Fact]
     public async Task Capture_RejectsMissingAssetsInsteadOfPublishingABrokenPin()
     {
-        var (env, service, _) = await CreateAsync();
+        var (env, service, _, _) = await CreateAsync();
         using var __ = env;
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CaptureAsync(Workflow(("shape-1", "shape-missing", 0)), CancellationToken.None));
         Assert.Contains("shape-missing", error.Message);
         Assert.Contains("does not exist", error.Message);
+    }
+
+    [Fact]
+    public async Task Capture_PinsTemplateAssetsIntoTheSameManifestList()
+    {
+        var (env, service, _, templates) = await CreateAsync();
+        using var _ = env;
+        var image = Enumerable.Range(0, 48).Select(i => (byte)i).ToArray();
+        var created = await templates.CreateAsync(new CreateTemplateAssetRequest(
+            "tpl-pin", "T", null, Convert.ToBase64String(image), 640, 480), CancellationToken.None);
+
+        var workflow = new WorkflowDefinition("manifest-tpl", "Template",
+            [new NodeDefinition("tpl-1", "match.template", null, null, new Dictionary<string, JsonElement>
+            {
+                ["templateAssetId"] = JsonSerializer.SerializeToElement("tpl-pin"),
+                ["templateAssetVersion"] = JsonSerializer.SerializeToElement(0)
+            })], []);
+        var manifest = await service.CaptureAsync(workflow, CancellationToken.None);
+
+        Assert.Equal(8, manifest.SchemaVersion);
+        var pin = Assert.Single(manifest.ModelAssets!);
+        Assert.Equal("tpl-pin", pin.AssetId);
+        Assert.Equal(created.LatestVersion, pin.Version);
+        Assert.Equal(created.Versions[0].Sha256, pin.Sha256);
     }
 }

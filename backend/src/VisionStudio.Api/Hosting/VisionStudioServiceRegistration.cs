@@ -362,6 +362,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<CameraIntrinsicAssetStore>();
         services.AddSingleton<AssetStore>();
         services.AddSingleton<ShapeModelAssetStore>();
+        services.AddSingleton<TemplateAssetStore>();
         services.AddSingleton<ShapeModelAssetExtraction>();
         services.AddSingleton<ShapeModelAssetGc>();
         services.AddSingleton<ShapeModelAssetPackageService>();

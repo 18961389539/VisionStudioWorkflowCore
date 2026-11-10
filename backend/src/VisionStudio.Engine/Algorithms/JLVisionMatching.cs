@@ -153,6 +153,30 @@ internal static class JLVisionMatching
             Mat templateBuffer;
             if (shape && savedModel.Length > 0) templateBuffer = savedModelPlaceholder = new Mat(1, 1, MatType.CV_8UC1); // geometry metadata is restored below
             else if (fromPort) templateBuffer = context.RequireImage("template").Mat;
+            else if (!string.IsNullOrWhiteSpace(node.GetString("templateAssetId", string.Empty)))
+            {
+                // 模板图资产：优先于 templatePath；端口连接时仍以端口为准（动态图像优先于静态资产）。
+                var templateAssetId = node.GetString("templateAssetId", string.Empty).Trim();
+                var templateAssetVersion = node.GetInt("templateAssetVersion", 0);
+                if (templateAssetVersion < 0)
+                    throw new InvalidOperationException($"Match node '{node.Id}' templateAssetVersion must be >= 0 (0 means latest).");
+                var assetSource = context.ModelAssets
+                    ?? throw new InvalidOperationException(
+                        $"Match node '{node.Id}' references template asset '{templateAssetId}', but this host did not provide an asset source. " +
+                        "Run through a host that registers the asset source, or clear templateAssetId to use Template File.");
+                var templateBytes = assetSource.TryRead(templateAssetId, templateAssetVersion)
+                    ?? throw new InvalidOperationException(
+                        $"Match node '{node.Id}' references template asset '{templateAssetId}' v{(templateAssetVersion == 0 ? "latest" : templateAssetVersion.ToString())}, " +
+                        "which does not exist or was deleted. Repoint the node or restore the asset.");
+                fileImage = Cv2.ImDecode(templateBytes, ImreadModes.Grayscale);
+                if (fileImage.Empty())
+                {
+                    var length = templateBytes.Length;
+                    fileImage.Dispose();
+                    throw new InvalidOperationException($"Match node '{node.Id}' template asset '{templateAssetId}' ({length} bytes) could not be decoded as an image.");
+                }
+                templateBuffer = fileImage;
+            }
             else
             {
                 var path = node.GetString("templatePath", string.Empty).Trim();
