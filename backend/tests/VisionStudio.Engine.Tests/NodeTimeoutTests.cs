@@ -95,6 +95,15 @@ public sealed class NodeTimeoutTests
     public void Normalize_TreatsNonPositiveAsUnset_AndClampsToCeiling(int input, int expected)
         => Assert.Equal(expected, NodeTimeoutPolicy.Normalize(input));
 
+    [Theory]
+    [InlineData(null, 10_000)]
+    [InlineData(50, 100)]
+    [InlineData(600_000, 600_000)]
+    [InlineData(900_000, 900_000)]
+    [InlineData(NodeTimeoutPolicy.AbsoluteMaxTimeoutMs + 1, NodeTimeoutPolicy.AbsoluteMaxTimeoutMs)]
+    public void RunBudget_UsesTheSameAbsoluteCeilingAsNodeBudgets(int? requested, int expected)
+        => Assert.Equal(expected, WorkflowCoreVisionRunner.ResolveRunTimeoutMs(requested));
+
     [Fact]
     public void Ceiling_DefaultsToTheConstAndCanBeRaisedForLongCycleNodes()
     {

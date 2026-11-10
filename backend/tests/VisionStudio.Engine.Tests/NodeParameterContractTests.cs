@@ -42,6 +42,17 @@ public sealed class NodeParameterContractTests
     }
 
     [Fact]
+    public void KnownExecutorFallbackDrifts_StayAlignedWithTheCatalog()
+    {
+        // Static audit compares literal fallbacks across the whole executor tree; these three
+        // were the only real drifts and are locked here so a catalog edit cannot silently undo them.
+        Assert.Equal(false, Parameter("measure.profileFilter", "closed").DefaultValue);
+        Assert.Equal("[]", Parameter("tolerance.stackup", "contributionsJson").DefaultValue);
+        Assert.Equal("VisionStudio alarm", Parameter("output.notify", "subject").DefaultValue);
+        Assert.Null(Parameter("tolerance.stackup", "tolerance").Unit);
+    }
+
+    [Fact]
     public void ImageCrop_LegacyRectangleFields_AreDeclaredInternalWithoutDefaults()
     {
         foreach (var name in new[] { "x", "y", "width", "height" })

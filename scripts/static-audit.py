@@ -181,12 +181,20 @@ PORT_TYPE_BY_GENERIC = {
 }
 NODE_TYPE_RE = re.compile(r'public string Type => "([a-zA-Z0-9.]+)"')
 NUMERIC_FALLBACK_RE = re.compile(r'node\.Get(?:Int|Double|Long)\(\s*"([A-Za-z0-9_]+)"\s*,\s*(-?\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*\)')
+STRING_FALLBACK_RE = re.compile(r'node\.GetString\(\s*"([A-Za-z0-9_]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\)')
+BOOL_FALLBACK_RE = re.compile(r'node\.GetBool\(\s*"([A-Za-z0-9_]+)"\s*,\s*(true|false)\s*\)')
+# 有意不跟随目录默认值的遗留哨兵：samplingMode 缺失时执行器按 angleStepDeg 是否存在选择
+# 旧版 step 语义，目录里的 "count" 只用于新建节点。新增例外必须在注释里说明原因。
+DEFAULT_DRIFT_EXEMPT = {
+    ('measure.caliperCircle', 'samplingMode'),
+}
 REQUIRE_GENERIC_RE = re.compile(r'context\.Require<\s*([A-Za-z0-9_.]+)\s*>\(\s*"([^"]+)"')
 REQUIRE_IMAGE_RE = re.compile(r'context\.RequireImage\(\s*"([^"]+)"')
 
 default_drift: list[str] = []
 port_type_drift: list[str] = []
 compared_defaults = 0
+compared_text_defaults = 0
 compared_ports = 0
 for source_path in sorted((ROOT / 'backend/src/VisionStudio.Engine/Nodes').glob('*.cs')):
     blocks = re.split(r'(?:^|\n)(?=(?:public|internal)\s+(?:sealed\s+|static\s+|abstract\s+)*class\s)',
@@ -219,6 +227,36 @@ for source_path in sorted((ROOT / 'backend/src/VisionStudio.Engine/Nodes').glob(
             if abs(expected_value - actual_value) > 1e-9:
                 default_drift.append(f'{type_name}.{name}: catalog={expected_value:g} executor={actual_value:g}')
 
+        for match in STRING_FALLBACK_RE.finditer(block):
+            name, literal = match.group(1), match.group(2)
+            if (type_name, name) in DEFAULT_DRIFT_EXEMPT:
+                continue
+            parameter = parameter_map.get(name)
+            if parameter is None:
+                continue
+            expected = parameter.get('defaultValue')
+            if not isinstance(expected, str):
+                continue
+            actual = literal.replace('\\"', '"').replace('\\\\', '\\')
+            compared_text_defaults += 1
+            if expected != actual:
+                default_drift.append(f'{type_name}.{name}: catalog={expected!r} executor={actual!r}')
+
+        for match in BOOL_FALLBACK_RE.finditer(block):
+            name = match.group(1)
+            if (type_name, name) in DEFAULT_DRIFT_EXEMPT:
+                continue
+            parameter = parameter_map.get(name)
+            if parameter is None:
+                continue
+            expected = parameter.get('defaultValue')
+            if not isinstance(expected, bool):
+                continue
+            actual = match.group(2) == 'true'
+            compared_text_defaults += 1
+            if expected is not actual:
+                default_drift.append(f'{type_name}.{name}: catalog={expected} executor={actual}')
+
         for match in REQUIRE_GENERIC_RE.finditer(block):
             expected_type = PORT_TYPE_BY_GENERIC.get(match.group(1).split('.')[-1])
             if expected_type is None:
@@ -243,7 +281,7 @@ for source_path in sorted((ROOT / 'backend/src/VisionStudio.Engine/Nodes').glob(
 for problem in default_drift:
     fail(f'Catalog/executor default drift: {problem}')
 if not default_drift:
-    ok(f'Parameter defaults: {compared_defaults} numeric fallbacks match the catalog')
+    ok(f'Parameter defaults: {compared_defaults} numeric and {compared_text_defaults} text/boolean fallbacks match the catalog')
 for problem in port_type_drift:
     fail(f'Input port type drift: {problem}')
 if not port_type_drift:

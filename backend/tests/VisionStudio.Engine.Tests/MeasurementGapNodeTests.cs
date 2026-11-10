@@ -183,6 +183,25 @@ public sealed class MeasurementGapNodeTests
         Assert.False(straight.Outputs["found"].Require<bool>("found"));
     }
 
+    [Fact]
+    public async Task Curvature_RejectsNearlyCollinearWindow_InsteadOfReportingHugeRadius()
+    {
+        // A barely curved, sub-pixel-scale span has det > 1e-12 in absolute px^4 units but is
+        // numerically indistinguishable from a straight line; the fit must stay scale-free.
+        var points = Enumerable.Range(0, 20).Select(i =>
+        {
+            var x = i * 0.1;
+            return new VisionPoint2D(x, 1e-4 * x * x);
+        }).ToArray();
+
+        var result = await new ContourCurvatureNode().ExecuteAsync(
+            Ctx(new() { ["contours"] = VisionValue.Contours([Contour(points)]) }),
+            Def("measure.curvature", """{"fittingWindow":4,"cornerRadius":8,"closed":false}"""), CancellationToken.None);
+
+        Assert.False(result.Outputs["found"].Require<bool>("found"));
+        Assert.Contains("degenerate-curvature", result.Outputs["diagnostics"].Require<string>("diagnostics"));
+    }
+
     // ── 滤波 / 粗糙度 ───────────────────────────────────────────────
     [Fact]
     public async Task ProfileFilter_SplitsWavinessFromResidual()

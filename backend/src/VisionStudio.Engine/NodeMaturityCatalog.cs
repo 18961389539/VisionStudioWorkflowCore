@@ -39,13 +39,13 @@ public static class NodeMaturityCatalog
             // 仓库里没有可用的模型包，推理精度与后处理（NMS/掩码解码/关键点配对）从未被断言。
 
             ["inference.instanceSegmentation"] = new(NodeMaturity.Experimental,
-                "实例分割只有契约与错误路径测试，无模型包可跑：掩码解码与实例后处理未做数值验证。"),
+                "无模型包可跑端到端：YOLO-Seg 解码与掩码合成已有纯函数测试，但节点级实例后处理（NMS + proto 掩码合成）未串联验证。"),
 
             ["inference.obb"] = new(NodeMaturity.Experimental,
-                "旋转框检测只有契约与错误路径测试，无模型包可跑：角度解码与 NMS 未做数值验证。"),
+                "无模型包可跑端到端：OBB 解码、旋转 IoU 与 NMS 已有纯函数测试，但节点级角度后处理未串联验证。"),
 
             ["inference.pose"] = new(NodeMaturity.Experimental,
-                "姿态估计只有契约与错误路径测试，无模型包可跑：关键点配对与置信度未做数值验证。"),
+                "无模型包可跑端到端：关键点解码已有纯函数测试，但节点级关键点配对与骨架输出未串联验证。"),
 
             // ---------------------------------------------------------- Preview
             // 判据：有行为基线，但文档（docs/*.md 或目录长描述）写明了适用范围/近似口径。

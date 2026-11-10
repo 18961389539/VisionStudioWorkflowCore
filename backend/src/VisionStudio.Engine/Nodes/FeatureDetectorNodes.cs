@@ -607,14 +607,10 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
             else
             {
                 // max 模式同时记录该像素最强响应来自哪个方向，用于方向图。
-                for (var y = 0; y < squared.Rows; y++)
-                for (var x = 0; x < squared.Cols; x++)
-                {
-                    var value = squared.At<float>(y, x);
-                    if (value <= best.At<float>(y, x)) continue;
-                    best.Set(y, x, value);
-                    bestDirection.Set(y, x, (float)degrees);
-                }
+                using var improved = new Mat();
+                Cv2.Compare(squared, best, improved, CmpTypes.GT);
+                squared.CopyTo(best, improved);
+                bestDirection.SetTo(Scalar.All((float)degrees), improved);
             }
         }
 
@@ -662,18 +658,26 @@ public sealed class FeatureGaborBankNode : IVisionNodeExecutor
 
         if (emitDirectionMap)
         {
-            using var directionMap = new Mat();
-            if (energyMode == "sum")
+            var directionMap = new Mat();
+            try
             {
-                // sum 模式下没有天然的方向图，用单一波长的最大响应方向近似不了，明确输出空图。
-                directionMap.Create(analysis.Rows, analysis.Cols, MatType.CV_8UC1);
-                directionMap.SetTo(Scalar.All(0));
+                if (energyMode == "sum")
+                {
+                    // sum 模式下没有天然的方向图，用单一波长的最大响应方向近似不了，明确输出空图。
+                    directionMap.Create(analysis.Rows, analysis.Cols, MatType.CV_8UC1);
+                    directionMap.SetTo(Scalar.All(0));
+                }
+                else
+                {
+                    bestDirection.ConvertTo(directionMap, MatType.CV_8UC1, 255.0 / 180.0, 0);
+                }
+                outputs["directionMap"] = VisionValue.Image(VisionImage.Own(directionMap));
             }
-            else
+            catch
             {
-                bestDirection.ConvertTo(directionMap, MatType.CV_8UC1, 255.0 / 180.0, 0);
+                directionMap.Dispose();
+                throw;
             }
-            outputs["directionMap"] = VisionValue.Image(VisionImage.Own(directionMap));
         }
 
         timer.Stop();

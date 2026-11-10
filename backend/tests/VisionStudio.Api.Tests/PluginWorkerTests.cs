@@ -136,6 +136,13 @@ public sealed class PluginWorkerTests
         Assert.Equal(0, profiler.Snapshot("sample", 1).SampleCount);
     }
 
+    [Theory]
+    [InlineData(0, 30_000, 30_000)]
+    [InlineData(5_000, 30_000, 5_000)]
+    [InlineData(60_000, 30_000, 60_000)]
+    public void Worker_execution_timeout_follows_the_node_budget_when_present(int nodeTimeoutMs, int configuredMs, int expected)
+        => Assert.Equal(expected, PluginWorkerTimeoutPolicy.Resolve(nodeTimeoutMs, configuredMs));
+
     [Fact]
     public void Worker_timing_contract_carries_decode_execute_and_encode_segments()
     {

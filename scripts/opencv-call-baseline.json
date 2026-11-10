@@ -5,11 +5,6 @@
     "PutText"
   ],
   [
-    "BarcodeQualityNode.cs",
-    "BarcodeQualityNode",
-    "MinMaxLoc"
-  ],
-  [
     "CharucoBoardNode.cs",
     "CharucoBoardNode",
     "PutText"
@@ -47,12 +42,12 @@
   [
     "FeatureDetectorNodes.cs",
     "FeatureCornerNode",
-    "GoodFeaturesToTrack"
+    "FAST"
   ],
   [
     "FeatureDetectorNodes.cs",
     "FeatureCornerNode",
-    "MinMaxLoc"
+    "GoodFeaturesToTrack"
   ],
   [
     "FeatureDetectorNodes.cs",
@@ -78,6 +73,11 @@
     "FeatureDetectorNodes.cs",
     "FeatureGaborBankNode",
     "Add"
+  ],
+  [
+    "FeatureDetectorNodes.cs",
+    "FeatureGaborBankNode",
+    "Compare"
   ],
   [
     "FeatureDetectorNodes.cs",
@@ -328,6 +328,11 @@
     "MatchingGeometryNodes.cs",
     "PnpPoseNode",
     "SolvePnP"
+  ],
+  [
+    "OnnxRuntimeInferenceCore.cs",
+    "OnnxInferenceHelpers",
+    "Split"
   ],
   [
     "PreprocessGapNodes.cs",

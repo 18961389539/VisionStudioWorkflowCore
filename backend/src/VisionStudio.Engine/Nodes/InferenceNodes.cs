@@ -648,8 +648,7 @@ var source = context.RequireImage("image").Mat;
         }
 
         using var modelMask = new Mat(height, width, MatType.CV_8UC1, Scalar.All(0));
-        for (var i = 0; i < labels.Length; i++)
-            modelMask.Set(i / width, i % width, labels[i]);
+        modelMask.SetArray(labels);
 
         var lowConfidenceThreshold = node.GetDouble("lowConfidenceThreshold", 0.5);
         if (!double.IsFinite(lowConfidenceThreshold)) throw new InvalidOperationException("lowConfidenceThreshold must be finite.");
@@ -728,20 +727,26 @@ var source = context.RequireImage("image").Mat;
             else if (source.Channels() == 3) source.CopyTo(overlay);
             else if (source.Channels() == 4) JLVisionOperators.CvtColor(source, overlay, ColorConversionCodes.BGRA2BGR);
             else throw new InvalidOperationException($"Segmentation overlay supports 1, 3, or 4 channel images; received {source.Channels()}.");
-            mask.GetArray(out byte[] maskBytes);
-            overlay.GetArray(out Vec3b[] basePixels);
-            for (var i = 0; i < maskBytes.Length; i++)
+            // Zero-copy row spans: the old GetArray/SetArray round trip copied the whole frame
+            // through managed memory just to blend the labelled pixels in place.
+            var maskRows = mask.AsRows<byte>();
+            var overlayRows = overlay.AsRows<Vec3b>();
+            for (var y = 0; y < maskRows.Count; y++)
             {
-                var label = maskBytes[i];
-                if (label == 0) continue;
-                var color = InferenceStats.SegmentationColorBgr(label);
-                var px = basePixels[i];
-                basePixels[i] = new Vec3b(
-                    (byte)Math.Clamp((px.Item0 + color.B) / 2, 0, 255),
-                    (byte)Math.Clamp((px.Item1 + color.G) / 2, 0, 255),
-                    (byte)Math.Clamp((px.Item2 + color.R) / 2, 0, 255));
+                var maskRow = maskRows[y];
+                var pixelRow = overlayRows[y];
+                for (var x = 0; x < maskRow.Length; x++)
+                {
+                    var label = maskRow[x];
+                    if (label == 0) continue;
+                    var color = InferenceStats.SegmentationColorBgr(label);
+                    var px = pixelRow[x];
+                    pixelRow[x] = new Vec3b(
+                        (byte)Math.Clamp((px.Item0 + color.B) / 2, 0, 255),
+                        (byte)Math.Clamp((px.Item1 + color.G) / 2, 0, 255),
+                        (byte)Math.Clamp((px.Item2 + color.R) / 2, 0, 255));
+                }
             }
-            overlay.SetArray(basePixels);
             return overlay;
         }
         catch { overlay.Dispose(); throw; }

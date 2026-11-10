@@ -79,6 +79,21 @@ describe('catalog localization for previously Chinese-authored nodes', () => {
     expect(missing).toEqual([]);
   });
 
+  it('translates every node name, node description and visible parameter description', () => {
+    // Labels/options were covered first; descriptions are what a Chinese user reads in the
+    // node dialog and the help popovers, so fall back to English is a visible gap there too.
+    const missing: string[] = [];
+    for (const item of localized.values()) {
+      if (!cjk.test(item.displayName)) missing.push(`${item.type} displayName`);
+      if (item.description && !cjk.test(item.description)) missing.push(`${item.type} description`);
+      for (const parameter of item.parameters) {
+        if (parameter.internal) continue;
+        if (parameter.description && !cjk.test(parameter.description)) missing.push(`${item.type}.${parameter.name} description`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   it('translates every category', () => {
     const missing = [...localized.values()].filter((item) => !cjk.test(item.category)).map((item) => `${item.type} category='${item.category}'`);
     expect(missing).toEqual([]);

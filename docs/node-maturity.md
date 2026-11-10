@@ -21,8 +21,9 @@
 
 ## 当前清单
 
-**Experimental（3）**——三个推理节点只有"拒绝 crop / 缺模型报错"这类错误路径测试，
-仓库里没有可用的模型包，推理精度与后处理（NMS、掩码解码、关键点配对）从未被断言：
+**Experimental（3）**——三个推理节点没有可用的模型包，端到端推理与后处理串联未验证；
+解码、旋转 IoU、NMS、掩码合成等纯函数已有数值测试，但节点级 NMS→输出、关键点配对与骨架
+仍未被断言：
 
 `inference.obb`、`inference.pose`、`inference.instanceSegmentation`
 

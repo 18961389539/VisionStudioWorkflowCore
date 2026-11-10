@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "79563517c340981b1f824afbc879b183240671abfe890deab523323010a443af",
+  "hash": "01d2f353939cce307b7e05e46bf37d9d8e9d7d7b73ed1d40e37387f7c16eb685",
   "items": [
     {
       "type": "image.acquire",
@@ -886,6 +886,7 @@
           "min": -180,
           "max": 180,
           "step": 1,
+          "unit": "deg",
           "group": "Placement",
           "description": "Rotation added per sample index in sequence mode.",
           "visibleWhen": {
@@ -956,6 +957,7 @@
           "min": 0,
           "max": 180,
           "step": 1,
+          "unit": "deg",
           "group": "Random",
           "description": "Random angle is selected from the symmetric range -value..+value.",
           "visibleWhen": {
@@ -1144,6 +1146,7 @@
           "min": 0,
           "max": 180,
           "step": 0.01,
+          "unit": "deg",
           "group": "Validation",
           "description": "Maximum allowed angular residual in degrees; 0 disables the gate."
         },
@@ -1358,6 +1361,7 @@
           "min": 0,
           "max": 180,
           "step": 0.01,
+          "unit": "deg",
           "group": "Validation",
           "description": "Gate on worst per-sample rotation residual in degrees; 0 disables the gate."
         },
@@ -2838,6 +2842,7 @@
           "min": 0,
           "max": 180,
           "step": 0.01,
+          "unit": "deg",
           "group": "Validation",
           "description": "Maximum allowed rotation residual in degrees; 0 disables the gate."
         },
@@ -13386,6 +13391,7 @@
           "min": 10,
           "max": 360,
           "step": 5,
+          "unit": "deg",
           "group": "Shape",
           "description": "Angular coverage of the supporting contour. Partially occluded holes still pass at 200..300; anything below this is usually a straight edge faking an ellipse."
         },
@@ -17535,6 +17541,7 @@
           "min": -6.2832,
           "max": 6.2832,
           "step": 0.01,
+          "unit": "rad",
           "group": "Geometry",
           "description": "Ellipse orientation in radians.",
           "visibleWhen": {
@@ -17563,6 +17570,7 @@
           "min": -6.2832,
           "max": 6.2832,
           "step": 0.01,
+          "unit": "rad",
           "group": "Geometry",
           "description": "Ellipse parameter angle in radians.",
           "visibleWhen": {
@@ -23138,6 +23146,7 @@
           "min": 0,
           "max": 180,
           "step": 0.1,
+          "unit": "deg",
           "group": "Search",
           "description": "Rotation search half-range in degrees around 0 (0..180)."
         },
@@ -23149,6 +23158,7 @@
           "min": 0.1,
           "max": 30,
           "step": 0.1,
+          "unit": "deg",
           "group": "Search",
           "description": "Rotation search step in degrees (0.1..30)."
         },
@@ -25806,6 +25816,7 @@
           "min": -180,
           "max": 180,
           "step": 0.5,
+          "unit": "deg",
           "group": "Initial Alignment",
           "description": "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on."
         },
@@ -30318,6 +30329,7 @@
           "min": 0,
           "max": 90,
           "step": 0.1,
+          "unit": "deg",
           "description": "Optional tolerance; withinTolerance reports |angleError| <= limit."
         }
       ],
@@ -30452,6 +30464,7 @@
           "min": -180,
           "max": 180,
           "step": 0.1,
+          "unit": "deg",
           "description": "Explicit ray angle in degrees when direction selects a fixed angle."
         },
         {
@@ -31551,7 +31564,7 @@
           "name": "closed",
           "label": "Closed Contour",
           "type": "boolean",
-          "defaultValue": true,
+          "defaultValue": false,
           "description": "Treat the polyline as closed when sampling (repeats the first point implicitly)."
         }
       ],
@@ -33380,6 +33393,7 @@
           "min": 0,
           "max": 360,
           "step": 1,
+          "unit": "deg",
           "description": "Minimum angular span of samples (degrees). Coverage is 360 minus the largest gap; below this returns found=false."
         },
         {
@@ -34094,9 +34108,9 @@
           "name": "contributionsJson",
           "label": "Contributions JSON",
           "type": "textarea",
-          "defaultValue": "[{\"name\":\"pin\",\"nominal\":10,\"plus\":0.02,\"minus\":0.02,\"sign\":1},{\"name\":\"hole\",\"nominal\":10.05,\"plus\":0.03,\"minus\":0,\"sign\":-1}]",
+          "defaultValue": "[]",
           "group": "Chain",
-          "description": "Dimension chain: each entry is {name, nominal, plus, minus, sign}. plus/minus are magnitudes >= 0; sign is +1 to add the feature, -1 to subtract it. Ports a..f override nominal of entries 1..6."
+          "description": "Dimension chain: each entry is {name, nominal, plus, minus, sign}, e.g. [{\"name\":\"pin\",\"nominal\":10,\"plus\":0.02,\"minus\":0.02,\"sign\":1},{\"name\":\"hole\",\"nominal\":10.05,\"plus\":0.03,\"minus\":0,\"sign\":-1}]. plus/minus are magnitudes >= 0; sign is +1 to add the feature, -1 to subtract it. Ports a..f override nominal of entries 1..6."
         },
         {
           "name": "method",
@@ -34135,9 +34149,8 @@
           "min": 0,
           "max": 1000000,
           "step": 0.001,
-          "unit": "px",
           "group": "Limits",
-          "description": "Allowed absolute gap between nominal and targetNominal. 0 disables the gate."
+          "description": "Allowed absolute gap between nominal and targetNominal, in the chain's unit (see Unit Label). 0 disables the gate."
         },
         {
           "name": "unit",
@@ -40515,6 +40528,7 @@
           "min": -180,
           "max": 180,
           "step": 1,
+          "unit": "deg",
           "group": "Parameters",
           "description": "Motion direction angle in degrees.",
           "visibleWhen": {
@@ -50219,6 +50233,7 @@
           "min": 0,
           "max": 360,
           "step": 0.1,
+          "unit": "deg",
           "group": "Limits",
           "description": "Optional magnitude gate on compensation angle; 0 disables.",
           "advanced": true

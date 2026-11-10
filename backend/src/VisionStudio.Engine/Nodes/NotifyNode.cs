@@ -56,7 +56,7 @@ public sealed class NotifyNode(HttpClient? httpClient = null) : IVisionNodeExecu
         var message = (context.TryGetValue("message", out var messageInput)
             ? messageInput.Require<string>("message")
             : node.GetString("message", string.Empty)).Trim();
-        var subject = node.GetString("subject", "VisionStudio 告警").Trim();
+        var subject = node.GetString("subject", "VisionStudio alarm").Trim();
         if (message.Length == 0 && !context.TryGetValue("value", out _))
             throw new InvalidOperationException("output.notify needs a message (connected or configured) or a value input.");
 

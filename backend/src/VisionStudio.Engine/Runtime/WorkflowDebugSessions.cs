@@ -292,7 +292,7 @@ public sealed class WorkflowDebugSessionService(
         data.RunId = runId;
         var startedAt = DateTimeOffset.UtcNow;
         var total = Stopwatch.StartNew();
-        var timeoutMs = Math.Clamp(session.Options.TimeoutMs, 100, 600000);
+        var timeoutMs = WorkflowCoreVisionRunner.ResolveRunTimeoutMs(session.Options.TimeoutMs);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         try

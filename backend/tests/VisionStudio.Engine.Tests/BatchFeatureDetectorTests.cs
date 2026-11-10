@@ -177,6 +177,26 @@ public sealed class BatchFeatureDetectorTests
     }
 
     [Fact]
+    public async Task GaborBank_MaxModeKeepsTheWinningDirectionMap()
+    {
+        using var image = new Mat(120, 160, MatType.CV_8UC1, Scalar.All(0));
+        for (var y = 0; y < image.Rows; y++)
+        for (var x = 0; x < image.Cols; x++)
+            image.Set(y, x, (byte)Math.Clamp(128 + 100 * Math.Sin(2 * Math.PI * y / 8.0), 0, 255));
+
+        var result = await new FeatureGaborBankNode().ExecuteAsync(
+            Ctx(new() { ["image"] = Img(image) }),
+            Def("feature.gaborBank", """{"wavelength":8,"orientations":6,"sigmaRatio":0.56,"gamma":0.5,"energyMode":"max","directionMap":true}"""),
+            CancellationToken.None);
+
+        Assert.True((bool)result.Outputs["found"].Value!);
+        // 灰度沿 y 变化，最强响应方向应为 90 度（0/30/.../150 里的第 4 个）。
+        Assert.InRange((double)result.Outputs["dominantDirectionDeg"].Value!, 89.99, 90.01);
+        var directionMap = result.Outputs["directionMap"].Require<VisionImage>("directionMap");
+        Assert.InRange(directionMap.Mat.At<byte>(60, 80), 120, 135);
+    }
+
+    [Fact]
     public async Task GaborBank_RejectsWavelengthLargerThanHalfImage()
     {
         using var image = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(50));

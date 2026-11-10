@@ -156,6 +156,31 @@ public sealed class DefectNodeTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceCompareLoadsAllPackageReferences()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "vs-refpkg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using (var first = new Mat(32, 32, MatType.CV_8UC1, Scalar.All(100)))
+            using (var second = new Mat(32, 32, MatType.CV_8UC1, Scalar.All(102)))
+            {
+                Cv2.ImWrite(Path.Combine(root, "ref1.png"), first);
+                Cv2.ImWrite(Path.Combine(root, "ref2.png"), second);
+            }
+            File.WriteAllText(Path.Combine(root, "manifest.json"),
+                """{"schemaVersion":"1","kind":"referenceCompare","name":"test","references":["ref1.png","ref2.png"]}""");
+
+            using var source = Image();
+            var result = await Run(new ReferenceCompareNode(), new() { ["image"] = VisionValue.Image(source) },
+                JsonSerializer.Serialize(new { packagePath = root, threshold = 1, minArea = 0 }));
+
+            Assert.Equal(2, result.Outputs["referenceSampleCount"].Require<long>("referenceSampleCount"));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task ReferenceCompareRejectsDifferentPixelDepths()
     {
         using var source = Image(100);

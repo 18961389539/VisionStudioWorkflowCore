@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
 using VisionStudio.Engine.Runtime;
@@ -35,6 +37,21 @@ public sealed class NodeExecutionModeTests
     public void KnownNodesResolveToExpectedMode(string type, VisionExecutionMode expected)
     {
         Assert.Equal(expected, VisionExecutionPolicy.Resolve(BuiltInNodeCatalog.Require(type)));
+    }
+
+    [Fact]
+    public void PipelineClassification_IsAReviewedSnapshot()
+    {
+        // ExecutionMode is filled by the prefix heuristic, so "every node has a mode" can never fail.
+        // This snapshot is the actual gate: adding a node or changing its mode changes the hash and
+        // forces a conscious review. Update the constant only after checking that the new/changed
+        // node is on the intended side (stateful/device/file-writing nodes belong to WorkflowCore).
+        var lines = BuiltInNodeCatalog.Items
+            .OrderBy(item => item.Type, StringComparer.Ordinal)
+            .Select(item => $"{item.Type}={VisionExecutionPolicy.Resolve(item)}");
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
+
+        Assert.Equal("4b67f0ea2fc09c78fe881b3fd464d395241f90ef53a4efcdd9b248dd29852b9c", hash);
     }
 
     [Fact]

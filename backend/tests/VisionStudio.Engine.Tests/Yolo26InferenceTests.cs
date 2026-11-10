@@ -203,6 +203,73 @@ public sealed class Yolo26InferenceTests
     }
 
     [Fact]
+    public void DecodeYoloObbReadsClassScoresAndAngleFromBothTensorOrders()
+    {
+        // channels: cx,cy,w,h + 2 classes + angle = 7; count=2, channels-first.
+        var channelsFirst = new float[7 * 2];
+        void Set(int n, int c, float value) => channelsFirst[c * 2 + n] = value;
+        Set(0, 0, 10); Set(0, 1, 20); Set(0, 2, 4); Set(0, 3, 6); Set(0, 4, 0.1f); Set(0, 5, 0.9f); Set(0, 6, 0.5f);
+        Set(1, 0, 30); Set(1, 1, 40); Set(1, 2, 8); Set(1, 3, 10); Set(1, 4, 0.8f); Set(1, 5, 0.2f); Set(1, 6, -0.25f);
+
+        var first = InferenceStats.DecodeYoloObb(channelsFirst, [1, 7, 2], tensorOrder: "channelsFirst");
+        Assert.Equal(2, first.Length);
+        Assert.Equal(1, first[0].ClassId);
+        Assert.Equal(0.9, first[0].Score, 5);
+        Assert.Equal(0.5, first[0].AngleRad, 5);
+        Assert.Equal(0, first[1].ClassId);
+        Assert.Equal(-0.25, first[1].AngleRad, 5);
+
+        var channelsLast = new float[7 * 2];
+        for (var n = 0; n < 2; n++)
+        for (var c = 0; c < 7; c++)
+            channelsLast[n * 7 + c] = channelsFirst[c * 2 + n];
+        var second = InferenceStats.DecodeYoloObb(channelsLast, [1, 2, 7], tensorOrder: "channelsLast");
+        Assert.Equal(first.Select(c => (c.CenterX, c.CenterY, c.ClassId, c.AngleRad)),
+            second.Select(c => (c.CenterX, c.CenterY, c.ClassId, c.AngleRad)));
+        Assert.Throws<InvalidOperationException>(() => InferenceStats.DecodeYoloObb(new float[49], [1, 7, 7]));
+    }
+
+    [Fact]
+    public void DecodeYoloObbXywhrValidatesClassIds()
+    {
+        float[] row = [10, 20, 4, 6, 0.9f, 2, 0.3f];
+        var candidate = Assert.Single(InferenceStats.DecodeYoloObbXywhr(row, [1, 1, 7]));
+        Assert.Equal(2, candidate.ClassId);
+        Assert.Equal(0.3, candidate.AngleRad, 5);
+
+        row[5] = 1.5f;
+        Assert.Throws<InvalidOperationException>(() => InferenceStats.DecodeYoloObbXywhr(row, [1, 1, 7]));
+    }
+
+    [Fact]
+    public void RotatedBoxIouIsOneForIdenticalAndZeroForDisjointBoxes()
+    {
+        Assert.Equal(1d, InferenceStats.RotatedBoxIoU(50, 50, 20, 10, 0.3, 50, 50, 20, 10, 0.3), 6);
+        Assert.Equal(0d, InferenceStats.RotatedBoxIoU(50, 50, 20, 10, 0.3, 500, 500, 20, 10, 0.3), 6);
+        var partial = InferenceStats.RotatedBoxIoU(50, 50, 20, 10, 0, 55, 50, 20, 10, 0);
+        Assert.InRange(partial, 0.01, 0.99);
+    }
+
+    [Fact]
+    public void NmsCapKeepsTopKAndReportsTruncation()
+    {
+        var kept = new List<int>();
+        var truncated = InferenceNmsCap.Fill(new[] { 5, 4, 3 }, 3, kept, (_, _) => false, CancellationToken.None);
+        Assert.False(truncated);
+        Assert.Equal(new[] { 5, 4, 3 }, kept);
+
+        kept.Clear();
+        truncated = InferenceNmsCap.Fill(new[] { 5, 4, 3, 2, 1 }, 2, kept, (_, _) => false, CancellationToken.None);
+        Assert.True(truncated);
+        Assert.Equal(new[] { 5, 4 }, kept);
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() =>
+            InferenceNmsCap.Fill(new[] { 1 }, 1, new List<int>(), (_, _) => false, cancelled.Token));
+    }
+
+    [Fact]
     public void Coco17SkeletonHasExpectedEdgeCount()
     {
         Assert.Equal(19, InferenceStats.Coco17Skeleton.Length);

@@ -142,7 +142,7 @@ public static class BuiltInNodeCatalog
                     Description: "Horizontal translation per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
                 new("offsetStepY", "Y Shift per Sample", "number", 0, -500, 500, 1, Group: "Placement",
                     Description: "Vertical translation per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
-                new("angleStepDeg", "Angle Step", "number", 5, -180, 180, 1, Group: "Placement",
+                new("angleStepDeg", "Angle Step", "number", 5, -180, 180, 1, Unit: "deg", Group: "Placement",
                     Description: "Rotation added per sample index in sequence mode.", VisibleWhen: new("placementMode", ["sequence"])),
                 new("randomSeed", "Random Seed", "number", 1, 0, 2147483647, 1, Group: "Random",
                     Description: "Fixed seed for repeatable pseudo-random positions.", VisibleWhen: new("placementMode", ["seededRandom"])),
@@ -150,7 +150,7 @@ public static class BuiltInNodeCatalog
                     Description: "Random horizontal shift is selected from this symmetric range.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"])),
                 new("maxOffsetY", "Maximum Y Shift", "number", 100, 0, 400, 1, Group: "Random",
                     Description: "Random vertical shift is selected from this symmetric range.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"])),
-                new("maxAngleDeg", "Maximum Angle", "number", 15, 0, 180, 1, Group: "Random",
+                new("maxAngleDeg", "Maximum Angle", "number", 15, 0, 180, 1, Unit: "deg", Group: "Random",
                     Description: "Random angle is selected from the symmetric range -value..+value.", VisibleWhen: new("placementMode", ["seededRandom", "randomEachRun"]))
             ,
 
@@ -1249,7 +1249,7 @@ public static class BuiltInNodeCatalog
                 new("angleUnit", "Angle Unit", "select", "deg", Options: [new("Degrees", "deg"), new("Radians", "rad")], Group: "Rotation", Description: "Unit of target.RDeg / angleZeroOffsetDeg; rad is converted to degrees before compensation.")
             ,
 
-                new("maxAngleDeg", "Max |Angle| deg (0=off)", "number", 0, 0, 360, 0.1, Group: "Limits", Description: "Optional magnitude gate on compensation angle; 0 disables."),
+                new("maxAngleDeg", "Max |Angle| deg (0=off)", "number", 0, 0, 360, 0.1, Unit: "deg", Group: "Limits", Description: "Optional magnitude gate on compensation angle; 0 disables."),
 
 
 

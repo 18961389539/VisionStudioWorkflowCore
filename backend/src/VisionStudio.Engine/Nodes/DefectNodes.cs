@@ -264,6 +264,9 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         var packagePath = node.GetString("packagePath", string.Empty).Trim();
         VisionImage reference;
         var referenceSamples = new List<VisionImage>();
+        // Package references are loaded and owned here; input-port references stay owned by the caller.
+        // The list must be released on every path, including a size/depth rejection mid-load.
+        var ownedSamples = new List<VisionImage>();
         if (context.TryGetValue("reference", out _))
         {
             reference = context.Require<VisionImage>("reference");
@@ -274,13 +277,22 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
         {
             var paths = VisionStudio.Engine.ExternalTrain.ExternalTrainPackage.ResolveRuntimePaths(packagePath).ReferencePaths;
             if (paths.Count == 0) throw new InvalidOperationException("defect.referenceCompare packagePath has no reference images.");
-            foreach (var path in paths)
+            try
             {
-                using var mat = OpenCvSharp.Cv2.ImRead(path, OpenCvSharp.ImreadModes.Unchanged);
-                if (mat.Empty()) throw new InvalidOperationException($"defect.referenceCompare could not load package reference '{path}'.");
-                var img = VisionImage.Own(mat.Clone());
-                DefectNodeHelpers.SameSize(source, img); DefectNodeHelpers.SameGrayDepth(source, img);
-                referenceSamples.Add(img);
+                foreach (var path in paths)
+                {
+                    using var mat = OpenCvSharp.Cv2.ImRead(path, OpenCvSharp.ImreadModes.Unchanged);
+                    if (mat.Empty()) throw new InvalidOperationException($"defect.referenceCompare could not load package reference '{path}'.");
+                    var img = VisionImage.Own(mat.Clone());
+                    ownedSamples.Add(img);
+                    DefectNodeHelpers.SameSize(source, img); DefectNodeHelpers.SameGrayDepth(source, img);
+                    referenceSamples.Add(img);
+                }
+            }
+            catch
+            {
+                foreach (var sample in ownedSamples) sample.Dispose();
+                throw;
             }
             reference = referenceSamples[0];
         }
@@ -493,7 +505,11 @@ var (source, scoped) = RegionNodeHelpers.Source(context);
                 }
             });
         }
-        finally { preparedReference?.Dispose(); }
+        finally
+        {
+            preparedReference?.Dispose();
+            foreach (var sample in ownedSamples) sample.Dispose();
+        }
     }
 
     /// <summary>

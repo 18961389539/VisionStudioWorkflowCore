@@ -119,8 +119,8 @@ internal static class JlVisionOperatorCatalog
                 new("column4", "Column 4", "number", 10, -1e9, 1e9, 0.5, Group: "Geometry", Description: "Line B end column."),
                 new("radius1", "Radius 1", "number", 10, 0, 1e9, 0.5, Group: "Geometry", Description: "First ellipse radius."),
                 new("radius2", "Radius 2", "number", 10, 0, 1e9, 0.5, Group: "Geometry", Description: "Second ellipse radius."),
-                new("phi", "Phi", "number", 0, -6.2832, 6.2832, 0.01, Group: "Geometry", Description: "Ellipse orientation in radians."),
-                new("angle", "Angle", "number", 1.5708, -6.2832, 6.2832, 0.01, Group: "Geometry", Description: "Ellipse parameter angle in radians."),
+                new("phi", "Phi", "number", 0, -6.2832, 6.2832, 0.01, Unit: "rad", Group: "Geometry", Description: "Ellipse orientation in radians."),
+                new("angle", "Angle", "number", 1.5708, -6.2832, 6.2832, 0.01, Unit: "rad", Group: "Geometry", Description: "Ellipse parameter angle in radians."),
                 new("size", "Size", "number", 1, 0, 1000, 0.1, Group: "Geometry", Description: "Scalar argument: sigma for the Gaussian kernel, alpha for filter info."),
                 new("mode", "Mode", "text", "", Group: "Geometry", Description: "Filter name for infoEdges/infoSmooth.")
             ],

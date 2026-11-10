@@ -4,7 +4,7 @@
 
 ## 结论先说
 
-此前**只有整轮预算**一个超时口径：`VisionRunOptions.TimeoutMs`（默认 10 s，钳在 100–600 000 ms）。
+此前**只有整轮预算**一个超时口径：`VisionRunOptions.TimeoutMs`（默认 10 s，钳在 100 ms–24 h；与节点上限共用 `NodeTimeoutPolicy.AbsoluteMaxTimeoutMs`）。
 一个慢节点会吃掉全部预算，超时只报 `Workflow Core execution timed out after N ms`，
 **既定位不到节点，也无法给相机采集（500 ms）、HTTP（2 s）、机器人运动（30 s）分别设限**。
 
@@ -44,8 +44,11 @@
 - 取值范围 **[1 000, 86 400 000] ms**，越界时**启动即失败**并在异常里写明合法区间。
   不做静默回落：现场会以为"已经调大了"，实际节点照样被 600 s 砍掉；而放任调到天文数字
   又等于关掉看门狗（卡住的节点永不报错，节拍慢慢烂掉）。两种误解都比一条启动错误昂贵。
-- 上限本身封顶 24 h。抬高上限**不会**延后整轮看门狗——`VisionRunOptions.TimeoutMs` 仍然先到期，
-  所以给单节点配 30 min 预算时，整轮预算必须一起抬。
+- 上限本身封顶 24 h。抬高上限**不会**自动延后整轮看门狗——`VisionRunOptions.TimeoutMs` 仍然先到期，
+  所以给单节点配 30 min 预算时，整轮预算必须一起抬；整轮预算现在同样允许到 24 h，
+  否则 600 s 以上的节点预算永远报不出 `node_timeout`。
+- 插件 worker 的执行 IPC 超时跟随节点的 `__timeoutMs`；节点未配置时才使用
+  `PluginWorker:ExecutionTimeoutMs`（默认 30 s）作为兜底。
 - 运行期不要改：它是启动期一次性配置，不是调参入口。
 
 ## 该填多少：`/api/diagnostics/node-durations`

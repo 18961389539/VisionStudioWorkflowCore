@@ -156,7 +156,13 @@ internal static class ProfileMath
         var a11 = suu; var a12 = suv; var a22 = svv;
         var b1 = 0.5 * (suuu + suvv); var b2 = 0.5 * (svvv + svuu);
         var det = a11 * a22 - a12 * a12;
-        if (Math.Abs(det) < 1e-12) return false;
+        var spread = suu + svv;
+        // det has px^4 units, so an absolute epsilon lets nearly straight short arcs through and
+        // produces a finite but meaningless radius. Use the same scale-free conditioning test as
+        // SubpixelNodes' robust circle fit.
+        const double minimumNormalizedSpread = 2e-3;
+        if (!double.IsFinite(spread) || !double.IsFinite(det) || spread < 1e-8
+            || det <= spread * spread * minimumNormalizedSpread) return false;
         var uc = (b1 * a22 - b2 * a12) / det;
         var vc = (a11 * b2 - a12 * b1) / det;
         var radius = Math.Sqrt(uc * uc + vc * vc + (suu + svv) / points.Count);

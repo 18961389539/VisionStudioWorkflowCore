@@ -110,7 +110,7 @@ internal static class OnnxInferenceHelpers
         if (net.Session.InputMetadata.Count != 1) throw new InvalidOperationException("Image inference requires a model with exactly one input tensor.");
     }
 
-    private static void NormalizeInto(float[] values, int offset, Mat source, int width, int height, NodeDefinition node)
+    internal static void NormalizeInto(float[] values, int offset, Mat source, int width, int height, NodeDefinition node)
     {
         if (source.Empty()) throw new InvalidOperationException("ONNX inference requires a non-empty image.");
         if (source.Depth() != MatType.CV_8U) throw new InvalidOperationException("ONNX preprocessing requires byte pixels.");
@@ -149,17 +149,29 @@ internal static class OnnxInferenceHelpers
         else JLVisionOperators.Resize(bgr, resized, new Size(width, height));
         var pixels = checked(width * height);
         var swap = node.GetBool("swapRB", false);
-        for (var y = 0; y < height; y++) for (var x = 0; x < width; x++)
+        // Split once and normalize each plane natively; per-pixel At<Vec3b> costs one managed/native
+        // transition per pixel (~1.2M at 640x640) for the same arithmetic.
+        Cv2.Split(resized, out var planes);
+        try
         {
-            var color = resized.At<Vec3b>(y, x);
-            var index = y * width + x;
             for (var channel = 0; channel < 3; channel++)
             {
-                var sourceChannel = swap ? 2 - channel : channel;
-                var normalized = (color[sourceChannel] - means[sourceChannel]) * scale;
-                if (!float.IsFinite((float)normalized)) throw new InvalidOperationException("ONNX normalized input contains a non-finite value.");
-                values[offset + channel * pixels + index] = (float)normalized;
+                var plane = planes[swap ? 2 - channel : channel];
+                using var normalized = new Mat();
+                plane.ConvertTo(normalized, MatType.CV_32FC1, scale, -means[channel] * scale);
+                normalized.GetArray(out float[] channelValues);
+                var destination = offset + channel * pixels;
+                for (var index = 0; index < pixels; index++)
+                {
+                    var value = channelValues[index];
+                    if (!float.IsFinite(value)) throw new InvalidOperationException("ONNX normalized input contains a non-finite value.");
+                    values[destination + index] = value;
+                }
             }
+        }
+        finally
+        {
+            foreach (var plane in planes) plane.Dispose();
         }
     }
 

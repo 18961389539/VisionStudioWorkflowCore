@@ -437,6 +437,7 @@ var source = context.RequireImage("image").Mat;
             workSource = cropped; offsetX = x; offsetY = y;
         }
 
+        var warnings = new List<string>();
         var engineLease = OcrEnginePool.Rent(resolvedDataPath, language, oem);
         try
         {
@@ -457,11 +458,21 @@ var source = context.RequireImage("image").Mat;
                 // for engines that expose no symbols. Empty is reported, never invented.
                 OcrTextParsing.OcrChar[] chars = [];
                 try { chars = ReadLayoutChars(page, scale, offsetX, offsetY); }
-                catch (Exception) { chars = []; }
+                catch (Exception ex)
+                {
+                    // An engine without symbol layout and a crashing layout walker both used to
+                    // collapse to chars=[]; keep the difference visible in diagnostics.
+                    warnings.Add($"layout-characters: {ex.GetType().Name}: {ex.Message}");
+                    chars = [];
+                }
                 if (chars.Length == 0)
                 {
                     try { chars = OcrTextParsing.ParseBoxChars(page.BoxText, scale, offsetX, offsetY, (int)Math.Round(workSource.Height * scale)); }
-                    catch (Exception) { chars = []; }
+                    catch (Exception ex)
+                    {
+                        warnings.Add($"box-characters: {ex.GetType().Name}: {ex.Message}");
+                        chars = [];
+                    }
                 }
                 var words = minConfidence > 0 ? allWords.Where(w => w.Confidence >= minConfidence).ToArray() : allWords;
                 var text = minConfidence > 0 ? string.Join(" ", words.Select(w => w.Text)) : page.Text.Trim();
@@ -472,7 +483,8 @@ var source = context.RequireImage("image").Mat;
                 var ocrDiag = CoordinateValidation.Diagnostics(Type,
                     ("language", language), ("psm", psmName), ("oem", oemName), ("confidence", confidence),
                     ("wordCount", words.Length), ("charCount", chars.Length), ("textLength", text.Length),
-                    ("engineReused", engineLease.Reused));
+                    ("engineReused", engineLease.Reused), ("warningCount", warnings.Count),
+                    ("warnings", JsonSerializer.Serialize(warnings)));
                 return ValueTask.FromResult(new NodeExecutorResult(
                     new Dictionary<string, VisionValue>
                     {
@@ -484,7 +496,7 @@ var source = context.RequireImage("image").Mat;
                         ["result"] = VisionValue.String(JsonSerializer.Serialize(new { text, confidence, language, psm = psmName, oem = oemName, wordCount = words.Length, words })),
                         ["diagnostics"] = VisionValue.String(ocrDiag)
                     },
-                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length, ["lowConfidenceWordCount"] = allWords.Length - words.Length, ["blacklist"] = blacklist.Length > 0, ["engineReused"] = engineLease.Reused, ["diagnostics"] = ocrDiag, ["recognitionBackend"] = "tesseract", ["algorithmBackend"] = "tesseract" }));
+                    new Dictionary<string, object?> { ["language"] = language, ["psm"] = psmName, ["oem"] = oemName, ["confidence"] = confidence, ["characters"] = text.Length, ["wordCount"] = words.Length, ["charCount"] = chars.Length, ["lowConfidenceWordCount"] = allWords.Length - words.Length, ["blacklist"] = blacklist.Length > 0, ["engineReused"] = engineLease.Reused, ["warnings"] = warnings, ["diagnostics"] = ocrDiag, ["recognitionBackend"] = "tesseract", ["algorithmBackend"] = "tesseract" }));
             }
             catch (Exception ex) when (ex is not (InvalidOperationException or OperationCanceledException))
             {

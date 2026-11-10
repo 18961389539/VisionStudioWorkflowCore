@@ -57,7 +57,7 @@ public static class MeasurementAlignCatalog
                     Group: "Fit", Description: "Stop when both the incremental rotation and the incremental translation fall below this value. Smaller than the measurement resolution is pointless."),
                 new("maxPoints", "Point Budget", "number", 600, 60, 1500, 20,
                     Group: "Data", Description: "Both contours are thinned to at most this many points before matching. Cost grows with the square of this number: 600 keeps a 40-iteration fit in the tens of milliseconds."),
-                new("initialRotationDeg", "Initial Rotation (deg)", "number", 0, -180, 180, 0.5,
+                new("initialRotationDeg", "Initial Rotation (deg)", "number", 0, -180, 180, 0.5, Unit: "deg",
                     Group: "Initial Alignment", Description: "Starting rotation applied before the first iteration. Needed when the part may be flipped or rotated far from the nominal, because ICP only converges to the nearest local minimum. Ignored when autoInitialRotation is on."),
                 new("autoInitialRotation", "Auto Initial Rotation", "boolean", true,
                     Group: "Initial Alignment", Description: "Coarse-search a full turn in 30 deg steps before refining, and start the ICP from the best candidate. Costs one extra pass over a thinned point set and removes the most common failure: a valid part that aligns to the wrong pose because the caller did not know the angle."),

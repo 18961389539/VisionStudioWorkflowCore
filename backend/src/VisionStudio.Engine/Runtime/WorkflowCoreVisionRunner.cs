@@ -12,6 +12,13 @@ public sealed class WorkflowCoreVisionRunner(
     IModelAssetSource? modelAssets = null) : IVisionWorkflowRunner
 {
 
+    /// <summary>
+    /// The run watchdog and the node ceiling share one absolute maximum. A node budget above the
+    /// old 10-minute clamp could never produce <c>node_timeout</c>: the run watchdog always fired first.
+    /// </summary>
+    internal static int ResolveRunTimeoutMs(int? requestedMs) =>
+        Math.Clamp(requestedMs ?? 10000, 100, NodeTimeoutPolicy.AbsoluteMaxTimeoutMs);
+
     public async Task<WorkflowRunResult> RunAsync(
         WorkflowDefinition workflow,
         VisionRunOptions? options = null,
@@ -31,7 +38,7 @@ public sealed class WorkflowCoreVisionRunner(
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var timeoutMs = Math.Clamp(options?.TimeoutMs ?? 10000, 100, 600000);
+            var timeoutMs = ResolveRunTimeoutMs(options?.TimeoutMs);
             timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
             ValidateDebugOptions(workflow, options);
             using var planLease = await plans.AcquireAsync(workflow, timeout.Token);
@@ -138,7 +145,7 @@ public sealed class WorkflowCoreVisionRunner(
                 data.SnapshotReports(),
                 data.SnapshotOverlays(),
                 null,
-                $"Workflow Core execution timed out after {Math.Clamp(options?.TimeoutMs ?? 10000, 100, 600000)} ms.",
+                $"Workflow Core execution timed out after {ResolveRunTimeoutMs(options?.TimeoutMs)} ms.",
                 "Error",
                 ControlFlowDecisions: data.SnapshotControlFlowDecisions())
             {

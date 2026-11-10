@@ -23,6 +23,10 @@ public static class MeasurementGapCatalog
         Description: "Which contour in the connected Contour list to measure (0-based). Out of range returns found=false.");
     private static readonly ParameterDescriptor Closed = new("closed", "Closed Contour", "boolean", true,
         Description: "Treat the polyline as closed when sampling (repeats the first point implicitly).");
+    // A profile filter expects a nominally straight, open edge (see the node description); unlike the
+    // contour-wide measurement nodes above, its executor fallback has always been false.
+    private static readonly ParameterDescriptor OpenProfile = new("closed", "Closed Contour", "boolean", false,
+        Description: "Treat the polyline as closed when sampling (repeats the first point implicitly).");
 
     public static IReadOnlyList<NodeCatalogItem> Items { get; } =
     [
@@ -132,7 +136,7 @@ public static class MeasurementGapCatalog
                     new("Reflect ends", "reflect"),
                     new("Discard ends", "discard")
                 ], Description: "Gaussian filtering shortens the usable profile by half a cutoff at each end. Reflect keeps the full length; discard drops the ends honestly instead of inventing data."),
-                Closed,
+                OpenProfile,
             ],
             "Splits a sampled profile into waviness and residual with an ISO 16610-21 Gaussian filter, emitting both as PointLists so downstream roughness or tolerance.profile can consume them. Wire: contours -> waviness/residual. The mean line is the least-squares axis, so the input must be a nominally straight edge; curved surfaces need a nominal first. Units: pixels.", "builtin",
             new VisionToolCapabilities(EmitsOverlay: true), Actions: []),
@@ -244,9 +248,9 @@ public static class MeasurementGapCatalog
              new("contributionsJson", VisionDataType.String), new("withinTolerance", VisionDataType.Boolean), Diagnostics, Next],
             [
                 new("contributionsJson", "Contributions JSON", "textarea",
-                    """[{"name":"pin","nominal":10,"plus":0.02,"minus":0.02,"sign":1},{"name":"hole","nominal":10.05,"plus":0.03,"minus":0,"sign":-1}]""",
+                    "[]",
                     Group: "Chain",
-                    Description: "Dimension chain: each entry is {name, nominal, plus, minus, sign}. plus/minus are magnitudes >= 0; sign is +1 to add the feature, -1 to subtract it. Ports a..f override nominal of entries 1..6."),
+                    Description: "Dimension chain: each entry is {name, nominal, plus, minus, sign}, e.g. [{\"name\":\"pin\",\"nominal\":10,\"plus\":0.02,\"minus\":0.02,\"sign\":1},{\"name\":\"hole\",\"nominal\":10.05,\"plus\":0.03,\"minus\":0,\"sign\":-1}]. plus/minus are magnitudes >= 0; sign is +1 to add the feature, -1 to subtract it. Ports a..f override nominal of entries 1..6."),
                 new("method", "Method", "select", "worstCase", Group: "Chain", Options:
                 [
                     new("Worst case (arithmetic)", "worstCase"),
@@ -254,8 +258,8 @@ public static class MeasurementGapCatalog
                 ], Description: "Worst case adds every tolerance (100% interchangeability). RSS assumes independent +-3 sigma contributors and gives the statistical limit, which is what a process capability claim needs."),
                 new("targetNominal", "Target Nominal (0=off)", "number", 0, -1000000, 1000000, .001, Group: "Limits",
                     Description: "Drawing nominal the chain should close at. The gate compares nominal against it; left at 0 with tolerance 0 the gate stays open."),
-                new("tolerance", "Tolerance", "number", 0, 0, 1000000, .001, Unit: "px", Group: "Limits",
-                    Description: "Allowed absolute gap between nominal and targetNominal. 0 disables the gate."),
+                new("tolerance", "Tolerance", "number", 0, 0, 1000000, .001, Group: "Limits",
+                    Description: "Allowed absolute gap between nominal and targetNominal, in the chain's unit (see Unit Label). 0 disables the gate."),
                 new("unit", "Unit Label", "text", "mm", Group: "Reporting",
                     Description: "Label only, no conversion (1..16 chars). Set it to whatever unit the contributions are in."),
             ],

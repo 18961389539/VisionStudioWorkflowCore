@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using Microsoft.Extensions.Options;
 using VisionStudio.Abstractions;
 using VisionStudio.Engine;
+using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api;
 
@@ -62,6 +63,15 @@ public sealed record PluginWorkerBenchmarkExecution<T>(
     T Result,
     PluginWorkerPerformanceProfile Performance,
     PluginWorkerStatus Status);
+
+/// <summary>
+/// Resolves the IPC deadline for one plugin execution. A node-level <c>__timeoutMs</c> is the
+/// caller's explicit budget; the worker option remains the fallback when the node does not set one.
+/// </summary>
+internal static class PluginWorkerTimeoutPolicy
+{
+    internal static int Resolve(int nodeTimeoutMs, int configuredMs) => nodeTimeoutMs > 0 ? nodeTimeoutMs : configuredMs;
+}
 
 public sealed class PluginWorkerSupervisor : IDisposable
 {
@@ -185,7 +195,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
                 // reuse a node id never share a worker-cached instance either.
                 WorkflowScope = context.WorkflowScope,
                 RunId = context.RunId
-            }, startup: false, cancellationToken);
+            }, startup: false, cancellationToken, NodeTimeoutPolicy.Resolve(node));
 
             var response = exchange.Response;
             var result = response.Result ?? throw new InvalidOperationException($"Plugin worker '{pluginId}' returned no execution result.");
@@ -406,7 +416,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
             if (count > 0) Interlocked.Add(ref _sharedMemoryTransfers, count);
         }
 
-        public async Task<WorkerPoolExchange> SendAsync(PluginWorkerRequest request, bool startup, CancellationToken cancellationToken)
+        public async Task<WorkerPoolExchange> SendAsync(PluginWorkerRequest request, bool startup, CancellationToken cancellationToken, int? nodeTimeoutMs = null)
         {
             var queueTimer = Stopwatch.StartNew();
             await _availableCount.WaitAsync(cancellationToken);
@@ -432,7 +442,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
                 var requestNumber = Interlocked.Increment(ref _requestCount);
                 if (SharedMemory is not null && requestNumber % 128 == 0)
                     SharedMemory.CleanupStaleFiles(_sharedMemoryStaleAge);
-                var exchange = await client.SendAsync(request, startup, cancellationToken);
+                var exchange = await client.SendAsync(request, startup, cancellationToken, nodeTimeoutMs);
                 return new WorkerPoolExchange(exchange.Response, queueTimer.Elapsed.TotalMilliseconds, exchange.IpcRoundTripMs, exchange.WorkerIndex);
             }
             finally
@@ -509,7 +519,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
             _circuitOpen,
             Volatile.Read(ref _busy) != 0);
 
-        public async Task<WorkerClientExchange> SendAsync(PluginWorkerRequest request, bool startup, CancellationToken cancellationToken)
+        public async Task<WorkerClientExchange> SendAsync(PluginWorkerRequest request, bool startup, CancellationToken cancellationToken, int? nodeTimeoutMs = null)
         {
             await _gate.WaitAsync(cancellationToken);
             Interlocked.Exchange(ref _busy, 1);
@@ -518,7 +528,10 @@ public sealed class PluginWorkerSupervisor : IDisposable
                 if (_circuitOpen) throw new InvalidOperationException($"Plugin worker '{_pluginId}'[{_workerIndex}] restart circuit is open. Use the worker restart endpoint after correcting the plugin.");
                 await EnsureStartedAsync(cancellationToken);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromMilliseconds(startup ? _options.StartupTimeoutMs : _options.ExecutionTimeoutMs));
+                var effectiveTimeoutMs = startup
+                    ? _options.StartupTimeoutMs
+                    : PluginWorkerTimeoutPolicy.Resolve(nodeTimeoutMs ?? 0, _options.ExecutionTimeoutMs);
+                timeout.CancelAfter(TimeSpan.FromMilliseconds(effectiveTimeoutMs));
                 try
                 {
                     var ipcTimer = Stopwatch.StartNew();
@@ -546,7 +559,7 @@ public sealed class PluginWorkerSupervisor : IDisposable
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    var message = $"Plugin worker '{_pluginId}'[{_workerIndex}] timed out after {(startup ? _options.StartupTimeoutMs : _options.ExecutionTimeoutMs)} ms.";
+                    var message = $"Plugin worker '{_pluginId}'[{_workerIndex}] timed out after {effectiveTimeoutMs} ms.";
                     KillWorker(message);
                     throw new TimeoutException(message);
                 }
