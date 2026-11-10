@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OpenCvSharp;
 using VisionStudio.Api.Infrastructure;
 
 namespace VisionStudio.Api;
@@ -65,9 +66,10 @@ public sealed class TemplateAssetStore(AssetStore assets)
 
     public async Task<TemplateAssetDescriptor> CreateAsync(CreateTemplateAssetRequest request, CancellationToken ct)
     {
+        var (width, height) = ResolveDimensions(request.ImageBase64, request.Width, request.Height);
         var created = await assets.CreateAsync(new CreateAssetRequest(
             request.Id, Kind, request.Name, request.Description,
-            Metadata(request.Width, request.Height, request.ContentType),
+            Metadata(width, height, request.ContentType),
             request.ImageBase64, request.Note, request.CreatedBy, MaxImageBytes), ct);
         return ToDescriptor(created);
     }
@@ -75,8 +77,9 @@ public sealed class TemplateAssetStore(AssetStore assets)
     public async Task<TemplateAssetVersionInfo> AppendVersionAsync(string id, AppendTemplateAssetVersionRequest request, CancellationToken ct)
     {
         await RequireTemplateAsync(id, ct);
+        var (width, height) = ResolveDimensions(request.ImageBase64, request.Width, request.Height);
         var info = await assets.AppendVersionAsync(id, new AppendAssetVersionRequest(
-            Metadata(request.Width, request.Height, request.ContentType),
+            Metadata(width, height, request.ContentType),
             request.ImageBase64, request.Note, request.CreatedBy, MaxImageBytes), ct);
         return ToVersion(info);
     }
@@ -103,6 +106,26 @@ public sealed class TemplateAssetStore(AssetStore assets)
             ?? throw new ApiNotFoundException($"Template asset '{id}' does not exist.");
         if (!IsTemplate(descriptor))
             throw new ApiValidationException($"Asset '{id}' has kind '{descriptor.Kind}', not '{Kind}'.");
+    }
+
+    /// <summary>
+    /// 尺寸以解码结果为准：既验证"这是一张能解码的图"，也避免前端声明的宽高与实际不符。
+    /// 声明值与实际不一致时拒绝，而不是静默改用实际值——静默纠正会掩盖调用方的 bug。
+    /// </summary>
+    private static (int Width, int Height) ResolveDimensions(string? imageBase64, int declaredWidth, int declaredHeight)
+    {
+        if (string.IsNullOrWhiteSpace(imageBase64))
+            throw new ApiValidationException("Template image payload is required.");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(imageBase64.Trim()); }
+        catch (FormatException ex) { throw new ApiValidationException("Template image payload must be valid base64.", ex); }
+        using var image = Cv2.ImDecode(bytes, ImreadModes.Grayscale);
+        if (image.Empty())
+            throw new ApiValidationException("Template image could not be decoded; expected PNG, JPEG, BMP or TIFF.");
+        if (declaredWidth > 0 && declaredWidth != image.Width || declaredHeight > 0 && declaredHeight != image.Height)
+            throw new ApiValidationException(
+                $"Declared template size {declaredWidth}×{declaredHeight} does not match the decoded image {image.Width}×{image.Height}.");
+        return (image.Width, image.Height);
     }
 
     private static bool IsTemplate(AssetDescriptor descriptor)

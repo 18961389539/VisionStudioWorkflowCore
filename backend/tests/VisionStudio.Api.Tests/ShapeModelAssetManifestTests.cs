@@ -121,9 +121,10 @@ public sealed class ShapeModelAssetManifestTests
     {
         var (env, service, _, templates) = await CreateAsync();
         using var _ = env;
-        var image = Enumerable.Range(0, 48).Select(i => (byte)i).ToArray();
+        using var mat = new OpenCvSharp.Mat(48, 64, OpenCvSharp.MatType.CV_8UC1, OpenCvSharp.Scalar.All(0));
+        OpenCvSharp.Cv2.ImEncode(".png", mat, out var image);
         var created = await templates.CreateAsync(new CreateTemplateAssetRequest(
-            "tpl-pin", "T", null, Convert.ToBase64String(image), 640, 480), CancellationToken.None);
+            "tpl-pin", "T", null, Convert.ToBase64String(image), 0, 0), CancellationToken.None);
 
         var workflow = new WorkflowDefinition("manifest-tpl", "Template",
             [new NodeDefinition("tpl-1", "match.template", null, null, new Dictionary<string, JsonElement>

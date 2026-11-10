@@ -4,6 +4,7 @@ import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { modelAssets } from '../endpoints';
 import DataErrorAlert from './DataErrorAlert';
+import TemplateAssetTable from './TemplateAssetTable';
 
 type VersionInfo = {
   version: number; sha256: string; sizeBytes: number; trainingConfig: string;
@@ -39,6 +40,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
   const [renaming, setRenaming] = useState<{ asset: AssetDescriptor; name: string; description: string } | null>(null);
   const [references, setReferences] = useState<{ asset: AssetDescriptor; items: AssetReference[] } | null>(null);
   const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [messageApi, holder] = message.useMessage();
 
@@ -159,6 +161,7 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
             <Button size="small" onClick={() => void load()} loading={busy}>刷新</Button>
             <Button size="small" onClick={() => void previewGc()} loading={busy}>清理未引用版本</Button>
             <Button size="small" loading={busy} onClick={() => importInputRef.current?.click()}>导入 .vsasset</Button>
+            <Button size="small" onClick={() => setTemplateOpen(true)}>模板图资产</Button>
             <input ref={importInputRef} type="file" accept=".vsasset,application/json" style={{ display: 'none' }}
               onChange={(event) => { const file = event.target.files?.[0]; if (file) void importPackage(file); }} />
             <Typography.Text type="secondary">
@@ -241,6 +244,10 @@ export default function ModelAssetPanel({ open, onClose }: Props) {
                 { title: '节点', dataIndex: 'nodeId' }
               ]} />}
       </Modal>
+      <Modal open={templateOpen} onCancel={() => setTemplateOpen(false)} footer={null} width={900} title="模板图资产">
+        <TemplateAssetTable />
+      </Modal>
+
       <Modal open={Boolean(gcPlan)} onCancel={() => setGcPlan(null)} title="回收未引用版本"
         okText={`回收 ${gcPlan?.candidates?.length ?? 0} 个版本`} cancelText="取消"
         okButtonProps={{ danger: true, disabled: !(gcPlan?.candidates?.length) }}
