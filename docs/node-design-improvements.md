@@ -417,6 +417,26 @@ P0 的最后一块：一个可控的回滚开关，加上"内联 → 资产"迁�
   失败语义（M2/M4 共 7 项）、回滚（本轮的全局开关）。
 
 
+## 第六十八轮：P1 模型资产进入运行时依赖清单（2026-11-10）
+
+P1 的第一块不是新造一套 pin 格式，而是复用已有的 `RuntimeDependencyManifest`——它已经能锁定
+引擎、插件、相机、设备、机器人、标定，模型资产只是同一张清单里的一类依赖。
+
+| 变更 | 说明 |
+| --- | --- |
+| 清单项 | 新增 `ModelAssetRuntimeDependency(AssetId, Version, Sha256)`，`RuntimeDependencyManifest` 末尾追加 `ModelAssets`（老清单反序列化为 null） |
+| 发布时锁定 | 扫描 `match.shape` 的 `modelAssetId`；`modelAssetVersion=0`（latest）**在发布时就地落成具体版本号**，之后追加新版本不会改变已发布配方的锁定；资产/版本不存在直接拒绝发布 |
+| schema | 仅当出现模型资产锁定时用 **schema 8**；不含资产的流程继续走 3/4/5/7，历史 `ManifestHash` 逐字节不变 |
+| 运行前校验 | 复用 `ValidateAsync` / `ValidateOrThrowAsync`（生产运行路径已在用）：按 `id:vN` 比对 sha，漂移即拒绝启动，kind=`ModelAsset` |
+
+### 验证
+
+- 新增 `ShapeModelAssetManifestTests` 4 项：latest 落成具体版本且哈希稳定、无资产流程仍走旧 schema、
+  发布后改成 v2 会报 `ModelAsset` 漂移、引用不存在的资产拒绝发布。
+- Engine **2147 项通过**；Api **474 项通过**；`static-audit.py` exit 0。
+- 未做（P1 剩余）：资产列表管理页、未引用版本 GC、`.vsasset` 导入导出（P2）。
+
+
 ## 历史轮次索引（第一 ~ 五十一轮）
 
 完整记录（含每轮的验证数字与当轮的兼容说明）见

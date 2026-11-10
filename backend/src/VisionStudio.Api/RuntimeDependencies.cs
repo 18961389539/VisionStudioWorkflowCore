@@ -75,6 +75,15 @@ public sealed record WorkflowModuleRuntimeDependency(
     int Version,
     string ModuleHash);
 
+/// <summary>
+/// 形状模型资产锁定项（P1）：发布时固定 (assetId, version, sha256)，生产运行前逐项校验。
+/// 版本永远落成具体数字——模型资产的"最新版"不会在发布后悄悄漂移。
+/// </summary>
+public sealed record ModelAssetRuntimeDependency(
+    string AssetId,
+    int Version,
+    string Sha256);
+
 public sealed record RuntimeDependencyManifest(
     int SchemaVersion,
     string ManifestHash,
@@ -85,7 +94,8 @@ public sealed record RuntimeDependencyManifest(
     IReadOnlyList<DeviceRuntimeDependency> Devices,
     IReadOnlyList<RobotRuntimeDependency> Robots,
     IReadOnlyList<CalibrationRuntimeDependency> Calibrations,
-    IReadOnlyList<WorkflowModuleRuntimeDependency>? Modules = null);
+    IReadOnlyList<WorkflowModuleRuntimeDependency>? Modules = null,
+    IReadOnlyList<ModelAssetRuntimeDependency>? ModelAssets = null);
 
 public sealed record RuntimeDependencyDrift(
     string Kind,
@@ -133,7 +143,8 @@ public sealed class RuntimeDependencyManifestService(
     WorkflowModuleExpander? moduleExpander = null,
     CameraSynchronizationGroupStore? synchronizationGroups = null,
     DeviceLeaseRegistry? commandGate = null,
-    CameraIntrinsicAssetStore? cameraIntrinsicAssets = null)
+    CameraIntrinsicAssetStore? cameraIntrinsicAssets = null,
+    ShapeModelAssetStore? modelAssets = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -317,6 +328,7 @@ public sealed class RuntimeDependencyManifestService(
         var deviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var robotIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var calibrationRefs = new HashSet<(string AssetId, int Version)>(new CalibrationRefComparer());
+        var modelAssetRefs = new HashSet<(string AssetId, int Version)>(new ModelAssetRefComparer());
 
         foreach (var node in workflow.Nodes)
         {
@@ -334,6 +346,13 @@ public sealed class RuntimeDependencyManifestService(
             var assetVersion = ResolveInt(node, registration.Catalog, "assetVersion");
             if (!string.IsNullOrWhiteSpace(assetId) && assetVersion > 0)
                 calibrationRefs.Add((assetId, assetVersion));
+
+            if (string.Equals(node.Type, "match.shape", StringComparison.OrdinalIgnoreCase))
+            {
+                var modelAssetId = ResolveString(node, registration.Catalog, "modelAssetId");
+                if (!string.IsNullOrWhiteSpace(modelAssetId))
+                    modelAssetRefs.Add((modelAssetId!, ResolveInt(node, registration.Catalog, "modelAssetVersion")));
+            }
 
             if (string.Equals(node.Type, "image.undistort", StringComparison.OrdinalIgnoreCase))
             {
@@ -361,13 +380,16 @@ public sealed class RuntimeDependencyManifestService(
         var deviceDependencies = await CaptureDevicesAsync(deviceIds, ct);
         var robotDependencies = await CaptureRobotsAsync(robotIds, ct);
         var calibrationDependencies = await CaptureCalibrationsAsync(calibrationRefs, ct);
+        var modelAssetDependencies = await CaptureModelAssetsAsync(modelAssetRefs, ct);
 
         // ManifestHash deliberately excludes capture/display timestamps such as Device ProfileRevision.
         // SDK 2.0 plugin workflows advance to schema v5 so package-manifest + referenced tool versions become
         // production provenance. Legacy/module-free workflows preserve their exact historical canonical shapes.
         var hasWorkerPlugin = pluginDependencies.Any(x => string.Equals(x.IsolationMode, nameof(VisionPluginIsolationMode.WorkerProcess), StringComparison.OrdinalIgnoreCase));
         var hasSdk2Plugin = pluginDependencies.Any(x => (x.SdkApiVersion ?? 1) >= 2);
-        var manifestSchemaVersion = hasWorkerPlugin ? 7 : hasSdk2Plugin ? 5 : moduleDependencies.Length > 0 ? 4 : 3;
+        // schema 8 只在出现模型资产锁定时使用：不含资产的流程继续走 3/4/5/7，历史 ManifestHash 不变。
+        var manifestSchemaVersion = modelAssetDependencies.Length > 0 ? 8
+            : hasWorkerPlugin ? 7 : hasSdk2Plugin ? 5 : moduleDependencies.Length > 0 ? 4 : 3;
         object canonical;
         if (manifestSchemaVersion == 3)
         {
@@ -416,6 +438,32 @@ public sealed class RuntimeDependencyManifestService(
                 modules = moduleDependencies.Select(x => new { x.ModuleId, x.Version, x.ModuleHash }).ToArray()
             };
         }
+        else if (manifestSchemaVersion == 8)
+        {
+            canonical = new
+            {
+                schemaVersion = 8,
+                engine = new { engine.Name, engine.Version, engine.InformationalVersion, engine.BinaryHash },
+                plugins = pluginDependencies.Select(x => new
+                {
+                    x.Id, x.Version, x.AssemblyHash,
+                    sdkApiVersion = x.SdkApiVersion ?? 1,
+                    packageManifestHash = x.PackageManifestHash,
+                    isolationMode = x.IsolationMode,
+                    workerProtocolVersion = x.WorkerProtocolVersion,
+                    workerPoolSize = x.WorkerPoolSize,
+                    workerImageTransport = x.WorkerImageTransport,
+                    workerSharedMemoryThresholdBytes = x.WorkerSharedMemoryThresholdBytes,
+                    tools = (x.Tools ?? []).OrderBy(t => t.Type, StringComparer.OrdinalIgnoreCase).Select(t => new { t.Type, t.Version }).ToArray()
+                }).ToArray(),
+                cameras = cameraDependencies.Select(x => new { x.Id, x.ConfigurationHash, hardwareFingerprint = x.Hardware?.Fingerprint, synchronizationGroupHashes = x.SynchronizationGroupHashes ?? [] }).ToArray(),
+                devices = deviceDependencies.Select(x => new { x.Id, x.ConfigurationHash, hardwareFingerprint = x.Hardware?.Fingerprint }).ToArray(),
+                robots = robotDependencies.Select(x => new { x.Id, x.ConfigurationHash, hardwareFingerprint = x.Hardware?.Fingerprint }).ToArray(),
+                calibrations = calibrationDependencies.Select(x => new { x.AssetId, x.Version, x.SnapshotHash }).ToArray(),
+                modules = moduleDependencies.Select(x => new { x.ModuleId, x.Version, x.ModuleHash }).ToArray(),
+                modelAssets = modelAssetDependencies.Select(x => new { x.AssetId, x.Version, x.Sha256 }).ToArray()
+            };
+        }
         else
         {
             canonical = new
@@ -452,7 +500,8 @@ public sealed class RuntimeDependencyManifestService(
             deviceDependencies,
             robotDependencies,
             calibrationDependencies,
-            moduleDependencies);
+            moduleDependencies,
+            modelAssetDependencies.Length > 0 ? modelAssetDependencies : null);
     }
 
     /// <summary>Verifies immutable calibration pins before any workflow execution path.</summary>
@@ -605,6 +654,7 @@ public sealed class RuntimeDependencyManifestService(
         CompareHardware(expected.Devices, current.Devices, x => x.Id, x => x.Hardware, "DeviceHardware", drifts);
         CompareHardware(expected.Robots, current.Robots, x => x.Id, x => x.Hardware, "RobotHardware", drifts);
         CompareById(expected.Calibrations, current.Calibrations, x => $"{x.AssetId}:v{x.Version}", x => x.SnapshotHash, "Calibration", drifts);
+        CompareById(expected.ModelAssets ?? [], current.ModelAssets ?? [], x => $"{x.AssetId}:v{x.Version}", x => x.Sha256, "ModelAsset", drifts);
         CompareById(expected.Modules ?? [], current.Modules ?? [], x => $"{x.ModuleId}:v{x.Version}", x => x.ModuleHash, "WorkflowModule", drifts);
 
         if (drifts.Count == 0)
@@ -831,6 +881,34 @@ public sealed class RuntimeDependencyManifestService(
                 await hardwareProvenance.CaptureForProductionAsync("robot", descriptor.Id, ct)));
         }
         return output;
+    }
+
+    /// <summary>
+    /// 捕获形状模型资产锁定项：version<=0（latest）在发布时就地落成具体版本号，
+    /// 之后追加新版本不会改变已发布配方的锁定；资产/版本不存在直接拒绝发布。
+    /// </summary>
+    private async Task<ModelAssetRuntimeDependency[]> CaptureModelAssetsAsync(
+        HashSet<(string AssetId, int Version)> references,
+        CancellationToken ct)
+    {
+        if (references.Count == 0) return [];
+        if (modelAssets is null)
+            throw new InvalidOperationException("Workflow references shape model assets, but model asset storage is unavailable.");
+        var output = new List<ModelAssetRuntimeDependency>(references.Count);
+        foreach (var reference in references.OrderBy(x => x.AssetId, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Version))
+        {
+            var version = reference.Version;
+            if (version <= 0)
+            {
+                var descriptor = await modelAssets.GetAsync(reference.AssetId, ct)
+                    ?? throw new InvalidOperationException($"Workflow references shape model asset '{reference.AssetId}', but it does not exist.");
+                version = descriptor.LatestVersion;
+            }
+            var info = await modelAssets.GetVersionAsync(reference.AssetId, version, ct)
+                ?? throw new InvalidOperationException($"Workflow references shape model asset '{reference.AssetId}' v{version}, but that immutable version does not exist.");
+            output.Add(new ModelAssetRuntimeDependency(reference.AssetId, info.Version, info.Sha256));
+        }
+        return [.. output];
     }
 
     private async Task<IReadOnlyList<CalibrationRuntimeDependency>> CaptureCalibrationsAsync(
@@ -1083,6 +1161,14 @@ public sealed class RuntimeDependencyManifestService(
                     "Physical/controller provenance changed after publication."));
             }
         }
+    }
+
+    private sealed class ModelAssetRefComparer : IEqualityComparer<(string AssetId, int Version)>
+    {
+        public bool Equals((string AssetId, int Version) x, (string AssetId, int Version) y)
+            => x.Version == y.Version && string.Equals(x.AssetId, y.AssetId, StringComparison.OrdinalIgnoreCase);
+        public int GetHashCode((string AssetId, int Version) obj)
+            => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.AssetId), obj.Version);
     }
 
     private sealed class CalibrationRefComparer : IEqualityComparer<(string AssetId, int Version)>
