@@ -19,7 +19,8 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var sourceImage = context.RequireImage("image");
+        // 与 region 家族一致：image / domainImage 二选一，region 输入再缩小分析域。
+        var (sourceImage, scopedDomain) = RegionNodeHelpers.Source(context);
         var source = sourceImage.Mat;
         var mode = node.GetString("mode", "all").Trim().ToLowerInvariant();
         if (mode is not ("all" or "largest")) throw new InvalidOperationException($"Unsupported blob mode '{mode}'.");
@@ -48,21 +49,14 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         var roi = node.GetRoi();
 
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
-        Mat? masked = null;
         try
         {
-            var analysis = gray;
-            if (roi is not null)
-            {
-                using var mask = roi.BuildMask(gray.Size(), cancellationToken);
-                masked = new Mat(gray.Rows, gray.Cols, gray.Type(), Scalar.All(0));
-                gray.CopyTo(masked, mask);
-                analysis = masked;
-            }
-
+            // ROI / region 输入 / domainImage 收敛成一个域，直接交给 JLVision 的 ReduceDomain：
+            // 不再复制整幅掩膜图，域外像素也不参与连通。
+            var domain = AnalysisDomain(context, scopedDomain, roi, gray.Width, gray.Height, cancellationToken);
             // 像素面积来自填充前的连通域：轮廓是填孔后的外边界，多边形面积会把小目标算小
             // （1–3 px 的斑甚至退化成 0），而 area 需要与 region 家族 / region.toDetections 同口径。
-            JLVisionOperators.FindContours(analysis, out Point[][] contours, out double[] pixelAreas, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            JLVisionOperators.FindContours(gray, domain, out Point[][] contours, out double[] pixelAreas, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
 
             var candidates = new List<VisionDetection>();
             for (var contourIndex = 0; contourIndex < contours.Length; contourIndex++)
@@ -213,8 +207,31 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         }
         finally
         {
-            masked?.Dispose();
             ownedGray?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 分析域：domainImage 的域 ∩ region 输入 ∩ canvas ROI。全部为 null 时返回 null（整幅图）。
+    /// 用 region 的 run 表达而不是整幅掩膜，避免每次运行都分配一张全尺寸图。
+    /// </summary>
+    private static VisionRegion? AnalysisDomain(
+        NodeExecutionContext context, VisionRegion? scoped, VisionRoi? roi, int width, int height, CancellationToken cancellationToken)
+    {
+        var domain = scoped;
+        if (context.TryGetValue("region", out var regionValue))
+        {
+            var supplied = regionValue.Require<VisionRegion>("region");
+            if (supplied.Width != width || supplied.Height != height)
+                throw new InvalidOperationException("Region/image dimensions must match.");
+            domain = domain is null ? supplied : RegionNodeHelpers.SetOperation(domain, supplied, "intersection", cancellationToken);
+        }
+        if (roi is not null)
+        {
+            using var mask = roi.BuildMask(new Size(width, height), cancellationToken);
+            var roiRegion = RegionNodeHelpers.MaskRegion(mask, cancellationToken);
+            domain = domain is null ? roiRegion : RegionNodeHelpers.SetOperation(domain, roiRegion, "intersection", cancellationToken);
+        }
+        return domain;
     }
 }

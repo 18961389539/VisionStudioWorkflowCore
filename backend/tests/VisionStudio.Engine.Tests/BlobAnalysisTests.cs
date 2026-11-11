@@ -85,4 +85,64 @@ public sealed class BlobAnalysisTests
         // 不加圆度筛选时，largest 回到面积最大的细长条。
         Assert.InRange(Convert.ToDouble(unfiltered.Outputs["area"].Value), 780, 820);
     }
+
+    [Fact]
+    public async Task Roi_LimitsAnalysisToTheSelection()
+    {
+        // 两块 10×10：ROI 只框左边，斑点分析只能在选区内连通。
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(4, 4, 10, 10), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(30, 30, 10, 10), Scalar.All(255), -1);
+
+        var result = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", """{"mode":"all","minArea":1,"roi":{"type":"Rectangle","x":0,"y":0,"width":20,"height":20}}"""),
+            CancellationToken.None);
+
+        Assert.Equal(1L, Convert.ToInt64(result.Outputs["count"].Value));
+        Assert.Equal(100d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+        // 便捷口 x/y 是最小外接圆圆心：块 (4,4)-(13,13) ⇒ 8.5，说明域裁剪没有平移坐标。
+        Assert.Equal(8.5d, Convert.ToDouble(result.Outputs["x"].Value), 6);
+    }
+
+    [Fact]
+    public async Task RegionInput_RestrictsTheAnalysisDomain()
+    {
+        // region 输入只覆盖右边那块：左边斑点不参与连通。
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(4, 4, 10, 10), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(30, 30, 10, 10), Scalar.All(255), -1);
+        var right = Block(30, 30, 10, 64);
+
+        var result = await new MultiBlobNode().ExecuteAsync(
+            Ctx(new() { ["image"] = Img(img), ["region"] = VisionValue.Region(right) }),
+            Def("measure.blobs", """{"mode":"all","minArea":1}"""), CancellationToken.None);
+
+        Assert.Equal(1L, Convert.ToInt64(result.Outputs["count"].Value));
+        Assert.Equal(34.5d, Convert.ToDouble(result.Outputs["x"].Value), 6);
+        Assert.Equal(100d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+    }
+
+    [Fact]
+    public async Task DomainImage_IsAcceptedAsTheOnlyInput()
+    {
+        // 与 region 家族一致：只接 domainImage 也能分析，域外不计入。
+        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(4, 4, 10, 10), Scalar.All(255), -1);
+        Cv2.Rectangle(img, new Rect(30, 30, 10, 10), Scalar.All(255), -1);
+        using var domainImage = new VisionDomainImage(VisionImage.Own(img.Clone()), Block(30, 30, 10, 64));
+
+        var result = await new MultiBlobNode().ExecuteAsync(
+            Ctx(new() { ["domainImage"] = VisionValue.DomainImage(domainImage) }),
+            Def("measure.blobs", """{"mode":"all","minArea":1}"""), CancellationToken.None);
+
+        Assert.Equal(1L, Convert.ToInt64(result.Outputs["count"].Value));
+        Assert.Equal(100d, Convert.ToDouble(result.Outputs["area"].Value), 9);
+    }
+
+    private static VisionRegion Block(int x, int y, int size, int canvas)
+        => new(canvas, canvas,
+        [
+            new VisionRegionComponent(Enumerable.Range(y, size)
+                .Select(row => new VisionRegionRun(row, x, x + size - 1)).ToArray())
+        ]);
 }

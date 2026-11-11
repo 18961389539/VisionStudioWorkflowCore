@@ -110,8 +110,37 @@ internal static partial class JLVisionOperators
     /// 而像素面积与 region 家族、region.toDetections 保持同一口径，可直接用于面积筛选。
     /// </summary>
     public static void FindContours(Mat source, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
+        => FindContours(source, null, out contours, out pixelAreas, out hierarchy, retrieval, approximation);
+
+    /// <summary>
+    /// 在指定域内找轮廓。域用 region 的 run 表达，省掉"整幅掩膜复制"那张全尺寸图，
+    /// 也让 ROI / region 输入 / domainImage 三种限制走同一条路径（域外像素不参与连通）。
+    /// </summary>
+    public static void FindContours(Mat source, VisionRegion? domain, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
     {
         using var image = JLVisionImages.FromMat(source);
+        JlImage? reduced = null;
+        JlRegion? nativeDomain = null;
+        try
+        {
+            var scoped = image;
+            if (domain is not null)
+            {
+                nativeDomain = JLVisionRegions.ToNative(domain);
+                reduced = image.ReduceDomain(nativeDomain);
+                scoped = reduced;
+            }
+            FindContoursCore(scoped, out contours, out pixelAreas, out hierarchy, retrieval, approximation);
+        }
+        finally
+        {
+            reduced?.Dispose();
+            nativeDomain?.Dispose();
+        }
+    }
+
+    private static void FindContoursCore(JlImage image, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
+    {
         using var foreground = image.Threshold(1d, 255d);
         using var components = foreground.Connection();
         var items = new List<(Point[] Points, int Parent, double PixelArea)>();

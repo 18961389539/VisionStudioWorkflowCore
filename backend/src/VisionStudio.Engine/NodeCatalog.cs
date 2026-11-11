@@ -277,7 +277,7 @@ public static class BuiltInNodeCatalog
             "measure.blobs",
             "Multi Blob",
             "Measurement",
-            [ExecIn, new("image", VisionDataType.Image)],
+            [ExecIn, new("image", VisionDataType.Image, Required: false), new("domainImage", VisionDataType.DomainImage, Required: false), new("region", VisionDataType.Region, Required: false)],
             [
                 new("image", VisionDataType.Image),
                 new("count", VisionDataType.Integer),
@@ -319,7 +319,7 @@ public static class BuiltInNodeCatalog
                 new("descending", "Descending", "boolean", true, Group: "Sorting", VisibleWhen: new("mode", ["all"]), Description: "Rank largest or highest first; turn off for ascending order.")
             ,
                 ],
-            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
+            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. Connect exactly one of image or domainImage; an optional region or ROI restricts the analysis area without copying the image. detections.index is a post-sort ordinal, not a tracking id across frames. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
