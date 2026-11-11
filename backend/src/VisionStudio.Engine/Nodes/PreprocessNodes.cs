@@ -70,12 +70,29 @@ internal static class PreprocessImageHelpers
     /// <summary>ROI 掩膜：ROI 外清零（调用方交出 processed 的所有权；返回可继续持有的新 Mat）。</summary>
     public static Mat ApplyRoiMask(Mat processed, VisionRoi? roi, CancellationToken cancellationToken = default)
     {
+        if (roi is null) return processed;
+        Mat mask;
+        try
+        {
+            mask = roi.BuildMask(processed.Size(), cancellationToken);
+        }
+        catch
+        {
+            processed.Dispose();
+            throw;
+        }
+
+        using (mask) return ApplyMask(processed, mask, cancellationToken);
+    }
+
+    /// <summary>按已栅格化的掩膜清零（掩膜为 null 时原样返回，便于和 <see cref="ThresholdStatisticsDomain"/> 复用同一份掩膜）。</summary>
+    public static Mat ApplyMask(Mat processed, Mat? mask, CancellationToken cancellationToken = default)
+    {
+        if (mask is null) return processed;
         Mat? masked = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (roi is null) return processed;
-            using var mask = roi.BuildMask(processed.Size(), cancellationToken);
             masked = new Mat(processed.Rows, processed.Cols, processed.Type(), Scalar.All(0));
             processed.CopyTo(masked, mask);
             cancellationToken.ThrowIfCancellationRequested();
@@ -90,11 +107,109 @@ internal static class PreprocessImageHelpers
         }
     }
 
+    /// <summary>把域内处理结果贴回全画布（域未裁剪、即整图时直接返回原图）。</summary>
+    public static Mat RestoreToCanvas(Mat patch, Rect rect, Size canvas, CancellationToken cancellationToken = default)
+    {
+        if (rect.X == 0 && rect.Y == 0 && rect.Width == canvas.Width && rect.Height == canvas.Height) return patch;
+        Mat? full = null;
+        try
+        {
+            full = new Mat(canvas.Height, canvas.Width, patch.Type(), Scalar.All(0));
+            using (var view = new Mat(full, rect)) patch.CopyTo(view);
+            cancellationToken.ThrowIfCancellationRequested();
+            patch.Dispose();
+            return full;
+        }
+        catch
+        {
+            full?.Dispose();
+            patch.Dispose();
+            throw;
+        }
+    }
+
     public static int OddKernel(int value, int min, int max)
     {
         var clamped = Math.Clamp(value, min, max);
         if (clamped % 2 == 1) return clamped;
         return clamped + 1 <= max ? clamped + 1 : clamped - 1;
+    }
+}
+
+/// <summary>
+/// 阈值统计域。ROI 存在时把 8 位灰度图裁剪到 ROI 包围盒，让 Otsu / 自适应阈值只统计 ROI 内的像素
+/// （此前 ROI 只在输出阶段清零，阈值本身仍由全图直方图决定，ROI 外的高亮会把阈值拉偏）。
+/// 同时给出 ROI 覆盖的像素数，作为前景占比的分母——用整图面积做分母会让 ROI 越小、占比越接近 0。
+///
+/// 裁剪而非掩膜的原因：JLVision 的 Otsu / 局部均值都按直方图或邻域计算，掩膜清零会引入一个
+/// 巨大的 0 值尖峰并污染邻域。矩形 ROI 裁剪即精确；圆形/多边形/画笔取包围盒，统计会含少量框外像素。
+/// <c>padding</c> 用于自适应阈值：外扩半个窗口，保证 ROI 内每个像素的邻域与整图计算时完全相同。
+/// </summary>
+internal sealed class ThresholdStatisticsDomain : IDisposable
+{
+    private readonly Mat? _cropped;
+    private readonly Mat? _mask;
+
+    private ThresholdStatisticsDomain(Mat gray, Rect rect, Mat? cropped, long pixelCount, Mat? mask)
+    {
+        Gray = gray;
+        Rect = rect;
+        _cropped = cropped;
+        PixelCount = pixelCount;
+        _mask = mask;
+    }
+
+    /// <summary>统计/处理用的灰度图；未裁剪时就是调用方的原图，不要释放。</summary>
+    public Mat Gray { get; }
+
+    /// <summary><see cref="Gray"/> 在整图中的位置，用于把结果贴回全画布。</summary>
+    public Rect Rect { get; }
+
+    /// <summary>ROI 覆盖的像素数（未设置 ROI 时为整图像素数），前景占比的分母。</summary>
+    public long PixelCount { get; }
+
+    /// <summary>ROI 掩膜；未设置 ROI 时为 null。交给 <see cref="PreprocessImageHelpers.ApplyMask"/> 以免重复栅格化。</summary>
+    public Mat? Mask => _mask;
+
+    public static ThresholdStatisticsDomain Create(Mat gray8, VisionRoi? roi, int padding, bool crop, CancellationToken cancellationToken)
+    {
+        var whole = new Rect(0, 0, gray8.Width, gray8.Height);
+        if (roi is null) return new ThresholdStatisticsDomain(gray8, whole, null, gray8.Total(), null);
+
+        var mask = roi.BuildMask(gray8.Size(), cancellationToken);
+        try
+        {
+            var pixelCount = (long)JLVisionOperators.CountNonZero(mask);
+            if (pixelCount <= 0)
+                throw new InvalidOperationException(
+                    $"{roi.Type} ROI covers no pixels in the {gray8.Width}×{gray8.Height} image; threshold statistics would be empty. Move or enlarge the ROI.");
+            if (!crop) return new ThresholdStatisticsDomain(gray8, whole, null, pixelCount, mask);
+
+            var rect = Inflate(VisionRoiOpenCvExtensions.BoundsOf(mask), padding, gray8.Size());
+            using var view = new Mat(gray8, rect);
+            var cropped = view.Clone();
+            return new ThresholdStatisticsDomain(cropped, rect, cropped, pixelCount, mask);
+        }
+        catch
+        {
+            mask.Dispose();
+            throw;
+        }
+    }
+
+    private static Rect Inflate(Rect bounds, int padding, Size canvas)
+    {
+        var left = Math.Max(0, bounds.X - padding);
+        var top = Math.Max(0, bounds.Y - padding);
+        var right = Math.Min(canvas.Width, bounds.X + bounds.Width + padding);
+        var bottom = Math.Min(canvas.Height, bounds.Y + bounds.Height + padding);
+        return new Rect(left, top, right - left, bottom - top);
+    }
+
+    public void Dispose()
+    {
+        _cropped?.Dispose();
+        _mask?.Dispose();
     }
 }
 
@@ -479,15 +594,20 @@ internal static class AdaptiveThresholdCore
         Mat? output = null;
         try
         {
+            // 自适应阈值取局部窗口：外扩半个窗口，ROI 内每个像素的邻域才与整图计算时一致。
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, blockSize / 2, crop: true, cancellationToken);
             var binary = ImageTransformOutput.Create(target => JLVisionOperators.AdaptiveThreshold(
-                gray, target, 255,
+                domain.Gray, target, 255,
                 method == "gaussian" ? AdaptiveThresholdTypes.GaussianC : AdaptiveThresholdTypes.MeanC,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary,
                 blockSize, c));
-            output = PreprocessImageHelpers.ApplyRoiMask(binary, roi, cancellationToken);
+            // 域内结果贴回全画布，再按 ROI 精确清零（圆形/多边形/画笔的包围盒内也有框外像素）。
+            output = PreprocessImageHelpers.ApplyMask(
+                PreprocessImageHelpers.RestoreToCanvas(binary, domain.Rect, gray.Size(), cancellationToken),
+                domain.Mask, cancellationToken);
 
-            var fg = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
-            var diag = CoordinateValidation.Diagnostics(nodeType, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("autoGray", converted));
+            var fg = domain.PixelCount > 0 ? (double)JLVisionOperators.CountNonZero(output) / domain.PixelCount : 0;
+            var diag = CoordinateValidation.Diagnostics(nodeType, ("blockSize", blockSize), ("c", c), ("method", method), ("invert", invert), ("foregroundRatio", fg), ("domainPixels", domain.PixelCount), ("autoGray", converted));
             cancellationToken.ThrowIfCancellationRequested();
             return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue> { ["image"] = VisionValue.Image(VisionImage.Own(output)), ["foregroundRatio"] = VisionValue.Double(fg), ["diagnostics"] = VisionValue.String(diag) },
@@ -500,6 +620,7 @@ internal static class AdaptiveThresholdCore
                     ["autoGray"] = converted,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage",
                     ["foregroundRatio"] = Math.Round(fg, 6),
+                    ["domainPixels"] = domain.PixelCount,
                     ["diagnostics"] = diag
                 }));
         }
@@ -532,14 +653,18 @@ internal static class OtsuThresholdCore
         Mat? output = null;
         try
         {
+            // 阈值只由统计域决定：ROI 存在时只用包围盒内的像素求 Otsu，ROI 外的高亮不再参与直方图。
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: true, cancellationToken);
             // Otsu：由直方图自动求全局阈值——输出阈值供追溯与"光照漂移"监控。
             var computed = 0d;
-            var binary = ImageTransformOutput.Create(target => computed = JLVisionOperators.Threshold(gray, target, 0, 255,
-                ThresholdTypes.Otsu | (invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary)));
-            output = PreprocessImageHelpers.ApplyRoiMask(binary, roi, cancellationToken);
+            using (var discard = new Mat())
+                computed = JLVisionOperators.Threshold(domain.Gray, discard, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
+            var binary = ImageTransformOutput.Create(target => JLVisionOperators.Threshold(gray, target, computed, 255,
+                invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
+            output = PreprocessImageHelpers.ApplyMask(binary, domain.Mask, cancellationToken);
 
-            var fg2 = output.Total() > 0 ? (double)JLVisionOperators.CountNonZero(output) / output.Total() : 0;
-            var diag2 = CoordinateValidation.Diagnostics(nodeType, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("autoGray", converted));
+            var fg2 = domain.PixelCount > 0 ? (double)JLVisionOperators.CountNonZero(output) / domain.PixelCount : 0;
+            var diag2 = CoordinateValidation.Diagnostics(nodeType, ("threshold", computed), ("invert", invert), ("foregroundRatio", fg2), ("domainPixels", domain.PixelCount), ("autoGray", converted));
             cancellationToken.ThrowIfCancellationRequested();
             return (new NodeExecutorResult(
                 new Dictionary<string, VisionValue>
@@ -554,7 +679,9 @@ internal static class OtsuThresholdCore
                     ["threshold"] = computed,
                     ["invert"] = invert,
                     ["autoGray"] = converted,
-                    ["roi"] = roi?.Type.ToString() ?? "FullImage"
+                    ["roi"] = roi?.Type.ToString() ?? "FullImage",
+                    ["foregroundRatio"] = Math.Round(fg2, 6),
+                    ["domainPixels"] = domain.PixelCount
                 }));
         }
         catch

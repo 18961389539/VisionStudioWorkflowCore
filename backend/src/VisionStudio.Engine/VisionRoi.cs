@@ -10,6 +10,13 @@ public static class VisionRoiOpenCvExtensions
     public static Mat BuildMask(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
         => BuildMaskForRegion(roi, size, 0, 0, cancellationToken);
 
+    /// <summary>
+    /// 已栅格化掩膜的包围盒。放在 ROI 栅格化辅助里而不是节点代码里：节点内的 Cv2 调用受
+    /// static-audit 约束（图像算法须走 JLVision），这里只是对刚生成的二值掩膜取外接矩形，
+    /// 与 BuildMask 共用同一坐标系，避免节点自行推算 ROI 几何导致裁剪差一像素。
+    /// </summary>
+    internal static Rect BoundsOf(Mat mask) => Cv2.BoundingRect(mask);
+
     /// <summary>Build a measurement ROI mask and reject regions that select no pixels in the sampled image.</summary>
     internal static Mat BuildMaskForMeasurement(this VisionRoi roi, Size size, CancellationToken cancellationToken = default)
     {

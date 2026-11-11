@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "c85e33f9fb78a315c8e98dd39d83705db31b454e6c0eb179a850813d6c6ddd91",
+  "hash": "f2024b899ecbf323628c741e64677cddfefba3661a53cd31286aebf0e3310719",
   "items": [
     {
       "type": "image.acquire",
@@ -42697,7 +42697,7 @@
           "internal": true
         }
       ],
-      "description": "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+      "description": "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

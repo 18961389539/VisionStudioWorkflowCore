@@ -291,9 +291,11 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         Mat? output = null;
         try
         {
+            // manual 的阈值是常量，不需要统计域；这里只取 ROI 掩膜与 ROI 像素数，让占比分母与 adaptive/Otsu 同口径。
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: false, cancellationToken);
             var thresholded = ImageTransformOutput.Create(target =>
                 JLVisionOperators.Threshold(gray, target, threshold, 255, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
-            output = PreprocessImageHelpers.ApplyRoiMask(thresholded, roi, cancellationToken);
+            output = PreprocessImageHelpers.ApplyMask(thresholded, domain.Mask, cancellationToken);
             var outputs = new Dictionary<string, VisionValue>
             {
                 ["image"] = VisionValue.Image(VisionImage.Own(output)),
@@ -309,7 +311,12 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             };
             DefectNodeHelpers.AttachByteStats(outputs, summary, output, Type, ("mode", "manual"), ("threshold", threshold), ("invert", invert), ("autoGray", converted));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
-            if (output.Total() > 0) outputs["foregroundRatio"] = VisionValue.Double(Convert.ToInt64(summary["nonZeroCount"]!) / output.Total());
+            // 分母必须是 ROI 像素数：ROI 外已清零但仍占面积，用整图面积会让 ROI 越小、占比越接近 0。
+            // 分子是 long，必须显式转 double，否则 10000/20000 走整除得 0。
+            var fgRatio = domain.PixelCount > 0 ? (double)Convert.ToInt64(summary["nonZeroCount"]!) / domain.PixelCount : 0d;
+            outputs["foregroundRatio"] = VisionValue.Double(fgRatio);
+            summary["foregroundRatio"] = Math.Round(fgRatio, 6);
+            summary["domainPixels"] = domain.PixelCount;
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
         }
@@ -335,10 +342,8 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         {
             DefectNodeHelpers.AttachByteStats(outputs, summary, owned.Mat, "image.threshold", ("mode", mode), ("invert", invert));
             outputs["nonZeroCount"] = VisionValue.Integer(Convert.ToInt64(summary["nonZeroCount"]!));
-            // 调用方（adaptive/otsu）可能已产出部分字段；缺什么补什么。manual 分支不走本方法。
-            var total = owned.Mat.Total();
-            if (!outputs.ContainsKey("foregroundRatio") && total > 0)
-                outputs["foregroundRatio"] = VisionValue.Double(Convert.ToInt64(summary["nonZeroCount"]!) / total);
+            // foregroundRatio 只由 adaptive/Otsu 核心在统计域内产出（分母是 ROI 像素数）。这里不再兜底，
+            // 否则会多出一个"分母是整图面积"的第二真值来源，ROI 越小占比越偏。
             if (!outputs.ContainsKey("threshold") && summary.TryGetValue("threshold", out var thr) && thr is double d)
                 outputs["threshold"] = VisionValue.Double(d);
             cancellationToken.ThrowIfCancellationRequested();

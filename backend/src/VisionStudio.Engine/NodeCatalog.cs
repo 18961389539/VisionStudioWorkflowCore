@@ -182,7 +182,7 @@ public static class BuiltInNodeCatalog
                 new("invert", "Invert", "boolean", false, Group: "Output",
                     Description: "Swap foreground/background polarity.", VisibleWhen: new("mode", ["manual", "adaptive", "otsu"]))
             ],
-            "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+            "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
         new(
