@@ -8,7 +8,7 @@ using VisionStudio.Engine.Nodes;
 namespace VisionStudio.Engine.Tests;
 
 /// <summary>
-/// 批次 C 回归：阈值/边界可由端口驱动、image.threshold 前景赋值可配置、
+/// 批次 C 回归：region.fromRange 边界可由端口驱动、image.threshold 前景赋值可配置、
 /// region.fromRange 的 ROI 限制与反选（补集不越过 ROI/域），以及 count 与 blobCount 的差异。
 /// </summary>
 public sealed class ThresholdRangeInputTests
@@ -47,32 +47,6 @@ public sealed class ThresholdRangeInputTests
         JLVisionOperators.MinMax(output.Mat, out _, out var wholeMax);
         Assert.Equal(1d, wholeMax);
         Assert.Equal(1d, Convert.ToDouble(result.Summary["maxValue"]));
-    }
-
-    [Fact]
-    public async Task ManualThreshold_ThresholdValuePortOverridesParameter()
-    {
-        // 参数写 10（左半 0 也会通过），端口给 150 → 只有右半 200 通过，说明端口优先。
-        using var img = new Mat(100, 200, MatType.CV_8UC1, Scalar.All(0));
-        Cv2.Rectangle(img, new Rect(100, 0, 100, 100), Scalar.All(200), -1);
-
-        var result = await new ThresholdNode().ExecuteAsync(
-            Ctx(new() { ["image"] = Img(img), ["thresholdValue"] = VisionValue.Double(150) }),
-            Def("image.threshold", """{"mode":"manual","threshold":10}"""), CancellationToken.None);
-
-        Assert.Equal(0.5d, Number(result, "foregroundRatio"), 9);
-        Assert.Equal(150d, Number(result, "threshold"), 9);
-    }
-
-    [Fact]
-    public async Task AutoModes_RejectThresholdValuePortInsteadOfIgnoringIt()
-    {
-        using var img = new Mat(64, 64, MatType.CV_8UC1, Scalar.All(128));
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await new ThresholdNode().ExecuteAsync(
-                Ctx(new() { ["image"] = Img(img), ["thresholdValue"] = VisionValue.Double(120) }),
-                Def("image.threshold", """{"mode":"otsu"}"""), CancellationToken.None));
-        Assert.Contains("only used by mode=manual", error.Message);
     }
 
     [Fact]

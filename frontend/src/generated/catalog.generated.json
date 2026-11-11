@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "4c079d0b37d814dce8378c66501b2f42466dfd0bed809159037834bf175b4f96",
+  "hash": "0dd7384baf183fe61af6abb8961936bf030e1a88cd186021d9abd522481d4aff",
   "items": [
     {
       "type": "image.acquire",
@@ -42520,11 +42520,6 @@
           "name": "image",
           "dataType": "Image",
           "required": true
-        },
-        {
-          "name": "thresholdValue",
-          "dataType": "Double",
-          "required": false
         }
       ],
       "outputs": [
@@ -42645,16 +42640,13 @@
           "max": 255,
           "step": 1,
           "group": "Threshold",
-          "description": "Manual gray threshold (0..255). A wired thresholdValue input overrides it, so an upstream statistics node can drive the threshold per batch.",
+          "description": "Manual gray threshold (0..255).",
           "visibleWhen": {
             "parameter": "mode",
             "values": [
               "manual"
             ]
-          },
-          "overriddenByPorts": [
-            "thresholdValue"
-          ]
+          }
         },
         {
           "name": "maxValue",

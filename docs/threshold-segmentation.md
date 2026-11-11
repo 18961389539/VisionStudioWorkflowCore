@@ -29,9 +29,9 @@
 - **反选**：`fromRange` 的 `invert` 取补集，底依次是 ROI → region/domain → 整幅画布，不会越界。
 - **count vs blobCount**：阈值区域把所有 run 放在**一个**区域对象里，所以 `count` 恒为 1；
   `blobCount` 才是八连通域个数，回答"检出几个目标"。要逐目标属性请再接 `region.connectedComponents`。
-- **端口驱动**：`image.threshold.thresholdValue`、`region.fromRange.minGray/maxGray` 可接线，
-  端口优先于参数。这样可以用上游统计（良品均值 ±3σ、直方图分位）逐批驱动阈值，
-  而不必每次改参数。非 manual 模式接 `thresholdValue` 会直接报错，不静默忽略。
+- **端口驱动**：`region.fromRange.minGray/maxGray` 可接线，端口优先于参数，
+  这样可以用上游统计（良品均值 ±3σ、直方图分位）逐批驱动区间边界，而不必每次改参数。
+  `image.threshold` 的阈值只做常量参数（单阈值节点的定位是"一条固定分界线"）。
 
 ## 参数速查
 
@@ -40,7 +40,7 @@
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `mode` | manual | manual / adaptive / otsu |
-| `threshold` | 128 | 仅 manual；0–255；可被 `thresholdValue` 端口覆盖 |
+| `threshold` | 128 | 仅 manual；0–255；单条分界线（要区间请用范围分割） |
 | `inputBitDepth` | auto | auto=满量程 ÷257；10/12/14 位声明后按 255/(2^b−1) 映射 |
 | `maxValue` | 255 | 前景赋值（1–255）；要 0/1 掩膜填 1 |
 | `blockSize` / `c` / `method` | 31 / 5 / mean | 仅 adaptive |

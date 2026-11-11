@@ -269,8 +269,6 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var mode = node.GetString("mode", "manual").Trim().ToLowerInvariant();
-        if (mode != "manual" && context.TryGetValue("thresholdValue", out _))
-            throw new InvalidOperationException("image.threshold thresholdValue is only used by mode=manual; adaptive/Otsu derive the threshold themselves. Disconnect it or switch the mode.");
         if (mode == "adaptive")
         {
             // 自适应与 Otsu 已合并为阈值模式的取值：直接调用内部实现，输出由本节点统一补齐。
@@ -288,7 +286,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         var source = sourceImage.Mat;
         if (source.Empty()) throw new InvalidOperationException("image.threshold requires a non-empty image.");
         // 端口优先：上游统计（良品均值±3σ 等）可以逐批驱动阈值，参数只作默认值。
-        var threshold = context.TryGetValue("thresholdValue", out _) ? context.RequireNumber("thresholdValue") : node.GetDouble("threshold", 128);
+        var threshold = node.GetDouble("threshold", 128);
         if (!double.IsFinite(threshold) || threshold is < 0 or > 255)
             throw new InvalidOperationException("Manual threshold must be finite in 0..255.");
         var maxValue = node.GetDouble("maxValue", 255);
