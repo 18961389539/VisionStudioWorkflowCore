@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Catalog and runtime-status localization.
  *
  * The backend catalog is authored in English (node display names, categories, parameter
@@ -451,7 +451,7 @@ const descriptions: Record<string, string> = {
   'measure.parallelism': '两拟合直线段的取向质量：mode=parallel 按相对 0° 的锐角误差评价平行度，mode=perpendicular 按相对 90° 的角度误差评价垂直度。接线：line a + b → angleError、实测角度、B 的端点漂移、withinTolerance。关键参数：mode、maxAngleErrorDeg。漂移与 B 段长度有关；端点对调不改结果。仅使用已拟合直线，图像平面几何。',
   'image.colorConvert': '将 8 位 sRGB 彩图或灰度图转换为三个独立浮点通道。RGB 为 0–1；HSV 的 H 为 0–360°，S/V 为 0–1；Lab 使用 sRGB 解码与 D65 白点，L* 为 0–100。灰度按 R=G=B 处理，透明度不参与颜色计算。',
   'region.fromColorRange': '三通道颜色范围求交生成 Region，常用于色标/色块。接线：彩色 image + 可选 region 限域。HSV 下色相可 min>max 跨红包裹；其它通道必须有序。无彩色像素色相为 0，查 H 时请设饱和度下限。需要多个色块时请再显式拆连通域。',
-  'region.fromRange': '按灰度或三通道颜色闭区间生成区域。灰度模式保留原位深，支持 byte/uint2/int2/int4/real，不隐式缩放到 8 位。必须且只能连接 image 或 domainImage 之一，可选 region 缩小处理域；连通对象另接连通域拆分。',
+  'region.fromRange': '按灰度或三通道颜色闭区间生成区域。灰度模式保留原位深，支持 byte/uint2/int2/int4/real，不隐式缩放到 8 位。必须且只能连接 image 或 domainImage 之一，可选 region 缩小处理域。count 是区域对象数——阈值区域不自动拆分，多个目标时仍是 1；blobCount 是八连通域个数，用它回答"检出几个目标"。连通对象也可另接连通域拆分。',
   'measure.colorDifference': '像素级 CIE76 ΔE（sRGB→D65 Lab）。接线：与待检图对齐的同尺寸参考图，或常量 sRGB 参考色；可用域限制。deltaE 是逐像素色差的均值，不是两幅图平均色之间的距离。空域不输出标量。适合色块/印刷一致性，不是缺陷语义分割。',
   'image.contrastNormalize': '将 8 位输入转灰度，按原生灰度极值或直方图百分位拉伸到指定范围，离群像素截到输出上下限；均匀图原样输出。输出为独立 8 位灰度图。',
   'image.illuminationNormalize': '局部均值估计背景，按背景下限保护除法，再计算灰度÷背景×目标灰度。窗口应大于待检特征；输出裁剪到 0–255。不能替代真实明暗场参考图校正。',
@@ -1165,6 +1165,7 @@ const parameterDescriptions: Record<string, string> = {
   'image.sharpen.windowSize': '反锐化掩膜的奇数局部均值窗口（3..255）。',
   'image.sharpen.amount': 'image + amount*(image-localMean) 强度；0 透传灰度。',
   'image.threshold.invert': '反转前景/背景极性。',
+  'image.threshold.maxValue': '前景像素写入的值（1–255）。下游要 0/1 掩膜时填 1；前景占比按非零像素统计，不受赋值大小影响。',
   'measure.contourDeviation.referenceIndex': '参考轮廓列表中的索引（从 0 起）。',
   'measure.contourDeviation.closed': '两侧折线均按闭合重采样。',
   'measure.contourDeviation.symmetric': '同时采样参考→当前距离并并入均值/RMS/极差。',
@@ -1818,6 +1819,7 @@ const parameterDescriptions: Record<string, string> = {
   'region.connectedComponents.emptyPolicy': '结果区域为空时：empty 保留 found=false，fail 停止流程。',
   'region.fillHoles.emptyPolicy': '输入区域为空时的处理方式。',
   'region.fromRange.emptyPolicy': '没有像素通过范围时的处理方式。',
+  'region.fromRange.invert': '改取区间之外的像素。设置了 ROI 时补集限制在 ROI 内，否则限制在 region/domain 内；两者都没有时取整幅画布。',
   'region.fromRoi.canvasWidth': '将 ROI 栅格化为区域时的画布宽度。',
   'region.fromRoi.canvasHeight': '将 ROI 栅格化为区域时的画布高度。',
   'region.boundary.unionFirst': '为真时先合并区域对象再做形状变换，使凸包/边界/骨架看到一张连通掩膜；为假时逐对象处理。',

@@ -1,4 +1,4 @@
-// 语义键目录标签（2026-11-10 由旧英文键翻译表迁移）。
+﻿// 语义键目录标签（2026-11-10 由旧英文键翻译表迁移）。
 // 键是稳定标识（节点类型 / 参数名 / 选项值 / 变体值），不是英文显示文案：
 // 后端改英文原文不会再丢失中文。新增节点或参数时在这里补条目；catalogLabels.test.ts 检查悬空键与覆盖率。
 
@@ -606,6 +606,7 @@ export const parameterLabels: Record<string, string> = {
   'image.threshold.c': '阈值偏移',
   'image.threshold.inputBitDepth': '输入位深',
   'image.threshold.invert': '反向',
+  'image.threshold.maxValue': '前景赋值',
   'image.threshold.method': '局部阈值算法',
   'image.threshold.mode': '阈值模式',
   'image.threshold.threshold': '阈值',
@@ -1388,6 +1389,7 @@ export const parameterLabels: Record<string, string> = {
   'region.fromMask.invert': '反转掩膜',
   'region.fromMask.threshold': '掩膜阈值',
   'region.fromRange.emptyPolicy': '空结果策略',
+  'region.fromRange.invert': '反选',
   'region.fromRange.max1': '通道 1 上限',
   'region.fromRange.max2': '通道 2 上限',
   'region.fromRange.max3': '通道 3 上限',

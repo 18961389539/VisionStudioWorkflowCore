@@ -607,6 +607,9 @@ internal static class AdaptiveThresholdCore
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
         var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, nodeType);
+        var maxValue = node.GetDouble("maxValue", 255);
+        if (!double.IsFinite(maxValue) || maxValue is < 1 or > 255)
+            throw new InvalidOperationException($"{nodeType} maxValue (foreground value) must be finite in 1..255.");
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray, inputBitDepth);
         Mat? output = null;
         try
@@ -614,7 +617,7 @@ internal static class AdaptiveThresholdCore
             // 自适应阈值取局部窗口：外扩半个窗口，ROI 内每个像素的邻域才与整图计算时一致。
             using var domain = ThresholdStatisticsDomain.Create(gray, roi, blockSize / 2, crop: true, cancellationToken);
             var binary = ImageTransformOutput.Create(target => JLVisionOperators.AdaptiveThreshold(
-                domain.Gray, target, 255,
+                domain.Gray, target, maxValue,
                 method == "gaussian" ? AdaptiveThresholdTypes.GaussianC : AdaptiveThresholdTypes.MeanC,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary,
                 blockSize, c));
@@ -631,6 +634,7 @@ internal static class AdaptiveThresholdCore
                 new Dictionary<string, object?>
                 {
                     ["blockSize"] = blockSize,
+                    ["maxValue"] = maxValue,
                     ["c"] = c,
                     ["method"] = method,
                     ["invert"] = invert,
@@ -668,6 +672,9 @@ internal static class OtsuThresholdCore
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
         var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, nodeType);
+        var maxValue = node.GetDouble("maxValue", 255);
+        if (!double.IsFinite(maxValue) || maxValue is < 1 or > 255)
+            throw new InvalidOperationException($"{nodeType} maxValue (foreground value) must be finite in 1..255.");
 
         var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray, inputBitDepth);
         Mat? output = null;
@@ -679,7 +686,7 @@ internal static class OtsuThresholdCore
             var computed = 0d;
             using (var discard = new Mat())
                 computed = JLVisionOperators.Threshold(domain.Gray, discard, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
-            var binary = ImageTransformOutput.Create(target => JLVisionOperators.Threshold(gray, target, computed, 255,
+            var binary = ImageTransformOutput.Create(target => JLVisionOperators.Threshold(gray, target, computed, maxValue,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(binary, domain.Mask, cancellationToken);
 
@@ -697,6 +704,7 @@ internal static class OtsuThresholdCore
                 new Dictionary<string, object?>
                 {
                     ["threshold"] = computed,
+                    ["maxValue"] = maxValue,
                     ["invert"] = invert,
                     ["autoGray"] = converted,
                     ["inputBitDepth"] = inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "auto",

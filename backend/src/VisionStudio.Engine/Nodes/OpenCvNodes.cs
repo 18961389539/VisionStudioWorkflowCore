@@ -265,6 +265,8 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
         var mode = node.GetString("mode", "manual").Trim().ToLowerInvariant();
+        if (mode != "manual" && context.TryGetValue("thresholdValue", out _))
+            throw new InvalidOperationException("image.threshold thresholdValue is only used by mode=manual; adaptive/Otsu derive the threshold themselves. Disconnect it or switch the mode.");
         if (mode == "adaptive")
         {
             // 自适应与 Otsu 已合并为阈值模式的取值：直接调用内部实现，输出由本节点统一补齐。
@@ -281,9 +283,13 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         var sourceImage = context.RequireImage("image");
         var source = sourceImage.Mat;
         if (source.Empty()) throw new InvalidOperationException("image.threshold requires a non-empty image.");
-        var threshold = node.GetDouble("threshold", 128);
+        // 端口优先：上游统计（良品均值±3σ 等）可以逐批驱动阈值，参数只作默认值。
+        var threshold = context.TryGetValue("thresholdValue", out _) ? context.RequireNumber("thresholdValue") : node.GetDouble("threshold", 128);
         if (!double.IsFinite(threshold) || threshold is < 0 or > 255)
             throw new InvalidOperationException("Manual threshold must be finite in 0..255.");
+        var maxValue = node.GetDouble("maxValue", 255);
+        if (!double.IsFinite(maxValue) || maxValue is < 1 or > 255)
+            throw new InvalidOperationException("image.threshold maxValue (foreground value) must be finite in 1..255.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
         var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, Type);
@@ -295,7 +301,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             // manual 的阈值是常量，不需要统计域；这里只取 ROI 掩膜与 ROI 像素数，让占比分母与 adaptive/Otsu 同口径。
             using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: false, cancellationToken);
             var thresholded = ImageTransformOutput.Create(target =>
-                JLVisionOperators.Threshold(gray, target, threshold, 255, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
+                JLVisionOperators.Threshold(gray, target, threshold, maxValue, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(thresholded, domain.Mask, cancellationToken);
             var outputs = new Dictionary<string, VisionValue>
             {
@@ -306,6 +312,7 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             {
                 ["mode"] = "manual",
                 ["threshold"] = threshold,
+                ["maxValue"] = maxValue,
                 ["invert"] = invert,
                 ["autoGray"] = converted,
                 ["inputBitDepth"] = inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "auto",

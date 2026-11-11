@@ -18,6 +18,56 @@ internal static class RegionNodeHelpers
         return (domain.Image, domain.Domain);
     }
 
+    /// <summary>
+    /// 连通域个数。阈值生成的区域把全部 run 放在同一个区域对象里，<c>count</c> 因此恒为 1；
+    /// 要回答"检出几个目标"必须再连一次通。点面积远小于再执行一次 region.connectedComponents。
+    /// </summary>
+    public static int CountBlobs(VisionRegion region, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var native = JLVisionRegions.ToNative(region);
+        using var union = native.Union1();
+        using var connected = union.Connection();
+        return connected.CountObj();
+    }
+
+    /// <summary>整幅画布区域（每行一个 run）。反选时作为补集的底。</summary>
+    public static VisionRegion FullCanvas(int width, int height)
+    {
+        var runs = new VisionRegionRun[height];
+        for (var y = 0; y < height; y++) runs[y] = new(y, 0, width - 1);
+        return new VisionRegion(width, height, [new VisionRegionComponent(runs)]);
+    }
+
+    /// <summary>二值掩膜 → 区域（ROI 求交用）。掩膜尺寸必须与目标区域一致。</summary>
+    public static VisionRegion MaskRegion(Mat mask, CancellationToken cancellationToken)
+    {
+        using var image = JLVisionImages.FromMat(mask);
+        using var native = image.Threshold(1d, 255d);
+        return JLVisionRegions.FromNative(native, mask.Width, mask.Height, cancellationToken);
+    }
+
+    /// <summary>区域集合运算（union/intersection/difference/xor）；两端必须同尺寸。</summary>
+    public static VisionRegion SetOperation(VisionRegion a, VisionRegion b, string operation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (a.Width != b.Width || a.Height != b.Height)
+            throw new InvalidOperationException("Region dimensions must match.");
+        using var nativeA = JLVisionRegions.ToNative(a);
+        using var nativeB = JLVisionRegions.ToNative(b);
+        using var unionA = nativeA.Union1();
+        using var unionB = nativeB.Union1();
+        using var result = operation switch
+        {
+            "union" => unionA.Union2(unionB),
+            "intersection" => unionA.Intersection(unionB),
+            "difference" => unionA.Difference(unionB),
+            "xor" => unionA.SymmDifference(unionB),
+            _ => throw new InvalidOperationException("Unsupported region boolean operation.")
+        };
+        return JLVisionRegions.FromNative(result, a.Width, a.Height, cancellationToken);
+    }
+
     public static NodeExecutorResult EnrichExtras(NodeExecutorResult result, string nodeType, params (string Key, object? Value)[] extra)
     {
         var fields = new List<(string Key, object? Value)>();
@@ -101,20 +151,73 @@ public sealed class RegionFromRangeNode : IVisionNodeExecutor
         var inner = mode == "gray"
             ? RegionFromThresholdCore.Execute(context, node, Type, cancellationToken)
             : RegionFromColorRangeCore.Execute(context, node, Type, cancellationToken);
-        return ValueTask.FromResult(RegionNodeHelpers.Complete(inner, cancellationToken, () =>
+        VisionImage? maskImage = inner.Outputs.TryGetValue("image", out var imageValue)
+            ? imageValue.Require<VisionImage>("image")
+            : null;
+        try
         {
+            var region = inner.Outputs["region"].Require<VisionRegion>("region");
+            var adjusted = ApplyRoiAndInvert(region, domain, node, source.Width, source.Height, cancellationToken);
+            if (!ReferenceEquals(adjusted, region))
+            {
+                // 集合运算改了区域，count/area/found/掩膜都必须按新区域重算；旧掩膜交回释放。
+                var replacement = RegionNodeHelpers.Result(adjusted, cancellationToken);
+                maskImage?.Dispose();
+                maskImage = replacement.Outputs["image"].Require<VisionImage>("image");
+                inner = replacement;
+            }
+
             if (!inner.Outputs.TryGetValue("found", out var foundVal))
                 throw new InvalidOperationException("region.fromRange inner result missing found.");
             var found = foundVal.Require<bool>("found");
             if (!found && emptyPolicy == "fail")
                 throw new InvalidOperationException("region.fromRange produced an empty region and emptyPolicy=fail.");
+            var blobCount = RegionNodeHelpers.CountBlobs(inner.Outputs["region"].Require<VisionRegion>("region"), cancellationToken);
             var diag = CoordinateValidation.Diagnostics(Type, ("mode", mode), ("emptyPolicy", emptyPolicy), ("found", found),
                 ("width", source.Width), ("height", source.Height), ("hasDomain", domain is not null),
-                ("pixelType", inner.Summary.GetValueOrDefault("pixelType")), ("grayLowerLimit", inner.Summary.GetValueOrDefault("grayLowerLimit")), ("grayUpperLimit", inner.Summary.GetValueOrDefault("grayUpperLimit")));
-            var outputs = new Dictionary<string, VisionValue>(inner.Outputs) { ["diagnostics"] = VisionValue.String(diag) };
-            var summary = new Dictionary<string, object?>(inner.Summary) { ["mode"] = mode, ["emptyPolicy"] = emptyPolicy, ["diagnostics"] = diag };
-            return inner with { Outputs = outputs, Summary = summary };
-        }));
+                ("pixelType", inner.Summary.GetValueOrDefault("pixelType")), ("grayLowerLimit", inner.Summary.GetValueOrDefault("grayLowerLimit")), ("grayUpperLimit", inner.Summary.GetValueOrDefault("grayUpperLimit")),
+                ("invert", node.GetBool("invert", false)), ("hasRoi", node.GetRoi() is not null), ("blobCount", blobCount));
+            var outputs = new Dictionary<string, VisionValue>(inner.Outputs) { ["blobCount"] = VisionValue.Integer(blobCount), ["diagnostics"] = VisionValue.String(diag) };
+            var summary = new Dictionary<string, object?>(inner.Summary)
+            {
+                ["mode"] = mode, ["emptyPolicy"] = emptyPolicy, ["blobCount"] = blobCount,
+                ["invert"] = node.GetBool("invert", false), ["hasRoi"] = node.GetRoi() is not null, ["diagnostics"] = diag
+            };
+            return ValueTask.FromResult(inner with { Outputs = outputs, Summary = summary });
+        }
+        catch
+        {
+            maskImage?.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// ROI 与反选：ROI 先把结果限制在选区内；反选取补集，补集底依次是 ROI、region/domain、整幅画布，
+    /// 这样"ROI 内不在区间内"不会把选区外的像素也算进来。未启用时原样返回同一个区域。
+    /// </summary>
+    private static VisionRegion ApplyRoiAndInvert(
+        VisionRegion region, VisionRegion? domain, NodeDefinition node, int width, int height, CancellationToken cancellationToken)
+    {
+        var invert = node.GetBool("invert", false);
+        var roi = node.GetRoi();
+        if (roi is null && !invert) return region;
+
+        VisionRegion? roiRegion = null;
+        if (roi is not null)
+        {
+            using var mask = roi.BuildMask(new Size(width, height), cancellationToken);
+            roiRegion = RegionNodeHelpers.MaskRegion(mask, cancellationToken);
+            if (JLVisionRegions.PixelArea(roiRegion) <= 0)
+                throw new InvalidOperationException($"ROI {roi.Type} covers no pixels in the {width}×{height} image; the range selection would be empty.");
+        }
+
+        var result = roiRegion is null ? region : RegionNodeHelpers.SetOperation(region, roiRegion, "intersection", cancellationToken);
+        if (!invert) return result;
+        var outside = roiRegion
+            ?? domain
+            ?? RegionNodeHelpers.FullCanvas(width, height);
+        return RegionNodeHelpers.SetOperation(outside, result, "difference", cancellationToken);
     }
 }
 
@@ -129,7 +232,7 @@ internal static class RegionFromThresholdCore
         if (context is null) throw new ArgumentNullException(nameof(context));
 var (source, domain) = RegionNodeHelpers.Source(context);
         if (source.Width < 1 || source.Height < 1) throw new InvalidOperationException($"{nodeType} requires a non-empty image.");
-        var minimum = node.GetDouble("minGray", 128); var maximum = node.GetDouble("maxGray", 255);
+        var minimum = RangeBound(context, node, "minGray", 128); var maximum = RangeBound(context, node, "maxGray", 255);
         if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || minimum > maximum)
             throw new InvalidOperationException($"{nodeType} minGray/maxGray must be finite with minGray <= maxGray.");
         var depth = source.Mat.Depth();
@@ -160,6 +263,13 @@ var (source, domain) = RegionNodeHelpers.Source(context);
         var summary = new Dictionary<string, object?>(result.Summary) { ["minGray"] = minimum, ["maxGray"] = maximum, ["pixelType"] = pixelType, ["grayLowerLimit"] = lowerLimit, ["grayUpperLimit"] = upperLimit, ["diagnostics"] = diag };
         return result with { Outputs = outputs, Summary = summary };
     }
+
+    /// <summary>
+    /// 灰度边界取值：接线端口优先，否则用参数。端口来自上游统计（例如良品均值 ±3σ），
+    /// 让阈值随批次漂移自动跟随，而不用每次改参数。
+    /// </summary>
+    private static double RangeBound(NodeExecutionContext context, NodeDefinition node, string port, double fallback)
+        => context.TryGetValue(port, out _) ? context.RequireNumber(port) : node.GetDouble(port, fallback);
 }
 
 public sealed class RegionConnectedComponentsNode : IVisionNodeExecutor
@@ -236,16 +346,9 @@ public sealed class RegionBooleanNode : IVisionNodeExecutor
             throw new InvalidOperationException("region.boolean requires positive canvas dimensions.");
         if (a.Width != b.Width || a.Height != b.Height) throw new InvalidOperationException("Region dimensions must match.");
         if (a.Components is null || b.Components is null) throw new InvalidOperationException("region.boolean Components must be non-null.");
-        using var nativeA = JLVisionRegions.ToNative(a); using var nativeB = JLVisionRegions.ToNative(b);
-        using var ua = nativeA.Union1(); using var ub = nativeB.Union1();
         var op = node.GetString("operation", "union").Trim().ToLowerInvariant();
-        using var result = op switch
-        {
-            "union" => ua.Union2(ub), "intersection" => ua.Intersection(ub),
-            "difference" => ua.Difference(ub), "xor" => ua.SymmDifference(ub),
-            _ => throw new InvalidOperationException("Unsupported region boolean operation.")
-        };
-        var baseResult = RegionNodeHelpers.Result(JLVisionRegions.FromNative(result, a.Width, a.Height, cancellationToken), cancellationToken);
+        var result = RegionNodeHelpers.SetOperation(a, b, op, cancellationToken);
+        var baseResult = RegionNodeHelpers.Result(result, cancellationToken);
         return ValueTask.FromResult(RegionNodeHelpers.EnrichExtras(baseResult, Type, ("operation", op), ("width", a.Width), ("height", a.Height)));
     }
 }

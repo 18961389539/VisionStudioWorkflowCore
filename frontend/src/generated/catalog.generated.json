@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "64190505f8a8dcde89d50c858ba19b20678a9b0060bf2212b272f444e06c9689",
+  "hash": "f7368a8c1d19f57a60fe6df276ce33e5cf19d6ddabf075f2430baeac612d80f7",
   "items": [
     {
       "type": "image.acquire",
@@ -42520,6 +42520,11 @@
           "name": "image",
           "dataType": "Image",
           "required": true
+        },
+        {
+          "name": "thresholdValue",
+          "dataType": "Double",
+          "required": false
         }
       ],
       "outputs": [
@@ -42640,13 +42645,27 @@
           "max": 255,
           "step": 1,
           "group": "Threshold",
-          "description": "Manual gray threshold (0..255).",
+          "description": "Manual gray threshold (0..255). A wired thresholdValue input overrides it, so an upstream statistics node can drive the threshold per batch.",
           "visibleWhen": {
             "parameter": "mode",
             "values": [
               "manual"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "thresholdValue"
+          ]
+        },
+        {
+          "name": "maxValue",
+          "label": "Foreground Value",
+          "type": "number",
+          "defaultValue": 255,
+          "min": 1,
+          "max": 255,
+          "step": 1,
+          "group": "Output",
+          "description": "Value written for foreground pixels (1..255). Use 1 when downstream expects a 0/1 mask; the foreground ratio still counts non-zero pixels, so it does not change."
         },
         {
           "name": "blockSize",
@@ -45746,6 +45765,16 @@
           "name": "region",
           "dataType": "Region",
           "required": false
+        },
+        {
+          "name": "minGray",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "maxGray",
+          "dataType": "Double",
+          "required": false
         }
       ],
       "outputs": [
@@ -45761,6 +45790,11 @@
         },
         {
           "name": "count",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "blobCount",
           "dataType": "Integer",
           "required": true
         },
@@ -45813,13 +45847,16 @@
           "max": 3.4028234663852886E+38,
           "step": 1,
           "group": "Gray Range",
-          "description": "Inclusive lower bound; byte 0..255, uint2 0..65535, int2 -32768..32767, int4 the signed 32-bit range, real any finite value. No 8-bit rescaling is applied.",
+          "description": "Inclusive lower bound; byte 0..255, uint2 0..65535, int2 -32768..32767, int4 the signed 32-bit range, real any finite value. No 8-bit rescaling is applied. A wired minGray input overrides it.",
           "visibleWhen": {
             "parameter": "mode",
             "values": [
               "gray"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "minGray"
+          ]
         },
         {
           "name": "maxGray",
@@ -45830,13 +45867,16 @@
           "max": 3.4028234663852886E+38,
           "step": 1,
           "group": "Gray Range",
-          "description": "Inclusive upper bound; must be >= the lower bound and within the actual input pixel type's range. Diagnostics report pixelType and the effective range.",
+          "description": "Inclusive upper bound; must be >= the lower bound and within the actual input pixel type's range. Diagnostics report pixelType and the effective range. A wired maxGray input overrides it.",
           "visibleWhen": {
             "parameter": "mode",
             "values": [
               "gray"
             ]
-          }
+          },
+          "overriddenByPorts": [
+            "maxGray"
+          ]
         },
         {
           "name": "space",
@@ -45969,6 +46009,14 @@
           }
         },
         {
+          "name": "invert",
+          "label": "Invert Selection",
+          "type": "boolean",
+          "defaultValue": false,
+          "group": "Output",
+          "description": "Keep pixels outside the range instead. The complement stays inside the ROI when one is set, and inside the connected region/domain otherwise."
+        },
+        {
           "name": "emptyPolicy",
           "label": "Empty Result Policy",
           "type": "select",
@@ -45985,12 +46033,20 @@
           ],
           "group": "Output",
           "description": "Behavior when no pixels pass the range."
+        },
+        {
+          "name": "roi",
+          "label": "ROI",
+          "type": "roi",
+          "group": "ROI",
+          "description": "Canvas-authored ROI object stored on the node. Edited through the ROI overlay, not as a form field.",
+          "internal": true
         }
       ],
-      "description": "Create a Region from an inclusive gray or three-channel color range. Connect exactly one of image or domainImage; optional region further restricts. Key params: channel bounds, empty policy. Too-wide range swallows background; too-narrow drops the target.",
+      "description": "Create a Region from an inclusive gray or three-channel color range. Connect exactly one of image or domainImage; optional region further restricts, and a ROI limits the result to the selection. Key params: channel bounds, invert, empty policy. count is the region object count — a threshold region keeps every run in one object, so it is 1 even with several targets; blobCount is the 8-connected component count and answers \"how many targets\". Too-wide range swallows background; too-narrow drops the target.",
       "pluginId": "builtin",
       "capabilities": {
-        "supportsRoi": false,
+        "supportsRoi": true,
         "emitsOverlay": true,
         "deterministic": true,
         "supportsRunNode": true,
