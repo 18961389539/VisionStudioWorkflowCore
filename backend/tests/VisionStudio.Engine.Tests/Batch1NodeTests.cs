@@ -261,12 +261,20 @@ public sealed class Batch1NodeTests
         var bigOnly = await Run(new MultiBlobNode(), Image(image), """{"minArea":800}""");
         Assert.Equal(1L, (long)bigOnly.Outputs["count"].Value!);
 
+        // largest 遵守筛选：maxArea=100 把三块全排除 ⇒ 没有达标目标（旧实现会忽略筛选、直接回最大块）。
+        var noneQualified = await Run(new MultiBlobNode(), Image(image),
+            """{"mode":"largest","minArea":100,"maxArea":100,"minCircularity":0}""");
+        Assert.Equal(0L, (long)noneQualified.Outputs["count"].Value!);
+        Assert.False(noneQualified.Outputs["found"].Require<bool>("found"));
+
+        // 筛选只留下中/小两块时，largest 返回其中最大的 r=15（≈707），而不是全图最大的 r=20；
+        // maxCount/sortBy/descending 在 largest 下不参与（仍强制取面积最大且只输出一个）。
         var largest = await Run(new MultiBlobNode(), Image(image),
-            """{"mode":"largest","minArea":100,"maxArea":100,"minCircularity":1,"maxCount":20,"sortBy":"x","descending":false}""");
+            """{"mode":"largest","minArea":100,"maxArea":800,"maxCount":20,"sortBy":"x","descending":false}""");
         var largestDetections = largest.Outputs["detections"].Require<IReadOnlyList<VisionDetection>>("detections");
         Assert.Equal(1L, (long)largest.Outputs["count"].Value!);
         Assert.Single(largestDetections);
-        Assert.InRange(largestDetections[0].Area, 1150, 1400);
+        Assert.InRange(largestDetections[0].Area, 650, 760);
         Assert.IsType<VisionImage>(largest.Outputs["image"].Value);
 
         var leftFirst = await Run(new MultiBlobNode(), Image(image), """{"minArea":100,"sortBy":"x","descending":false}""");

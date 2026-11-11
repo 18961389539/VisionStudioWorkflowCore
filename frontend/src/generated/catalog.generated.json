@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "5d4a49f36a7321b3c743d9a4d02f826c12ba227a354f436bf9374c723ed36cf5",
+  "hash": "754c9d94517141a5dec15732e5fba9674d8d9ec68f6c5b7dd5ee47357736c4fc",
   "items": [
     {
       "type": "image.acquire",
@@ -31084,7 +31084,7 @@
             }
           ],
           "group": "Mode",
-          "description": "all returns every filtered blob up to Max Count; largest returns only the largest qualifying blob."
+          "description": "all returns every filtered blob up to Max Count; largest returns the qualifying blob with the largest area. The filters and Min Area apply in both modes; Max Count, Sort By and Descending are used only by all."
         },
         {
           "name": "minArea",
@@ -31106,13 +31106,7 @@
           "max": 99999999,
           "step": 10,
           "group": "Filter",
-          "description": "0 disables the upper bound.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "0 disables the upper bound."
         },
         {
           "name": "minCircularity",
@@ -31123,13 +31117,7 @@
           "max": 1,
           "step": 0.05,
           "group": "Filter",
-          "description": "4*pi*A/P^2, 1 = perfect circle.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "4*pi*A/P^2, 1 = perfect circle."
         },
         {
           "name": "minWidth",
@@ -31141,13 +31129,7 @@
           "step": 1,
           "unit": "px",
           "group": "Filter",
-          "description": "0 disables the lower bound.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "0 disables the lower bound."
         },
         {
           "name": "maxWidth",
@@ -31159,13 +31141,7 @@
           "step": 1,
           "unit": "px",
           "group": "Filter",
-          "description": "0 disables the upper bound.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "0 disables the upper bound."
         },
         {
           "name": "minHeight",
@@ -31177,13 +31153,7 @@
           "step": 1,
           "unit": "px",
           "group": "Filter",
-          "description": "0 disables the lower bound.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "0 disables the lower bound."
         },
         {
           "name": "maxHeight",
@@ -31195,13 +31165,7 @@
           "step": 1,
           "unit": "px",
           "group": "Filter",
-          "description": "0 disables the upper bound.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          }
+          "description": "0 disables the upper bound."
         },
         {
           "name": "minRectangularity",
@@ -31213,12 +31177,6 @@
           "step": 0.05,
           "group": "Filter",
           "description": "Area / bounding-box area, 1 = perfect rectangle.",
-          "visibleWhen": {
-            "parameter": "mode",
-            "values": [
-              "all"
-            ]
-          },
           "advanced": true
         },
         {
@@ -31296,7 +31254,7 @@
           "internal": true
         }
       ],
-      "description": "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show.",
+      "description": "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

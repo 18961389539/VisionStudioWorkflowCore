@@ -42,7 +42,7 @@ const PRIMARY_SUMMARY_KEYS: Record<string, string[]> = {
   'measure.caliperLine': ['found', 'sampleCount', 'rejectedCalipers', 'ignoredByFit', 'fitError'],
   'measure.caliperCircle': ['found', 'fittedRadius', 'radiusDelta', 'radiusSpread', 'fitError'], 'measure.fitEllipse': ['width', 'height', 'angleDeg'],
   'match.shape': ['found', 'bestScore', 'matchedAngle'], 'roi.transform': ['roiType', 'thetaDeg', 'basePose', 'currentPose'],
-  'measure.blobs': ['mode', 'count', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
+  'measure.blobs': ['count', 'truncated', 'totalArea'], 'match.template': ['found', 'score', 'angle'],
   'value.arithmetic': ['result'], 'value.range': ['pass', 'value'], 'logic.boolean': ['result'],
   'flow.ifBoolean': ['condition'], 'flow.switch': ['selected'],
   'output.saveImage': ['saved', 'fileName', 'bytesWritten'], 'output.exportResult': ['path', 'bytesWritten'],

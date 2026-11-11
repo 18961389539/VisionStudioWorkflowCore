@@ -299,15 +299,15 @@ public static class BuiltInNodeCatalog
             ],
             [
                 new("mode", "Blob Mode", "select", "all", Options:
-                [new("All Blobs", "all"), new("Largest Blob", "largest")], Group: "Mode", Description: "all returns every filtered blob up to Max Count; largest returns only the largest qualifying blob."),
+                [new("All Blobs", "all"), new("Largest Blob", "largest")], Group: "Mode", Description: "all returns every filtered blob up to Max Count; largest returns the qualifying blob with the largest area. The filters and Min Area apply in both modes; Max Count, Sort By and Descending are used only by all."),
                 new("minArea", "Min Area", "number", 100, 0, 99999999, 10, Group: "Filter", Description: "Minimum accepted area in pixels."),
-                new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Group: "Filter", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
-                new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Group: "Filter", Description: "4*pi*A/P^2, 1 = perfect circle.", VisibleWhen: new("mode", ["all"])),
-                new("minWidth", "Min Width", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
-                new("maxWidth", "Max Width", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
-                new("minHeight", "Min Height", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the lower bound.", VisibleWhen: new("mode", ["all"])),
-                new("maxHeight", "Max Height", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the upper bound.", VisibleWhen: new("mode", ["all"])),
-                new("minRectangularity", "Min Rectangularity", "number", 0, 0, 1, 0.05, Group: "Filter", Description: "Area / bounding-box area, 1 = perfect rectangle.", VisibleWhen: new("mode", ["all"])),
+                new("maxArea", "Max Area", "number", 0, 0, 99999999, 10, Group: "Filter", Description: "0 disables the upper bound."),
+                new("minCircularity", "Min Circularity", "number", 0, 0, 1, 0.05, Group: "Filter", Description: "4*pi*A/P^2, 1 = perfect circle."),
+                new("minWidth", "Min Width", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the lower bound."),
+                new("maxWidth", "Max Width", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the upper bound."),
+                new("minHeight", "Min Height", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the lower bound."),
+                new("maxHeight", "Max Height", "number", 0, 0, 99999999, 1, Unit: "px", Group: "Filter", Description: "0 disables the upper bound."),
+                new("minRectangularity", "Min Rectangularity", "number", 0, 0, 1, 0.05, Group: "Filter", Description: "Area / bounding-box area, 1 = perfect rectangle."),
                 new("maxCount", "Max Count", "number", 20, 1, 200, 1, Group: "Sorting", VisibleWhen: new("mode", ["all"]), Description: "Maximum blobs returned after sorting. Used only in All Blobs mode."),
                 new("sortBy", "Sort By", "select", "area", Group: "Sorting", Options:
                 [
@@ -319,7 +319,7 @@ public static class BuiltInNodeCatalog
                 new("descending", "Descending", "boolean", true, Group: "Sorting", VisibleWhen: new("mode", ["all"]), Description: "Rank largest or highest first; turn off for ascending order.")
             ,
                 ],
-            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show.",
+            "Analyze either all filtered/sorted blobs or only the largest one. The input must be binary — every non-zero pixel counts as foreground, so feed a threshold/range/mask output rather than raw grayscale. area counts real foreground pixels and excludes holes; circularity, rectangularity and the bounding box come from the filled outer contour, so a ring reads as round while its hole is not counted in area. Filters combine area, circularity, bounding-box width/height and rectangularity (HALCON select_shape style); sorting supports area, X, Y and circularity. Outputs a DetectionList, the selected target geometry and source image; zero blobs is a normal result (count=0). count is the emitted length and inputCount the pre-cap candidate count, so truncated=true means maxCount (default 20) cut the list and more blobs exist than the outputs show. totalArea sums the emitted blobs only — compare count with inputCount before treating it as the whole-scene area.",
             "builtin",
             new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(

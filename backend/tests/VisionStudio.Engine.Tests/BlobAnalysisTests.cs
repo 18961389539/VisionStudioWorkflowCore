@@ -64,4 +64,25 @@ public sealed class BlobAnalysisTests
             await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
                 Def("measure.blobs", """{"mode":"all","minArea":1}"""), cancelled.Token));
     }
+
+    [Fact]
+    public async Task LargestMode_HonorsFiltersInsteadOfIgnoringThem()
+    {
+        // 细长条 80×10=800 px（圆度约 0.31）比半径 12 的圆（约 450 px）大，
+        // 但设了 minCircularity=0.6 后 largest 必须给出圆——旧实现会把筛选全部置 0、直接返回长条。
+        using var img = new Mat(200, 200, MatType.CV_8UC1, Scalar.All(0));
+        Cv2.Rectangle(img, new Rect(10, 10, 80, 10), Scalar.All(255), -1);
+        Cv2.Circle(img, new Point(150, 150), 12, Scalar.All(255), -1);
+
+        var filtered = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", """{"mode":"largest","minArea":10,"minCircularity":0.6}"""), CancellationToken.None);
+        var unfiltered = await new MultiBlobNode().ExecuteAsync(Ctx(new() { ["image"] = Img(img) }),
+            Def("measure.blobs", """{"mode":"largest","minArea":10}"""), CancellationToken.None);
+
+        Assert.Equal(1L, Convert.ToInt64(filtered.Outputs["count"].Value));
+        Assert.InRange(Convert.ToDouble(filtered.Outputs["area"].Value), 380, 520);
+        Assert.True(Convert.ToDouble(filtered.Outputs["circularity"].Value) >= 0.6);
+        // 不加圆度筛选时，largest 回到面积最大的细长条。
+        Assert.InRange(Convert.ToDouble(unfiltered.Outputs["area"].Value), 780, 820);
+    }
 }

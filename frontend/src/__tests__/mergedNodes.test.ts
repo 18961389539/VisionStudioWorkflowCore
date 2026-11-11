@@ -67,7 +67,11 @@ describe('merged node entries', () => {
 
     const blobs = catalog.find((item) => item.type === 'measure.blobs')!;
     const maxArea = blobs.parameters.find((parameter) => parameter.name === 'maxArea')!;
+    const maxCount = blobs.parameters.find((parameter) => parameter.name === 'maxCount')!;
+    // 筛选在两种模式下都生效（largest 是"达标斑点中面积最大的"），只有 Max Count/排序在 largest 下隐藏。
     expect(isParameterVisible(maxArea, blobs.parameters, { mode: 'all' })).toBe(true);
-    expect(isParameterVisible(maxArea, blobs.parameters, { mode: 'largest' })).toBe(false);
+    expect(isParameterVisible(maxArea, blobs.parameters, { mode: 'largest' })).toBe(true);
+    expect(isParameterVisible(maxCount, blobs.parameters, { mode: 'all' })).toBe(true);
+    expect(isParameterVisible(maxCount, blobs.parameters, { mode: 'largest' })).toBe(false);
   });
 });

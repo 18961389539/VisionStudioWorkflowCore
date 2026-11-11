@@ -24,14 +24,15 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
         var mode = node.GetString("mode", "all").Trim().ToLowerInvariant();
         if (mode is not ("all" or "largest")) throw new InvalidOperationException($"Unsupported blob mode '{mode}'.");
         var largestOnly = mode == "largest";
+        // 筛选在两种模式下都生效：largest 是"达标斑点中面积最大的那个"，不是"忽略筛选取最大"。
         var minArea = node.GetDouble("minArea", 100);
-        var maxArea = largestOnly ? 0 : node.GetDouble("maxArea", 0);
-        var minCircularity = largestOnly ? 0 : node.GetDouble("minCircularity", 0);
-        var minWidth = largestOnly ? 0 : node.GetDouble("minWidth", 0);
-        var maxWidth = largestOnly ? 0 : node.GetDouble("maxWidth", 0);
-        var minHeight = largestOnly ? 0 : node.GetDouble("minHeight", 0);
-        var maxHeight = largestOnly ? 0 : node.GetDouble("maxHeight", 0);
-        var minRectangularity = largestOnly ? 0 : node.GetDouble("minRectangularity", 0);
+        var maxArea = node.GetDouble("maxArea", 0);
+        var minCircularity = node.GetDouble("minCircularity", 0);
+        var minWidth = node.GetDouble("minWidth", 0);
+        var maxWidth = node.GetDouble("maxWidth", 0);
+        var minHeight = node.GetDouble("minHeight", 0);
+        var maxHeight = node.GetDouble("maxHeight", 0);
+        var minRectangularity = node.GetDouble("minRectangularity", 0);
         if (!double.IsFinite(minArea) || minArea < 0 || !double.IsFinite(maxArea) || maxArea < 0 || maxArea > 0 && maxArea < minArea)
             throw new InvalidOperationException("Blob area filter must satisfy 0 <= minArea <= maxArea (maxArea 0 means unlimited).");
         if (!double.IsFinite(minCircularity) || minCircularity is < 0 or > 1 || !double.IsFinite(minRectangularity) || minRectangularity is < 0 or > 1)
