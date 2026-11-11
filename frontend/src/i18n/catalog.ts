@@ -542,7 +542,7 @@ const descriptions: Record<string, string> = {
   'inference.anomaly.mapThreshold': '异常图像素阈值，仅在开启单独设置图阈值时生效；Otsu 模式会覆盖此值。',
   'calibration.cameraIntrinsics': '相机内参标定。接线：calibrationDataJson（或检测板节点累积的视图）→ 输出 calibrationJson/rms/viewStats，供 image.undistort 与外参/手眼。关键参数：cameraModel=pinhole（JLVision 多项式）/fisheye（OpenCV Kannala-Brandt）/telecentric（JLVision 物方远心）；maxViewRms/maxPoseViewRms/maxRms 质量门限。至少 3 个姿态差异大的视图；远心需种子放大倍率与像元尺寸。标定失败：视图不足、点退化或 RMS 超门限。',
   'image.difference': '图像差分：绝对/有符号/归一化三种模式，可缩放，始终输出均值/标准差/极值；设门限后还输出超阈值像素占比。',
-  'measure.blobs': '多斑点分析：面积、圆度、宽高、矩形度多特征组合筛选（HALCON select_shape 式），可按面积/X/Y/圆度排序。',
+  'measure.blobs': '多斑点分析：面积、圆度、宽高、矩形度多特征组合筛选（HALCON select_shape 式），可按面积/X/Y/圆度排序。输入必须是二值图（任何非零像素都当前景），请接阈值/范围分割/掩码的输出而不是灰度原图。area 是真实前景像素数（孔洞不计入）；圆度、矩形度与外接框取自填孔后的外轮廓，所以环形目标看着圆、面积却不含孔。',
   'recognition.ocr': '文字识别（algorithmBackend=tesseract，Tesseract 5）。接线：image + 可选矩形 ROI → text、meanConfidence、words/chars JSON。关键参数：语言包（tessdata 须齐全）、页面分割/引擎模式、字符白名单、DPI、放大与二值化、低置信过滤。引擎按目录/语言/模式池化且每次清自适应状态，结果不依赖上一张图。不支持字体训练/示教。失败：语言包缺失、分辨率过低、白名单过严、版面分割模式不匹配。',
   'recognition.barcode': '工业读码（algorithmBackend=zxing）：QR、DataMatrix、PDF417、Aztec 与常见一维码。接线：image → text/format/count/points；可限 ROI；预览叠加定位点。关键参数：码制过滤、多码数量、预处理链（灰度/Otsu/自适应/反色）、极性重试。同一符号被多种预处理命中会合并；不同位置相同内容计为多条。失败：对比度低、模糊、ROI 切掉静区、未启用码制、透视过强。',
   'defect.referenceCompare': '标准样板缺陷比对（algorithmBackend=hybrid）：差分/阈值/形态学/连通走 JLVision；MAD 平移搜索与增益偏移拟合为托管（库无域掩膜配准 API），应用位移用 WarpAffine、光照用 ScaleImage。接线：image=待检，reference～reference5=1–5 张同尺寸同位深良品；可选 region 限域；输出 found/count/area/grade/defects。关键参数：threshold、minArea/maxArea、registrationTolerance、compensation、variationK、morphology、分级面积。无学习型 variation 算子：多样本标准差与单样本局部纹理仍为托管估算。亮=图−参考，暗=参考−图。常见失败：尺寸/位深不一致、配准误差超门限、阈值过严导致无缺陷、未接参考图。',

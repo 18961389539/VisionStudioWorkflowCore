@@ -18,6 +18,7 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var sourceImage = context.RequireImage("image");
         var source = sourceImage.Mat;
         var mode = node.GetString("mode", "all").Trim().ToLowerInvariant();
@@ -52,20 +53,27 @@ public sealed class MultiBlobNode : IVisionNodeExecutor
             var analysis = gray;
             if (roi is not null)
             {
-                using var mask = roi.BuildMask(gray.Size());
+                using var mask = roi.BuildMask(gray.Size(), cancellationToken);
                 masked = new Mat(gray.Rows, gray.Cols, gray.Type(), Scalar.All(0));
                 gray.CopyTo(masked, mask);
                 analysis = masked;
             }
 
-            JLVisionOperators.FindContours(analysis, out Point[][] contours, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
+            // 像素面积来自填充前的连通域：轮廓是填孔后的外边界，多边形面积会把小目标算小
+            // （1–3 px 的斑甚至退化成 0），而 area 需要与 region 家族 / region.toDetections 同口径。
+            JLVisionOperators.FindContours(analysis, out Point[][] contours, out double[] pixelAreas, out _, RetrievalModes.External, ContourApproximationModes.ApproxSimple);
 
             var candidates = new List<VisionDetection>();
-            foreach (var contour in contours)
+            for (var contourIndex = 0; contourIndex < contours.Length; contourIndex++)
             {
-                var area = JLVisionOperators.ContourArea(contour);
+                // 每轮检查取消：上千个连通域时这是唯一能中断的位置。
+                cancellationToken.ThrowIfCancellationRequested();
+                var contour = contours[contourIndex];
+                var area = pixelAreas[contourIndex];
                 if (area < minArea) continue;
                 if (maxArea > 0 && area > maxArea) continue;
+                // perimeter、外接框与矩形度都来自填孔后的外轮廓：环形目标因此呈"圆"，
+                // 但它的 area 已排除孔洞，矩形度会相应偏小。
                 var perimeter = JLVisionOperators.ArcLength(contour, closed: true);
                 var circularity = perimeter > 0 ? Math.Min(1, 4 * Math.PI * area / (perimeter * perimeter)) : 0;
                 if (circularity < minCircularity) continue;

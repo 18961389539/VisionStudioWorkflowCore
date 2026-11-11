@@ -101,22 +101,39 @@ internal static partial class JLVisionOperators
         using (row) using (col) return Enumerable.Range(0, row.Length).Select(i => new Point((int)Math.Round(col[i].D), (int)Math.Round(row[i].D))).ToArray();
     }
     public static void FindContours(Mat source, out Point[][] contours, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
+        => FindContours(source, out contours, out _, out hierarchy, retrieval, approximation);
+
+    /// <summary>
+    /// 同 <see cref="FindContours(Mat, out Point[][], out HierarchyIndex[], RetrievalModes, ContourApproximationModes)"/>，
+    /// 额外给出每个轮廓的**真实像素面积**（取自填充前的连通域，孔洞不计入）。
+    /// 轮廓本身是填孔后的外边界：多边形面积会把小目标算小（1–3 px 的斑甚至退化为 0），
+    /// 而像素面积与 region 家族、region.toDetections 保持同一口径，可直接用于面积筛选。
+    /// </summary>
+    public static void FindContours(Mat source, out Point[][] contours, out double[] pixelAreas, out HierarchyIndex[] hierarchy, RetrievalModes retrieval, ContourApproximationModes approximation)
     {
         using var image = JLVisionImages.FromMat(source);
         using var foreground = image.Threshold(1d, 255d);
         using var components = foreground.Connection();
-        var items = new List<(Point[] Points, int Parent)>();
+        var items = new List<(Point[] Points, int Parent, double PixelArea)>();
         for (var i = 1; i <= components.CountObj(); i++)
         {
             using var component = components.SelectObj(i);
-            if (component.AreaCenter(out double _, out double _) == 0) continue;
+            // AreaCenter 的返回值是像素面积；out 参数是标定后的面积/中心，无标定时不是像素数。
+            var componentArea = (double)component.AreaCenter(out double _, out double _);
+            if (componentArea == 0) continue;
             using var solid = component.FillUp();
-            var parent = items.Count; items.Add((RegionContour(solid), -1));
+            var parent = items.Count; items.Add((RegionContour(solid), -1, componentArea));
             if (retrieval == RetrievalModes.External) continue;
             using var holes = solid.Difference(component);
             using var separated = holes.Connection();
             for (var j = 1; j <= separated.CountObj(); j++)
-            { using var hole = separated.SelectObj(j); if (hole.AreaCenter(out double _, out double _) == 0) continue; using var border = hole.DilationCircle(1d); items.Add((RegionContour(border), parent)); }
+            {
+                using var hole = separated.SelectObj(j);
+                var holeArea = (double)hole.AreaCenter(out double _, out double _);
+                if (holeArea == 0) continue;
+                using var border = hole.DilationCircle(1d);
+                items.Add((RegionContour(border), parent, holeArea));
+            }
         }
         if (retrieval == RetrievalModes.External)
         {
@@ -125,6 +142,7 @@ internal static partial class JLVisionOperators
                 .Any(parent => ContourArea(parent.Points) > ContourArea(item.Points) && Contains(parent.Points, item.Points[0]))).ToList();
         }
         contours = items.Select(x => x.Points).ToArray();
+        pixelAreas = items.Select(x => x.PixelArea).ToArray();
         hierarchy = items.Select(x => new HierarchyIndex(-1, -1, -1, x.Parent)).ToArray();
     }
     private static bool Contains(Point[] polygon, Point point)
