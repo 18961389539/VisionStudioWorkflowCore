@@ -286,8 +286,9 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             throw new InvalidOperationException("Manual threshold must be finite in 0..255.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
+        var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, Type);
 
-        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
+        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray, inputBitDepth);
         Mat? output = null;
         try
         {
@@ -307,6 +308,8 @@ public sealed class ThresholdNode : IVisionNodeExecutor
                 ["threshold"] = threshold,
                 ["invert"] = invert,
                 ["autoGray"] = converted,
+                ["inputBitDepth"] = inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "auto",
+                ["byteScale"] = source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d,
                 ["roi"] = roi?.Type.ToString() ?? "FullImage"
             };
             DefectNodeHelpers.AttachByteStats(outputs, summary, output, Type, ("mode", "manual"), ("threshold", threshold), ("invert", invert), ("autoGray", converted));

@@ -604,6 +604,7 @@ export const parameterLabels: Record<string, string> = {
   'image.synthetic.width': '宽度',
   'image.threshold.blockSize': '局部窗口大小',
   'image.threshold.c': '阈值偏移',
+  'image.threshold.inputBitDepth': '输入位深',
   'image.threshold.invert': '反向',
   'image.threshold.method': '局部阈值算法',
   'image.threshold.mode': '阈值模式',
@@ -2335,6 +2336,14 @@ export const optionLabels: Record<string, Record<string, Record<string, string>>
     },
   },
   'image.threshold': {
+    'inputBitDepth': {
+      '10': '10 位',
+      '12': '12 位',
+      '14': '14 位',
+      '16': '16 位',
+      '8': '8 位',
+      'auto': '自动（满 16 位）',
+    },
     'method': {
       'gaussian': '高斯',
       'mean': '均值',

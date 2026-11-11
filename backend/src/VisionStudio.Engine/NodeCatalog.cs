@@ -171,6 +171,9 @@ public static class BuiltInNodeCatalog
             [
                 new("mode", "Threshold Mode", "select", "manual", Group: "Mode", Options:
                 [new("Manual", "manual"), new("Adaptive", "adaptive"), new("Otsu", "otsu")], Description: "manual uses Threshold; adaptive uses local mean/Gaussian; otsu picks a global level."),
+                new("inputBitDepth", "Input Bit Depth", "select", "auto", Group: "Input", Options:
+                [new("Auto (full 16-bit range)", "auto"), new("8-bit", "8"), new("10-bit", "10"), new("12-bit", "12"), new("14-bit", "14"), new("16-bit", "16")],
+                    Description: "How 16-bit unsigned inputs are scaled to byte before thresholding. auto keeps the historical full-range mapping (divide by 257); a fixed depth maps 0..(2^bits-1) onto 0..255 so 10/12-bit cameras keep their contrast. Ignored for other pixel types."),
                 new("threshold", "Threshold", "number", 128, 0, 255, 1, Group: "Threshold",
                     Description: "Manual gray threshold (0..255).", VisibleWhen: new("mode", ["manual"])),
                 new("blockSize", "Block Size", "number", 31, 3, 99, 2, Group: "Threshold",

@@ -16,8 +16,12 @@ namespace VisionStudio.Engine.Nodes;
 /// </summary>
 internal static class PreprocessImageHelpers
 {
-    /// <summary>把输入规范化为单通道 CV_8U（3/4 通道转灰度；UInt16 按全量程缩放到 8 位）。</summary>
-    public static Mat ToGray8(Mat source, out bool converted, out Mat? owned)
+    /// <summary>
+    /// 把输入规范化为单通道 CV_8U（3/4 通道转灰度；UInt16 按 <paramref name="inputBitDepth"/> 缩放到 8 位）。
+    /// <paramref name="inputBitDepth"/> 为 null（auto）时沿用满量程 1/257；指定位深时按 255/(2^bits-1) 映射，
+    /// 否则 10/12 位相机的有效灰度会被压进 0..16 / 0..4，阈值几乎无法使用。
+    /// </summary>
+    public static Mat ToGray8(Mat source, out bool converted, out Mat? owned, int? inputBitDepth = null)
     {
         converted = false;
         owned = null;
@@ -49,10 +53,9 @@ internal static class PreprocessImageHelpers
         var gray8 = new Mat();
         try
         {
-            // Match the recognition pipeline: map the full UInt16 sensor range to byte gray.
-            // Other numeric depths use OpenCV's saturating conversion without an implicit
-            // image-dependent normalization that would change edge-threshold meaning per frame.
-            var scale = gray.Depth() == MatType.CV_16U ? 1d / 257d : 1d;
+            // auto 保持历史口径：把 uint16 满量程映射到 byte（1/257）；指定位深时按实际有效位深映射。
+            // 其他数值深度用 OpenCV 的饱和转换，不做与图像相关的隐式归一化——那会让边缘/阈值含义逐帧漂移。
+            var scale = gray.Depth() == MatType.CV_16U ? ByteScale(inputBitDepth) : 1d;
             gray.ConvertTo(gray8, MatType.CV_8UC1, scale);
         }
         catch
@@ -65,6 +68,19 @@ internal static class PreprocessImageHelpers
         if (converted) gray.Dispose();
         owned = gray8;
         return gray8;
+    }
+
+    /// <summary>uint16 → byte 的缩放系数：auto（null）= 1/257 满量程，指定 b 位 = 255/(2^b-1)。</summary>
+    public static double ByteScale(int? inputBitDepth) => inputBitDepth is { } bits ? 255d / ((1 << bits) - 1) : 1d / 257d;
+
+    /// <summary>读取 inputBitDepth 参数：auto/空 → null（满量程），8..16 → 位深；其他值报错。</summary>
+    public static int? InputBitDepth(NodeDefinition node, string nodeType)
+    {
+        var text = node.GetString("inputBitDepth", "auto").Trim();
+        if (text.Length == 0 || text.Equals("auto", StringComparison.OrdinalIgnoreCase)) return null;
+        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var bits) && bits is >= 8 and <= 16)
+            return bits;
+        throw new InvalidOperationException($"{nodeType} inputBitDepth '{text}' is unsupported; use auto or 8..16.");
     }
 
     /// <summary>ROI 掩膜：ROI 外清零（调用方交出 processed 的所有权；返回可继续持有的新 Mat）。</summary>
@@ -590,7 +606,8 @@ internal static class AdaptiveThresholdCore
         if (!double.IsFinite(c)) throw new InvalidOperationException($"{nodeType} c must be finite.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
-        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
+        var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, nodeType);
+        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray, inputBitDepth);
         Mat? output = null;
         try
         {
@@ -618,6 +635,8 @@ internal static class AdaptiveThresholdCore
                     ["method"] = method,
                     ["invert"] = invert,
                     ["autoGray"] = converted,
+                    ["inputBitDepth"] = inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "auto",
+                    ["byteScale"] = source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage",
                     ["foregroundRatio"] = Math.Round(fg, 6),
                     ["domainPixels"] = domain.PixelCount,
@@ -648,8 +667,9 @@ internal static class OtsuThresholdCore
         if (source.Empty()) throw new InvalidOperationException(nodeType + " requires a non-empty image.");
         var invert = node.GetBool("invert", false);
         var roi = node.GetRoi();
+        var inputBitDepth = PreprocessImageHelpers.InputBitDepth(node, nodeType);
 
-        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray);
+        var gray = PreprocessImageHelpers.ToGray8(source, out var converted, out var ownedGray, inputBitDepth);
         Mat? output = null;
         try
         {
@@ -679,6 +699,8 @@ internal static class OtsuThresholdCore
                     ["threshold"] = computed,
                     ["invert"] = invert,
                     ["autoGray"] = converted,
+                    ["inputBitDepth"] = inputBitDepth?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "auto",
+                    ["byteScale"] = source.Depth() == MatType.CV_16U ? PreprocessImageHelpers.ByteScale(inputBitDepth) : 1d,
                     ["roi"] = roi?.Type.ToString() ?? "FullImage",
                     ["foregroundRatio"] = Math.Round(fg2, 6),
                     ["domainPixels"] = domain.PixelCount

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "f2024b899ecbf323628c741e64677cddfefba3661a53cd31286aebf0e3310719",
+  "hash": "64190505f8a8dcde89d50c858ba19b20678a9b0060bf2212b272f444e06c9689",
   "items": [
     {
       "type": "image.acquire",
@@ -42596,6 +42596,40 @@
           ],
           "group": "Mode",
           "description": "manual uses Threshold; adaptive uses local mean/Gaussian; otsu picks a global level."
+        },
+        {
+          "name": "inputBitDepth",
+          "label": "Input Bit Depth",
+          "type": "select",
+          "defaultValue": "auto",
+          "options": [
+            {
+              "label": "Auto (full 16-bit range)",
+              "value": "auto"
+            },
+            {
+              "label": "8-bit",
+              "value": "8"
+            },
+            {
+              "label": "10-bit",
+              "value": "10"
+            },
+            {
+              "label": "12-bit",
+              "value": "12"
+            },
+            {
+              "label": "14-bit",
+              "value": "14"
+            },
+            {
+              "label": "16-bit",
+              "value": "16"
+            }
+          ],
+          "group": "Input",
+          "description": "How 16-bit unsigned inputs are scaled to byte before thresholding. auto keeps the historical full-range mapping (divide by 257); a fixed depth maps 0..(2^bits-1) onto 0..255 so 10/12-bit cameras keep their contrast. Ignored for other pixel types."
         },
         {
           "name": "threshold",
