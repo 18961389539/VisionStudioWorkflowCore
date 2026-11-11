@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "f7368a8c1d19f57a60fe6df276ce33e5cf19d6ddabf075f2430baeac612d80f7",
+  "hash": "4c079d0b37d814dce8378c66501b2f42466dfd0bed809159037834bf175b4f96",
   "items": [
     {
       "type": "image.acquire",
@@ -42508,7 +42508,7 @@
     },
     {
       "type": "image.threshold",
-      "displayName": "Threshold",
+      "displayName": "Threshold (single level)",
       "category": "Preprocess",
       "inputs": [
         {
@@ -42750,7 +42750,7 @@
           "internal": true
         }
       ],
-      "description": "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+      "description": "Binary threshold with one cut level: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible, and raises a warning with an Otsu suggestion when a manual level selects almost nothing or almost everything. Need a 100..200 band instead of one cut? Use region.fromRange — it keeps the source bit depth and returns a Region; this node answers \"above/below one level\" and returns an Image. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,
@@ -45743,7 +45743,7 @@
     },
     {
       "type": "region.fromRange",
-      "displayName": "Range Segmentation",
+      "displayName": "Range Segmentation (band)",
       "category": "Region",
       "inputs": [
         {
@@ -46043,7 +46043,7 @@
           "internal": true
         }
       ],
-      "description": "Create a Region from an inclusive gray or three-channel color range. Connect exactly one of image or domainImage; optional region further restricts, and a ROI limits the result to the selection. Key params: channel bounds, invert, empty policy. count is the region object count — a threshold region keeps every run in one object, so it is 1 even with several targets; blobCount is the 8-connected component count and answers \"how many targets\". Too-wide range swallows background; too-narrow drops the target.",
+      "description": "Create a Region from an inclusive gray or three-channel color range (a band with both bounds), keeping the source pixel type. Connect exactly one of image or domainImage; optional region further restricts, and a ROI limits the result to the selection. Key params: channel bounds, invert, empty policy. count is the region object count — a threshold region keeps every run in one object, so it is 1 even with several targets; blobCount is the 8-connected component count and answers \"how many targets\". Need a single cut level and a 0/255 image instead? Use image.threshold; this node answers \"between two levels\" and returns a Region. Too-wide range swallows background; too-narrow drops the target.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": true,

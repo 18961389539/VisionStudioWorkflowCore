@@ -162,7 +162,7 @@ public static class BuiltInNodeCatalog
             new VisionToolCapabilities(Deterministic: false)),
         new(
             "image.threshold",
-            "Threshold",
+            "Threshold (single level)",
             "Preprocess",
             [ExecIn, new("image", VisionDataType.Image), new("thresholdValue", VisionDataType.Double, Required: false)],
             [new("image", VisionDataType.Image), new("threshold", VisionDataType.Double, Required: false),
@@ -187,7 +187,7 @@ public static class BuiltInNodeCatalog
                 new("invert", "Invert", "boolean", false, Group: "Output",
                     Description: "Swap foreground/background polarity.", VisibleWhen: new("mode", ["manual", "adaptive", "otsu"]))
             ],
-            "Binary threshold: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
+            "Binary threshold with one cut level: manual, local adaptive, or Otsu. All modes convert color to gray and scale UInt16 by 1/257 (or by the declared inputBitDepth) to an 8-bit binary image; manual/Otsu also emit the threshold value. A ROI limits the Otsu and adaptive statistics to the ROI bounding box and makes the foreground ratio relative to the ROI area; pixels outside the ROI are cleared. Emits the foreground pixel ratio so binarization drift is visible, and raises a warning with an Otsu suggestion when a manual level selects almost nothing or almost everything. Need a 100..200 band instead of one cut? Use region.fromRange — it keeps the source bit depth and returns a Region; this node answers \"above/below one level\" and returns an Image. Harsh lighting can make Otsu swallow the target; follow with region cleanup when needed.",
             "builtin", new VisionToolCapabilities(SupportsRoi: true, EmitsOverlay: false)),
         // ===== 批次一（2026-10-13 节点补齐）：图像预处理族 =====
         new(

@@ -32,7 +32,7 @@ describe('readable run observability', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ ...snapshot, baselines: [{ ...snapshot.baselines[0], status: 'Insufficient', sampleCount: 0 }] })));
     render(<RunObservabilityPanel runId="run-1" />);
     await screen.findByRole('table');
-    expect(screen.getAllByText('图像阈值分割')).toHaveLength(2);
+    expect(screen.getAllByText('阈值分割（单阈值）')).toHaveLength(2);
     expect(screen.getAllByText('样本不足')).toHaveLength(2);
   });
 

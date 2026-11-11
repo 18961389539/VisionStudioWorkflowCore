@@ -662,6 +662,13 @@ internal static class AdaptiveThresholdCore
 internal static class OtsuThresholdCore
 {
 
+    /// <summary>在给定灰度图上求 Otsu 全局阈值。Otsu 模式与手动模式的建议值共用，避免两套算法口径。</summary>
+    public static double Level(Mat gray)
+    {
+        using var discard = new Mat();
+        return JLVisionOperators.Threshold(gray, discard, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
+    }
+
     public static NodeExecutorResult Execute(NodeExecutionContext context, NodeDefinition node, string nodeType, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -683,9 +690,7 @@ internal static class OtsuThresholdCore
             // 阈值只由统计域决定：ROI 存在时只用包围盒内的像素求 Otsu，ROI 外的高亮不再参与直方图。
             using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: true, cancellationToken);
             // Otsu：由直方图自动求全局阈值——输出阈值供追溯与"光照漂移"监控。
-            var computed = 0d;
-            using (var discard = new Mat())
-                computed = JLVisionOperators.Threshold(domain.Gray, discard, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
+            var computed = OtsuThresholdCore.Level(domain.Gray);
             var binary = ImageTransformOutput.Create(target => JLVisionOperators.Threshold(gray, target, computed, maxValue,
                 invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(binary, domain.Mask, cancellationToken);

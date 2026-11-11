@@ -256,6 +256,10 @@ var width = node.GetInt("width", 1280);
 
 public sealed class ThresholdNode : IVisionNodeExecutor
 {
+    /// <summary>手动阈值选中比例低于/高于这两个门限时视为配置异常（0.05% / 99.95%）。</summary>
+    private const double ExtremeLowRatio = 0.0005;
+    private const double ExtremeHighRatio = 0.9995;
+
     public string Type => "image.threshold";
 
     public ValueTask<NodeExecutorResult> ExecuteAsync(NodeExecutionContext context, NodeDefinition node, CancellationToken cancellationToken)
@@ -298,8 +302,8 @@ public sealed class ThresholdNode : IVisionNodeExecutor
         Mat? output = null;
         try
         {
-            // manual 的阈值是常量，不需要统计域；这里只取 ROI 掩膜与 ROI 像素数，让占比分母与 adaptive/Otsu 同口径。
-            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: false, cancellationToken);
+            // manual 的阈值是常量，不需要统计域来定阈值；但保留 ROI 包围盒裁剪，才能在占比异常时给出 Otsu 建议值。
+            using var domain = ThresholdStatisticsDomain.Create(gray, roi, 0, crop: true, cancellationToken);
             var thresholded = ImageTransformOutput.Create(target =>
                 JLVisionOperators.Threshold(gray, target, threshold, maxValue, invert ? ThresholdTypes.BinaryInv : ThresholdTypes.Binary));
             output = PreprocessImageHelpers.ApplyMask(thresholded, domain.Mask, cancellationToken);
@@ -327,6 +331,18 @@ public sealed class ThresholdNode : IVisionNodeExecutor
             outputs["foregroundRatio"] = VisionValue.Double(fgRatio);
             summary["foregroundRatio"] = Math.Round(fgRatio, 6);
             summary["domainPixels"] = domain.PixelCount;
+            // 自检：手动阈值选中几乎为空或几乎全选，通常是阈值/极性/ROI 配错。此时额外算一次 Otsu 给出对照值，
+            // 正常取值不付这份代价。前景占比已含 ROI 口径，所以告警对 ROI 同样成立。
+            if (fgRatio <= ThresholdNode.ExtremeLowRatio || fgRatio >= ThresholdNode.ExtremeHighRatio)
+            {
+                var suggested = OtsuThresholdCore.Level(domain.Gray);
+                var warning = $"manual threshold {threshold:0.###} selected {fgRatio * 100:0.###}% of the domain ({Convert.ToInt64(summary["nonZeroCount"])} px of {domain.PixelCount}); Otsu suggests {suggested:0.###}. Check the level, invert, or the ROI.";
+                outputs["warningCount"] = VisionValue.Integer(1);
+                summary["warningCount"] = 1;
+                summary["thresholdWarning"] = warning;
+                summary["suggestedThreshold"] = suggested;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
         }
