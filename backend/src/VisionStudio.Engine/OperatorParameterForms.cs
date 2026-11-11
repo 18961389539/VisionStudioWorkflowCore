@@ -65,8 +65,7 @@ internal static class OperatorParameterForms
     internal static ParameterDescriptor Resolve(NodeDefinition node, NodeCatalogItem catalog, ParameterDescriptor descriptor)
     {
         if (descriptor.VariantParameter is not { } controller || descriptor.Variants is not { } variants) return descriptor;
-        var fallback = Convert.ToString(catalog.Parameters.FirstOrDefault(p => p.Name == controller)?.DefaultValue) ?? "";
-        var operation = node.GetString(controller, fallback).Trim();
+        var operation = (NodeParameterValue.Resolve(node, catalog, controller) ?? string.Empty).Trim();
         if (!variants.TryGetValue(operation, out var presentation))
             presentation = variants.FirstOrDefault(pair => pair.Key.Equals(operation, StringComparison.OrdinalIgnoreCase)).Value;
         if (presentation is null) return descriptor;
@@ -88,7 +87,7 @@ internal static class OperatorParameterForms
     {
         var catalog = BuiltInNodeCatalog.Items.First(item => item.Type.Equals(node.Type, StringComparison.OrdinalIgnoreCase));
         var controller = catalog.Parameters.First(item => item.Name is "operator" or "feature");
-        var operation = node.GetString(controller.Name, Convert.ToString(controller.DefaultValue) ?? "").Trim();
+        var operation = (NodeParameterValue.Resolve(node, catalog, controller.Name) ?? string.Empty).Trim();
         foreach (var original in catalog.Parameters.Where(item => item.Type == "number"))
         {
             if (original.VisibleWhen is { } visibility && !visibility.Values.Contains(operation)) continue;

@@ -8,7 +8,7 @@ public static class CalibrationEndpoints
     public static IEndpointRouteBuilder MapCalibrationEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/calibration/providers", (IEnumerable<ICalibrationPointProvider> providers) =>
-            Results.Ok(providers.Select(x => x.Descriptor)));
+            Results.Ok(providers.Select(x => x.Descriptor))).Produces<IReadOnlyList<CalibrationProviderDescriptor>>();
 
         app.MapPost("/api/calibration/capture-grid", async (
             CalibrationGridCaptureRequest request,
@@ -25,7 +25,8 @@ public static class CalibrationEndpoints
             {
                 throw new ApiValidationException(ex.Message, ex);
             }
-        }).RequireEngineer("calibration.capture-grid", "calibration");
+        }).RequireEngineer("calibration.capture-grid", "calibration")
+            .Produces<IReadOnlyList<CalibrationWorkspacePoint>>();
 
         app.MapPost("/api/calibration/solve", (CalibrationWorkspaceRequest request, CalibrationWorkspaceService solver) =>
         {
@@ -34,67 +35,75 @@ public static class CalibrationEndpoints
             {
                 throw new ApiValidationException(ex.Message, ex);
             }
-        }).RequireEngineer("calibration.solve", "calibration");
+        }).RequireEngineer("calibration.solve", "calibration").Produces<CalibrationWorkspaceResult>();
 
         app.MapGet("/api/calibrations", async (CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct)));
+            Results.Ok(await store.ListAsync(ct))).Produces<IReadOnlyList<CalibrationAssetDescriptor>>();
 
         app.MapPost("/api/calibrations", async (CreateCalibrationAssetRequest request, CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.CreateAsync(request, ct))).RequireEngineer("calibration.create", "calibration");
+            Results.Ok(await store.CreateAsync(request, ct))).RequireEngineer("calibration.create", "calibration")
+            .Produces<CalibrationAssetDescriptor>();
 
         app.MapGet("/api/calibrations/{id}", async (string id, CalibrationAssetStore store, CancellationToken ct) =>
         {
             var asset = await store.GetAsync(id, ct);
             return asset is null ? Results.NotFound() : Results.Ok(asset);
-        });
+        }).Produces<CalibrationAssetDescriptor>();
 
         app.MapPost("/api/calibrations/{id}/versions", async (string id, SaveCalibrationVersionRequest request, CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.AddVersionAsync(id, request, ct))).RequireEngineer("calibration.version.create", "calibration");
+            Results.Ok(await store.AddVersionAsync(id, request, ct))).RequireEngineer("calibration.version.create", "calibration")
+            .Produces<CalibrationVersionSnapshot>();
 
         app.MapGet("/api/calibrations/{id}/versions/{version:int}", async (string id, int version, CalibrationAssetStore store, CancellationToken ct) =>
         {
             var snapshot = await store.GetVersionAsync(id, version, ct);
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-        });
+        }).Produces<CalibrationVersionSnapshot>();
 
         app.MapGet("/api/calibrations/{id}/published", async (string id, CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.GetPublishedAsync(id, ct)));
+            Results.Ok(await store.GetPublishedAsync(id, ct))).Produces<CalibrationVersionSnapshot>();
 
         app.MapPost("/api/calibrations/{id}/versions/{version:int}/publish", async (string id, int version, CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.publish", "calibration");
+            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.publish", "calibration")
+            .Produces<CalibrationAssetDescriptor>();
 
         app.MapPost("/api/calibrations/{id}/rollback/{version:int}", async (string id, int version, CalibrationAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.rollback", "calibration");
+            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.rollback", "calibration")
+            .Produces<CalibrationAssetDescriptor>();
 
         app.MapGet("/api/camera-intrinsics", async (CameraIntrinsicAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct)));
+            Results.Ok(await store.ListAsync(ct))).Produces<IReadOnlyList<CameraIntrinsicAssetDescriptor>>();
 
         app.MapPost("/api/camera-intrinsics", async (CreateCameraIntrinsicAssetFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
-            Results.Ok(await wizard.CreateIntrinsicAssetAsync(request, ct))).RequireEngineer("calibration.intrinsic-asset.create", "calibration");
+            Results.Ok(await wizard.CreateIntrinsicAssetAsync(request, ct))).RequireEngineer("calibration.intrinsic-asset.create", "calibration")
+            .Produces<CameraIntrinsicAssetDescriptor>();
 
         app.MapGet("/api/camera-intrinsics/{id}", async (string id, CameraIntrinsicAssetStore store, CancellationToken ct) =>
         {
             var asset = await store.GetAsync(id, ct);
             return asset is null ? Results.NotFound() : Results.Ok(asset);
-        });
+        }).Produces<CameraIntrinsicAssetDescriptor>();
 
         app.MapPost("/api/camera-intrinsics/{id}/versions", async (string id, SaveCameraIntrinsicVersionFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
-            Results.Ok(await wizard.AddIntrinsicVersionAsync(id, request, ct))).RequireEngineer("calibration.intrinsic-asset.version.create", "calibration");
+            Results.Ok(await wizard.AddIntrinsicVersionAsync(id, request, ct))).RequireEngineer("calibration.intrinsic-asset.version.create", "calibration")
+            .Produces<CameraIntrinsicVersionSnapshot>();
 
         app.MapGet("/api/camera-intrinsics/{id}/versions/{version:int}", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
         {
             var snapshot = await store.GetVersionAsync(id, version, ct);
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-        });
+        }).Produces<CameraIntrinsicVersionSnapshot>();
 
         app.MapGet("/api/camera-intrinsics/{id}/published", async (string id, CameraIntrinsicAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.GetPublishedAsync(id, ct)));
+            Results.Ok(await store.GetPublishedAsync(id, ct))).Produces<CameraIntrinsicVersionSnapshot>();
 
         app.MapPost("/api/camera-intrinsics/{id}/versions/{version:int}/publish", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.intrinsic-asset.publish", "calibration");
+            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.intrinsic-asset.publish", "calibration")
+            .Produces<CameraIntrinsicAssetDescriptor>();
 
         app.MapPost("/api/camera-intrinsics/{id}/rollback/{version:int}", async (string id, int version, CameraIntrinsicAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.intrinsic-asset.rollback", "calibration");
+            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.intrinsic-asset.rollback", "calibration")
+            .Produces<CameraIntrinsicAssetDescriptor>();
 
         // --- Guided camera-intrinsics wizard (HALCON-assistant style slice) ---
         app.MapPost("/api/calibration/wizard/sessions", (CalibrationWizardCreateRequest request, CalibrationWizardService wizard) =>

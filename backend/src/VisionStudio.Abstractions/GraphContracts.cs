@@ -53,10 +53,7 @@ public sealed record PortDescriptor(string Name, VisionDataType DataType, bool R
     {
         if (Required) return true;
         if (RequiredWhen is not { } condition) return false;
-        var fallback = Convert.ToString(catalog.Parameters.FirstOrDefault(parameter =>
-            parameter.Name.Equals(condition.Parameter, StringComparison.OrdinalIgnoreCase))?.DefaultValue,
-            System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-        var actual = node.GetString(condition.Parameter, fallback);
+        var actual = NodeParameterValue.Resolve(node, catalog, condition.Parameter) ?? string.Empty;
         return condition.Values.Any(expected => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase));
     }
 }
@@ -205,31 +202,13 @@ public static class NodeActionContract
     public static bool Applies(NodeDefinition node, NodeCatalogItem catalog, NodeActionDeclaration action)
     {
         if (string.IsNullOrWhiteSpace(action.WhenParameter)) return true;
-        var actual = ResolveParameter(node, catalog, action.WhenParameter);
+        var actual = NodeParameterValue.Resolve(node, catalog, action.WhenParameter);
         return string.Equals(Normalize(actual), Normalize(action.WhenValue), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>该节点是否存在成立的动作声明（按实际参数求值）。</summary>
     public static bool NodeHasAction(NodeDefinition node, NodeCatalogItem catalog)
         => catalog.Actions is { } actions && actions.Any(action => Applies(node, catalog, action));
-
-    private static string? ResolveParameter(NodeDefinition node, NodeCatalogItem catalog, string name)
-    {
-        if (node.Parameters is not null && node.Parameters.TryGetValue(name, out var raw))
-        {
-            return raw.ValueKind switch
-            {
-                JsonValueKind.String => raw.GetString(),
-                JsonValueKind.True => "true",
-                JsonValueKind.False => "false",
-                JsonValueKind.Number => raw.GetRawText(),
-                _ => null
-            };
-        }
-        return catalog.Parameters
-            .FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?.DefaultValue?.ToString();
-    }
 
     private static string? Normalize(string? value)
         => value is null ? null : bool.TryParse(value, out var flag) ? (flag ? "true" : "false") : value.Trim();

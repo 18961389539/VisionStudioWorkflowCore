@@ -524,7 +524,7 @@ public static class Batch5PrecisionCatalog
                 ],
             "JLVision gray-edge shape matching with explicit model/search regions, train-up-to-four equal-size samples, rotation, uniform or aniso scale, polarity, multi-target and clutter ROI. Wire: train first on new nodes, then run on scene image; pose/scale outputs feed roi.transform. Key params: model/search regions, minScore, train/search angle and scale ranges, pyramidLevels, contrast gates, clutterRoi. Default matchingBackend=jlvision; engine=auto is native only and never silently switches to managedChamfer (explicit engine=managedChamfer required for the managed distance matcher). Remaining gap vs PatMax/full HALCON: no PatMax feature vectors, no trained clutter model, no full XLD least-squares deformation. The trained model is stored inside the node as base64 (16 MB limit) together with a training-parameter fingerprint; changing training parameters requires retraining, and modelMode=trained refuses to run before the first training. found=false: not trained, weak contrast, outside angle/scale window, or clutter reject.",
             "builtin",
-            new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true, SupportsRoi: true), TransformFrames: new(NodeTransformFramePolicy.TemplateToImage, ImagePort: "image", TemplatePort: "template"), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
+            new VisionToolCapabilities(Deterministic: false, EmitsOverlay: true, SupportsRoi: true), OutputFrames: [new(NodeOutputFrameSource.ImageInput, InputPort: "image")]),
         new(
             "roi.transform",
             "ROI Transform",

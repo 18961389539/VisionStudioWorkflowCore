@@ -1,3 +1,4 @@
+using VisionStudio.Api.Contracts;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 using VisionStudio.Engine;
@@ -15,25 +16,24 @@ public static class WorkflowExecutionEndpoints
             {
                 var expanded = await modules.ExpandAsync(workflow, ct);
                 var compiled = compiler.Compile(expanded.Workflow);
-                return Results.Ok(new
-                {
+                return Results.Ok(new WorkflowCompileResponse(
                     compiled.WorkflowCoreId,
                     compiled.Version,
                     compiled.OrderedNodeIds,
                     compiled.PipelineSegments,
-                    pipelineSegmentCount = compiled.PipelineSegments.Count,
+                    compiled.PipelineSegments.Count,
                     compiled.ControlRegions,
-                    structuredRegionCount = compiled.ControlRegions.Count,
-                    moduleDependencies = expanded.Dependencies,
-                    expandedNodeCount = expanded.Workflow.Nodes.Count,
-                    compiled.DslJson
-                });
+                    compiled.ControlRegions.Count,
+                    compiled.Warnings,
+                    expanded.Dependencies,
+                    expanded.Workflow.Nodes.Count,
+                    compiled.DslJson));
             }
             catch (InvalidOperationException ex)
             {
                 throw new ApiValidationException(ex.Message, ex);
             }
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).RequireAuthorization(SecurityPolicies.Engineer).Produces<WorkflowCompileResponse>();
 
         // Validation is intentionally a result-style endpoint rather than ProblemDetails because
         // the designer consumes valid=false as normal interactive feedback.
@@ -43,25 +43,26 @@ public static class WorkflowExecutionEndpoints
             {
                 var expanded = await modules.ExpandAsync(workflow, ct);
                 var compiled = compiler.Compile(expanded.Workflow);
-                return Results.Ok(new
-                {
-                    valid = true,
+                return Results.Ok(new WorkflowValidationSuccess(
+                    true,
                     compiled.WorkflowCoreId,
                     compiled.OrderedNodeIds,
                     compiled.PipelineSegments,
-                    pipelineSegmentCount = compiled.PipelineSegments.Count,
+                    compiled.PipelineSegments.Count,
                     compiled.ControlRegions,
-                    structuredRegionCount = compiled.ControlRegions.Count,
-                    moduleDependencies = expanded.Dependencies,
-                    expandedNodeCount = expanded.Workflow.Nodes.Count,
-                    registeredNodeTypes = expanded.Workflow.Nodes.Select(x => x.Type).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
-                });
+                    compiled.ControlRegions.Count,
+                    compiled.Warnings,
+                    expanded.Dependencies,
+                    expanded.Workflow.Nodes.Count,
+                    expanded.Workflow.Nodes.Select(x => x.Type).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()));
             }
             catch (Exception ex)
             {
-                return Results.BadRequest(new { valid = false, error = ex.Message });
+                return Results.BadRequest(new WorkflowValidationFailure(false, ex.Message));
             }
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).RequireAuthorization(SecurityPolicies.Engineer)
+            .Produces<WorkflowValidationSuccess>()
+            .Produces<WorkflowValidationFailure>(StatusCodes.Status400BadRequest);
 
         app.MapPost("/api/run", async (
             WorkflowDefinition workflow,

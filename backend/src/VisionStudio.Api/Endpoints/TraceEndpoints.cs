@@ -1,9 +1,11 @@
+using VisionStudio.Abstractions;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 
 namespace VisionStudio.Api.Endpoints;
 
 public sealed record StorageBackupCreateRequest(bool? IncludeArtifacts = null);
+public sealed record StorageCleanupResponse(int Changed, StorageCapacityStatus Capacity);
 
 public static class TraceEndpoints
 {
@@ -43,25 +45,29 @@ public static class TraceEndpoints
             return Results.Ok(filtered
                 ? await traces.StatsAsync(new TraceQuery(0, 0, jobId, jobVersion, disposition, executionStatus, source, runIdPrefix, workflow, errorCode, from, to), ct)
                 : await traces.StatsAsync(days ?? 7, ct));
-        });
+        }).Produces<TraceStats>();
 
         app.MapGet("/api/traces/{runId}", async (string runId, TraceabilityStore traces, CancellationToken ct) =>
         {
             var trace = await traces.GetAsync(runId, ct);
             return trace is null ? Results.NotFound() : Results.Ok(trace);
-        });
+        }).Produces<RunTraceRecord>();
 
         app.MapGet("/api/traces/{runId}/observability", async (string runId, int? days, int? history, RunObservabilityService observability, CancellationToken ct) =>
-            Results.Ok(await observability.GetAsync(runId, days ?? 7, history ?? 100, ct)));
+            Results.Ok(await observability.GetAsync(runId, days ?? 7, history ?? 100, ct)))
+            .Produces<RunObservabilitySnapshot>();
 
         app.MapGet("/api/traces/{runId}/compare", async (string runId, string? baselineRunId, TraceAnalysisService analysis, CancellationToken ct) =>
-            Results.Ok(await analysis.CompareAsync(runId, baselineRunId, ct)));
+            Results.Ok(await analysis.CompareAsync(runId, baselineRunId, ct)))
+            .Produces<RunTraceComparison>();
 
         app.MapGet("/api/traces/{runId}/failure-signature", async (string runId, int? days, int? take, TraceAnalysisService analysis, CancellationToken ct) =>
-            Results.Ok(await analysis.AnalyzeFailureAsync(runId, days ?? 30, take ?? 12, ct)));
+            Results.Ok(await analysis.AnalyzeFailureAsync(runId, days ?? 30, take ?? 12, ct)))
+            .Produces<FailureSignatureAnalysis>();
 
         app.MapPut("/api/traces/{runId}/disposition", async (string runId, UpdateDispositionRequest request, TraceabilityStore traces, CancellationToken ct) =>
-            Results.Ok(await traces.UpdateDispositionAsync(runId, request, ct))).RequireOperator("trace.disposition.update", "trace");
+            Results.Ok(await traces.UpdateDispositionAsync(runId, request, ct))).RequireOperator("trace.disposition.update", "trace")
+            .Produces<RunTraceRecord>();
 
         app.MapGet("/api/traces/{runId}/preview", (string runId, TraceabilityStore traces) =>
         {
@@ -73,41 +79,43 @@ public static class TraceEndpoints
         {
             var workflow = await traces.GetWorkflowSnapshotAsync(runId, ct);
             return workflow is null ? Results.NotFound() : Results.Ok(workflow);
-        });
+        }).Produces<WorkflowDefinition>();
 
         app.MapGet("/api/traces/{runId}/dependencies", async (string runId, TraceabilityStore traces, CancellationToken ct) =>
         {
             var manifest = await traces.GetDependencyManifestAsync(runId, ct);
             return manifest is null ? Results.NotFound() : Results.Ok(manifest);
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).RequireAuthorization(SecurityPolicies.Engineer).Produces<RuntimeDependencyManifest>();
 
         app.MapGet("/api/traces/{runId}/overlays", async (string runId, TraceabilityStore traces, CancellationToken ct) =>
         {
             var overlays = await traces.GetOverlaysAsync(runId, ct);
             return overlays is null ? Results.NotFound() : Results.Ok(overlays);
-        });
+        }).Produces<IReadOnlyList<VisionOverlay>>();
 
         app.MapGet("/api/storage/status", async (TraceabilityStore traces, CancellationToken ct) =>
-            Results.Ok(await traces.StorageStatusAsync(ct)));
+            Results.Ok(await traces.StorageStatusAsync(ct))).Produces<TraceStorageStatus>();
 
         app.MapGet("/api/storage/schema", async (SqliteMetadataDatabase database, CancellationToken ct) =>
-            Results.Ok(await database.GetSchemaStatusAsync(ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await database.GetSchemaStatusAsync(ct))).RequireAuthorization(SecurityPolicies.Engineer)
+            .Produces<SchemaMigrationStatus>();
 
         app.MapGet("/api/storage/capacity", async (StorageCapacityService capacity, CancellationToken ct) =>
-            Results.Ok(await capacity.RefreshAsync(ct)));
+            Results.Ok(await capacity.RefreshAsync(ct))).Produces<StorageCapacityStatus>();
 
         app.MapPost("/api/storage/cleanup", async (TraceabilityStore traces, StorageCapacityService capacity, CancellationToken ct) =>
         {
             var changed = await traces.CleanupAsync(ct);
-            return Results.Ok(new { changed, capacity = await capacity.RefreshAsync(ct) });
-        }).RequireAdministrator("storage.cleanup", "storage");
+            return Results.Ok(new StorageCleanupResponse(changed, await capacity.RefreshAsync(ct)));
+        }).RequireAdministrator("storage.cleanup", "storage").Produces<StorageCleanupResponse>();
 
         app.MapGet("/api/storage/backups", async (StorageBackupService backups, CancellationToken ct) =>
-            Results.Ok(await backups.ListAsync(ct))).RequireAuthorization(SecurityPolicies.Administrator);
+            Results.Ok(await backups.ListAsync(ct))).RequireAuthorization(SecurityPolicies.Administrator)
+            .Produces<IReadOnlyList<StorageBackupDescriptor>>();
 
         app.MapPost("/api/storage/backups", async (StorageBackupCreateRequest? request, StorageBackupService backups, CancellationToken ct) =>
             Results.Ok(await backups.CreateAsync(request?.IncludeArtifacts, ct)))
-            .RequireAdministrator("storage.backup.create", "storage");
+            .RequireAdministrator("storage.backup.create", "storage").Produces<StorageBackupDescriptor>();
 
         app.MapDelete("/api/storage/backups/{backupId}", async (string backupId, HttpContext http, StorageBackupService backups, CancellationToken ct) =>
         {
@@ -120,7 +128,7 @@ public static class TraceEndpoints
         {
             AuditContext.SetTarget(http, request.BackupId);
             return Results.Ok(await backups.RestoreAsync(request, ct));
-        }).RequireAdministrator("storage.restore", "storage");
+        }).RequireAdministrator("storage.restore", "storage").Produces<StorageRestoreResult>();
 
         // F03：受控恢复入口——失败锁激活时唯一仍可达的维护端点（中间件豁免使其在维护激活时
         // 仍可登录并核对）。Q07：本端点**只做核验与诊断，永不直接清除失败锁**：没有哈希校验的

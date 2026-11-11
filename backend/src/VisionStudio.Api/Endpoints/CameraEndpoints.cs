@@ -11,7 +11,8 @@ public static class CameraEndpoints
 {
     public static IEndpointRouteBuilder MapCameraEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/cameras", (CameraManager cameras) => Results.Ok(cameras.List()));
+        app.MapGet("/api/cameras", (CameraManager cameras) => Results.Ok(cameras.List()))
+            .Produces<IReadOnlyList<CameraDescriptor>>();
 
         app.MapGet("/api/cameras/adapters", (IEnumerable<ICameraAdapterProvider> providers) => Results.Ok(
             providers.OrderBy(x => x.Driver, StringComparer.OrdinalIgnoreCase).Select(x => new
@@ -39,7 +40,7 @@ public static class CameraEndpoints
                 result.AddRange(await provider.DiscoverAsync(ct));
             }
             return Results.Ok(result.OrderBy(x => x.Driver).ThenBy(x => x.SerialNumber).ToArray());
-        }).RequireEngineer("camera.discover", "camera");
+        }).Produces<IReadOnlyList<CameraDiscoveredDevice>>().RequireEngineer("camera.discover", "camera");
 
         app.MapPost("/api/cameras/vendor", (VendorCameraRegistrationRequest request, IEnumerable<ICameraAdapterProvider> providers, CameraManager cameras) =>
         {
@@ -52,7 +53,7 @@ public static class CameraEndpoints
                 request.Id.Trim(), request.Name, request.SerialNumber, request.UserDefinedName, request.DeviceKey, request.Settings));
             cameras.Register(device, Math.Clamp(request.RingCapacity, 2, 64));
             return Results.Ok(cameras.Get(request.Id.Trim()));
-        }).RequireEngineer("camera.register.vendor", "camera");
+        }).Produces<CameraDescriptor>().RequireEngineer("camera.register.vendor", "camera");
 
         app.MapPost("/api/cameras/file", (FileCameraRegistrationRequest request, CameraManager cameras, MediaLibraryService media) =>
         {
@@ -69,38 +70,38 @@ public static class CameraEndpoints
                 source.Source,
                 source.PhysicalPath);
             return Results.Ok(cameras.Get(request.Id.Trim()));
-        }).RequireEngineer("camera.register.file", "camera");
+        }).Produces<CameraDescriptor>().RequireEngineer("camera.register.file", "camera");
 
         app.MapPost("/api/cameras/{id}/open", async (string id, CameraManager cameras, CancellationToken ct) =>
         {
             await cameras.OpenAsync(id, ct);
             return Results.Ok(cameras.Get(id));
-        }).RequireOperator("camera.open", "camera");
+        }).Produces<CameraDescriptor>().RequireOperator("camera.open", "camera");
 
         app.MapPost("/api/cameras/{id}/close", async (string id, CameraManager cameras, CancellationToken ct) =>
         {
             await cameras.CloseAsync(id, ct);
             return Results.Ok(cameras.Get(id));
-        }).RequireOperator("camera.close", "camera");
+        }).Produces<CameraDescriptor>().RequireOperator("camera.close", "camera");
 
         app.MapPost("/api/cameras/{id}/start", async (string id, CameraManager cameras, CancellationToken ct) =>
         {
             await cameras.StartAsync(id, ct);
             return Results.Ok(cameras.Get(id));
-        }).RequireOperator("camera.start", "camera");
+        }).Produces<CameraDescriptor>().RequireOperator("camera.start", "camera");
 
         app.MapPost("/api/cameras/{id}/stop", async (string id, CameraManager cameras, CancellationToken ct) =>
         {
             await cameras.StopAsync(id, ct);
             return Results.Ok(cameras.Get(id));
-        }).RequireOperator("camera.stop", "camera");
+        }).Produces<CameraDescriptor>().RequireOperator("camera.stop", "camera");
 
         app.MapPut("/api/cameras/{id}/settings", async (string id, CameraSettings request, CameraManager cameras, ProductionRuntimeService production, CancellationToken ct) =>
         {
             production.EnsureDependencyMutationAllowed("camera", id);
             await cameras.ApplySettingsAsync(id, request, ct);
             return Results.Ok(cameras.Get(id));
-        }).RequireEngineer("camera.settings.update", "camera");
+        }).Produces<CameraDescriptor>().RequireEngineer("camera.settings.update", "camera");
 
         app.MapPost("/api/cameras/{id}/trigger", async (string id, CameraManager cameras, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
@@ -131,10 +132,10 @@ public static class CameraEndpoints
             // F02/R01：下发确认成功才解除意图（成帧属于采集阶段，由派发许可覆盖，不在本意图范围）。
             intent.Complete();
             return Results.Ok(cameras.Get(id));
-        }).RequireOperator("camera.trigger", "camera");
+        }).Produces<CameraDescriptor>().RequireOperator("camera.trigger", "camera");
 
         app.MapGet("/api/cameras/{id}/transport-telemetry", (string id, CameraManager cameras)
-            => Results.Ok(cameras.GetTransportTelemetry(id)));
+            => Results.Ok(cameras.GetTransportTelemetry(id))).Produces<CameraTransportTelemetry>();
 
         app.MapGet("/api/cameras/{id}/preview", async (string id, int? maxWidth, int? quality, CameraManager cameras, CancellationToken ct) =>
         {

@@ -8,6 +8,41 @@ namespace VisionStudio.Api.Endpoints;
 /// Stateful debug sessions: run to the first breakpoint, keep the live scene, then continue
 /// (skipping completed nodes) or run single nodes from cached inputs.
 /// </summary>
+public sealed record DebugSessionRunResponse(
+    string SessionId,
+    string Operation,
+    string RunId,
+    bool Success,
+    double TotalDurationMs,
+    bool PreviewAvailable,
+    int PreviewWidth,
+    int PreviewHeight,
+    IReadOnlyList<VisionOverlay> Overlays,
+    IReadOnlyList<NodeRunReport> NodeReports,
+    string? Error,
+    string DebugState,
+    string? HaltNodeId,
+    string? HaltReason,
+    string? QualityDisposition,
+    IReadOnlyList<ControlFlowDecision>? ControlFlowDecisions,
+    string Engine);
+
+public sealed record DebugSessionSnapshotResponse(
+    string SessionId,
+    string State,
+    string? HaltNodeId,
+    string? HaltReason,
+    string? QualityDisposition,
+    string? Error,
+    int ReportCount,
+    IReadOnlyList<NodeRunReport> Reports,
+    IReadOnlyList<VisionOverlay> Overlays,
+    int PreviewWidth,
+    int PreviewHeight,
+    IReadOnlyList<string> ExecutedNodeIds,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastActivityAt);
+
 public static class DebugSessionEndpoints
 {
     public static IEndpointRouteBuilder MapDebugSessionEndpoints(this IEndpointRouteBuilder app)
@@ -22,7 +57,7 @@ public static class DebugSessionEndpoints
             await production.EnsureWorkflowRunAllowedAsync(request.Workflow, ct);
             var (sessionId, result) = await sessions.CreateAsync(request.Workflow, request.Options, ct);
             return MapSessionRun(sessionId, "create", result, store);
-        }).RequireEngineer("workflow.debug.session.create", "workflow");
+        }).Produces<DebugSessionRunResponse>().RequireEngineer("workflow.debug.session.create", "workflow");
 
         app.MapPost("/api/debug/sessions/{sessionId}/continue", async (
             string sessionId,
@@ -32,7 +67,7 @@ public static class DebugSessionEndpoints
         {
             var result = await sessions.ContinueAsync(sessionId, ct);
             return MapSessionRun(sessionId, "continue", result, store);
-        }).RequireEngineer("workflow.debug.session.continue", "workflow");
+        }).Produces<DebugSessionRunResponse>().RequireEngineer("workflow.debug.session.continue", "workflow");
 
         app.MapPost("/api/debug/sessions/{sessionId}/run-node", async (
             string sessionId,
@@ -43,7 +78,7 @@ public static class DebugSessionEndpoints
         {
             var result = await sessions.RunNodeAsync(sessionId, request.NodeId, ct);
             return MapSessionRun(sessionId, "run-node", result, store);
-        }).RequireEngineer("workflow.debug.session.run-node", "workflow");
+        }).Produces<DebugSessionRunResponse>().RequireEngineer("workflow.debug.session.run-node", "workflow");
 
         app.MapGet("/api/debug/sessions/{sessionId}", async (
             string sessionId,
@@ -51,24 +86,22 @@ public static class DebugSessionEndpoints
             CancellationToken ct) =>
         {
             var snapshot = await sessions.SnapshotAsync(sessionId, ct);
-            return Results.Ok(new
-            {
+            return Results.Ok(new DebugSessionSnapshotResponse(
                 snapshot.SessionId,
                 snapshot.State,
                 snapshot.HaltNodeId,
                 snapshot.HaltReason,
                 snapshot.QualityDisposition,
                 snapshot.Error,
-                reportCount = snapshot.Reports.Count,
+                snapshot.Reports.Count,
                 snapshot.Reports,
                 snapshot.Overlays,
                 snapshot.PreviewWidth,
                 snapshot.PreviewHeight,
                 snapshot.ExecutedNodeIds,
                 snapshot.CreatedAt,
-                snapshot.LastActivityAt
-            });
-        }).RequireEngineer("workflow.debug.session.read", "workflow");
+                snapshot.LastActivityAt));
+        }).Produces<DebugSessionSnapshotResponse>().RequireEngineer("workflow.debug.session.read", "workflow");
 
         app.MapDelete("/api/debug/sessions/{sessionId}", async (
             string sessionId,
@@ -82,8 +115,7 @@ public static class DebugSessionEndpoints
     private static IResult MapSessionRun(string sessionId, string operation, WorkflowRunResult result, RunStore store)
     {
         store.Put(result);
-        var response = new
-        {
+        var response = new DebugSessionRunResponse(
             sessionId,
             operation,
             result.RunId,
@@ -100,8 +132,7 @@ public static class DebugSessionEndpoints
             result.HaltReason,
             result.QualityDisposition,
             result.ControlFlowDecisions,
-            engine = "Workflow Core + Recursive Structured IR + VisionPipelineExecutor"
-        };
+            "Workflow Core + Recursive Structured IR + VisionPipelineExecutor");
         return result.Success ? Results.Ok(response) : Results.BadRequest(response);
     }
 }

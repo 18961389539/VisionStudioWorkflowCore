@@ -8,6 +8,9 @@ using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api.Endpoints;
 
+public sealed record CatalogMetaResponse(int SchemaVersion, string Hash, int NodeCount, int BuiltInNodeCount, int PluginNodeCount);
+public sealed record HostModeStatus(bool RuntimeOnly, string Mode);
+
 public static class SystemEndpoints
 {
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
@@ -120,8 +123,8 @@ public static class SystemEndpoints
         app.MapGet("/api/host-mode", (IConfiguration configuration) =>
         {
             var runtimeOnly = configuration.GetValue("VisionStudio:RuntimeOnly", false);
-            return Results.Ok(new { runtimeOnly, mode = runtimeOnly ? "Runtime" : "Designer" });
-        });
+            return Results.Ok(new HostModeStatus(runtimeOnly, runtimeOnly ? "Runtime" : "Designer"));
+        }).Produces<HostModeStatus>();
 
         app.MapGet("/api/catalog", (HttpContext http, VisionNodeRegistry registry) =>
         {
@@ -138,15 +141,13 @@ public static class SystemEndpoints
         app.MapGet("/api/catalog/meta", (VisionNodeRegistry registry) =>
         {
             var catalog = registry.Catalog;
-            return Results.Ok(new
-            {
-                schemaVersion = VisionCatalogSnapshot.SchemaVersion,
-                hash = VisionCatalogSnapshot.ComputeHash(catalog),
-                nodeCount = catalog.Count,
-                builtInNodeCount = catalog.Count(x => string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase)),
-                pluginNodeCount = catalog.Count(x => !string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase))
-            });
-        });
+            return Results.Ok(new CatalogMetaResponse(
+                VisionCatalogSnapshot.SchemaVersion,
+                VisionCatalogSnapshot.ComputeHash(catalog),
+                catalog.Count,
+                catalog.Count(x => string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase)),
+                catalog.Count(x => !string.Equals(x.PluginId, "builtin", StringComparison.OrdinalIgnoreCase))));
+        }).Produces<CatalogMetaResponse>();
         app.MapPost("/api/frames/resolve", (FrameResolveRequest request) =>
         {
             try

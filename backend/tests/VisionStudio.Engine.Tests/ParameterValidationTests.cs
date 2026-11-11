@@ -673,6 +673,39 @@ public sealed class ParameterValidationTests
     }
 
     [Fact]
+    public void FrameValidationAppliesToAnyCatalogNodeWithTransformAndImageInputs()
+    {
+        // 不再依赖六个测量类型的硬编码名单：目录里带 transform+image 的新节点自动受同样的帧校验。
+        var custom = new NodeCatalogItem(
+            "test.measure", "Test Measure", "Test",
+            [
+                new("exec", VisionDataType.Control),
+                new("image", VisionDataType.Image),
+                new("transform", VisionDataType.Transform2D)
+            ],
+            [new("image", VisionDataType.Image), new("next", VisionDataType.Control)],
+            []);
+        var workflow = new WorkflowDefinition("custom-frame-validation", "Custom frame validation",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop", "image.crop", null, null, null),
+            new NodeDefinition("custom", "test.measure", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop-control", "scene", "next", "crop", "exec", "control"),
+            new EdgeDefinition("crop-custom-control", "crop", "next", "custom", "exec", "control"),
+            new EdgeDefinition("scene-crop-image", "scene", "image", "crop", "image", "data"),
+            new EdgeDefinition("scene-custom-image", "scene", "image", "custom", "image", "data"),
+            new EdgeDefinition("crop-custom-transform", "crop", "transform", "custom", "transform", "data")
+        ]);
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler(custom).Compile(workflow));
+
+        Assert.Contains("samples image frame 'scene.image'", error.Message);
+        Assert.Contains("transform targets 'crop.image (crop frame)'", error.Message);
+    }
+
+    [Fact]
     public void MeasurementAcceptsImagePreservingNodesAfterTheTransformTarget()
     {
         var workflow = new WorkflowDefinition("crop-grayscale-measurement", "Crop grayscale measurement",
@@ -845,6 +878,54 @@ public sealed class ParameterValidationTests
 
         var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(BuildWorkflow("scene")));
         Assert.Contains("transform targets 'crop.image (crop frame)'", error.Message);
+    }
+
+    [Fact]
+    public void InnerOuterComposeValidatesTheReversedFrameChain()
+    {
+        // innerOuter 运行时执行 Compose(B, A)：transformB 在上游、transformA 在下游。
+        // 这里的合法链路是 scene.image -> crop1.image (transformB) -> crop2.image (transformA)。
+        var workflow = InnerOuterComposeWorkflow("""{"order":"innerOuter"}""");
+
+        var compiled = CreateCompiler().Compile(workflow);
+
+        Assert.Contains("measure", compiled.OrderedNodeIds);
+    }
+
+    [Fact]
+    public void OuterInnerComposeRejectsTheInnerOuterFrameChain()
+    {
+        var workflow = InnerOuterComposeWorkflow("""{"order":"outerInner"}""");
+
+        var error = Assert.Throws<InvalidOperationException>(() => CreateCompiler().Compile(workflow));
+
+        Assert.Contains("cannot compose transforms", error.Message);
+    }
+
+    private static WorkflowDefinition InnerOuterComposeWorkflow(string composeParameters)
+    {
+        var compose = new NodeDefinition("compose", "coordinate.transformCompose", null, null,
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(composeParameters));
+        return new WorkflowDefinition("inner-outer-compose", "Inner outer compose",
+        [
+            new NodeDefinition("scene", "image.synthetic", null, null, null),
+            new NodeDefinition("crop1", "image.crop", null, null, null),
+            new NodeDefinition("crop2", "image.crop", null, null, null),
+            compose,
+            new NodeDefinition("measure", "measure.caliperLine", null, null, null)
+        ],
+        [
+            new EdgeDefinition("scene-crop1-control", "scene", "next", "crop1", "exec", "control"),
+            new EdgeDefinition("crop1-crop2-control", "crop1", "next", "crop2", "exec", "control"),
+            new EdgeDefinition("crop2-compose-control", "crop2", "next", "compose", "exec", "control"),
+            new EdgeDefinition("compose-measure-control", "compose", "next", "measure", "exec", "control"),
+            new EdgeDefinition("scene-crop1-image", "scene", "image", "crop1", "image", "data"),
+            new EdgeDefinition("crop1-crop2-image", "crop1", "image", "crop2", "image", "data"),
+            new EdgeDefinition("crop1-compose-transform", "crop1", "transform", "compose", "transformB", "data"),
+            new EdgeDefinition("crop2-compose-transform", "crop2", "transform", "compose", "transformA", "data"),
+            new EdgeDefinition("crop2-measure-image", "crop2", "image", "measure", "image", "data"),
+            new EdgeDefinition("composed-transform", "compose", "transform", "measure", "transform", "data")
+        ]);
     }
 
     [Theory]

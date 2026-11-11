@@ -8,10 +8,13 @@ public static class MediaEndpoints
 {
     public static IEndpointRouteBuilder MapMediaEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/media/status", (MediaLibraryService media) => Results.Ok(media.Status()));
-        app.MapGet("/api/media/collections", (MediaLibraryService media) => Results.Ok(media.ListCollections()));
+        app.MapGet("/api/media/status", (MediaLibraryService media) => Results.Ok(media.Status()))
+            .Produces<MediaLibraryStatus>();
+        app.MapGet("/api/media/collections", (MediaLibraryService media) => Results.Ok(media.ListCollections()))
+            .Produces<IReadOnlyList<MediaCollectionDescriptor>>();
         app.MapGet("/api/media/items", (string? collection, string? label, int? take, MediaLibraryService media) =>
-            Results.Ok(media.ListItems(collection, label, take ?? 200)));
+            Results.Ok(media.ListItems(collection, label, take ?? 200)))
+            .Produces<IReadOnlyList<MediaItemDescriptor>>();
 
         app.MapGet("/api/media/preview", (string path, MediaLibraryService media) =>
         {
@@ -28,6 +31,7 @@ public static class MediaEndpoints
 
         app.MapPost("/api/media/collections", (MediaCollectionCreateRequest request, MediaLibraryService media) =>
             Results.Ok(media.CreateCollection(request.Name)))
+            .Produces<MediaCollectionDescriptor>()
             .RequireEngineer("media.collection.create", "media");
 
         app.MapPost("/api/media/import", async (HttpRequest request, MediaLibraryService media, ProductionRuntimeService production, CancellationToken ct) =>
@@ -51,7 +55,7 @@ public static class MediaEndpoints
                 imported.Add(await media.ImportAsync(collection, label, file.FileName, stream, file.Length, ct));
             }
             return Results.Ok(imported);
-        }).RequireEngineer("media.import", "media").RequireRateLimiting("media-import");
+        }).Produces<IReadOnlyList<MediaItemDescriptor>>().RequireEngineer("media.import", "media").RequireRateLimiting("media-import");
 
         app.MapDelete("/api/media/items", (string path, MediaLibraryService media, ProductionRuntimeService production) =>
         {

@@ -7,7 +7,8 @@ public static class WorkflowStoreEndpoints
     public static IEndpointRouteBuilder MapWorkflowStoreEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/workflows", async (WorkflowStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct)));
+            Results.Ok(await store.ListAsync(ct)))
+            .Produces<IReadOnlyList<WorkflowDocumentSummary>>();
 
         app.MapPut("/api/workflows/{id}", async (
             string id,
@@ -83,7 +84,7 @@ public static class WorkflowStoreEndpoints
             if (found.Revision is { } revision)
                 http.Response.Headers["X-Workflow-Revision"] = revision;
             return Results.Ok(found.Workflow);
-        });
+        }).Produces<WorkflowDefinition>();
 
         return app;
     }

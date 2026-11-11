@@ -1043,33 +1043,13 @@ public sealed class RuntimeDependencyManifestService(
     ///（插件可以只声明资源而不把参数暴露为可编辑项）；缺省值仍按参数描述符解析。
     /// </summary>
     private static string? ResolveDeclaredResourceValue(NodeDefinition node, NodeCatalogItem catalog, string name)
-    {
-        if (node.Parameters is not null && node.Parameters.TryGetValue(name, out var raw))
-        {
-            return raw.ValueKind switch
-            {
-                JsonValueKind.String => raw.GetString(),
-                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => raw.ToString(),
-                _ => null
-            };
-        }
-        return catalog.Parameters.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.DefaultValue?.ToString();
-    }
+        => NodeParameterValue.Resolve(node, catalog, name);
 
     private static string? ResolveString(NodeDefinition node, NodeCatalogItem catalog, string name)
     {
-        var descriptor = catalog.Parameters.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (descriptor is null) return null;
-        if (node.Parameters is not null && node.Parameters.TryGetValue(name, out var value))
-        {
-            return value.ValueKind switch
-            {
-                JsonValueKind.String => value.GetString(),
-                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
-                _ => null
-            };
-        }
-        return descriptor.DefaultValue?.ToString();
+        // 资产参数必须先在目录里声明；未声明的键不参与依赖捕获。
+        if (!catalog.Parameters.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) return null;
+        return NodeParameterValue.Resolve(node, catalog, name);
     }
 
     private static int ResolveInt(NodeDefinition node, NodeCatalogItem catalog, string name)
@@ -1086,7 +1066,7 @@ public sealed class RuntimeDependencyManifestService(
             int i => i,
             long l when l is >= int.MinValue and <= int.MaxValue => (int)l,
             JsonElement json when json.ValueKind == JsonValueKind.Number && json.TryGetInt32(out var i) => i,
-            _ when int.TryParse(descriptor.DefaultValue?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ when int.TryParse(NodeParameterValue.FormatInvariant(descriptor.DefaultValue), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
             _ => 0
         };
     }

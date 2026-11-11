@@ -1,4 +1,5 @@
 ﻿using VisionStudio.Api.Security;
+using VisionStudio.Engine.ExternalTrain;
 
 namespace VisionStudio.Api.Endpoints;
 
@@ -7,21 +8,24 @@ public static class ModelPackageEndpoints
     public static IEndpointRouteBuilder MapModelPackageEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/model-packages", (ModelPackageService packages) =>
-            Results.Ok(packages.List())).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(packages.List())).Produces<IReadOnlyList<ModelPackageSummary>>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapGet("/api/model-packages/{id}", (string id, ModelPackageService packages) =>
-            Results.Ok(packages.Get(id))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(packages.Get(id))).Produces<ModelPackageDetail>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPost("/api/model-packages/preflight", (ModelPackageImportRequest request, ModelPackageService packages) =>
             Results.Ok(packages.Preflight(request.SourcePath, request.ExpectedKind)))
+            .Produces<ExternalTrainManifest>()
             .RequireEngineer("model-package.preflight", "model-package");
 
         app.MapPost("/api/model-packages/import", (ModelPackageImportRequest request, ModelPackageService packages) =>
             Results.Ok(packages.Import(request)))
+            .Produces<ModelPackageDetail>()
             .RequireEngineer("model-package.import", "model-package");
 
         app.MapPost("/api/model-packages/{id}/smoke", (string id, ModelPackageSmokeRequest? request, ModelPackageService packages) =>
             Results.Ok(packages.Smoke(id, request?.OpenOnnxSession ?? false)))
+            .Produces<ExternalTrainSmokeResult>()
             .RequireEngineer("model-package.smoke", "model-package");
 
         app.MapDelete("/api/model-packages/{id}", (string id, ModelPackageService packages) =>

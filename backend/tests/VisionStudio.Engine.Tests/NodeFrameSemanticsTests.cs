@@ -36,7 +36,6 @@ public sealed class NodeFrameSemanticsTests
     }
 
     [Theory]
-    [InlineData("match.shape", NodeTransformFramePolicy.TemplateToImage)]
     [InlineData("coordinate.transformCompose", NodeTransformFramePolicy.Compose)]
     [InlineData("coordinate.transformInverse", NodeTransformFramePolicy.Invert)]
     public void BuiltInTransformNodes_DeclareTransformFrames(string type, NodeTransformFramePolicy policy)

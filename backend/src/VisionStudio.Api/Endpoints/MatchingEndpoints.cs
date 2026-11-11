@@ -73,7 +73,7 @@ public static class MatchingEndpoints
             {
                 throw new ApiValidationException(ex.Message, ex);
             }
-        }).RequireEngineer("matching.auto-tune", "matching");
+        }).Produces<MatchingAutoTuneHttpResponse>().RequireEngineer("matching.auto-tune", "matching");
 
         return app;
     }

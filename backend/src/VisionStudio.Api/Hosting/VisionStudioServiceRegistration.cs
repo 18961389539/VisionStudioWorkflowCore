@@ -27,10 +27,10 @@ namespace VisionStudio.Api.Hosting;
 public static class VisionStudioServiceRegistration
 {
     /// <summary>
-    /// R3-02锛?026-10-13 R3 瀹℃煡锛夛細鐢熶骇鏄庢枃鐩戝惉杈圭晫鐨?*瀹屾暣鏉ユ簮鏋氫妇**銆?
+    /// R3-02（2026-10-13 R3 审查）：生产明文监听边界的**完整来源枚举**。
     ///
     /// 实测监听优先级（本机实验，2026-10-13，.NET 10 Kestrel）：
-    ///   `Kestrel:Endpoints:*:Url` 锛?`urls`锛?-urls / ASPNETCORE_URLS / 閰嶇疆 urls锛夛紴 `HTTP_PORTS`/`HTTPS_PORTS`
+    ///   `Kestrel:Endpoints:*:Url` ＞ `urls`（--urls / ASPNETCORE_URLS / 配置 urls）＞ `HTTP_PORTS`/`HTTPS_PORTS`
     ///   · Kestrel 端点存在时 urls 与 HTTP_PORTS 均不生效；urls 存在时 HTTP_PORTS 不生效；
     ///   · HTTP_PORTS 只承载端口，**恒为 0.0.0.0 通配明文监听**（旧实现未枚举它）：
     ///     仅设 ASPNETCORE_HTTP_PORTS 即可让生产环境以明文远程监听启动（探针复现）；
@@ -195,7 +195,10 @@ public static class VisionStudioServiceRegistration
         services.Configure<KestrelServerOptions>(options => options.Limits.MaxRequestBodySize = mediaMaxBatchBytes + 1024 * 1024);
         services.AddWorkflow();
         services.AddWorkflowDSL();
-        services.AddOpenApi();
+        services.AddOpenApi(options => options
+            .AddSchemaTransformer<JsonElementSchemaTransformer>()
+            .AddSchemaTransformer<RequiredPropertiesSchemaTransformer>()
+            .AddDocumentTransformer<StructSchemaRequiredDocumentTransformer>());
         services.AddSignalR();
         services.Configure<TraceRetentionOptions>(configuration.GetSection("TraceRetention"));
         services.AddOptions<ProductionTraceOptions>().Bind(configuration.GetSection("ProductionTrace"))
@@ -223,7 +226,7 @@ public static class VisionStudioServiceRegistration
         // 与 restart-pending.json（恢复成功但未重启 → 业务 503 直到重启）。
         // Q01（2026-10-13 审查）：同时识别旧版离线 CLI 的 .visionstudio-restore-intent.json
         // （现场可能残留；与 restore-transaction.json 同一判定语义），并登记跨进程维护活跃标记
-        // maintenance-active.json锛圦04锛氫笌绂荤嚎 CLI 鐨勭淮鎶や簰鏂ワ級銆?
+        // maintenance-active.json（Q04：与离线 CLI 的维护互斥）。
         var dataRoot = VisionStudioDataRoot.Resolve(environment.ContentRootPath);
         var maintenanceDir = Path.Combine(dataRoot, ".storage-maintenance");
         services.AddSingleton(sp => new StorageMaintenanceCoordinator(
@@ -256,6 +259,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton(_ => new HardwareProvenanceStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "provenance")));
         services.AddSingleton<VendorProvenanceProbeRegistry>();
         services.AddSingleton<HardwareProvenanceService>();
+        services.Configure<RobotTraceRetentionOptions>(configuration.GetSection("RobotTraceRetention"));
         services.AddSingleton<RobotCommandTraceStore>();
         services.AddSingleton<IRobotCommandObserver>(sp => sp.GetRequiredService<RobotCommandTraceStore>());
         services.AddSingleton<RobotManager>();
@@ -322,7 +326,7 @@ public static class VisionStudioServiceRegistration
             probe: sp.GetRequiredService<IDeviceActivityProbe>()));
         // A02：设备/机器人/相机的真实命令派发边界共用租约注册表作为所有权闸门——
         // 失去所有权（换代/撤销）的旧执行在派发前被拒绝。惰性解析打破
-        // "绠＄悊鍣?鈫?闂搁棬 鈫?娉ㄥ唽琛?鈫?娲诲姩鎺㈤拡 鈫?绠＄悊鍣?鐨勬瀯閫犵幆銆?
+        // "管理器 → 闸门 → 注册表 → 活动探针 → 管理器" 的构造环。
         services.AddSingleton<IDeviceCommandOwnershipGate>(sp =>
             new LazyDeviceCommandOwnershipGate(() => sp.GetRequiredService<DeviceLeaseRegistry>()));
 
@@ -394,6 +398,7 @@ public static class VisionStudioServiceRegistration
         services.AddHostedService<DiagnosticsCenterService>(sp => sp.GetRequiredService<DiagnosticsCenterService>());
         services.AddHostedService<ProductionRuntimeHostedService>();
         services.AddHostedService<TraceRetentionHostedService>();
+        services.AddHostedService<RobotTraceRetentionHostedService>();
         services.AddHostedService<StorageCapacityHostedService>();
         // 跨轮计数落盘：启动即恢复，之后每 5s 有变化才写（停机补写一次）。
         // 先注册具体类型再转发到 IHostedService，诊断端点才能注入它读取落盘状态。

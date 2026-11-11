@@ -533,7 +533,8 @@ public sealed class PnpPoseNode : IVisionNodeExecutor
 
     private static bool IsFiniteVector(Mat column)
     {
-        for (var row = 0; row < column.Rows; row++)
+        var rows = column.Rows;
+        for (var row = 0; row < rows; row++)
             if (!double.IsFinite(column.At<double>(row, 0))) return false;
         return true;
     }

@@ -62,6 +62,11 @@ public sealed record SecurityUserDto(
 
 public sealed record LoginResponse(string Token, DateTimeOffset ExpiresAt, SecurityUserDto User);
 public sealed record SecurityStatus(bool Enabled, bool BootstrapRequired, bool AutoLogin);
+public sealed record SessionUserResponse(DateTimeOffset ExpiresAt, SecurityUserDto User);
+public sealed record LogoutResponse(bool LoggedOut);
+public sealed record CurrentUserResponse(string? Id, string? Username, string? DisplayName, string? Role);
+public sealed record ChangePasswordResult(bool Changed, bool SessionsRevoked);
+public sealed record ResetPasswordResult(bool Reset, bool SessionsRevoked);
 public sealed record AuditEventDto(
     long Sequence,
     DateTimeOffset At,

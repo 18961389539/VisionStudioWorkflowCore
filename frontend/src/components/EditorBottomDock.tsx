@@ -103,6 +103,7 @@ export default function EditorBottomDock({
             <div className="bottom-issues">
               {validationIssues.map((issue) => {
                 const locatable = Boolean(issue.nodeId || issue.edgeId);
+                const warning = issue.severity === 'warning';
                 return (
                   <div
                     key={issue.id}
@@ -110,8 +111,8 @@ export default function EditorBottomDock({
                     title={locatable ? '点击定位到节点/连线' : '该问题无法自动定位，请根据描述排查'}
                     style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 6, cursor: locatable ? 'pointer' : 'default', fontSize: 12, lineHeight: 1.55 }}
                   >
-                    <Tag color={issue.source === 'server' ? 'red' : 'orange'} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
-                      {issue.source === 'server' ? '编译器' : '预检'}
+                    <Tag color={warning ? 'gold' : issue.source === 'server' ? 'red' : 'orange'} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
+                      {warning ? '提示' : issue.source === 'server' ? '编译器' : '预检'}
                     </Tag>
                     <span>
                       {issue.message}

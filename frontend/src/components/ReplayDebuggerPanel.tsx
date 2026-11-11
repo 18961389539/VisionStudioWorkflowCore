@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../apiErrors';
 import { Alert, Button, Checkbox, Col, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, OfflineReplayContext, OfflineReplayResult, WorkflowPayload } from '../types';
@@ -21,28 +21,54 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
   const [parameterText, setParameterText] = useState('{}');
   const [running, setRunning] = useState(false);
   const [messageApi, holder] = message.useMessage();
+  // 运行切换/关闭面板时中止在途请求；迟到的上下文或回放结果不能落到新的 runId 上。
+  const loadRequest = useRef(0);
+  const loadAbort = useRef<AbortController | null>(null);
+  const executeAbort = useRef<AbortController | null>(null);
+  const runIdRef = useRef(runId);
+  runIdRef.current = runId;
 
   const selectedNode = workflow?.nodes.find((x) => x.id === selectedNodeId);
   const selectedReport: NodeRunReport | undefined = result?.nodeReports.find((x) => x.nodeId === selectedNodeId);
 
   const load = async () => {
     if (!runId) return;
-    const response = await apiFetch(traces.replayContext(runId));
-    const data = await response.json();
-    if (!response.ok) {
-      messageApi.error(apiErrorMessage(data, '加载回放上下文失败'));
-      return;
+    const request = ++loadRequest.current;
+    loadAbort.current?.abort();
+    const controller = new AbortController();
+    loadAbort.current = controller;
+    try {
+      const response = await apiFetch(traces.replayContext(runId), { signal: controller.signal });
+      if (request !== loadRequest.current || controller.signal.aborted) return;
+      const data = await response.json();
+      if (request !== loadRequest.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        messageApi.error(apiErrorMessage(data, '加载回放上下文失败'));
+        return;
+      }
+      const next = data as OfflineReplayContext;
+      setContext(next);
+      setWorkflow(cloneWorkflow(next.workflow));
+      const preferred = initialNodeId && next.workflow.nodes.some((x) => x.id === initialNodeId) ? initialNodeId : undefined;
+      setSelectedNodeId(preferred ?? next.orderedNodeIds[0] ?? next.workflow.nodes[0]?.id);
+      setResult(undefined);
+      setBreakpoints([]);
+    } catch (error) {
+      if (controller.signal.aborted || request !== loadRequest.current) return;
+      messageApi.error(error instanceof Error ? `加载回放上下文失败：${error.message}` : '加载回放上下文失败：网络请求未完成');
     }
-    const next = data as OfflineReplayContext;
-    setContext(next);
-    setWorkflow(cloneWorkflow(next.workflow));
-    const preferred = initialNodeId && next.workflow.nodes.some((x) => x.id === initialNodeId) ? initialNodeId : undefined;
-    setSelectedNodeId(preferred ?? next.orderedNodeIds[0] ?? next.workflow.nodes[0]?.id);
-    setResult(undefined);
-    setBreakpoints([]);
   };
 
-  useEffect(() => { if (open && runId) void load(); }, [open, runId, initialNodeId]);
+  useEffect(() => {
+    if (!open || !runId) return;
+    setContext(undefined);
+    setResult(undefined);
+    setSelectedNodeId(undefined);
+    setRunning(false);
+    void load();
+    return () => { loadAbort.current?.abort(); executeAbort.current?.abort(); };
+  }, [open, runId, initialNodeId]);
+  useEffect(() => () => { loadAbort.current?.abort(); executeAbort.current?.abort(); }, []);
   useEffect(() => {
     const node = workflow?.nodes.find((x) => x.id === selectedNodeId);
     setParameterText(JSON.stringify(node?.parameters ?? {}, null, 2));
@@ -63,11 +89,16 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
     if (!runId || !workflow || !context?.replayable) return;
     if ((mode === 'RunNode' || mode === 'RunFromNode') && !selectedNodeId) return messageApi.warning('请先选择节点');
     if (mode === 'Breakpoints' && breakpoints.length === 0) return messageApi.warning('请至少选择一个断点');
+    const targetRunId = runId;
+    executeAbort.current?.abort();
+    const controller = new AbortController();
+    executeAbort.current = controller;
     setRunning(true);
     try {
-      const response = await apiFetch(traces.replay(runId), {
+      const response = await apiFetch(traces.replay(targetRunId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           workflow,
           options: {
@@ -77,21 +108,24 @@ export default function ReplayDebuggerPanel({ open, runId, initialNodeId, onClos
           }
         })
       });
+      if (controller.signal.aborted || runIdRef.current !== targetRunId) return;
       const data = await response.json();
+      if (controller.signal.aborted || runIdRef.current !== targetRunId) return;
       setResult(data as OfflineReplayResult);
       if (!response.ok) messageApi.error(data.error ?? apiErrorMessage(data, '回放失败'));
       else messageApi.success(`${mode === 'Full' ? '完整回放' : mode === 'RunNode' ? '运行节点' : mode === 'RunFromNode' ? '从此处运行' : '运行到断点'}已完成 · ${Number(data.totalDurationMs).toFixed(2)} 毫秒`);
     } catch (error) {
+      if (controller.signal.aborted || runIdRef.current !== targetRunId) return;
       messageApi.error(error instanceof Error ? error.message : '回放失败');
     } finally {
-      setRunning(false);
+      if (!controller.signal.aborted && runIdRef.current === targetRunId) setRunning(false);
     }
   };
 
   const comparisonById = useMemo(() => new Map((result?.comparison ?? []).map((x) => [x.nodeId, x])), [result]);
 
   return (
-    <Modal open={open} width={1480} mask={false} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnClose>
+    <Modal open={open} width={1480} mask={false} title={`离线回放 / 工作流调试器${runId ? ` · ${runId.slice(0, 12)}` : ''}`} footer={null} onCancel={onClose} destroyOnHidden>
       {holder}
       {!context ? <Alert type="info" showIcon title="正在加载回放上下文…" /> : <>
         <Alert

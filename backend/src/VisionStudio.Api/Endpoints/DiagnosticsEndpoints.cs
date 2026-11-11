@@ -20,14 +20,14 @@ public static class DiagnosticsEndpoints
     public static IEndpointRouteBuilder MapDiagnosticsEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/diagnostics/summary", (DiagnosticsCenterService diagnostics) => Results.Ok(diagnostics.Summary()))
-            .RequireOperator("diagnostics.summary", "diagnostics");
+            .RequireOperator("diagnostics.summary", "diagnostics").Produces<DiagnosticsSummary>();
 
         app.MapGet("/api/diagnostics/assets", (DiagnosticsCenterService diagnostics) => Results.Ok(diagnostics.Assets()))
-            .RequireOperator("diagnostics.assets", "diagnostics");
+            .RequireOperator("diagnostics.assets", "diagnostics").Produces<IReadOnlyList<AssetHealthSnapshot>>();
 
         app.MapGet("/api/diagnostics/events", (int? take, AssetKind? kind, string? assetId, DiagnosticsCenterService diagnostics) =>
             Results.Ok(diagnostics.Events(take ?? 200, kind, assetId)))
-            .RequireOperator("diagnostics.events", "diagnostics");
+            .RequireOperator("diagnostics.events", "diagnostics").Produces<IReadOnlyList<AssetEventEnvelope>>();
 
         // 跨轮计数器落盘状态：计数在内存里累加、磁盘副本可能落后。Degraded=true 时
         // 界面应提示"班次统计未落盘"，否则现场只会在重启后看到数字倒退。

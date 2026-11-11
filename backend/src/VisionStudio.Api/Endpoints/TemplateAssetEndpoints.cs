@@ -15,21 +15,24 @@ public static class TemplateAssetEndpoints
     public static IEndpointRouteBuilder MapTemplateAssetEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/template-assets", async (TemplateAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct)));
+            Results.Ok(await store.ListAsync(ct)))
+            .Produces<IReadOnlyList<TemplateAssetDescriptor>>();
 
         app.MapPost("/api/template-assets", async (CreateTemplateAssetRequest request, TemplateAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.CreateAsync(request, ct)))
-            .RequireEngineer("template-asset.create", "template-assets");
+            .RequireEngineer("template-asset.create", "template-assets")
+            .Produces<TemplateAssetDescriptor>();
 
         app.MapGet("/api/template-assets/{id}", async (string id, TemplateAssetStore store, CancellationToken ct) =>
         {
             var asset = await store.GetAsync(id, ct);
             return asset is null ? Results.NotFound() : Results.Ok(asset);
-        });
+        }).Produces<TemplateAssetDescriptor>();
 
         app.MapPost("/api/template-assets/{id}/versions", async (string id, AppendTemplateAssetVersionRequest request, TemplateAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.AppendVersionAsync(id, request, ct)))
-            .RequireEngineer("template-asset.version.create", "template-assets");
+            .RequireEngineer("template-asset.version.create", "template-assets")
+            .Produces<TemplateAssetVersionInfo>();
 
         app.MapGet("/api/template-assets/{id}/versions/{version:int}/blob", async (string id, int version, TemplateAssetStore store, CancellationToken ct) =>
         {

@@ -185,7 +185,7 @@ public static class ParameterTierCatalog
         var controller = parameters.FirstOrDefault(parameter =>
             parameter.Name.Equals(condition.Parameter, StringComparison.OrdinalIgnoreCase));
         if (controller is null) return false;
-        var actual = Convert.ToString(controller.DefaultValue, CultureInfo.InvariantCulture) ?? string.Empty;
+        var actual = NodeParameterValue.FormatInvariant(controller.DefaultValue);
         return condition.Values.Any(value => string.Equals(actual, value, StringComparison.OrdinalIgnoreCase));
     }
 

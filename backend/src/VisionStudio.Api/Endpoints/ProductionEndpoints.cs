@@ -7,31 +7,35 @@ public static class ProductionEndpoints
 {
     public static IEndpointRouteBuilder MapProductionEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/production/status", (ProductionRuntimeService production) => Results.Ok(production.Status));
+        app.MapGet("/api/production/status", (ProductionRuntimeService production) => Results.Ok(production.Status))
+            .Produces<ProductionRuntimeStatus>();
 
         app.MapGet("/api/production/config", async (ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.GetConfigAsync(ct)));
+            Results.Ok(await production.GetConfigAsync(ct)))
+            .Produces<ProductionRuntimeConfig>();
 
         app.MapGet("/api/production/ptp-guard", (ProductionRuntimeService production) =>
-            Results.Ok(production.Status.PtpGuard));
+            Results.Ok(production.Status.PtpGuard))
+            .Produces<ProductionPtpGuardSnapshot>();
 
         app.MapGet("/api/production/synchronization-guard", (ProductionRuntimeService production) =>
-            Results.Ok(production.Status.SynchronizationGuard));
+            Results.Ok(production.Status.SynchronizationGuard))
+            .Produces<ProductionSynchronizationGuardSnapshot>();
 
         app.MapPut("/api/production/config", async (ProductionRuntimeConfig request, ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.UpdateConfigAsync(request, ct))).RequireEngineer("production.config.update", "production");
+            Results.Ok(await production.UpdateConfigAsync(request, ct))).Produces<ProductionRuntimeConfig>().RequireEngineer("production.config.update", "production");
 
         app.MapPost("/api/production/start", async (ProductionStartRequest request, ProductionRuntimeService production, PluginPerformanceBenchmarkService benchmarks, CancellationToken ct) =>
         {
             if (benchmarks.HasActiveRuns) throw new ApiConflictException("A plugin performance benchmark is running. Cancel or finish it before starting Production Runtime.");
             return Results.Ok(await production.StartAsync(request.JobId, ct));
-        }).RequireOperator("production.start", "production");
+        }).Produces<ProductionRuntimeStatus>().RequireOperator("production.start", "production");
 
         app.MapPost("/api/production/stop", async (ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.StopAsync(ct))).RequireOperator("production.stop", "production");
+            Results.Ok(await production.StopAsync(ct))).Produces<ProductionRuntimeStatus>().RequireOperator("production.stop", "production");
 
         app.MapPost("/api/production/recover", async (ProductionRuntimeService production, CancellationToken ct) =>
-            Results.Ok(await production.RecoverAsync(ct))).RequireOperator("production.recover", "production");
+            Results.Ok(await production.RecoverAsync(ct))).Produces<ProductionRuntimeStatus>().RequireOperator("production.recover", "production");
 
         app.MapPost("/api/production/device-actions/resolve", async (DeviceActionResolutionRequest request, HttpContext http,
             ProductionRuntimeService production, DeviceActionAuthorizationService authorization, CancellationToken ct) =>
@@ -55,7 +59,7 @@ public static class ProductionEndpoints
             AuditContext.SetTarget(http, request.RunId);
             await production.ResolveUnknownDeviceActionsAsync(request, operatorName ?? string.Empty, ct);
             return Results.Ok(production.Status);
-        }).RequireAdministrator("production.device-actions.resolve", "production").WithAudit("production.device-actions.resolve", "production");
+        }).Produces<ProductionRuntimeStatus>().RequireAdministrator("production.device-actions.resolve", "production").WithAudit("production.device-actions.resolve", "production");
 
         app.MapGet("/api/production/device-actions/pending", (ProductionRuntimeService production, DeviceActionAuthorizationService authorization) =>
         {
@@ -101,7 +105,7 @@ public static class ProductionEndpoints
         }).Produces<IReadOnlyList<AlarmRecord>>();
 
         app.MapPost("/api/alarms/{id}/ack", async (string id, AlarmStore alarms, CancellationToken ct) =>
-            Results.Ok(await alarms.AcknowledgeAsync(id, ct))).RequireOperator("alarm.ack", "alarm");
+            Results.Ok(await alarms.AcknowledgeAsync(id, ct))).Produces<AlarmRecord>().RequireOperator("alarm.ack", "alarm");
 
         return app;
     }

@@ -4,8 +4,9 @@
 # 后端 DTO / 路由变更后重新运行本脚本，并同步更新测试里的棘轮基线。
 #
 # 前提：先 `dotnet build`（本脚本用 --no-build 启动，避免导出过程触发重编译）。
-# 如需生成 TS 类型供新代码使用：
-#   npx openapi-typescript frontend/src/generated/openapi.json -o frontend/src/generated/api-types.ts
+# 如需生成 TS 类型供新代码使用（openapi-typescript 7 的 peer 是 TS 5.x，而本仓库用 TS 7，
+# 因此固定用一次性 TS5 环境执行，避免把 openapi-typescript 装进项目依赖）：
+#   cd frontend && npm run generate:api-types
 #
 # 2026-10-23 三项修正（此前脚本在本机与 CI 上均会失败或产出不可用快照）：
 #  1. 必须绕过系统代理：环境里存在 HTTP_PROXY 时，Invoke-RestMethod 会把 127.0.0.1 的请求

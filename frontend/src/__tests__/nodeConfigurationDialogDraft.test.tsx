@@ -573,4 +573,38 @@ describe('node timeout budget', () => {
     await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
     expect(onApply.mock.calls[0][0]).not.toHaveProperty('__timeoutMs');
   });
+
+  it('shows the node type P95 and suggested timeout from diagnostics', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/diagnostics/node-durations') return { ok: true, json: async () => [
+        { nodeType: 'text.validate', samples: 30, p50Ms: 8, p95Ms: 120, maxMs: 200, configuredTimeoutMs: 130, suggestedTimeoutMs: 200, timeoutCount: 1, timeoutTooTight: true }
+      ] };
+      return { ok: true, json: async () => ({ images: [] }) };
+    }));
+    const budgetNode: Node = { ...node, data: { ...node.data, parameters: { expected: 'ABC', __timeoutMs: 130 } } };
+    const { dialog } = mount({ node: budgetNode, nodes: [budgetNode] });
+
+    const hint = await dialog.findByTestId('node-duration-hint');
+    expect(hint.textContent).toContain('P95 120 毫秒');
+    expect(hint.textContent).toContain('建议超时 200 毫秒');
+    expect(hint.textContent).toContain('已触发超时 1 次');
+    expect(hint.textContent).toContain('最近运行配置偏紧');
+  });
+
+  it('withholds the suggestion when the duration window has too few samples', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/diagnostics/node-durations') return { ok: true, json: async () => [
+        { nodeType: 'text.validate', samples: 5, p50Ms: 8, p95Ms: 40, maxMs: 45, configuredTimeoutMs: null, suggestedTimeoutMs: null, timeoutCount: 0, timeoutTooTight: false }
+      ] };
+      return { ok: true, json: async () => ({ images: [] }) };
+    }));
+    const { dialog } = mount();
+
+    const hint = await dialog.findByTestId('node-duration-hint');
+    expect(hint.textContent).toContain('耗时样本 5/20');
+    expect(hint.textContent).toContain('样本不足');
+    expect(hint.textContent).toContain('暂不建议超时值');
+  });
 });

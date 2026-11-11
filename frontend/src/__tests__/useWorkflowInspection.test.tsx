@@ -38,6 +38,33 @@ describe('workflow validation and DSL ownership', () => {
     expect(result.current.compiledDsl).toBe(JSON.stringify(dsl, null, 2));
   });
 
+  it('surfaces non-fatal compile warnings without failing validation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      ...valid,
+      warnings: [{ code: 'flow.parallel.sequential', message: "Parallel node 'p' runs both branches sequentially: branch1 contains node 'r1' (flow.result).", nodeId: 'p' }]
+    })));
+    const { result, props } = mount();
+    let ok: boolean | undefined;
+    await act(async () => { ok = await result.current.validate(); });
+
+    expect(ok).toBe(true);
+    expect(result.current.validationState).toMatchObject({ status: 'ok', summary: expect.stringContaining('1 条编译提示') });
+    const warning = result.current.validationIssues.find(issue => issue.severity === 'warning');
+    expect(warning).toMatchObject({ source: 'server', nodeId: 'p' });
+    expect(warning?.message).toContain('runs both branches sequentially');
+    expect(props.messages.warning).toHaveBeenCalledWith(expect.stringContaining('1 条编译提示'));
+    expect(props.messages.success).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed warnings payload instead of silently dropping it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...valid, warnings: [{ message: 'missing code' }] })));
+    const { result } = mount();
+    await act(async () => { await result.current.validate(); });
+
+    expect(result.current.validationState.status).toBe('issues');
+    expect(result.current.validationIssues[0]?.message).toContain('warnings 条目缺少 code/message');
+  });
+
   it('keeps client parameter issues even when the server validates successfully', async () => {
     const { result, props, rerender } = mount();
     rerender({ ...props, catalog: [{ ...catalog[0], parameters: [{ name: 'size', label: 'Size', type: 'number', min: 1 }] }],

@@ -7,14 +7,16 @@ public static class PluginPackageEndpoints
 {
     public static IEndpointRouteBuilder MapPluginPackageEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/plugin-packages", (PluginPackageService packages) => Results.Ok(packages.ListPackages()));
-        app.MapGet("/api/plugin-publishers", (PluginPackageService packages) => Results.Ok(packages.ListTrustedPublishers()));
+        app.MapGet("/api/plugin-packages", (PluginPackageService packages) => Results.Ok(packages.ListPackages()))
+            .Produces<IReadOnlyList<PluginPackageVersionInfo>>();
+        app.MapGet("/api/plugin-publishers", (PluginPackageService packages) => Results.Ok(packages.ListTrustedPublishers()))
+            .Produces<IReadOnlyList<TrustedPluginPublisher>>();
 
         app.MapPost("/api/plugin-packages/preflight", async (HttpRequest request, PluginPackageService packages, CancellationToken ct) =>
         {
             var (bytes, fileName) = await ReadSingleFileAsync(request, packages, ct);
             return Results.Ok(packages.Preflight(bytes, fileName));
-        }).RequireEngineer("plugin.package.preflight", "plugin-package");
+        }).Produces<PluginPackagePreflightResult>().RequireEngineer("plugin.package.preflight", "plugin-package");
 
         app.MapPost("/api/plugin-packages/install", async (HttpRequest request, PluginPackageService packages, PluginManager plugins, ProductionRuntimeService production, CancellationToken ct) =>
         {
@@ -24,7 +26,7 @@ public static class PluginPackageEndpoints
             var result = packages.Install(bytes, fileName);
             if (result.ActivatedImmediately) plugins.Rescan();
             return Results.Ok(result);
-        }).RequireAdministrator("plugin.package.install", "plugin-package");
+        }).Produces<PluginPackageInstallResult>().RequireAdministrator("plugin.package.install", "plugin-package");
 
         app.MapPost("/api/plugin-packages/{id}/versions/{version}/select", (string id, string version, PluginPackageService packages, PluginManager plugins, ProductionRuntimeService production) =>
         {
@@ -33,14 +35,14 @@ public static class PluginPackageEndpoints
             var result = packages.SelectVersion(id, version);
             if (!result.RestartRequired) plugins.Rescan();
             return Results.Ok(result);
-        }).RequireAdministrator("plugin.package.select-version", "plugin-package");
+        }).Produces<PluginPackageSelectionResult>().RequireAdministrator("plugin.package.select-version", "plugin-package");
 
         app.MapPost("/api/plugin-packages/{id}/rollback", (string id, PluginRollbackRequest request, PluginPackageService packages, ProductionRuntimeService production) =>
         {
             if (production.Status.ProductionLocked)
                 throw new ApiConflictException("Stop Production Runtime before staging a plugin rollback.");
             return Results.Ok(packages.Rollback(id, request.TargetVersion));
-        }).RequireAdministrator("plugin.package.rollback", "plugin-package");
+        }).Produces<PluginPackageSelectionResult>().RequireAdministrator("plugin.package.rollback", "plugin-package");
 
         app.MapDelete("/api/plugin-packages/{id}/versions/{version}", (string id, string version, PluginPackageService packages, ProductionRuntimeService production) =>
         {
@@ -61,7 +63,7 @@ public static class PluginPackageEndpoints
             using var output = new MemoryStream();
             await stream.CopyToAsync(output, ct);
             return Results.Ok(packages.TrustPublisher(output.ToArray(), form["displayName"].ToString()));
-        }).RequireAdministrator("plugin.publisher.trust", "plugin-publisher");
+        }).Produces<TrustedPluginPublisher>().RequireAdministrator("plugin.publisher.trust", "plugin-publisher");
 
         app.MapDelete("/api/plugin-publishers/{thumbprint}", (string thumbprint, PluginPackageService packages) =>
         {

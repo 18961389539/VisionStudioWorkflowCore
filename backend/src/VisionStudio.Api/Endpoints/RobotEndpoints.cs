@@ -16,32 +16,32 @@ public static class RobotEndpoints
         {
             await robots.ConnectAsync(id, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireOperator("robot.connect", "robot");
+        }).Produces<RobotDescriptor>().RequireOperator("robot.connect", "robot");
 
         app.MapPost("/api/robots/{id}/disconnect", async (string id, RobotManager robots, CancellationToken ct) =>
         {
             await robots.DisconnectAsync(id, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireOperator("robot.disconnect", "robot");
+        }).Produces<RobotDescriptor>().RequireOperator("robot.disconnect", "robot");
 
         app.MapPost("/api/robots/{id}/stop", async (string id, RobotManager robots, CancellationToken ct) =>
         {
             await robots.StopAsync(id, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireOperator("robot.stop", "robot");
+        }).Produces<RobotDescriptor>().RequireOperator("robot.stop", "robot");
 
         app.MapPost("/api/robots/{id}/reset", async (string id, RobotManager robots, CancellationToken ct) =>
         {
             await robots.ResetFaultAsync(id, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireOperator("robot.reset", "robot");
+        }).Produces<RobotDescriptor>().RequireOperator("robot.reset", "robot");
 
         app.MapPut("/api/robots/{id}/settings", async (string id, RobotRuntimeSettings request, RobotManager robots, ProductionRuntimeService production, CancellationToken ct) =>
         {
             production.EnsureDependencyMutationAllowed("robot", id);
             await robots.ApplySettingsAsync(id, request, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireEngineer("robot.settings.update", "robot");
+        }).Produces<RobotDescriptor>().RequireEngineer("robot.settings.update", "robot");
 
         app.MapPost("/api/robots/{id}/target", async (
             string id,
@@ -106,16 +106,17 @@ public static class RobotEndpoints
         {
             await robots.AcknowledgeAsync(id, commandId, ct);
             return Results.Ok(robots.Get(id));
-        }).RequireOperator("robot.command.ack", "robot");
+        }).Produces<RobotDescriptor>().RequireOperator("robot.command.ack", "robot");
 
         app.MapGet("/api/robot-traces", async (int? take, string? robotId, RobotCommandTraceStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(take ?? 100, robotId, ct)));
+            Results.Ok(await store.ListAsync(take ?? 100, robotId, ct)))
+            .Produces<IReadOnlyList<RobotCommandTraceRecord>>();
 
         app.MapGet("/api/robot-traces/{traceId}", async (string traceId, RobotCommandTraceStore store, CancellationToken ct) =>
         {
             var trace = await store.GetAsync(traceId, ct);
             return trace is null ? Results.NotFound() : Results.Ok(trace);
-        });
+        }).Produces<RobotCommandTraceRecord>();
 
         app.MapGet("/api/robot-simulators/tcp", (TcpRobotSimulatorServer simulator) => Results.Ok(new
         {

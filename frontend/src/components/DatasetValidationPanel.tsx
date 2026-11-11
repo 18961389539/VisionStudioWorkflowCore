@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Col, Divider, Input, Modal, Popconfirm, Progress, Row, Select, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import type { MediaItemDescriptor, RunTraceRecord, ValidationDatasetDetail, ValidationDatasetSummary, ValidationResultRecord, ValidationRunRecord, WorkflowPayload } from '../types';
 import { localizeStatus } from '../i18n';
@@ -31,6 +31,12 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string>();
   const [messageApi, holder] = message.useMessage();
+  // 数据集/运行详情按选择变化并发加载：只有最后一次请求可以写状态，旧响应必须丢弃，
+  // 否则慢响应会把新选择的数据集明细或运行结果覆盖成上一个对象。
+  const detailRequest = useRef(0);
+  const runRequest = useRef(0);
+  const detailAbort = useRef<AbortController | null>(null);
+  const runAbort = useRef<AbortController | null>(null);
 
   const replayableTraces = useMemo(() => traces.filter((x) => x.hasReplayInput && !x.nodeReports.some((r) => r.nodeType === 'camera.syncCapture')), [traces]);
   const labeledMediaItems = useMemo(() => mediaItems.filter((x) => x.label === 'OK' || x.label === 'NG'), [mediaItems]);
@@ -67,34 +73,63 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
   };
   const retrySources = () => { setLoadError(undefined); void loadDatasets(); void loadTraces(); void loadMedia(); };
   const loadDetail = async (id: string) => {
-    const [datasetResponse, runResponse] = await Promise.all([apiFetch(validation.dataset(id)), apiFetch(validation.datasetRuns(id))]);
-    if (!datasetResponse.ok) {
-      setLoadError(await responseErrorMessage(datasetResponse, `读取数据集明细失败（HTTP ${datasetResponse.status}）`));
-    }
-    if (datasetResponse.ok) {
-      const data: ValidationDatasetDetail = await datasetResponse.json();
-      setDetail(data);
-      if (!workflowSourceRunId) {
-        const traceItem = data.items.find((x) => x.sourceKind === 'TRACE' && x.sourceRunId);
-        if (traceItem?.sourceRunId) setWorkflowSourceRunId(traceItem.sourceRunId);
+    const request = ++detailRequest.current;
+    detailAbort.current?.abort();
+    const controller = new AbortController();
+    detailAbort.current = controller;
+    if (detail?.dataset.id !== id) { setDetail(undefined); setRuns([]); }
+    try {
+      const [datasetResponse, runResponse] = await Promise.all([
+        apiFetch(validation.dataset(id), { signal: controller.signal }),
+        apiFetch(validation.datasetRuns(id), { signal: controller.signal })
+      ]);
+      if (request !== detailRequest.current || controller.signal.aborted) return;
+      if (!datasetResponse.ok) {
+        setLoadError(await responseErrorMessage(datasetResponse, `读取数据集明细失败（HTTP ${datasetResponse.status}）`));
       }
-    }
-    if (runResponse.ok) {
-      const data: ValidationRunRecord[] = await runResponse.json();
-      setRuns(data);
-      if (!selectedRunId && data.length) setSelectedRunId(data[0].runId);
+      if (datasetResponse.ok) {
+        const data: ValidationDatasetDetail = await datasetResponse.json();
+        if (request !== detailRequest.current || controller.signal.aborted) return;
+        setDetail(data);
+        if (!workflowSourceRunId) {
+          const traceItem = data.items.find((x) => x.sourceKind === 'TRACE' && x.sourceRunId);
+          if (traceItem?.sourceRunId) setWorkflowSourceRunId(traceItem.sourceRunId);
+        }
+      }
+      if (runResponse.ok) {
+        const data: ValidationRunRecord[] = await runResponse.json();
+        if (request !== detailRequest.current || controller.signal.aborted) return;
+        setRuns(data);
+        if (!selectedRunId && data.length) setSelectedRunId(data[0].runId);
+      }
+    } catch (error) {
+      if (controller.signal.aborted || request !== detailRequest.current) return;
+      setLoadError(error instanceof Error ? `读取数据集明细失败：${error.message}` : '读取数据集明细失败：网络请求未完成');
     }
   };
   const loadRun = async (id: string) => {
-    const response = await apiFetch(apiUrl(`validation/runs/${id}?includeResults=true`));
-    if (!response.ok) {
-      setLoadError(await responseErrorMessage(response, `读取验证运行详情失败（HTTP ${response.status}）`));
-      return;
+    const request = ++runRequest.current;
+    runAbort.current?.abort();
+    const controller = new AbortController();
+    runAbort.current = controller;
+    try {
+      const response = await apiFetch(apiUrl(`validation/runs/${id}?includeResults=true`), { signal: controller.signal });
+      if (request !== runRequest.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        setLoadError(await responseErrorMessage(response, `读取验证运行详情失败（HTTP ${response.status}）`));
+        return;
+      }
+      const data: ValidationRunRecord = await response.json();
+      if (request !== runRequest.current || controller.signal.aborted) return;
+      setSelectedRun(data);
+    } catch (error) {
+      if (controller.signal.aborted || request !== runRequest.current) return;
+      setLoadError(error instanceof Error ? `读取验证运行详情失败：${error.message}` : '读取验证运行详情失败：网络请求未完成');
     }
-    setSelectedRun(await response.json());
   };
 
   useEffect(() => { if (open) { void loadDatasets(); void loadTraces(); void loadMedia(); } }, [open]);
+  useEffect(() => () => { detailAbort.current?.abort(); runAbort.current?.abort(); }, []);
   useEffect(() => { if (open && datasetId) void loadDetail(datasetId); }, [open, datasetId]);
   useEffect(() => { if (open && selectedRunId) void loadRun(selectedRunId); }, [open, selectedRunId]);
   useEffect(() => {
@@ -177,7 +212,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
     <Row gutter={12}>
       <Col span={5}>
         <Card size="small" title="数据集" extra={<Button size="small" onClick={() => setCreateOpen(true)}>新建</Button>}>
-          <Select style={{ width: '100%', marginBottom: 8 }} value={datasetId} onChange={(v) => { setDatasetId(v); setSelectedRunId(undefined); setSelectedRun(undefined); setWorkflowText(''); setWorkflowSourceRunId(undefined); }} options={datasets.map((x) => ({ value: x.id, label: `${x.name} (${x.itemCount})` }))} />
+          <Select style={{ width: '100%', marginBottom: 8 }} value={datasetId} onChange={(v) => { setDatasetId(v); setSelectedRunId(undefined); setSelectedRun(undefined); setWorkflowText(''); setWorkflowSourceRunId(undefined); setDetail(undefined); setRuns([]); setSelectedTraceIds([]); setSelectedMediaRefs([]); }} options={datasets.map((x) => ({ value: x.id, label: `${x.name} (${x.itemCount})` }))} />
           {detail && <>
             <Typography.Title level={5} style={{ margin: '8px 0 0' }}>{detail.dataset.name}</Typography.Title>
             <Typography.Paragraph type="secondary">{detail.dataset.description || '暂无说明'}</Typography.Paragraph>
@@ -236,7 +271,7 @@ export default function DatasetValidationPanel({ open, onClose, currentWorkflow 
           </Col>
           <Col span={14}>
             <Card size="small" title="验证运行记录">
-              <Table size="small" pagination={{ pageSize: 5 }} rowKey="runId" dataSource={runs} onRow={(row) => ({ onClick: () => setSelectedRunId(row.runId) })} columns={[
+              <Table size="small" pagination={{ pageSize: 5 }} rowKey="runId" dataSource={runs} onRow={(row) => ({ onClick: () => { setSelectedRunId(row.runId); setSelectedRun(undefined); } })} columns={[
                 { title: '状态', dataIndex: 'status', width: 95, render: (v: string) => <Tag color={v === 'Completed' ? 'green' : v === 'Running' ? 'blue' : v === 'Failed' ? 'red' : 'gold'}>{localizeStatus(v)}</Tag> },
                 { title: '进度', width: 160, render: (_: unknown, row) => <Progress size="small" percent={row.requestedCount ? Math.round(100 * row.completedCount / row.requestedCount) : 0} /> },
                 { title: '准确率', width: 90, render: (_: unknown, row) => row.summary ? `${(row.summary.accuracy * 100).toFixed(1)}%` : '-' },

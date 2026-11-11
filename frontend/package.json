@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "generate:api-types": "npx --yes -p typescript@5.9.3 -p openapi-typescript@7.13.0 openapi-typescript src/generated/openapi.json -o src/generated/api-types.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",

@@ -8,7 +8,7 @@ public static class ReplayEndpoints
     {
         app.MapGet("/api/traces/{runId}/replay/context", async (string runId, OfflineReplayService replay, CancellationToken ct) =>
             Results.Ok(await replay.GetContextAsync(runId, ct)))
-            .RequireAuthorization(SecurityPolicies.Engineer);
+            .RequireAuthorization(SecurityPolicies.Engineer).Produces<OfflineReplayContext>();
 
         app.MapGet("/api/traces/{runId}/replay/input", (string runId, TraceabilityStore traces) =>
         {
@@ -20,7 +20,9 @@ public static class ReplayEndpoints
         {
             var result = await replay.ExecuteAsync(runId, request, ct);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireEngineer("trace.replay.execute", "trace");
+        }).RequireEngineer("trace.replay.execute", "trace")
+            .Produces<OfflineReplayResult>()
+            .Produces<OfflineReplayResult>(StatusCodes.Status400BadRequest);
 
         return app;
     }

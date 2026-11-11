@@ -8,7 +8,7 @@ public static class ParameterTuningEndpoints
     {
         app.MapPost("/api/tuning/preview", async (ParameterTuningPreviewRequest request, ParameterTuningService service, CancellationToken ct) =>
             Results.Ok(await service.PreviewAsync(request, ct)))
-            .RequireEngineer("tuning.preview", "parameter-tuning");
+            .Produces<ParameterTuningPreviewResult>().RequireEngineer("tuning.preview", "parameter-tuning");
 
         return app;
     }

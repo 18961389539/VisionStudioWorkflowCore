@@ -345,7 +345,8 @@ export const modelAssets = {
 export const diagnostics = {
   summary: apiUrl('diagnostics/summary'),
   events: apiUrl('diagnostics/events?take=250'),
-  assets: apiUrl('diagnostics/assets')
+  assets: apiUrl('diagnostics/assets'),
+  nodeDurations: apiUrl('diagnostics/node-durations')
 } as const;
 
 // ── hardware-provenance ──────────────────────────────────────────────────────

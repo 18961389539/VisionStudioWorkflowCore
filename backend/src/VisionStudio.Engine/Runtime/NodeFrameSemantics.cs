@@ -74,21 +74,5 @@ internal static class NodeFrameSemantics
         => $"{nodeId}.image ({rule.FrameLabel ?? defaultLabel})";
 
     private static string? ParameterValue(NodeDefinition node, NodeCatalogItem catalog, string name)
-    {
-        if (node.Parameters is not null && node.Parameters.TryGetValue(name, out var raw))
-        {
-            return raw.ValueKind switch
-            {
-                JsonValueKind.String => raw.GetString(),
-                JsonValueKind.True => "true",
-                JsonValueKind.False => "false",
-                JsonValueKind.Number => raw.GetRawText(),
-                _ => null
-            };
-        }
-
-        return catalog.Parameters
-            .FirstOrDefault(parameter => parameter.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-            ?.DefaultValue?.ToString();
-    }
+        => NodeParameterValue.Resolve(node, catalog, name);
 }

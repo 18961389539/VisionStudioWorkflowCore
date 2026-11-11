@@ -9,15 +9,15 @@ public static class ScriptEndpoints
     {
         app.MapPost("/api/scripts/validate", (ScriptValidateRequest request, CancellationToken ct) =>
                 Results.Ok(ScriptEditorService.Validate(request.Source, ct)))
-            .RequireEngineer("script.validate", "script");
+            .Produces<ScriptValidationResult>().RequireEngineer("script.validate", "script");
 
         app.MapPost("/api/scripts/complete", (ScriptCompletionRequest request) =>
                 Results.Ok(ScriptEditorService.Complete(request.Source, request.Offset, request.Ports)))
-            .RequireEngineer("script.complete", "script");
+            .Produces<IReadOnlyList<ScriptCompletionItem>>().RequireEngineer("script.complete", "script");
 
         app.MapPost("/api/scripts/format", (ScriptFormatRequest request, CancellationToken ct) =>
                 Results.Ok(ScriptEditorService.Format(request.Source, ct)))
-            .RequireEngineer("script.format", "script");
+            .Produces<ScriptFormatResult>().RequireEngineer("script.format", "script");
 
         return app;
     }

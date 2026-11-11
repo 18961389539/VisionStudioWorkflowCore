@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "01d2f353939cce307b7e05e46bf37d9d8e9d7d7b73ed1d40e37387f7c16eb685",
+  "hash": "c85e33f9fb78a315c8e98dd39d83705db31b454e6c0eb179a850813d6c6ddd91",
   "items": [
     {
       "type": "image.acquire",
@@ -6831,7 +6831,7 @@
           "description": "Matrix multiply order when composing transforms."
         }
       ],
-      "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. For image geometry, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
+      "description": "Compose A:S->M with B:M->T to produce S->T, enforcing frame/unit compatibility and rejecting singular or non-finite transforms. order=outerInner (default) runs Compose(A,B) and requires A.target == B.source; order=innerOuter runs Compose(B,A) and requires B.target == A.source. For image geometry with the default order, compose roi.transform (ReferenceImage->CurrentImage) as A with image.crop (CurrentImage->CropImage) as B. Emits frames, determinant and JSON diagnostics.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -24401,12 +24401,6 @@
         "executionMode": "Pipeline"
       },
       "actions": [],
-      "transformFrames": {
-        "policy": "TemplateToImage",
-        "primaryPort": "transform",
-        "imagePort": "image",
-        "templatePort": "template"
-      },
       "outputFrames": [
         {
           "source": "ImageInput",
@@ -24415,7 +24409,7 @@
       ],
       "declaresActions": true,
       "declaresFrames": false,
-      "declaresTransformFrames": true,
+      "declaresTransformFrames": false,
       "declaresOutputFrames": true,
       "declaresRoiImageBindings": false
     },

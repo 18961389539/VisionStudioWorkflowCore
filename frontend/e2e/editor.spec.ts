@@ -82,6 +82,9 @@ test.describe('编辑器画布（真实浏览器）', () => {
   test('Ctrl+K 命令面板可直接加节点（真实画布命中链路）', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
+    // 画布可见只代表 DOM 渲染完成，Ctrl+K 的全局监听随首个 effect 挂载；
+    // 满载（7 个 worker 并发）时直接按键会抢在挂载前，属于测试竞态。
+    await expect(page.locator('.react-flow')).toBeVisible();
     await page.keyboard.press('Control+KeyK');
     const search = page.getByLabel('命令面板搜索');
     await expect(search).toBeVisible();

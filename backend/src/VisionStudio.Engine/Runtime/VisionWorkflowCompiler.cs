@@ -107,7 +107,8 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             dsl,
             compiled.VisualOrder,
             context.SnapshotSegments(),
-            compiled.ControlRegions);
+            compiled.ControlRegions,
+            context.SnapshotWarnings());
     }
 
     private void ValidateCatalogAndEdges(WorkflowDefinition workflow)
@@ -257,14 +258,27 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         }
     }
 
+    /// <summary>
+    /// 需要"几何/图像必须与 transform 帧一致"校验的节点：带 transform + image 输入，且图像本身不是
+    /// transform 结果。image.warpAffine 声明 TransformTarget（输出图像 = 变换结果），输入图像在
+    /// transform 的 source 帧，由 ValidateImageWarpFrames 单独校验。规则来自目录声明，不再维护
+    /// 六个测量类型的硬编码名单——新增测量节点自动受保护。
+    /// </summary>
+    private bool SamplesGeometryAgainstTransformedImage(NodeDefinition node)
+    {
+        var catalog = registry.Require(node.Type).Catalog;
+        if (!catalog.Inputs.Any(port => port.Name.Equals("transform", StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Transform2D))
+            return false;
+        if (!catalog.Inputs.Any(port => port.Name.Equals("image", StringComparison.OrdinalIgnoreCase)
+                && port.DataType == VisionDataType.Image))
+            return false;
+        return NodeFrameSemantics.Resolve(node, catalog)?.Policy != NodeImageFramePolicy.TransformTarget;
+    }
+
     private void ValidateMeasurementImageFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
-        var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "feature.edgeSubpixel", "measure.caliper", "measure.caliperWidth", "measure.caliperArray", "measure.caliperLine", "measure.caliperCircle"
-        };
-
-        foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
+        foreach (var node in workflow.Nodes.Where(SamplesGeometryAgainstTransformedImage))
         {
             var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
             var imageEdge = FindInputEdge(workflow.Edges, node.Id, "image");
@@ -343,8 +357,14 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
                                 new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
                     }
 
-                    var first = ResolveComposePort(transformDeclaration.PrimaryPort);
-                    var second = ResolveComposePort(transformDeclaration.SecondaryPort ?? string.Empty);
+                    // 与运行时 ComposeTransformNode 保持一致：innerOuter 执行 Compose(B, A)，
+                    // 帧链方向随之反过来（B.Target 必须衔接 A.Source）。
+                    var innerOuter = node.GetString("order", "outerInner").Trim()
+                        .Equals("innerOuter", StringComparison.OrdinalIgnoreCase);
+                    var firstPort = innerOuter ? transformDeclaration.SecondaryPort ?? string.Empty : transformDeclaration.PrimaryPort;
+                    var secondPort = innerOuter ? transformDeclaration.PrimaryPort : transformDeclaration.SecondaryPort ?? string.Empty;
+                    var first = ResolveComposePort(firstPort);
+                    var second = ResolveComposePort(secondPort);
                     if (first?.Target is { IsTraceable: true } firstTarget
                         && second?.Source is { IsTraceable: true } secondSource
                         && !string.Equals(firstTarget.Key, secondSource.Key, StringComparison.OrdinalIgnoreCase))
@@ -412,12 +432,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     /// </summary>
     private void ValidateMeasurementGeometryFrames(WorkflowDefinition workflow, IReadOnlyDictionary<string, NodeDefinition> byId)
     {
-        var measurementTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "feature.edgeSubpixel", "measure.caliper", "measure.caliperWidth", "measure.caliperArray", "measure.caliperLine", "measure.caliperCircle"
-        };
-
-        foreach (var node in workflow.Nodes.Where(item => measurementTypes.Contains(item.Type)))
+        foreach (var node in workflow.Nodes.Where(SamplesGeometryAgainstTransformedImage))
         {
             var transformEdge = FindInputEdge(workflow.Edges, node.Id, "transform");
             var transform = transformEdge is null ? null
@@ -1049,9 +1064,7 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
             var controller = catalog.Parameters.FirstOrDefault(parameter =>
                 parameter.Name.Equals(condition.Parameter, StringComparison.OrdinalIgnoreCase));
             if (controller is null) return false;
-            var actual = node.Parameters is not null && node.Parameters.TryGetValue(controller.Name, out var value)
-                ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString()
-                : controller.DefaultValue?.ToString();
+            var actual = NodeParameterValue.Resolve(node, catalog, controller.Name) ?? string.Empty;
             return condition.Values.Any(expected => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase));
         }
     }
@@ -1407,13 +1420,29 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         // 由 VisionPipelineExecutor 按分支分组并发执行（此前用 Sequence 顺序执行两条分支，时间线上永远不会重叠）。
         // 含非融合节点（flow.result、设备节点等）的分支仍回退为顺序 Sequence；while/repeat 体内的 Parallel 因
         // loopNodeId 非空而不融合，保持串行语义。
-        if (loopNodeId is null && TryCollectFusedBranchNodes(parallel.Branch1, out var branch1Nodes) &&
-            TryCollectFusedBranchNodes(parallel.Branch2, out var branch2Nodes))
+        if (loopNodeId is null && TryCollectFusedBranchNodes(parallel.Branch1, out var branch1Nodes, out _) &&
+            TryCollectFusedBranchNodes(parallel.Branch2, out var branch2Nodes, out _))
         {
             var fusedNodes = branch1Nodes.Concat(branch2Nodes).ToArray();
             var fusedMarker = CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId);
             return [fusedMarker, CreatePipelineStep(fusedNodes, continuationStepId, context, stepIdOverride: sequenceId)];
         }
+
+        // 退化不能静默：画布上写的并行与产物（Sequence）不一致，必须让调用方看到原因。
+        string sequentialReason;
+        if (loopNodeId is not null)
+            sequentialReason = "the Parallel node is inside a loop body, where branch fusion is disabled";
+        else if (!TryCollectFusedBranchNodes(parallel.Branch1, out _, out var branch1Blocker))
+            sequentialReason = $"branch1 contains {branch1Blocker}";
+        else if (!TryCollectFusedBranchNodes(parallel.Branch2, out _, out var branch2Blocker))
+            sequentialReason = $"branch2 contains {branch2Blocker}";
+        else
+            sequentialReason = "the branches could not be fused";
+        context.AddWarning(new CompileWarning(
+            "flow.parallel.sequential",
+            $"Parallel node '{parallel.Node.Id}' runs both branches sequentially: {sequentialReason}. " +
+            "Branch outputs and disposition are unchanged; only concurrency (cycle time) is affected.",
+            parallel.Node.Id));
 
         var marker = CreateVisionStep(parallel.Node.Id, sequenceId, loopNodeId);
         var sequence = new Dictionary<string, object?>
@@ -1433,15 +1462,30 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
         return [marker, sequence];
     }
 
-    /// <summary>分支可整体融合为一个流水线段的条件：全部为可融合普通节点（无嵌套控制结构）。</summary>
-    private bool TryCollectFusedBranchNodes(StructuredSequenceIr branch, out List<NodeDefinition> nodes)
+    /// <summary>
+    /// 分支可整体融合为一个流水线段的条件：全部为可融合普通节点（无嵌套控制结构）。
+    /// blocker 说明第一条不满足条件的项，供“退化顺序执行”的编译提示使用。
+    /// </summary>
+    private bool TryCollectFusedBranchNodes(StructuredSequenceIr branch, out List<NodeDefinition> nodes, out string? blocker)
     {
         nodes = [];
-        if (branch.Items.Count == 0) return false;
+        blocker = null;
+        if (branch.Items.Count == 0)
+        {
+            blocker = "an empty branch";
+            return false;
+        }
         foreach (var item in branch.Items)
         {
-            if (item is not StructuredNodeIr node || !IsPipelineEligible(node.Node))
+            if (item is not StructuredNodeIr node)
             {
+                blocker = "a nested control structure";
+                nodes = [];
+                return false;
+            }
+            if (!IsPipelineEligible(node.Node))
+            {
+                blocker = $"node '{node.Node.Id}' ({node.Node.Type}), whose execution mode or actions forbid pipeline fusion";
                 nodes = [];
                 return false;
             }
@@ -1651,9 +1695,13 @@ public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)
     private sealed class CompileContext
     {
         private readonly Dictionary<string, IReadOnlyList<string>> _segments = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<CompileWarning> _warnings = [];
 
         public CompileContext(IReadOnlyList<EdgeDefinition> edges) => Edges = edges;
         public IReadOnlyList<EdgeDefinition> Edges { get; }
+
+        public void AddWarning(CompileWarning warning) => _warnings.Add(warning);
+        public IReadOnlyList<CompileWarning> SnapshotWarnings() => [.. _warnings];
 
         public void RegisterSegment(string segmentId, IReadOnlyList<string> nodeIds)
         {
@@ -1682,4 +1730,11 @@ public sealed record CompiledWorkflow(
     string DslJson,
     IReadOnlyList<string> OrderedNodeIds,
     IReadOnlyDictionary<string, IReadOnlyList<string>> PipelineSegments,
-    IReadOnlyList<StructuredControlRegion> ControlRegions);
+    IReadOnlyList<StructuredControlRegion> ControlRegions,
+    IReadOnlyList<CompileWarning> Warnings);
+
+/// <summary>
+/// 非致命编译提示：不改变流程结果，但用户需要知道编译产物与画布直觉不一致的地方
+/// （典型：flow.parallel 退化为顺序执行）。Warnings 是编译产物的披露，不是校验失败。
+/// </summary>
+public sealed record CompileWarning(string Code, string Message, string? NodeId = null);

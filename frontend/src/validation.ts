@@ -12,7 +12,8 @@ import { localizePortName, portDisplayName } from './i18n/catalog';
  */
 export type WorkflowIssue = {
   id: string;
-  severity: 'error';
+  /** warning：编译提示（流程仍有效）；error：阻断校验的问题。 */
+  severity: 'error' | 'warning';
   source: 'client' | 'server';
   message: string;
   nodeId?: string;

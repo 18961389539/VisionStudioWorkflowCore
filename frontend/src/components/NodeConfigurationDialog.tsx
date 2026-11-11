@@ -39,7 +39,8 @@ import {
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
 
-import { runs } from '../endpoints';
+import { apiFetch } from '../apiClient';
+import { diagnostics, runs } from '../endpoints';
 import {
   clipLineToImage,
   connectedRoiGeometry,
@@ -54,6 +55,29 @@ import {
   legacyCropRectangle,
   outputPortMatches
 } from './nodeConfigurationUtils';
+
+type NodeDurationHint = {
+  samples: number;
+  p95Ms: number;
+  suggestedTimeoutMs?: number;
+  timeoutCount: number;
+  tooTight: boolean;
+};
+
+function parseNodeDuration(value: unknown): NodeDurationHint | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const samples = typeof record.samples === 'number' && Number.isFinite(record.samples) ? record.samples : undefined;
+  const p95Ms = typeof record.p95Ms === 'number' && Number.isFinite(record.p95Ms) ? record.p95Ms : undefined;
+  if (samples === undefined || p95Ms === undefined) return undefined;
+  return {
+    samples,
+    p95Ms,
+    suggestedTimeoutMs: typeof record.suggestedTimeoutMs === 'number' && Number.isFinite(record.suggestedTimeoutMs) ? record.suggestedTimeoutMs : undefined,
+    timeoutCount: typeof record.timeoutCount === 'number' && Number.isFinite(record.timeoutCount) ? record.timeoutCount : 0,
+    tooTight: record.timeoutTooTight === true
+  };
+}
 
 type Props = {
   node: Node;
@@ -123,6 +147,28 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
       return () => cancelAnimationFrame(frame);
     }
   }, [open, initialTab, activeTab]);
+  // __timeoutMs 的取值建议：打开配置页时读取该节点类型的 P95（/api/diagnostics/node-durations）。
+  // 诊断属于附加信息：无权限/离线/格式异常都不得打断配置。
+  const [nodeDuration, setNodeDuration] = useState<NodeDurationHint>();
+  useEffect(() => {
+    if (!open) { setNodeDuration(undefined); return; }
+    setNodeDuration(undefined);
+    const controller = new AbortController();
+    let disposed = false;
+    void (async () => {
+      try {
+        const response = await apiFetch(diagnostics.nodeDurations, { signal: controller.signal });
+        if (!response.ok) return;
+        const data: unknown = await response.json();
+        if (disposed || !Array.isArray(data)) return;
+        const entry = data.find((item) => typeof item === 'object' && item !== null
+          && (item as Record<string, unknown>).nodeType === catalogItem.type);
+        const hint = parseNodeDuration(entry);
+        if (!disposed && hint) setNodeDuration(hint);
+      } catch { /* 诊断提示是附加信息，失败不能打断配置 */ }
+    })();
+    return () => { disposed = true; controller.abort(); };
+  }, [open, catalogItem.type]);
   const [baseline] = useState(() => configurationParameters((node.data.parameters ?? {}) as NodeParameters, catalogItem));
   // 资产引用节点打开时会把模型回读到草稿；基线同时补齐，避免"刚打开就显示未保存修改"。
   const [baselineOverride, setBaselineOverride] = useState<NodeParameters>();
@@ -1402,6 +1448,15 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             <span style={{ cursor: 'help', textDecoration: 'underline dotted' }}>说明</span>
           </Tooltip>
         </div>
+        {nodeDuration && <div data-testid="node-duration-hint" style={{ padding: '0 10px 8px', fontSize: 12, color: 'var(--vs-text-3)' }}>
+          {nodeDuration.samples < 20
+            ? `耗时样本 ${nodeDuration.samples}/20，P95 ${Math.round(nodeDuration.p95Ms)} 毫秒（样本不足，暂不建议超时值）`
+            : nodeDuration.suggestedTimeoutMs === undefined
+              ? `P95 ${Math.round(nodeDuration.p95Ms)} 毫秒 · 暂无建议值`
+              : `P95 ${Math.round(nodeDuration.p95Ms)} 毫秒 · 建议超时 ${nodeDuration.suggestedTimeoutMs} 毫秒`}
+          {nodeDuration.timeoutCount > 0 && <Tag color="red" style={{ marginLeft: 6 }}>已触发超时 {nodeDuration.timeoutCount} 次</Tag>}
+          {nodeDuration.tooTight && <Tag color="orange" style={{ marginLeft: 6 }}>最近运行配置偏紧</Tag>}
+        </div>}
         {(isCaliperCircle || isCaliperEdge) && <div className="caliper-workspace-mode"><Segmented size="small" aria-label={isCaliperEdge ? '单边缘卡尺工作模式' : '圆卡尺工作模式'}
           value={caliperDiagnosticMode ? 'diagnostics' : 'settings'}
           options={[{ label: isCaliperEdge ? '选线与调参' : '圈选与调参', value: 'settings' }, { label: isCaliperEdge ? '边缘剖面诊断' : '单卡尺诊断', value: 'diagnostics' }]}

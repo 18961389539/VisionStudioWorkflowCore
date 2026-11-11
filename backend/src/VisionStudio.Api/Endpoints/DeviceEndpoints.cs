@@ -14,7 +14,8 @@ public static class DeviceEndpoints
         {
             new("NModbusTcpDeviceDriver", "Modbus TCP", ["C:0", "DI:0", "HR:0", "IR:0"], "0-based addresses. Boolean uses C/DI; Integer and Double use two registers (Int32 / Float32). 32-bit order: ABCD/CDAB/BADC/DCBA."),
             new("S7NetPlusDeviceDriver", "Siemens S7", ["DB10.DBX0.0", "DB10.DBW2", "DB10.DBD4", "M10.0", "MW20", "MD24"], "S7.Net Plus absolute addresses. Double uses a DWord address and is decoded as IEEE754 float32.")
-        }));
+        }))
+            .Produces<IReadOnlyList<DeviceAddressTemplate>>();
 
         app.MapPost("/api/devices/register/modbus-tcp", async (
             ModbusTcpRegistrationRequest request,
@@ -27,7 +28,7 @@ public static class DeviceEndpoints
                 request.Id, "modbus-tcp", request.Name, request.Host, request.Port, request.TimeoutMs,
                 request.UnitId, request.RegisterOrder, Tags: request.Tags ?? Array.Empty<DeviceTagDefinition>());
             return await RegisterDeviceAsync(profile, devices, profiles, loggerFactory.CreateLogger("DeviceRegistration"), ct);
-        }).RequireEngineer("device.register.modbus", "device");
+        }).Produces<DeviceDescriptor>().RequireEngineer("device.register.modbus", "device");
 
         app.MapPost("/api/devices/register/s7", async (
             S7NetPlusRegistrationRequest request,
@@ -41,10 +42,11 @@ public static class DeviceEndpoints
                 CpuType: request.CpuType, Rack: request.Rack, Slot: request.Slot,
                 Tags: request.Tags ?? Array.Empty<DeviceTagDefinition>());
             return await RegisterDeviceAsync(profile, devices, profiles, loggerFactory.CreateLogger("DeviceRegistration"), ct);
-        }).RequireEngineer("device.register.s7", "device");
+        }).Produces<DeviceDescriptor>().RequireEngineer("device.register.s7", "device");
 
         app.MapGet("/api/device-profiles", async (DeviceProfileStore profiles, CancellationToken ct) =>
-            Results.Ok(await profiles.ListAsync(ct)));
+            Results.Ok(await profiles.ListAsync(ct)))
+            .Produces<IReadOnlyList<DeviceProfile>>();
 
         app.MapDelete("/api/devices/{id}", async (string id, DeviceManager devices, DeviceProfileStore profiles, ProductionRuntimeService production, CancellationToken ct) =>
         {
@@ -75,7 +77,9 @@ public static class DeviceEndpoints
         }).RequireEngineer("device.delete", "device");
 
         app.MapPost("/api/devices/{id}/read-all", async (string id, DeviceManager devices, CancellationToken ct) =>
-            Results.Ok(await devices.ReadAllFreshAsync(id, autoConnect: true, cancellationToken: ct))).RequireAuthorization(SecurityPolicies.Operator);
+            Results.Ok(await devices.ReadAllFreshAsync(id, autoConnect: true, cancellationToken: ct)))
+            .Produces<IReadOnlyList<DeviceTagSample>>()
+            .RequireAuthorization(SecurityPolicies.Operator);
 
         app.MapPut("/api/devices/{id}/tags", async (string id, DeviceBatchWriteRequest request, DeviceManager devices, DeviceLeaseRegistry leases, DeviceActionAuthorizationService auth, CancellationToken ct) =>
         {
@@ -89,7 +93,7 @@ public static class DeviceEndpoints
             // F02：写入确认成功才解除意图；抛异常/取消时由 Dispose 保留为 Unknown（阻断后续动作）。
             intent.Complete();
             return Results.Ok(devices.Get(id));
-        }).RequireEngineer("device.tags.write", "device");
+        }).Produces<DeviceDescriptor>().RequireEngineer("device.tags.write", "device");
 
         app.MapGet("/api/devices", (DeviceManager devices) => Results.Ok(devices.List()))
             .Produces<List<DeviceDescriptor>>();
@@ -100,13 +104,13 @@ public static class DeviceEndpoints
         {
             await devices.ConnectAsync(id, ct);
             return Results.Ok(devices.Get(id));
-        }).RequireOperator("device.connect", "device");
+        }).Produces<DeviceDescriptor>().RequireOperator("device.connect", "device");
 
         app.MapPost("/api/devices/{id}/disconnect", async (string id, DeviceManager devices, CancellationToken ct) =>
         {
             await devices.DisconnectAsync(id, ct);
             return Results.Ok(devices.Get(id));
-        }).RequireOperator("device.disconnect", "device");
+        }).Produces<DeviceDescriptor>().RequireOperator("device.disconnect", "device");
 
         app.MapPut("/api/devices/{id}/settings", async (
             string id,
@@ -120,7 +124,7 @@ public static class DeviceEndpoints
             devices.ApplySettings(id, request);
             await profiles.UpdateSettingsAsync(id, request, ct);
             return Results.Ok(devices.Get(id));
-        }).RequireEngineer("device.settings.update", "device");
+        }).Produces<DeviceDescriptor>().RequireEngineer("device.settings.update", "device");
 
         app.MapGet("/api/devices/{id}/tags/{tagId}", async (
             string id,
@@ -128,7 +132,8 @@ public static class DeviceEndpoints
             bool? fresh,
             DeviceManager devices,
             CancellationToken ct) =>
-            Results.Ok(await devices.ReadTagAsync(id, tagId, fresh ?? false, autoConnect: true, ct)));
+            Results.Ok(await devices.ReadTagAsync(id, tagId, fresh ?? false, autoConnect: true, ct)))
+            .Produces<DeviceTagSample>();
 
         app.MapPut("/api/devices/{id}/tags/{tagId}", async (
             string id,
@@ -148,7 +153,7 @@ public static class DeviceEndpoints
             var readBack = await devices.ReadTagAsync(id, tagId, fresh: true, autoConnect: true, cancellationToken: ct);
             intent.Complete();
             return Results.Ok(readBack);
-        }).RequireEngineer("device.tag.write", "device");
+        }).Produces<DeviceTagSample>().RequireEngineer("device.tag.write", "device");
 
         return app;
     }

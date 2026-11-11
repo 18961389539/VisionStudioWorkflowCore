@@ -9,25 +9,25 @@ public static class WorkflowModuleEndpoints
     public static IEndpointRouteBuilder MapWorkflowModuleEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/modules", async (WorkflowModuleStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await store.ListAsync(ct))).Produces<IReadOnlyList<WorkflowModuleDescriptor>>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPost("/api/modules/extract", async (ExtractWorkflowModuleRequest request, WorkflowModuleAuthoringService service, CancellationToken ct) =>
-            Results.Ok(await service.ExtractAsync(request,ct))).RequireEngineer("module.extract","workflow-module");
+            Results.Ok(await service.ExtractAsync(request,ct))).Produces<ExtractWorkflowModuleResult>().RequireEngineer("module.extract","workflow-module");
 
         app.MapGet("/api/modules/{id}", async (string id, WorkflowModuleStore store, CancellationToken ct) =>
         {
             var module=await store.GetAsync(id,ct);
             return module is null?Results.NotFound():Results.Ok(module);
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).Produces<WorkflowModuleDescriptor>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapGet("/api/modules/{id}/versions/{version:int}", async (string id,int version,WorkflowModuleStore store,CancellationToken ct) =>
         {
             var snapshot=await store.GetVersionAsync(id,version,ct);
             return snapshot is null?Results.NotFound():Results.Ok(snapshot);
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).Produces<WorkflowModuleVersion>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPost("/api/modules/{id}/versions", async (string id,SaveWorkflowModuleVersionRequest request,WorkflowModuleAuthoringService service,CancellationToken ct) =>
-            Results.Ok(await service.AddVersionAsync(id,request,ct))).RequireEngineer("module.version.create","workflow-module");
+            Results.Ok(await service.AddVersionAsync(id,request,ct))).Produces<WorkflowModuleVersion>().RequireEngineer("module.version.create","workflow-module");
 
         app.MapPost("/api/modules/expand", async (ExpandWorkflowModulesRequest request,WorkflowModuleExpander expander,CancellationToken ct) =>
         {

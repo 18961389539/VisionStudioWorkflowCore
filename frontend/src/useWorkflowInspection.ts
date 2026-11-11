@@ -22,15 +22,36 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 const isText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const isOptionalCount = (value: unknown) => value === undefined || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 
+type CompileWarningInfo = { code: string; message: string; nodeId?: string };
+
+/** 服务端编译提示（非致命）：格式不合法时按响应无效处理，不能悄悄吞掉。 */
+function compileWarnings(data: unknown): CompileWarningInfo[] {
+  if (!isRecord(data) || data.warnings === undefined) return [];
+  if (!Array.isArray(data.warnings)) throw new Error('校验响应无效：warnings 必须是数组');
+  return data.warnings.map((warning) => {
+    if (!isRecord(warning) || !isText(warning.code) || !isText(warning.message)
+      || (warning.nodeId !== undefined && warning.nodeId !== null && typeof warning.nodeId !== 'string')) {
+      throw new Error('校验响应无效：warnings 条目缺少 code/message');
+    }
+    return {
+      code: warning.code,
+      message: warning.message,
+      nodeId: typeof warning.nodeId === 'string' && warning.nodeId.trim() ? warning.nodeId : undefined
+    };
+  });
+}
+
 function validationSummary(data: unknown): string {
   if (isRecord(data) && data.valid === false) throw new Error(apiErrorMessage(data, '校验失败（服务端未提供原因）'));
   if (!isRecord(data) || data.valid !== true || !Array.isArray(data.orderedNodeIds) || !data.orderedNodeIds.length
     || !data.orderedNodeIds.every(isText) || !isOptionalCount(data.pipelineSegmentCount) || !isOptionalCount(data.structuredRegionCount)) {
     throw new Error('校验响应无效：缺少有效的校验结果或编译统计');
   }
+  const warnings = compileWarnings(data);
   return `流程校验通过 · ${data.orderedNodeIds.length} 个节点`
     + (data.pipelineSegmentCount === undefined ? '' : ` · ${data.pipelineSegmentCount} 个流水线`)
-    + (data.structuredRegionCount === undefined ? '' : ` · ${data.structuredRegionCount} 个结构化区域`);
+    + (data.structuredRegionCount === undefined ? '' : ` · ${data.structuredRegionCount} 个结构化区域`)
+    + (warnings.length === 0 ? '' : ` · ${warnings.length} 条编译提示`);
 }
 
 function formatDsl(data: unknown): string {
@@ -97,6 +118,7 @@ export function useWorkflowInspection(params: Params) {
     try {
       const issues = action === 'validate' ? validateWorkflow(context.nodes, context.catalog, context.edges) : [];
       let outcome: { ok: true; value: string } | { ok: false; error: string };
+      let warnings: CompileWarningInfo[] = [];
       try {
         const data: unknown = await withRequestTimeout(controller, 15_000, async () => {
           const response = await apiFetch(workflows.operation(action === 'validate' ? 'validate' : 'compile'), { method: 'POST', signal: controller.signal,
@@ -107,6 +129,7 @@ export function useWorkflowInspection(params: Params) {
           catch { throw new Error(`${label}响应无效：无法解析 JSON`); }
         });
         if (!owns()) return false;
+        if (action === 'validate') warnings = compileWarnings(data);
         outcome = { ok: true, value: action === 'validate' ? validationSummary(data) : formatDsl(data) };
       } catch (reason) {
         if (!owns()) return false;
@@ -119,9 +142,17 @@ export function useWorkflowInspection(params: Params) {
         return outcome.ok;
       }
       if (outcome.ok === false) issues.push(serverIssueFromMessage(outcome.error));
-      setValidation({ ...operation, issues, state: issues.length ? { status: 'issues' } : { status: 'ok', summary: outcome.ok === true ? outcome.value : undefined } });
+      const warningIssues: WorkflowIssue[] = warnings.map((warning, index) => ({
+        id: `warning-${warning.code}-${index}`,
+        severity: 'warning',
+        source: 'server',
+        message: warning.message,
+        nodeId: warning.nodeId
+      }));
+      setValidation({ ...operation, issues: [...issues, ...warningIssues], state: issues.length ? { status: 'issues' } : { status: 'ok', summary: outcome.ok === true ? outcome.value : undefined } });
       latest.current.onValidated();
       if (issues.length) latest.current.messages.warning(`发现 ${issues.length} 个校验问题，点击列表项可定位`);
+      else if (warningIssues.length) latest.current.messages.warning(`校验通过，有 ${warningIssues.length} 条编译提示，点击列表项可定位`);
       else if (outcome.ok === true) latest.current.messages.success(outcome.value);
       return issues.length === 0;
     } finally {

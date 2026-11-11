@@ -9,62 +9,77 @@ public static class CameraSynchronizationEndpoints
     {
         app.MapGet("/api/camera-sync/groups", async (CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.ListAsync(ct)))
+            .Produces<IReadOnlyList<CameraSynchronizationGroup>>()
             .RequireEngineer("camera.sync.list", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}", async (string id, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.GetAsync(id, ct)))
+            .Produces<CameraSynchronizationGroup>()
             .RequireEngineer("camera.sync.get", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}/status", async (string id, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.GetStatusAsync(id, ct)))
+            .Produces<CameraSynchronizationGroupStatus>()
             .RequireOperator("camera.sync.status", "camera-sync");
 
         app.MapGet("/api/camera-sync/runs", async (string? groupId, int? limit, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.ListRunsAsync(groupId, limit ?? 50, ct)))
+            .Produces<IReadOnlyList<CameraSynchronizationRunRecord>>()
             .RequireOperator("camera.sync.runs.list", "camera-sync");
 
         app.MapGet("/api/camera-sync/runs/{runId}", async (string runId, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.GetRunAsync(runId, ct)))
+            .Produces<CameraSynchronizationRunRecord>()
             .RequireOperator("camera.sync.runs.get", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}/statistics", async (string id, int? limit, int? minimumSamples, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.GetStatisticsAsync(id, limit ?? 100, minimumSamples ?? 20, ct)))
+            .Produces<CameraSynchronizationStatistics>()
             .RequireOperator("camera.sync.statistics", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}/ptp-diagnostics", async (string id, int? limit, CameraSynchronizationService sync, CancellationToken ct) =>
             Results.Ok(await sync.GetPtpDiagnosticsAsync(id, limit ?? 100, ct)))
+            .Produces<CameraSynchronizationPtpDiagnostics>()
             .RequireOperator("camera.sync.ptp-diagnostics", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}/gige-network-diagnostics", async (string id, int? limit, GigENetworkDiagnosticsService network, CancellationToken ct) =>
             Results.Ok(await network.GetGroupAsync(id, limit ?? 100, ct)))
+            .Produces<GigENetworkDiagnostics>()
             .RequireOperator("camera.sync.gige-network-diagnostics", "camera-sync");
 
         app.MapPost("/api/camera-sync/groups/{id}/gige-network-tests", async (string id, GigENetworkCommissioningTestRequest request, GigENetworkDiagnosticsService network, CancellationToken ct) =>
             Results.Accepted(value: await network.StartNetworkTestAsync(id, request, ct)))
+            .Produces<CameraSynchronizationCommissioningTest>(StatusCodes.Status202Accepted)
             .RequireEngineer("camera.sync.gige-network-test.start", "camera-sync");
 
         app.MapGet("/api/camera-sync/gige-network-tests/{testId}/report", async (string testId, GigENetworkDiagnosticsService network, CancellationToken ct) =>
             Results.Ok(await network.GetNetworkTestReportAsync(testId, ct)))
+            .Produces<GigENetworkCommissioningReport>()
             .RequireOperator("camera.sync.gige-network-test.report", "camera-sync");
 
         app.MapGet("/api/camera-sync/groups/{id}/commissioning-tests", async (string id, int? limit, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
             Results.Ok(await commissioning.ListAsync(id, limit ?? 20, ct)))
+            .Produces<IReadOnlyList<CameraSynchronizationCommissioningTest>>()
             .RequireOperator("camera.sync.commissioning.list", "camera-sync");
 
         app.MapPost("/api/camera-sync/groups/{id}/commissioning-tests", async (string id, CameraSynchronizationCommissioningTestRequest request, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
             Results.Accepted(value: await commissioning.StartAsync(id, request, ct)))
+            .Produces<CameraSynchronizationCommissioningTest>(StatusCodes.Status202Accepted)
             .RequireEngineer("camera.sync.commissioning.start", "camera-sync");
 
         app.MapGet("/api/camera-sync/commissioning-tests/{testId}", async (string testId, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
             Results.Ok(await commissioning.GetAsync(testId, ct)))
+            .Produces<CameraSynchronizationCommissioningTest>()
             .RequireOperator("camera.sync.commissioning.get", "camera-sync");
 
         app.MapPost("/api/camera-sync/commissioning-tests/{testId}/cancel", async (string testId, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
             Results.Ok(await commissioning.CancelAsync(testId, ct)))
+            .Produces<CameraSynchronizationCommissioningTest>()
             .RequireEngineer("camera.sync.commissioning.cancel", "camera-sync");
 
         app.MapGet("/api/camera-sync/commissioning-tests/{testId}/report", async (string testId, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
             Results.Ok(await commissioning.GetReportAsync(testId, ct)))
+            .Produces<CameraSynchronizationCommissioningReport>()
             .RequireOperator("camera.sync.commissioning.report", "camera-sync");
 
         app.MapGet("/api/camera-sync/commissioning-tests/{testId}/report.html", async (string testId, CameraSynchronizationCommissioningService commissioning, CancellationToken ct) =>
@@ -86,7 +101,7 @@ public static class CameraSynchronizationEndpoints
             request = request with { Id = id };
             foreach (var cameraId in request.CameraIds) production.EnsureDependencyMutationAllowed("camera", cameraId);
             return Results.Ok(await sync.SaveAsync(request, ct));
-        }).RequireEngineer("camera.sync.save", "camera-sync");
+        }).Produces<CameraSynchronizationGroup>().RequireEngineer("camera.sync.save", "camera-sync");
 
         app.MapDelete("/api/camera-sync/groups/{id}", async (
             string id, CameraSynchronizationService sync, ProductionRuntimeService production, CancellationToken ct) =>
@@ -113,6 +128,7 @@ public static class CameraSynchronizationEndpoints
             intent.Complete();
             return Results.Ok(result);
         })
+            .Produces<CameraSynchronizationCaptureResult>()
             .RequireOperator("camera.sync.trigger", "camera-sync");
 
         app.MapPost("/api/camera-sync/groups/{id}/schedule", async (
@@ -130,6 +146,7 @@ public static class CameraSynchronizationEndpoints
             intent.Complete();
             return Results.Ok(result);
         })
+            .Produces<CameraSynchronizationCaptureResult>()
             .RequireOperator("camera.sync.schedule", "camera-sync");
 
         return app;

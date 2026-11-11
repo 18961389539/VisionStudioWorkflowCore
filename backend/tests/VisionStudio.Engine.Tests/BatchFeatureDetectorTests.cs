@@ -159,8 +159,10 @@ public sealed class BatchFeatureDetectorTests
     public async Task GaborBank_DetectsDominantOrientationOfVerticalStripes()
     {
         using var image = new Mat(120, 160, MatType.CV_8UC1, Scalar.All(0));
-        for (var y = 0; y < image.Rows; y++)
-        for (var x = 0; x < image.Cols; x++)
+        var rows = image.Rows;
+        var cols = image.Cols;
+        for (var y = 0; y < rows; y++)
+        for (var x = 0; x < cols; x++)
             image.Set(y, x, (byte)Math.Clamp(128 + 100 * Math.Sin(2 * Math.PI * x / 8.0), 0, 255));
 
         var result = await new FeatureGaborBankNode().ExecuteAsync(
@@ -180,8 +182,10 @@ public sealed class BatchFeatureDetectorTests
     public async Task GaborBank_MaxModeKeepsTheWinningDirectionMap()
     {
         using var image = new Mat(120, 160, MatType.CV_8UC1, Scalar.All(0));
-        for (var y = 0; y < image.Rows; y++)
-        for (var x = 0; x < image.Cols; x++)
+        var rows = image.Rows;
+        var cols = image.Cols;
+        for (var y = 0; y < rows; y++)
+        for (var x = 0; x < cols; x++)
             image.Set(y, x, (byte)Math.Clamp(128 + 100 * Math.Sin(2 * Math.PI * y / 8.0), 0, 255));
 
         var result = await new FeatureGaborBankNode().ExecuteAsync(

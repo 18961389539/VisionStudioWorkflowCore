@@ -24,7 +24,7 @@ const sources = import.meta.glob('/src/**/*.{ts,tsx}', {
 describe('API request layer ratchet', () => {
   it(`does not add direct fetch calls (baseline ${DIRECT_FETCH_BASELINE})`, () => {
     const offenders = Object.entries(sources)
-      .filter(([path]) => !path.includes('/__tests__/') && !path.endsWith('/apiClient.ts'))
+      .filter(([path]) => !path.includes('/__tests__/') && !path.includes('/src/generated/') && !path.endsWith('/apiClient.ts'))
       .map(([path, content]) => ({ path, count: (content.match(/(?<![\w.])fetch\(/g) ?? []).length }))
       .filter((entry) => entry.count > 0);
     const total = offenders.reduce((sum, entry) => sum + entry.count, 0);
@@ -40,7 +40,7 @@ describe('API request layer ratchet', () => {
 
   it(`does not hardcode /api/ paths outside endpoints.ts (baseline ${HARDCODED_API_PATH_BASELINE})`, () => {
     const offenders = Object.entries(sources)
-      .filter(([path]) => !path.includes('/__tests__/') && !path.endsWith('/endpoints.ts'))
+      .filter(([path]) => !path.includes('/__tests__/') && !path.includes('/src/generated/') && !path.endsWith('/endpoints.ts'))
       .map(([path, content]) => ({ path, count: (content.match(/['"`]\/api\/|\$\{API_BASE\}/g) ?? []).length }))
       .filter((entry) => entry.count > 0);
     const total = offenders.reduce((sum, entry) => sum + entry.count, 0);

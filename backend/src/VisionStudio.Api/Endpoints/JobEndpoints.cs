@@ -21,13 +21,13 @@ public static class JobEndpoints
         {
             await ValidateWorkflowAsync(request.Workflow, compiler, modules, ct);
             return Results.Ok(await jobs.CreateAsync(request, ct));
-        }).RequireEngineer("job.create", "job");
+        }).Produces<JobDescriptor>().RequireEngineer("job.create", "job");
 
         app.MapGet("/api/jobs/{id}", async (string id, JobStore jobs, CancellationToken ct) =>
         {
             var job = await jobs.GetAsync(id, ct);
             return job is null ? Results.NotFound() : Results.Ok(job);
-        });
+        }).Produces<JobDescriptor>();
 
         app.MapPost("/api/jobs/{id}/versions", async (
             string id,
@@ -39,13 +39,13 @@ public static class JobEndpoints
         {
             await ValidateWorkflowAsync(request.Workflow, compiler, modules, ct);
             return Results.Ok(await jobs.AddVersionAsync(id, request, ct));
-        }).RequireEngineer("job.version.create", "job");
+        }).Produces<JobVersionSnapshot>().RequireEngineer("job.version.create", "job");
 
         app.MapGet("/api/jobs/{id}/versions/{version:int}", async (string id, int version, JobStore jobs, CancellationToken ct) =>
         {
             var snapshot = await jobs.GetVersionAsync(id, version, ct);
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-        });
+        }).Produces<JobVersionSnapshot>();
 
         app.MapPost("/api/jobs/{id}/versions/{version:int}/publish", async (
             string id,
@@ -62,7 +62,7 @@ public static class JobEndpoints
             await ValidateWorkflowAsync(snapshot.Workflow, compiler, modules, ct);
             var manifest = await dependencies.CaptureAsync(snapshot.Workflow, ct);
             return Results.Ok(await jobs.PublishAsync(id, version, "Publish", manifest, ct, expectedUpdatedAt));
-        }).RequireEngineer("job.publish", "job");
+        }).Produces<JobDescriptor>().RequireEngineer("job.publish", "job");
 
         app.MapPost("/api/jobs/{id}/rollback/{version:int}", async (
             string id,
@@ -79,13 +79,13 @@ public static class JobEndpoints
             await ValidateWorkflowAsync(snapshot.Workflow, compiler, modules, ct);
             var manifest = await dependencies.CaptureAsync(snapshot.Workflow, ct);
             return Results.Ok(await jobs.PublishAsync(id, version, "Rollback", manifest, ct, expectedUpdatedAt));
-        }).RequireEngineer("job.rollback", "job");
+        }).Produces<JobDescriptor>().RequireEngineer("job.rollback", "job");
 
         app.MapGet("/api/jobs/{id}/dependencies", async (string id, JobStore jobs, CancellationToken ct) =>
         {
             var snapshot = await jobs.GetPublishedSnapshotAsync(id, ct);
             return Results.Ok(snapshot.DependencyManifest);
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).Produces<RuntimeDependencyManifest>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapGet("/api/jobs/{id}/dependencies/validate", async (
             string id,
@@ -95,7 +95,7 @@ public static class JobEndpoints
         {
             var snapshot = await jobs.GetPublishedSnapshotAsync(id, ct);
             return Results.Ok(await dependencies.ValidateAsync(snapshot.DependencyManifest, snapshot.Workflow, ct));
-        }).RequireAuthorization(SecurityPolicies.Engineer);
+        }).Produces<RuntimeDependencyValidation>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPost("/api/jobs/{id}/run", async (
             string id,
@@ -142,7 +142,7 @@ public static class JobEndpoints
                     actionIntent.MarkUnknown("the published job returned success but an accepted device action still awaits completion confirmation");
             }
             return EndpointResults.StoreAndMapRunResult(result, store);
-        }).RequireOperator("job.run", "job");
+        }).Produces<WorkflowRunResult>().RequireOperator("job.run", "job");
 
         return app;
     }

@@ -8,10 +8,12 @@ public static class HardwareProvenanceEndpoints
     public static IEndpointRouteBuilder MapHardwareProvenanceEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/hardware-provenance", async (HardwareProvenanceService provenance, CancellationToken ct) =>
-            Results.Ok(await provenance.ListAsync(ct)));
+            Results.Ok(await provenance.ListAsync(ct)))
+            .Produces<IReadOnlyList<HardwareProvenanceSnapshot>>();
 
         app.MapGet("/api/hardware-provenance/{kind}/{id}", async (string kind, string id, HardwareProvenanceService provenance, CancellationToken ct) =>
-            Results.Ok(await provenance.CaptureAsync(kind, id, ct)));
+            Results.Ok(await provenance.CaptureAsync(kind, id, ct)))
+            .Produces<HardwareProvenanceSnapshot>();
 
         app.MapPut("/api/hardware-provenance/{kind}/{id}", async (
             string kind, string id, HardwareProvenanceDeclaration request,
@@ -20,7 +22,7 @@ public static class HardwareProvenanceEndpoints
             kind = kind.Trim().ToLowerInvariant();
             production.EnsureDependencyMutationAllowed(kind, id);
             return Results.Ok(await provenance.UpsertAsync(kind, id, request, ct));
-        }).RequireEngineer("hardware-provenance.update", "hardware-provenance");
+        }).Produces<HardwareProvenanceSnapshot>().RequireEngineer("hardware-provenance.update", "hardware-provenance");
 
         app.MapDelete("/api/hardware-provenance/{kind}/{id}", async (
             string kind, string id, HardwareProvenanceService provenance, ProductionRuntimeService production, CancellationToken ct) =>

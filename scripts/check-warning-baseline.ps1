@@ -47,7 +47,9 @@ if ($Update) {
 
 $baselineSet = @()
 if (Test-Path $Baseline) {
-    $baselineSet = Get-Content $Baseline | Where-Object { $_ -and -not $_.StartsWith('#') }
+    # 基线是无 BOM 的 UTF-8（-Update 也按 UTF8 写出）；PS 5.1 的默认 ANSI 读取会把
+    # 中文注释与首条告警解码粘连，导致已有告警被误判为新增。
+    $baselineSet = Get-Content $Baseline -Encoding UTF8 | Where-Object { $_ -and -not $_.StartsWith('#') }
 }
 
 $new = @($current | Where-Object { $baselineSet -notcontains $_ })

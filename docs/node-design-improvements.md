@@ -4,7 +4,7 @@
 本文件保留**现状、最近轮次与历史索引**；第一 ~ 五十一轮（2026-10-19 → 2026-10-22）的完整过程
 已归档到 [`docs/archive/node-design-improvements-rounds-1-51.md`](archive/node-design-improvements-rounds-1-51.md)。
 
-## 现状（2026-11-02）
+## 现状（2026-11-10）
 
 | 指标 | 当前值 | 守卫 |
 | --- | --- | --- |
@@ -14,6 +14,8 @@
 | 参数分组守卫 | 通过 | `nodeValidation.test.ts`（47/47） |
 | 目录参数契约 | 242 节点，无未声明读取 | `static-audit.py` 的 catalog 检查 |
 | 输出端口契约 | 242 节点，**源码目录 = 发布目录（逐端口、逐 Required）** | `NodeOutputContractTests`：任何擦端口/改必需位即失败；执行器缺必填输出即运行时报错 |
+| 前端契约 | 生成 `api-types.ts` + **54 个同名 DTO 编译期对账**；目录/报告 DTO 已从 schema 派生 | `apiContractParity.ts` / `apiContract.test.ts` / `npm run build` |
+| 交付闸门 | 全绿（覆盖率、警告、发布回归、e2e 见第九十四轮） | `scripts/quality-gate.ps1` |
 
 节点合并这条线**已经收口**：目录里不再同时存在「通用节点」和「它的某个参数取值」两份条目，
 `legacyNodes` 的兼容映射已清空，画布上的「兼容」徽标与配置页提示一并删除。
@@ -600,6 +602,599 @@ P1 的第二块：让人能看见资产、改得动元数据、删得安全。**
 工作区里还有两处**非本轮**的改动（`BarcodeQualityNode` 的分位对比度、`FeatureMatchNode` 一行修正），
 未打包进本次提交，留给作者确认后再提交。
 
+
+## 第七十六轮：组合变换顺序与交付闸门修复（2026-11-10）
+
+第七十六轮设计审查发现 `coordinate.transformCompose` 的编译期帧校验没有读取 `order`：
+编译器始终按 A×B 校验，而运行时 `order=innerOuter` 执行 `Compose(B, A)`。结果是合法的反向链路
+被编译期误拒，不合法的链路通过校验后在运行期才抛帧不匹配。
+
+| 层 | 变更 |
+| --- | --- |
+| 编译器 | `ResolveTransformFrames` 的 Compose 分支按 `order` 交换 primary/secondary 后再校验中间帧衔接，与 `ComposeTransformNode` 的 `Compose(B, A)` 对齐 |
+| 目录 | `coordinate.transformCompose` 长描述写明两种顺序的衔接要求；`catalog.generated.json` 重新生成（hash `5bba52d1…`） |
+| i18n | 节点描述与 `order` 参数说明同步补充 outerInner / innerOuter 的语义 |
+
+### 交付闸门修复
+
+- 上一批改动引入的 6 条新告警在源码修复（`GetGenericIndexer` → `GetArray` 单次取像素、
+  循环外缓存 `Rows`/`Cols`），没有靠改基线放行；基线由 28 条裁剪到 22 条。
+- 修复 `VisionStudioServiceRegistration.cs` 中 4 处 GBK 乱码注释（含监听优先级、维护互斥、构造环说明）。
+
+### 验证
+
+- 新增 2 项编译期用例：innerOuter 反向链路通过；同一接线在 outerInner 下被拒绝。加上既有 compose 用例共 4 项通过。
+- Engine **2206** 项、Api **496** 项通过；合并行覆盖率 **84.29%**、分支 **62.12%**（阈值 81/60）。
+- 前端 **96 文件 / 1162 项**通过；覆盖率 语句 69.43 / 分支 66.02 / 函数 59.82 / 行 73.97（阈值 68/65/59/73）；
+  `npm run build` 通过。
+- `static-audit.py` exit 0（Fact=1611）、metric floor、warning baseline、publish data separation、
+  data migration、Bash publish 回归 23 项、`CatalogExporter --check` 均通过。
+- e2e 7 项通过。本机 Playwright Chromium 缓存缺失且下载无进展，临时改用系统 Edge（同 Chromium 内核）验证后已还原配置；
+  CI 会执行 `npx playwright install chromium`。
+
+## 第七十七轮：面板请求竞态、机器人追踪保留与 e2e 稳定性（2026-11-10）
+
+### 数据集 / 回放面板
+
+| 场景 | 变更 |
+| --- | --- |
+| 数据集面板 | 切换数据集立即清空旧明细、运行列表与待添加选择；明细与运行详情请求带代次 + `AbortController`，迟到的旧响应直接丢弃；网络失败落到 `DataErrorAlert`，不再产生未处理拒绝 |
+| 回放调试器 | `runId` 变化时清空上下文/结果并中止在途的上下文与回放请求；回放结果按发起时的 runId 校验，迟到的旧结果不会显示在新运行标题下；`destroyOnClose` → `destroyOnHidden`（antd 6 弃用） |
+
+新增 4 项回归用例（数据集 2、回放 2）：用 deferred fetch 复现"旧请求后到"，断言旧数据不会覆盖新选择。
+
+### 机器人命令追踪保留
+
+- 新增 `RobotTraceRetentionOptions`（默认 30 天 / 20000 文件 / 每日清理）与 `RobotTraceRetentionHostedService`；
+  存储维护激活时让出，24 小时内文件不按数量删除，避免清理正在排查的证据。
+- `CleanupAsync` 按 `SelectForDeletion` 纯函数删除过期/超额文件并回收空日期目录；
+  新增 5 项测试（时间过期、数量上限、一天内保护、禁用开关、重复执行幂等）。
+
+### e2e 稳定性
+
+- Ctrl+K 用例在 7 worker 并发时可能抢在全局键盘监听挂载前按键；补画布可见性等待后复跑 7/7 通过。
+  本机仍无 Playwright Chromium 缓存，验证用系统 Edge（同内核），配置已还原。
+
+### 验证
+
+- Engine **2206**、Api **501**、前端 **98 文件 / 1166 项** 通过；合并行覆盖率 **84.26%**、分支 **62.15%**（阈值 81/60）。
+- 前端覆盖率：语句 68.95 / 分支 65.15 / 函数 59.27 / 行 73.57（阈值 68/65/59/73）。
+- `static-audit.py` exit 0（Fact=1616）、metric floor（Api 460 / 前端 98）、warning baseline 22 条无新增、
+  `npm run build`、e2e 7 项通过。
+
+## 第七十八轮：并行降级显式披露（2026-11-10）
+
+`flow.parallel` 在分支含设备/控制节点、或位于循环体时，编译产物会退化为 Sequence 顺序执行。
+此前编译响应与界面没有任何标记，与"不静默降级"原则冲突。本轮把退化变成**可见的编译提示**，
+不改变执行语义，也不把提示当成校验失败。
+
+| 层 | 变更 |
+| --- | --- |
+| 编译器 | `CompiledWorkflow` 新增 `Warnings`；`CompileParallel` 未融合时发出 `flow.parallel.sequential`，消息点名阻塞项（具体节点/嵌套控制结构/循环体）；`TryCollectFusedBranchNodes` 返回 blocker 供提示复用 |
+| API | `/api/validate`、`/api/compile` 响应新增 `warnings`（code / message / nodeId），可融合流程仍为空数组 |
+| 前端 | 校验链解析 warnings，格式非法按"响应无效"拒绝；提示进入"校验问题"列表（金色「提示」标签）并可点击定位节点；摘要追加"N 条编译提示"；`validate()` 仍返回通过 |
+
+### 验证
+
+- 新增 3 项编译器用例：可融合分支无提示且确实进入同一流水线段；不可融合分支提示点名 `flow.result`；
+  循环体内的 Parallel 提示融合被禁用。
+- 新增 2 项前端用例：提示不阻断校验并进入问题列表；非法 warnings 载荷被拒绝而不是静默丢弃。
+- Engine **2209**、Api **501**、前端 **98 文件 / 1168 项** 通过；合并行覆盖率 **84.25%**、分支 **62.15%**（阈值 81/60）。
+- 前端覆盖率：语句 68.98 / 分支 65.2 / 函数 59.31 / 行 73.6（阈值 68/65/59/73）；
+  `static-audit.py` exit 0（Fact=1619）、metric floor、warning baseline 22 条、`npm run build` 通过。
+
+## 第七十九轮：节点超时诊断接入配置页（2026-11-10）
+
+`/api/diagnostics/node-durations` 早已存在（回答"`__timeoutMs` 该填多少"），但此前只能 curl。
+本轮把它接到节点配置页的超时输入下方，工程师不用离开画布即可按实测 P95 选值。
+
+| 场景 | 展示 |
+| --- | --- |
+| 样本 < 20 | `耗时样本 N/20，P95 X 毫秒（样本不足，暂不建议超时值）` |
+| 样本 ≥ 20 | `P95 X 毫秒 · 建议超时 Y 毫秒` |
+| 最近运行触发过超时 | 红色「已触发超时 N 次」 |
+| P95 超过最近配置的 80% | 橙色「最近运行配置偏紧」 |
+
+- 按节点类型匹配；端点要求 Operator——无权限、离线或载荷格式异常都只是不显示提示，不打断配置与保存。
+- 端点常量收进 `endpoints.ts`（`diagnostics.nodeDurations`），符合前端"禁止硬编码 /api/"棘轮。
+
+### 验证
+
+- 新增 2 项配置页用例：P95 / 建议值 / 超时次数 / 偏紧标签；样本不足时不显示建议值。
+- 前端 **98 文件 / 1170 项** 通过；`apiUsage` / `apiContract` / `endpoints` 11 项通过；`npm run build` 通过。
+- 前端覆盖率：语句 69.03 / 分支 65.27 / 函数 59.38 / 行 73.67（阈值 68/65/59/73）；
+  `static-audit.py` exit 0（Fact=1619）、metric floor 通过。
+
+## 第八十轮：OpenAPI 快照刷新（2026-11-10）
+
+`frontend/src/generated/openapi.json` 自 2026-10-29 起未刷新：模型资产 / 模板资产共 **15 个端点**、
+**8 个 schema** 以及 `ParameterDescriptor.advanced` 字段缺失，`openapi-typescript` 生成链会漏掉这些契约。
+本轮用 `scripts/export-openapi.ps1` 从当前后端重新导出（临时数据根，不污染本机现场库）：
+
+- 路径 **242 → 257**（+15，全部为 `model-assets` / `template-assets`），**无删除**；
+- schema **159 → 167**（+8）；既有 schema 仅 `ParameterDescriptor` 新增 `advanced`；
+- `apiContract.test.ts` 增加"已存在端点不回落"棘轮，防止旧快照覆盖回流。
+
+验证：`apiContract` 4 项通过；快照可解析（OpenAPI 3.x）；前端 **98 文件 / 1171 项** 通过。
+已知缺口：`/api/validate`、`/api/compile` 仍返回匿名对象，未用 `Produces<T>()` 固化响应 schema。
+
+## 第八十一轮：校验/编译响应进入 OpenAPI 契约（2026-11-10）
+
+`/api/validate`、`/api/compile` 一直返回匿名对象：OpenAPI 里只有 `"200 OK"`，生成不出响应类型，
+上一轮新增的 `warnings` 也就无法进入下游契约。本轮把它们固化为具名 DTO：
+
+| DTO | 用途 |
+| --- | --- |
+| `WorkflowCompileResponse` | 编译成功（含 warnings / moduleDependencies / dslJson） |
+| `WorkflowValidationSuccess` | 校验成功（含 registeredNodeTypes / warnings） |
+| `WorkflowValidationFailure` | 校验失败（valid=false / error；仍以 400 作为交互反馈，不是 ProblemDetails） |
+
+- 两个端点补 `.Produces<T>()`；JSON 字段仍由 Minimal API camelCase 输出，与既有前端解析逐字段一致。
+- OpenAPI 快照重新导出：schema **167 → 173**，`/api/validate` 有 200/400 两个具名响应，`/api/compile` 有具名 200。
+- `apiContract` 棘轮加入三个 DTO，防止端点退回匿名对象。
+
+验证：Engine **2209**、Api **501**、前端 **98 文件 / 1171 项** 通过；`apiContract` + `useWorkflowInspection`
+50 项通过；OpenAPI 快照可解析且两个端点的响应为 `$ref`；warning baseline 22 条无新增、static-audit exit 0。
+
+真实宿主冒烟（临时数据根 + 安全关闭）：`POST /api/validate` 返回
+`valid=true / warnings[0].code=flow.parallel.sequential / moduleDependencies=[] / registeredNodeTypes`，
+`POST /api/compile` 返回同结构 + `dslJson`；空流程返回 `400 {"valid":false,"error":"Workflow has no nodes."}`，
+失败契约与旧前端解析保持一致。
+
+## 第八十二轮：资产域端点响应 schema（2026-11-10）
+
+上一轮固化校验/编译响应后，资产域（模型/模板）端点仍是匿名对象：OpenAPI 只有 `"200 OK"`，
+资产面板与训练工作区无法使用生成类型，字段漂移也无从断言。本轮为 **15 个 JSON 端点**补 `.Produces<T>()`：
+
+| 域 | 端点 | 响应 |
+| --- | --- | --- |
+| 模型资产 | list / create / get / patch | `ShapeModelAssetDescriptor` |
+| 模型资产 | 版本追加 / 版本读取 | `ShapeModelVersionInfo` |
+| 模型资产 | import | `ShapeModelAssetDescriptor` |
+| 模型资产 | gc preview / gc apply | `ShapeModelAssetGcPlan` |
+| 模型资产 | references | `ShapeModelAssetReference[]` |
+| 模型资产 | extract | `ExtractShapeModelAssetResponse` |
+| 模板资产 | list / create / get | `TemplateAssetDescriptor` |
+| 模板资产 | 版本追加 | `TemplateAssetVersionInfo` |
+
+OpenAPI schema **173 → 181**；`apiContract` 棘轮加入资产域 DTO（descriptor / version / gc / extract / template），
+防止这些端点退回匿名对象。二进制下载端点（blob / export）保持文件响应，不在此列。
+
+验证：Engine **2209**、Api **501**、前端 **98 文件 / 1171 项** 与 `npm run build` 通过；`apiContract` 4 项通过；
+warning baseline 22 条无新增；static-audit exit 0、metric floor 通过。
+
+## 第八十三轮：OpenAPI 生成类型与编译期对账（2026-11-10）
+
+设计审计 P1-1 的核心风险是 `types.ts` 这份约 1,784 行手写镜像：后端契约变了前端不会报错。
+本轮引入生成类型与编译期对账，作为迁移手写类型前的第一道闸门：
+
+- `src/generated/api-types.ts`：由 `openapi-typescript` 从 OpenAPI 快照生成。
+  openapi-typescript 7 的 peer 是 TypeScript 5.x，而项目是 TS 7，因此通过隔离的 TS5 环境执行
+  （`npm run generate:api-types`，固定 TS 5.9.3 + openapi-typescript 7.13.0），**不把工具装进项目依赖**。
+- `src/generated/apiContractParity.ts`：编译期断言"后端生成类型 → 前端手写类型"可赋值，
+  覆盖 `WorkflowDefinition` / `NodeCatalogItem` / `WorkflowRunResult` / `RunTraceRecord`。
+  .NET 10 OpenAPI 把数值生成成 `number | string`，对账前收敛回 number；后端开放 string、
+  前端收窄为联合的字段（`ParameterDescriptor.type`、`RunTraceRecord.disposition`）做显式归一。
+- 生成文件参与 `tsc -b`，`npm run build` 即会因契约漂移失败；API 用量棘轮排除 `src/generated/`。
+
+对账第一跑就抓到真实漂移：前端 `NodeOutputFrameSource` 缺少后端已使用的
+`ImageOutputFrame`（image.warpAffine）与 `OutputTransformTarget`（region.warpAffine），已补齐。
+
+验证：前端 **98 文件 / 1171 项** 通过；覆盖率 69.03 / 65.27 / 59.38 / 73.67（阈值 68/65/59/73；
+首跑有 2 项 worker 偶发失败，复跑全过）；`npm run build` 通过；static-audit exit 0（Fact=1619）、metric floor 通过。
+
+## 第八十四轮：帧校验去类型名单 + Vitest 并发封顶（2026-11-10）
+
+### 帧校验不再维护类型名单
+
+`ValidateMeasurementImageFrames` / `ValidateMeasurementGeometryFrames` 此前各自硬编码 6 个测量类型；
+新增测量节点若忘改名单，会静默跳过"几何/图像必须与 transform 帧一致"的校验。
+现改为目录语义判定 `SamplesGeometryAgainstTransformedImage`：带 `transform`(Transform2D) + `image`(Image) 输入、
+且图像帧策略不是 `TransformTarget` 的节点即受检（`image.warpAffine` 的图像是 transform 结果，
+由 `ValidateImageWarpFrames` 单独校验）。对现有 242 个节点行为等价，新增节点自动受保护。
+
+新增 1 项用例：自定义 `test.measure` 目录项（非内置类型）连接不匹配的图像/transform 帧，编译被拒绝。
+
+### Vitest 并发封顶
+
+本机 28 核时 Vitest 默认拉起 ~27 个 worker，每个创建 jsdom，是历史"worker 启动超时"偶发失败源。
+`vite.config.ts` 增加 `maxWorkers: 8`（CI 4 vCPU 自然低于该上限）。全量测试 56s、
+覆盖率 81–89s（此前约 60s），两次覆盖率复跑均 1171 项全绿。
+
+### 验证
+
+Engine **2210**、Api **501**、前端 **98 文件 / 1171 项** 通过；后端覆盖率 行 **84.22%** / 分支 **62.16%**
+（阈值 81/60）；前端覆盖率 69.03 / 65.27 / 59.38 / 73.67（阈值 68/65/59/73，连续两次复跑）；
+`npm run build` 通过；warning baseline 22 条无新增；static-audit exit 0（Fact=1620）、metric floor（Engine 1338）通过。
+
+## 第八十五轮：参数默认值解析收敛为单一实现（2026-11-10）
+
+设计审计第 3 项：Engine/Api 有 5 份"节点值优先、目录默认值兜底"的实现，且多处用 CurrentCulture
+格式化数值默认值。在逗号小数点区域（de-DE / fr-FR）默认值 `0.5` 会被读成 `"0,5"`，
+动作声明、frame 条件、端口必需性、运行时依赖与参数可见性会对同一个节点给出不同结论。
+
+新增 `Abstractions/NodeParameterValue.cs` 作为唯一实现：
+
+- 节点显式标量按 JSON 原文（数字取 raw text，布尔为小写 `true/false`）；
+- 目录默认值用 invariant 文本（`JsonElement` 字符串还原、数字取原文）；
+- 无节点值且无参数描述符 → `null`。
+
+替换 8 处调用：`PortDescriptor.IsRequired`、`NodeActionContract`、`OperatorParameterForms.Resolve/Validate`、
+`NodeFrameSemantics`、`ParameterTierCatalog`、编译器参数可见性判断、`RuntimeDependencies`
+（声明资源值 / 资产字符串 / 版本整数）。新增 3 项测试，其中 de-DE 文化下动作条件与端口必填
+仍按 `"0.5"` 成立——旧实现会失败。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.27%** / 分支 **62.17%**（阈值 81/60）；
+warning baseline 22 条无新增；static-audit exit 0（Fact=1623）、metric floor（Engine 1341）通过。
+
+## 第八十六轮：手写枚举收敛到生成类型（2026-11-10）
+
+`types.ts` 中 9 个与后端完全一致的枚举联合改为生成类型别名（`ContractSchema<'X'>`）：
+
+`NodeImageFramePolicy`、`NodeTransformFramePolicy`、`NodeOutputFrameSource`、`NodeMaturity`、
+`CameraTriggerMode`、`CameraOutputPixelFormat`、`DeviceConnectionState`、`DeviceTagQuality`、`DeviceTagDataType`。
+
+- 类型行为不变（`tsc` 全量通过）；后端新增枚举值会直接流入前端，不再需要双份维护。
+- `AssetKind` 保持手写：后端 schema 含 `null`，前端语义不允许 null，属于刻意收窄而非镜像。
+- 生成类型自此成为运行时源码的编译依赖（`types.ts → generated/api-types.ts`），
+  契约漂移会在 `npm run build` 阶段直接暴露。
+
+验证：前端 **98 文件 / 1171 项** 通过；覆盖率 69.03 / 65.27 / 59.38 / 73.67（阈值 68/65/59/73）；
+`npm run build` 通过；static-audit exit 0（Fact=1623）、metric floor 通过。
+
+## 第八十七轮：JsonElement 进入生成类型（2026-11-10）
+
+`NodeDefinition.parameters` / `ParameterDescriptor.defaultValue` 等 `JsonElement` 字段在 OpenAPI 里是
+"object 无属性"，openapi-typescript 会生成 `Record<string, never>`——`WorkflowPayload` 等 DTO 因此无法迁移到生成类型。
+新增 `JsonElementSchemaTransformer`（通过 `AddOpenApi(options => ...)` 注册）：
+
+- 直接出现的 `JsonElement` → 空 schema（生成 TS `unknown`）；
+- `Dictionary<string, JsonElement>` → 保留原 `null` 类型位并补 `additionalProperties: {}`（生成 `Record<string, unknown>`）。
+
+结果：`NodeDefinition.parameters` 由 `null | Record<string, never>` 变为 `null | { [key: string]: unknown }`；
+`ParameterDescriptor.defaultValue` 等直接字段变为 `unknown`。OpenAPI 快照与 `api-types.ts` 已重新生成；
+`apiContract` 增加守卫（`parameters.additionalProperties === {}`、`defaultValue` 为空 schema），
+static-audit 同步识别带 options 的 `AddOpenApi(` 并校验 transformer 已注册。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.24%** / 分支 **62.19%**（阈值 81/60）；
+前端 **98 文件 / 1172 项** 与 `npm run build` 通过；前端覆盖率 69.03 / 65.27 / 59.38 / 73.67；
+warning baseline 22 条无新增；static-audit exit 0（Fact=1623）、metric floor 通过。
+
+## 第八十八轮：WorkflowPayload 迁移到生成 schema（2026-11-10）
+
+`types.ts` 的 `WorkflowPayload` 不再手写整份结构，改为从 `ContractSchema<'WorkflowDefinition'>` 派生：
+`Omit` 掉 `nodes / edges / schemaVersion` 后只覆盖 UI 需要的宽化——
+
+- `node.position` 的生成类型是 `number | string`（.NET 数值 schema），UI 使用 `number`；
+- `name / position / parameters` 允许省略；`edge` 去掉计算属性 `isControl`。
+
+字段名与基础类型由后端 schema 锁定，`WorkflowPayload ↔ WorkflowDefinition` 的漂移同时受
+`apiContractParity` 编译期对账保护。`NodeCatalogItem` 暂保持手写（参数/端口类型比 schema 更窄），
+留待后续按模块迁移。
+
+验证：`tsc` / `npm run build` 通过；前端 **98 文件 / 1172 项** 通过；覆盖率不变
+（69.03 / 65.27 / 59.38 / 73.67）；static-audit exit 0、metric floor 通过；后端未改动。
+
+## 第八十九轮：目录/报告 DTO 迁移与 object 载荷（2026-11-10）
+
+- `NodeCatalogItem` 从 `ContractSchema<'NodeCatalogItem'>` 派生：参数、端口、能力位、帧声明保留前端更窄的类型覆盖，
+  其余字段（含 `actions / resources / declares*`）自动继承；`VisionToolCapabilities.executionMode` 改用生成枚举。
+- `NodeRunReport` 从 schema 派生：结构继承，仅把耗时/序号/时间偏移覆盖为 `number` 且允许省略（旧记录无时间线）；
+  `VisionValueSnapshot` 直接别名生成类型，`apiContractParity` 增加 `NodeRunReport` 对账。
+- `JsonElementSchemaTransformer` 扩展到 `object` 与 `IReadOnlyDictionary<string, object?>`：
+  `NodeRunReport.summary`、`DeviceBatchWriteRequest.values` 由 `Record<string, never>` 变为 `Record<string, unknown>`。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.24%** / 分支 **62.21%**（阈值 81/60）；
+前端 **98 文件 / 1172 项** 与 `npm run build` 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第九十轮：DTO 编译期对账扩到 50 个（2026-11-10）
+
+自动比对 `types.ts` 与 OpenAPI schema 的 54 个同名类型，把结构已对齐的 **45 个**全部加入
+`apiContractParity`（连同原有 5 个共 **50 个**），覆盖 alarm / job / device / camera / robot / plugin /
+production / port / parameter 等域。排除 9 个并在文件里写明原因：
+
+- OpenAPI 把带 C# 默认值或计算属性的必填字段标成 optional（`CameraSettings.triggerMode/outputPixelFormat`、
+  `RobotDescriptor.currentPose.x/y`、`RunCounterPersistenceStatus.degraded`、
+  `CalibrationWorkspaceRequest.verificationPoints`）——后端实际总会序列化，前端保持 required 是对的，
+  属于 schema 表达不精确，不应放宽前端类型；
+- `NodeCatalogItem.parameters.type`、`TracePage → RunTraceRecord.disposition` 是前端刻意收窄（已有单独的归一化对账）；
+- `CameraCommissioningProfile` 继承 `CameraSettings`。
+
+验证：`tsc` / `npm run build` 通过；前端 **98 文件 / 1172 项** 通过；覆盖率不变；static-audit exit 0；后端未改动。
+
+## 第九十一轮：required 表达修正与 53 个 DTO 对账（2026-11-10）
+
+.NET OpenAPI 会把"带默认值的构造参数"和"只读计算属性"标成 optional，生成类型因此比实际响应宽松
+（如 `CameraSettings.triggerMode`、`RunCounterPersistenceStatus.degraded`）。新增
+`RequiredPropertiesSchemaTransformer`：
+
+- 按 CLR 可空性补 required：值类型（非 `Nullable<T>`）与 NRT 标记为非空的引用类型；
+- 尊重条件序列化：带 `JsonIgnore(WhenWritingNull/WhenWritingDefault)` 的属性保持 optional
+  （`NodeMaturity` 缺省 Stable 不写 JSON 的行为不变）；
+- `readonly record struct` 的属性默认总会序列化，整体按 required 表达。
+
+结果：`CameraSettings` / `CameraCommissioningProfile` / `RunCounterPersistenceStatus` /
+`CalibrationWorkspaceRequest` 纳入编译期对账（**对账总数 53**）；`WorkflowDefinition.schemaVersion`
+变为 required（响应必含）。`RobotDescriptor` 例外：其 `currentPose / activeTarget` 是 readonly record struct，
+ASP.NET OpenAPI 未对该 struct schema 应用 transformer，继续人工核对。`apiContract` 增加 required 守卫。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.24%** / 分支 **62.21%**（阈值 81/60）；
+前端 **98 文件 / 1173 项** 与 `npm run build` 通过；warning baseline 22 条无新增；
+static-audit exit 0（Fact=1623）、metric floor 通过。
+
+## 第九十二轮：struct schema required 与 54 个 DTO 全覆盖（2026-11-10）
+
+一次性探针确认：ASP.NET OpenAPI **不会对 readonly record struct 调用 schema transformer**，
+`VisionRobotTarget2D` 的字段因此始终 optional（尽管默认序列化总会输出，包括 null）。
+新增文档级 `StructSchemaRequiredDocumentTransformer`：对已知 struct schema 的全部属性补 required；
+`RobotDescriptor` 重新纳入对账，`TracePage` 用 `NormalizeTraceItems` 覆盖 items 内的 disposition 收窄。
+至此 `types.ts` 与 OpenAPI schema 同名的 **54 个 DTO 全部有编译期对账**。
+
+- static-audit 增加"struct 文档 transformer 必须注册"守卫（与 schema transformer 守卫并列）。
+- 验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.23%** / 分支 **62.21%**（阈值 81/60）；
+  前端 **98 文件 / 1173 项** 与 `npm run build` 通过；warning baseline 22 条无新增；
+  static-audit exit 0、metric floor 通过。
+
+## 第九十三轮：数据集/验证域响应 schema（2026-11-10）
+
+数据集/批量验证是前端核心面板，但 `/api/validation/**` 的响应一直是匿名对象。本轮为 **9 个 JSON 端点**补
+`.Produces<T>()`：datasets（list/create/get、items add/update）、runs（start/list/get）、run workflow。
+
+- OpenAPI schema **181 → 186**；`ValidationDatasetSummary / ValidationDatasetDetail / ValidationRunRecord`
+  进入 `apiContract` 的 DTO 与路径守卫。
+- 新增 4 个 validation 类型对账：`sourceKind`、`expectedDisposition` 是后端开放 string、前端收窄的联合，
+  用 `NormalizeValidationItem` 显式归一后纳入（`ValidationDatasetItem / Detail / RunRecord / ResultRecord`）。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.25%** / 分支 **62.22%**（阈值 81/60）；
+前端 **98 文件 / 1173 项** 与 `npm run build` 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第九十四轮：交付闸门复核（2026-11-10）
+
+本轮不新增功能，逐项复核 `scripts/quality-gate.ps1` 的交付闸门（工作区为 76–93 轮累计改动）：
+
+| 闸门 | 结果 |
+| --- | --- |
+| `static-audit.py` | exit 0（Fact=1623） |
+| `check-metric-floor.py` | 目录 242 / Engine 1341 / Api 460 / 前端 98 |
+| publish data separation | PASSED |
+| data migration | PASSED |
+| bash publish regression | 23 passed |
+| `CatalogExporter --check` | current（hash `5bba52d1…`） |
+| 后端测试 + 覆盖率 | Engine **2213** / Api **501**；行 **84.25%** / 分支 **62.22%**（阈值 81/60） |
+| warning baseline | 22 条，无新增 |
+| 前端测试 + 覆盖率 + build | **98 文件 / 1173 项**；69.03/65.27/59.38/73.67；build 通过 |
+| e2e | 7/7（本机 Chromium 缓存缺失，用系统 Edge 验证；配置已还原） |
+
+结论：仓库质量闸门全绿，处于可交付候选状态。未完成/不阻塞闸门的遗留：
+
+1. **改动尚未提交**（用户未要求提交；共 53 个工作区文件，其中 11 个新增）。
+2. 三个推理节点保持 Experimental：`inference.obb / pose / instanceSegmentation` 缺模型包，无法端到端验收。
+3. 编译器仍有少量节点特判：`measure.fitLine/fitCircle` 最小点数、`measure.regionIntensity` 与
+   `image.flatFieldCorrect` 参数校验、`caliperCircle + roi.transform` 双变换防护。
+4. OpenAPI 仍有大量匿名端点（auth、插件、标定、trace/replay 等），可按域继续补 `Produces<T>()` 与生成类型。
+
+## 第九十五轮：追溯/回放/存储域响应 schema（2026-11-10）
+
+为 trace / storage / replay 共 **18 个 JSON 端点**补 `.Produces<T>()`：traces（stats、单条、observability、
+compare、failure-signature、disposition、workflow、dependencies、overlays）、storage（status/schema/capacity/
+cleanup/backup list/create/restore）、replay（context/result）。清理接口改用具名 `StorageCleanupResponse`
+替代匿名对象。OpenAPI schema **186 → 218**。
+
+`apiContract` 增加 6 个 DTO 与 3 条路径守卫；新增 **20 个类型对账**，其中 5 个字段是后端开放 string、
+前端收窄的联合，用显式归一处理：`HardwareProvenanceSnapshot.kind/completeness`、
+`NodePerformanceBaseline.status`、`NodeTimelineObservation.phase`、`OfflineReplayContext.trace.disposition`、
+`RunObservabilitySnapshot.timeline/baselines`。
+
+验证：Engine **2213**、Api **501** 通过；后端覆盖率 行 **84.25%** / 分支 **62.23%**（阈值 81/60）；
+前端 **98 文件 / 1173 项** 与 `npm run build` 通过、覆盖率 69.03/65.27/59.38/73.67；
+warning baseline 22 条无新增；static-audit exit 0、metric floor 通过。
+
+## 第九十六轮：清理 match.shape 的不可达 transform 声明（2026-11-10）
+
+`match.shape` 目录声明了 `TransformFrames: TemplateToImage`，但节点输出只有 pose/scale/detections，
+没有 `transform` 端口；编译器对该声明的解析永远不可达（pose 需经 `roi.transform` 才生成 transform）。
+这是首轮"transform 帧语义声明化"遗留的死契约，会误导维护者以为 match.shape 直接输出 transform。
+本轮移除声明，同步目录快照（hash `5bba52d1…` → `c85e33f9…`）与声明测试。
+
+对执行行为、目录条目数（242）与其他节点零影响。验证：Engine **2212**（少一条已删除的声明用例）、
+Api **501**；后端覆盖率 行 **84.29%** / 分支 **62.22%**（阈值 81/60）；前端 **98 文件 / 1173 项**
+与 `npm run build` 通过；warning baseline 22 条无新增；static-audit exit 0、metric floor 通过。
+
+## 第九十七轮：诊断/目录元信息响应 schema（2026-11-10）
+
+诊断中心与目录元信息此前返回匿名对象。本轮为 **5 个 JSON 端点**补 `.Produces<T>()`：
+`/api/diagnostics/summary|assets|events`、`/api/catalog/meta`、`/api/host-mode`；两个匿名对象改为具名
+`CatalogMetaResponse` 与 `HostModeStatus`。OpenAPI schema **218 → 225**。
+
+`apiContract` 增加 `DiagnosticsSummary / AssetHealthSnapshot / CatalogMetaResponse / HostModeStatus` 与两条路径守卫；
+新增 6 个类型对账（`AssetEventEnvelope / AssetEventSeverity / AssetHealthLevel / AssetHealthSnapshot /
+DiagnosticsSummary / RunTraceComparison`）。
+
+验证：Engine **2212**、Api **501** 通过；后端覆盖率 行 **84.28%** / 分支 **62.21%**（阈值 81/60）；
+前端 **98 文件 / 1173 项** 与 `npm run build` 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第九十八轮：validate/compile 真实宿主契约测试（2026-11-10）
+
+此前 `/api/validate`、`/api/compile` 的响应形状只由编译器单测和前端 mock 覆盖，真实 Minimal API 的
+camelCase JSON、400 失败体与 `dslJson` 没有自动化守卫。新增 `WorkflowContractApiTests`（3 项，
+使用 `VisionStudioApiFactory` 真实宿主）：
+
+- `/api/validate` 成功体：`valid / workflowCoreId / registeredNodeTypes / pipelineSegmentCount / warnings`；
+- 并行降级警告：`code=flow.parallel.sequential`、`nodeId=p`、消息含 "runs both branches sequentially"；
+- 空工作流：400 且 `valid=false`、`error` 含 "no nodes"；
+- `/api/compile`：`version=1`、`dslJson` 可解析且含 `Steps`、`warnings` 与 validate 一致。
+
+验证：Engine **2212**、Api **504** 通过；warning baseline 22 条无新增；static-audit exit 0（Fact=1626）、
+metric floor（Api 463）通过；后端覆盖率 行 **84.28%** / 分支 **62.21%**（阈值 81/60）。
+
+## 第九十九轮：插件注册表响应 schema（2026-11-10）
+
+为插件注册表 3 个端点补 `.Produces<T>()`：`/api/plugins` → `PluginLoadInfo[]`、
+`/api/plugins/sdk` → `PluginSdkInfo`、`/api/plugins/rescan` → `PluginRescanResult`。
+OpenAPI schema **225 → 232**；`apiContract` 增加 3 个 DTO 与 2 条路径守卫，新增 3 个类型对账。
+
+验证：Engine **2212**、Api **504** 通过；后端覆盖率 行 **84.29%** / 分支 **62.23%**（阈值 81/60）；
+前端 **98 文件 / 1173 项** 与 `npm run build` 通过；warning baseline 22 条无新增、static-audit exit 0。
+
+## 第一百轮：Soak 与 L3 故障注入演练（2026-11-10）
+
+补两类非功能交付证据（不修改代码）：
+
+- **Soak 门禁**：按 CI 参数（250 工作流 / 50 机器人 / 50000 数学迭代）运行 `scripts/soak-test.ps1`，
+  Engine 的 3 项 Soak 测试全部通过，输出 `Soak Gate PASSED`。
+- **L3 故障注入（实验室模式）**：`scripts/l3-fault-drills.ps1` 全部 PASS——
+  A1/A2/A3/A4（动作失败→未决意图→全入口 409 阻断→管理员核对→恢复）、
+  B1（未决意图期间调试会话同样被阻断）、C1/C2（重启后意图仍可见、核对后恢复）；
+  实测故障→阻断 1530 ms、核对→恢复 141 ms。报告与 CSV 输出到 `artifacts/`（已忽略）。
+
+物理故障（相机断线 / PLC 断电 / 停止不返回 / 磁盘满）仍需现场按脚本输出的 MANUAL 清单执行。
+
+## 第一百零一轮：认证/用户/审计响应 schema（2026-11-10）
+
+为安全域 **12 个端点**补 `.Produces<T>()` 并消灭匿名响应：auth status/login/auto-login/logout/me/
+change-password、security users list/create/update/reset-password、audit list。
+
+- 新增具名响应：`SessionUserResponse / LogoutResponse / CurrentUserResponse / ChangePasswordResult /
+  ResetPasswordResult`（复用 `SecurityStatus / SecurityUserDto / AuditEventDto`）；JSON 字段名不变。
+- OpenAPI schema **232 → 240**；`apiContract` 增加 `SecurityStatus / SessionUserResponse / SecurityUserDto /
+  AuditEventDto` 与 3 条路径守卫。
+
+验证：Engine **2212**、Api **504** 通过；前端 **98 文件 / 1173 项** 与 `npm run build` 通过；
+后端覆盖率 行 **84.29%** / 分支 **62.22%**（阈值 81/60）；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零二轮：标定/相机/媒体域响应 schema（2026-11-11）
+
+为三个设备相关域补 `.Produces<T>()`，消灭列表/描述符的匿名响应：
+
+- 标定域 **19 个端点**：providers、capture-grid、solve，标定资产与相机内参资产的 list/create/get/
+  versions/publish/rollback → `CalibrationProviderDescriptor / CalibrationWorkspacePoint /
+  CalibrationWorkspaceResult / CalibrationAssetDescriptor / CalibrationVersionSnapshot /
+  CameraIntrinsicAssetDescriptor / CameraIntrinsicVersionSnapshot`。
+- 相机域 **11 个端点**：列表、发现、vendor/file 注册、open/close/start/stop/settings/trigger、
+  transport-telemetry → `CameraDescriptor / CameraDiscoveredDevice / CameraTransportTelemetry`。
+- 媒体域 **5 个端点**：status、collections、items、import → `MediaLibraryStatus /
+  MediaCollectionDescriptor / MediaItemDescriptor`。
+- OpenAPI schema **240 → 264**；`apiContractParity` 新增 11 个 DTO 对账（相机 state、媒体 label
+  在 schema 中是宽 string，前端联合仅做展示收窄），`apiContract` 新增 11 个必需 DTO、10 条路径与
+  三个列表域的数组成员守卫。
+- 修正 `check-warning-baseline.ps1`：基线是无 BOM UTF-8，PS 5.1 默认 ANSI 读取会把中文注释与首条
+  告警粘连，导致已有告警误报为新增；改为显式 `-Encoding UTF8`。
+
+验证：Engine **2212**、Api **504** 通过；前端 **98 文件 / 1174 项** 与 `npm run build` 通过；
+warning baseline 22 条无新增；static-audit exit 0（Fact=1626）、metric floor 通过。
+
+## 第一百零三轮：设备/作业/机器人/生产域响应 schema（2026-11-11）
+
+继续把核心运行时域的匿名响应替换为 `.Produces<T>()`（共 **38 个端点**，JSON 字段不变）：
+
+- PLC 设备域 **11 个**：地址模板、modbus/s7 注册、profiles、read-all、批量/单点写标签、
+  connect/disconnect/settings、单点读标签 → `DeviceAddressTemplate / DeviceProfile / DeviceTagSample /
+  DeviceDescriptor`。
+- 作业域 **9 个**：create/get/version/publish/rollback、dependencies、dependencies validate、run →
+  `JobDescriptor / JobVersionSnapshot / RuntimeDependencyManifest / RuntimeDependencyValidation /
+  WorkflowRunResult`。
+- 机器人域 **8 个**：connect/disconnect/stop/reset/settings/ack、命令追溯列表与详情 →
+  `RobotDescriptor / RobotCommandTraceRecord`（`/target` 因握手与下发返回两种不同形状保持匿名，
+  避免为对齐 schema 引入 null 字段改变响应）。
+- 生产运行域 **10 个**：status/config GET+PUT、ptp/synchronization guard、start/stop/recover、
+  device-actions resolve、alarm ack → `ProductionRuntimeStatus / ProductionRuntimeConfig /
+  ProductionPtpGuardSnapshot / ProductionSynchronizationGuardSnapshot / AlarmRecord`。
+
+OpenAPI schema **264 → 280**；`apiContractParity` 新增 `JobVersionSnapshot /
+RuntimeDependencyValidation / RobotCommandTraceRecord / ProductionRuntimeStatus（state 收窄）/
+ProductionPtpGuardSnapshot / ProductionSynchronizationGuardSnapshot`。`apiContract` 增加 7 个
+必需 DTO 与 14 条路径守卫。
+
+验证：Api **504**、前端 **98 文件 / 1174 项**、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零四轮：相机同步 / 相机特性域响应 schema（2026-11-11）
+
+- 相机同步域 **18 个端点**：组列表/详情/状态/保存、运行记录与统计、PTP 诊断、GigE 网络诊断与
+  测试报告、调试测试（列表/启动/详情/取消/报告）、组触发与调度 → `CameraSynchronizationGroup /
+  GroupStatus / RunRecord / Statistics / PtpDiagnostics / CommissioningTest / CommissioningReport /
+  CaptureResult`、`GigENetworkDiagnostics / CommissioningReport`（启动类返回 202，按
+  `StatusCodes.Status202Accepted` 声明）。
+- 相机特性域 **9 个 JSON 端点**：commissioning 读取/应用、features 列表与更新、特性配置档案的
+  列表/读取/采集/导入/应用 → `CameraCommissioningSnapshot / CameraCommissioningApplyResult /
+  CameraFeatureDescriptor / CameraFeatureProfileRecord`；三个匿名响应改为具名 record
+  （`CameraCommissioningSnapshot / CameraFeatureUpdateResponse / CameraFeatureProfileApplyResponse`），
+  字段名与顺序保持不变。
+- OpenAPI schema **280 → 318**；`apiContractParity` 新增 13 个 DTO 对账（全部通过，说明前端镜像与
+  后端逐字段一致），`apiContract` 增加 9 个必需 DTO 与 14 条路径守卫。
+
+验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零五轮：插件包 / 模型包 / 工作流模块域响应 schema（2026-11-11）
+
+- 插件包域 **7 个端点**：包列表、信任发布者列表/导入、预检、安装、版本选择、回滚 →
+  `PluginPackageVersionInfo / TrustedPluginPublisher / PluginPackagePreflightResult /
+  PluginPackageInstallResult / PluginPackageSelectionResult`。
+- 模型包域 **5 个端点**：列表、详情、预检、导入、冒烟 → `ModelPackageSummary / ModelPackageDetail /
+  ExternalTrainManifest / ExternalTrainSmokeResult`（`ModelPackageEndpoints` 补
+  `VisionStudio.Engine.ExternalTrain` using）。
+- 工作流模块域 **5 个端点**：列表、提取、详情、版本读取/保存 → `WorkflowModuleDescriptor /
+  WorkflowModuleVersion / ExtractWorkflowModuleResult`（expand/validate 仍为匿名对象：
+  响应由展开器组合派生，命名化收益低）。
+- OpenAPI schema **318 → 334**；`apiContractParity` 新增 6 个 DTO 对账，其中模块参数的 `type`
+  在 schema 中是宽 string、前端复用节点参数联合，新增嵌套收窄 `NormalizeWorkflowModuleVersion /
+  Descriptor / ExtractWorkflowModuleResult`。`apiContract` 增加 12 个必需 DTO 与 11 条路径守卫。
+
+验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零六轮：调查 / 硬件来源 / 脚本 / 配方域响应 schema（2026-11-11）
+
+- 调查域 **8 个端点**：列表、趋势、按追溯查询、详情、从追溯立项、更新、验证证据读取/评估 →
+  `InvestigationCaseSummary / CaseDetail / VerificationEvidence / TrendDashboard`。
+- 硬件来源域 **3 个端点**：列表、捕获、声明写入 → `HardwareProvenanceSnapshot`。
+- 脚本编辑器 **3 个端点**：validate/complete/format → `ScriptValidationResult /
+  ScriptCompletionItem / ScriptFormatResult`。
+- 配方域 **5 个端点**：创建、克隆、版本 diff、验证候选、验证关联 → `JobDescriptor / JobVersionDiff /
+  ValidationCandidateInfo / JobVersionValidationInfo`。
+- OpenAPI schema **334 → 348**；`apiContractParity` 新增 6 个 DTO 对账（硬件来源沿用已有的
+  kind 收窄定义），`apiContract` 增加 10 个必需 DTO 与 13 条路径守卫。
+
+验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零七轮：插件基准 / 工作进程 / 工作流存储 / 配方参数域 schema（2026-11-11）
+
+- 插件基准域 **4 个端点**：列表、启动、详情、CI 规格 → `PluginBenchmarkRun / PluginBenchmarkCiSpec`
+  （取消返回空 202）。
+- 插件工作进程域 **4 个端点**：状态列表、性能列表、重启、性能重置 →
+  `PluginWorkerStatus / PluginWorkerPerformanceProfile`。
+- 工作流存储域 **2 个端点**：列表 → `WorkflowDocumentSummary`；读取 → `WorkflowDefinition`
+  （保存/强制覆盖返回 204 与 `X-Workflow-Revision` 头）。
+- 配方参数域 **3 个端点**：读取/替换 → `ParameterValueSet`；解析 → `ResolvedRecipeParameterization`
+  （版本参数化快照仍为派生匿名对象）。
+- OpenAPI schema **348 → 357**；`apiContractParity` 新增 5 个 DTO 对账（`ParameterValueSet.scope`
+  在 schema 中是宽 string，做联合收窄），`apiContract` 增加 6 个必需 DTO 与 9 条路径守卫。
+
+验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
+
+## 第一百零八轮：调试会话 / 匹配自动调参 / 参数调优 schema（2026-11-11）
+
+- 调试会话 **4 个 JSON 端点**：启动/继续/单节点运行 → `DebugSessionRunResponse`（此前为匿名对象，
+  含 sessionId/operation 与 WorkflowRunResult 的展示字段）；会话快照 →
+  `DebugSessionSnapshotResponse`（含 reportCount，不含预览 JPEG）。
+- 匹配自动调参 `/api/matching/auto-tune` → `MatchingAutoTuneHttpResponse`（既有具名 DTO，此前未声明）。
+- 参数调优 `/api/tuning/preview` → `ParameterTuningPreviewResult`。
+- OpenAPI schema **357 → 364**；`apiContractParity` 新增 1 个 DTO 对账（sourceKind 与
+  expectedDisposition 在 schema 中是宽 string，做联合收窄），`apiContract` 增加 4 个必需 DTO 与
+  4 条路径守卫。
+- 至此 `Endpoints/` 下每个含路由的文件都至少声明了一个 `Produces<T>()`；剩余匿名响应仅为
+  多形状端点（机器人 `/target`、模块 expand/validate、相机适配器、生产待核对列表等）与
+  204 空响应。
+
+验证：Api 504、前端 98 文件 / 1174 项、typecheck/build 通过；warning baseline 22 条无新增；
+static-audit exit 0、metric floor 通过。
 
 ## 历史轮次索引（第一 ~ 五十一轮）
 

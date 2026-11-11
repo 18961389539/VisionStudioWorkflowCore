@@ -23,19 +23,21 @@ public static class ProductRecipeEndpoints
             return Results.Ok(await jobs.CreateAsync(new CreateJobRequest(
                 request.Id ?? $"recipe-{Guid.NewGuid():N}", request.Name, request.Description, request.Workflow,
                 request.ChangeNote ?? "Initial recipe version", ParameterBindings: request.ParameterBindings, RequiresValidation: true), ct));
-        }).RequireEngineer("recipe.create", "recipe");
+        }).Produces<JobDescriptor>().RequireEngineer("recipe.create", "recipe");
 
         app.MapPost("/api/jobs/{id}/clone", async (string id, CopyRecipeRequest request, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.CloneRecipeAsync(id, new CloneRecipeRequest(request.NewId ?? $"recipe-{Guid.NewGuid():N}", null, null, request.Name, request.Description, request.SourceVersion), ct))).RequireEngineer("recipe.clone", "recipe");
+            Results.Ok(await store.CloneRecipeAsync(id, new CloneRecipeRequest(request.NewId ?? $"recipe-{Guid.NewGuid():N}", null, null, request.Name, request.Description, request.SourceVersion), ct))).Produces<JobDescriptor>().RequireEngineer("recipe.clone", "recipe");
 
         app.MapGet("/api/jobs/{id}/versions/{fromVersion:int}/diff/{toVersion:int}", async (string id, int fromVersion, int toVersion, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.DiffAsync(id, fromVersion, toVersion, ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await store.DiffAsync(id, fromVersion, toVersion, ct))).Produces<JobVersionDiff>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapGet("/api/jobs/{id}/versions/{version:int}/validation-candidates", async (string id, int version, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.ValidationCandidatesAsync(id, version, ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await store.ValidationCandidatesAsync(id, version, ct)))
+            .Produces<IReadOnlyList<ValidationCandidateInfo>>()
+            .RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPost("/api/jobs/{id}/versions/{version:int}/validation", async (string id, int version, LinkRecipeValidationRequest request, ProductRecipeStore store, CancellationToken ct) =>
-            Results.Ok(await store.LinkValidationAsync(id, version, request, ct))).RequireEngineer("recipe.validation.link", "recipe");
+            Results.Ok(await store.LinkValidationAsync(id, version, request, ct))).Produces<JobVersionValidationInfo>().RequireEngineer("recipe.validation.link", "recipe");
 
         return app;
     }

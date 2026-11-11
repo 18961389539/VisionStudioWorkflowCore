@@ -1,3 +1,8 @@
+import type { components } from './generated/api-types';
+
+/** 后端 OpenAPI schema 别名：枚举与 DTO 以生成类型为准，手写侧只保留 UI 需要的收窄。 */
+type ContractSchema<K extends keyof components['schemas']> = components['schemas'][K];
+
 export type VisionRegionRun = { row: number; startColumn: number; endColumn: number };
 export type VisionRegion = { width: number; height: number; components: { runs: VisionRegionRun[] }[] };
 
@@ -54,11 +59,11 @@ export type VisionToolCapabilities = {
   deterministic?: boolean;
   supportsRunNode?: boolean;
   supportsParallel?: boolean;
-  executionMode?: 'Auto' | 'WorkflowCore' | 'Pipeline';
+  executionMode?: ContractSchema<'VisionExecutionMode'>;
 };
 
-export type NodeImageFramePolicy = 'PreserveInput' | 'NewSpatialFrame' | 'NewFixedFrame' | 'TransformTarget' | 'InputFrame';
-export type NodeTransformFramePolicy = 'None' | 'Spatial' | 'RoiReference' | 'ReferenceInput' | 'TemplateToImage' | 'Compose' | 'Invert';
+export type NodeImageFramePolicy = ContractSchema<'NodeImageFramePolicy'>;
+export type NodeTransformFramePolicy = ContractSchema<'NodeTransformFramePolicy'>;
 
 /** 目录声明的图像坐标帧语义（与后端 NodeFrameRule 一一对应）。 */
 export type NodeFrameRule = {
@@ -74,9 +79,7 @@ export type NodeFrameRule = {
   whenValues?: string[] | null;
 };
 
-export type NodeOutputFrameSource =
-  | 'ImageInput' | 'ImageOutput' | 'GeometryInput' | 'DetectionInput'
-  | 'RegionInput' | 'ContourInput' | 'FittedPoints';
+export type NodeOutputFrameSource = ContractSchema<'NodeOutputFrameSource'>;
 
 /** 非图像输出（ROI/几何/检测框）的帧来源声明。 */
 export type NodeOutputFrameRule = {
@@ -97,50 +100,54 @@ export type NodeTransformFrameDeclaration = {
 };
 
 /** 节点成熟度（后端 enum 字符串）。目录里 Stable 不写该字段，缺省一律按 Stable 处理。 */
-export type NodeMaturity = 'Stable' | 'Preview' | 'Experimental';
+export type NodeMaturity = ContractSchema<'NodeMaturity'>;
 
-export type NodeCatalogItem = {
-  type: string;
-  displayName: string;
-  category: string;
-  inputs: PortDescriptor[];
-  outputs: PortDescriptor[];
-  parameters: ParameterDescriptor[];
-  description?: string | null;
-  pluginId?: string | null;
-  capabilities?: VisionToolCapabilities | null;
-  /** 坐标帧声明；未声明时输出沿用输入帧。插件可据此参与帧跟踪。 */
-  frames?: NodeFrameRule[] | null;
-  /** 纯 transform 节点的帧声明（match.shape / compose / inverse）。 */
-  transformFrames?: NodeTransformFrameDeclaration | null;
-  /** ROI / 几何 / 检测等非图像输出的帧来源声明。 */
-  outputFrames?: NodeOutputFrameRule[] | null;
-  /** ROI 输入绑定的图像输入端口（ROI 帧校验用）。 */
-  roiImageBindings?: { roiPort: string; imagePort: string }[] | null;
-  /** 节点成熟度：Stable 不写入 JSON，缺省即 Stable。见 src/nodeMaturity.ts。 */
-  maturity?: NodeMaturity | null;
-};
+type BackendNodeCatalogItem = ContractSchema<'NodeCatalogItem'>;
 
-export type VisionValueSnapshot = {
-  type: string;
-  display: string;
-  value?: unknown;
-};
+/**
+ * 节点目录：标识/分组/描述等字段来自后端 schema；参数、端口与能力位保留前端更窄的类型
+ * （表单渲染与校验依赖封闭联合），其余声明字段（frames / actions / resources / declares*）直接继承。
+ */
+export type NodeCatalogItem =
+  Omit<BackendNodeCatalogItem, 'inputs' | 'outputs' | 'parameters' | 'capabilities'
+    | 'frames' | 'transformFrames' | 'outputFrames' | 'roiImageBindings' | 'maturity'
+    | 'declaresActions' | 'declaresFrames' | 'declaresTransformFrames' | 'declaresOutputFrames' | 'declaresRoiImageBindings'> & {
+    inputs: PortDescriptor[];
+    outputs: PortDescriptor[];
+    parameters: ParameterDescriptor[];
+    capabilities?: VisionToolCapabilities | null;
+    /** 后端计算属性；前端目录夹具不必逐项填写，消费方缺省按 false/未声明处理。 */
+    declaresActions?: boolean;
+    declaresFrames?: boolean;
+    declaresTransformFrames?: boolean;
+    declaresOutputFrames?: boolean;
+    declaresRoiImageBindings?: boolean;
+    /** 坐标帧声明；未声明时输出沿用输入帧。插件可据此参与帧跟踪。 */
+    frames?: NodeFrameRule[] | null;
+    /** 纯 transform 节点的帧声明（match.shape / compose / inverse）。 */
+    transformFrames?: NodeTransformFrameDeclaration | null;
+    /** ROI / 几何 / 检测等非图像输出的帧来源声明。 */
+    outputFrames?: NodeOutputFrameRule[] | null;
+    /** ROI 输入绑定的图像输入端口（ROI 帧校验用）。 */
+    roiImageBindings?: { roiPort: string; imagePort: string }[] | null;
+    /** 节点成熟度：Stable 不写入 JSON，缺省即 Stable。见 src/nodeMaturity.ts。 */
+    maturity?: NodeMaturity | null;
+  };
 
-export type NodeRunReport = {
-  nodeId: string;
-  nodeType: string;
-  success: boolean;
-  durationMs: number;
-  summary: Record<string, unknown>;
-  error?: string | null;
-  phase?: 'Warmup' | 'Run';
-  inputs?: Record<string, VisionValueSnapshot> | null;
-  outputs?: Record<string, VisionValueSnapshot> | null;
-  executionSequence?: number;
-  startOffsetMs?: number;
-  endOffsetMs?: number;
-};
+export type VisionValueSnapshot = ContractSchema<'VisionValueSnapshot'>;
+
+type BackendNodeRunReport = ContractSchema<'NodeRunReport'>;
+
+/** 节点运行报告：结构来自后端 schema；耗时/序号收窄为 number 并允许省略（旧记录没有时间线字段）。 */
+export type NodeRunReport =
+  Omit<BackendNodeRunReport, 'durationMs' | 'executionSequence' | 'startOffsetMs' | 'endOffsetMs' | 'phase'> & {
+    durationMs: number;
+    executionSequence?: number;
+    startOffsetMs?: number;
+    endOffsetMs?: number;
+    /** 后端默认 Run；历史离线记录与前端夹具可以省略。 */
+    phase?: ContractSchema<'NodeExecutionPhase'>;
+  };
 
 export type OverlayPoint = { x: number; y: number };
 
@@ -368,8 +375,8 @@ export type PluginBenchmarkRun = {
   results?: PluginBenchmarkPoolResult[] | null;
 };
 
-export type CameraTriggerMode = 'Continuous' | 'Software' | 'External';
-export type CameraOutputPixelFormat = 'Auto' | 'Mono8' | 'Bgr8';
+export type CameraTriggerMode = ContractSchema<'CameraTriggerMode'>;
+export type CameraOutputPixelFormat = ContractSchema<'CameraOutputPixelFormat'>;
 
 export type CameraSettings = {
   exposureUs: number;
@@ -563,25 +570,25 @@ export type RobotCommandTraceRecord = {
   events: RobotCommandTraceEvent[];
 };
 
-export type WorkflowPayload = {
-  id: string;
-  name: string;
-  nodes: Array<{
-    id: string;
-    type: string;
-    name?: string | null;
-    position?: { x: number; y: number } | null;
-    parameters?: Record<string, unknown>;
-  }>;
-  edges: Array<{
-    id: string;
-    sourceNodeId: string;
-    sourcePort: string;
-    targetNodeId: string;
-    targetPort: string;
-    kind?: string | null;
-  }>;
-};
+/**
+ * 工作流文档：字段名/基本类型来自后端 WorkflowDefinition / NodeDefinition / EdgeDefinition，
+ * 只覆盖 UI 需要更宽的几处（数值坐标生成类型是 number|string；parameters 允许省略）。
+ */
+type BackendNodeDefinition = ContractSchema<'NodeDefinition'>;
+type BackendEdgeDefinition = ContractSchema<'EdgeDefinition'>;
+
+export type WorkflowPayload =
+  Omit<ContractSchema<'WorkflowDefinition'>, 'nodes' | 'edges' | 'schemaVersion'> & {
+    schemaVersion?: number;
+    nodes: Array<Omit<BackendNodeDefinition, 'name' | 'position' | 'parameters'> & {
+      name?: string | null;
+      position?: { x: number; y: number } | null;
+      parameters?: Record<string, unknown>;
+    }>;
+    edges: Array<Omit<BackendEdgeDefinition, 'kind' | 'isControl'> & {
+      kind?: string | null;
+    }>;
+  };
 
 export type JobVersionValidationInfo = {
   validationRunId: string; datasetId: string; accepted: boolean; linkedAt: string; reason: string;
@@ -989,7 +996,7 @@ export type CalibrationWorkspaceRequest = {
   targetFrame: string;
   targetUnit: string;
   points: CalibrationWorkspacePoint[];
-  verificationPoints: CalibrationWorkspacePoint[];
+  verificationPoints?: CalibrationWorkspacePoint[];
   heatmapColumns: number;
   heatmapRows: number;
   maxRmse?: number;
@@ -1128,9 +1135,9 @@ export type CalibrationHandEyeResidual = {
   vision: { x: number; y: number; thetaDeg: number };
 };
 
-export type DeviceConnectionState = 'Disconnected' | 'Connecting' | 'Connected' | 'Reconnecting' | 'Faulted';
-export type DeviceTagQuality = 'Good' | 'Uncertain' | 'Bad' | 'Disconnected';
-export type DeviceTagDataType = 'Boolean' | 'Integer' | 'Double' | 'String';
+export type DeviceConnectionState = ContractSchema<'DeviceConnectionState'>;
+export type DeviceTagQuality = ContractSchema<'DeviceTagQuality'>;
+export type DeviceTagDataType = ContractSchema<'DeviceTagDataType'>;
 
 export type DeviceTagDefinition = {
   id: string;

@@ -34,27 +34,30 @@ public static class ModelAssetEndpoints
     public static IEndpointRouteBuilder MapModelAssetEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/model-assets", async (ShapeModelAssetStore store, CancellationToken ct) =>
-            Results.Ok(await store.ListAsync(ct)));
+            Results.Ok(await store.ListAsync(ct)))
+            .Produces<IReadOnlyList<ShapeModelAssetDescriptor>>();
 
         app.MapPost("/api/model-assets", async (CreateShapeModelAssetRequest request, ShapeModelAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.CreateAsync(request, ct)))
-            .RequireEngineer("model-asset.create", "model-assets");
+            .RequireEngineer("model-asset.create", "model-assets")
+            .Produces<ShapeModelAssetDescriptor>();
 
         app.MapGet("/api/model-assets/{id}", async (string id, ShapeModelAssetStore store, CancellationToken ct) =>
         {
             var asset = await store.GetAsync(id, ct);
             return asset is null ? Results.NotFound() : Results.Ok(asset);
-        });
+        }).Produces<ShapeModelAssetDescriptor>();
 
         app.MapPost("/api/model-assets/{id}/versions", async (string id, AppendShapeModelVersionRequest request, ShapeModelAssetStore store, CancellationToken ct) =>
             Results.Ok(await store.AppendVersionAsync(id, request, ct)))
-            .RequireEngineer("model-asset.version.create", "model-assets");
+            .RequireEngineer("model-asset.version.create", "model-assets")
+            .Produces<ShapeModelVersionInfo>();
 
         app.MapGet("/api/model-assets/{id}/versions/{version:int}", async (string id, int version, ShapeModelAssetStore store, CancellationToken ct) =>
         {
             var info = await store.GetVersionAsync(id, version, ct);
             return info is null ? Results.NotFound() : Results.Ok(info);
-        });
+        }).Produces<ShapeModelVersionInfo>();
 
         app.MapGet("/api/model-assets/{id}/versions/{version:int}/blob", async (string id, int version, ShapeModelAssetStore store, CancellationToken ct) =>
         {
@@ -74,30 +77,31 @@ public static class ModelAssetEndpoints
 
         app.MapPost("/api/model-assets/import", async (
             ShapeModelAssetPackage package, ShapeModelAssetPackageService packages, CancellationToken ct) =>
-            Results.Ok(await packages.ImportAsync(package, ct))).RequireEngineer("model-asset.import", "model-assets");
+            Results.Ok(await packages.ImportAsync(package, ct))).RequireEngineer("model-asset.import", "model-assets")
+            .Produces<ShapeModelAssetDescriptor>();
 
         // 未引用版本回收：预览与执行分离，执行必须显式 confirm。
         app.MapGet("/api/model-assets/gc/preview", async (ShapeModelAssetGc gc, CancellationToken ct) =>
-            Results.Ok(await gc.PlanAsync(ct)));
+            Results.Ok(await gc.PlanAsync(ct))).Produces<ShapeModelAssetGcPlan>();
 
         app.MapPost("/api/model-assets/gc", async (GcApplyRequest request, ShapeModelAssetGc gc, CancellationToken ct) =>
         {
             if (!request.Confirm)
                 throw new ApiValidationException("Reclaiming versions requires confirm=true; call gc/preview first and review the candidate list.");
             return Results.Ok(await gc.ApplyAsync(ct));
-        }).RequireEngineer("model-asset.gc", "model-assets");
+        }).RequireEngineer("model-asset.gc", "model-assets").Produces<ShapeModelAssetGcPlan>();
 
         app.MapPatch("/api/model-assets/{id}", async (string id, UpdateShapeModelAssetRequest request, ShapeModelAssetStore store, CancellationToken ct) =>
         {
             var updated = await store.UpdateAsync(id, request.Name, request.Description, ct);
             return updated is null ? Results.NotFound() : Results.Ok(updated);
-        }).RequireEngineer("model-asset.update", "model-assets");
+        }).RequireEngineer("model-asset.update", "model-assets").Produces<ShapeModelAssetDescriptor>();
 
         app.MapGet("/api/model-assets/{id}/references", async (string id, ShapeModelAssetStore store, WorkflowStore workflows, CancellationToken ct) =>
         {
             if (await store.GetAsync(id, ct) is null) return Results.NotFound();
             return Results.Ok(await FindReferencesAsync(id, workflows, ct));
-        });
+        }).Produces<IReadOnlyList<ShapeModelAssetReference>>();
 
         app.MapDelete("/api/model-assets/{id}", async (string id, ShapeModelAssetStore store, WorkflowStore workflows, CancellationToken ct) =>
         {
@@ -120,7 +124,7 @@ public static class ModelAssetEndpoints
                 request.WorkflowId, request.NodeId, request.Name, request.SourceImageSha256, request.CreatedBy, ct);
             return Results.Ok(new ExtractShapeModelAssetResponse(
                 result.AssetId, result.Version, result.Sha256, result.SizeBytes, result.Revision, result.RevisionRecordDeferred));
-        }).RequireEngineer("model-asset.extract", "model-assets");
+        }).RequireEngineer("model-asset.extract", "model-assets").Produces<ExtractShapeModelAssetResponse>();
 
         return app;
     }

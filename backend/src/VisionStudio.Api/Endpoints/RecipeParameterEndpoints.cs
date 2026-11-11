@@ -8,13 +8,13 @@ public static class RecipeParameterEndpoints
     public static IEndpointRouteBuilder MapRecipeParameterEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/jobs/{id}/parameters", async (string id, RecipeParameterStore store, CancellationToken ct) =>
-            Results.Ok(await store.GetRecipeAsync(id, ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await store.GetRecipeAsync(id, ct))).Produces<ParameterValueSet>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapPut("/api/jobs/{id}/parameters", async (string id, ReplaceParameterValuesRequest request, RecipeParameterStore store, CancellationToken ct) =>
-            Results.Ok(await store.ReplaceRecipeAsync(id, request, ct))).RequireEngineer("recipe.parameters.update", "recipe");
+            Results.Ok(await store.ReplaceRecipeAsync(id, request, ct))).Produces<ParameterValueSet>().RequireEngineer("recipe.parameters.update", "recipe");
 
         app.MapPost("/api/jobs/{id}/parameterization/resolve", async (string id, ResolveRecipeParametersRequest request, RecipeParameterStore store, CancellationToken ct) =>
-            Results.Ok(await store.ResolveForJobAsync(id, request.Workflow, request.Bindings, ct))).RequireAuthorization(SecurityPolicies.Engineer);
+            Results.Ok(await store.ResolveForJobAsync(id, request.Workflow, request.Bindings, ct))).Produces<ResolvedRecipeParameterization>().RequireAuthorization(SecurityPolicies.Engineer);
 
         app.MapGet("/api/jobs/{id}/versions/{version:int}/parameterization", async (string id, int version, JobStore jobs, CancellationToken ct) =>
         {

@@ -223,7 +223,8 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
     {
         var sums = new double[rows * cols];
         var counts = new int[rows * cols];
-        var indexer = gray.GetGenericIndexer<byte>();
+        gray.GetArray(out byte[] pixels);
+        var stride = gray.Cols;
         for (var y = region.Y; y < region.Bottom; y++)
         {
             var row = Math.Min(rows - 1, (y - region.Y) * rows / region.Height);
@@ -231,7 +232,7 @@ public sealed class BarcodeQualityNode : IVisionNodeExecutor
             {
                 var col = Math.Min(cols - 1, (x - region.X) * cols / region.Width);
                 var slot = row * cols + col;
-                sums[slot] += indexer[y, x];
+                sums[slot] += pixels[y * stride + x];
                 counts[slot]++;
             }
         }
