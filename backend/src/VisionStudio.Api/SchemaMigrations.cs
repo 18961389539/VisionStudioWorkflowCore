@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 25;
+    public const int CurrentVersion = 27;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -61,7 +61,9 @@ public sealed class SqliteSchemaMigrationRunner
         new(22, "Versioned camera intrinsic calibration assets", CameraIntrinsicAssetSchemaSql),
         new(23, "Run result records for database persistence", ResultRecordSchemaSql),
         new(24, "Versioned shape model assets (content-addressed blobs)", ShapeModelAssetSchemaSql),
-        new(25, "Generic content-addressed assets (kind + metadata), shape data migrated", GenericAssetSchemaSql)
+        new(25, "Generic content-addressed assets (kind + metadata), shape data migrated", GenericAssetSchemaSql),
+        new(26, "Versioned planar hand-eye calibration assets", HandEyeCalibrationAssetSchemaSql),
+        new(27, "Versioned SE(3) hand-eye calibration assets", HandEye3DCalibrationAssetSchemaSql)
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -925,6 +927,76 @@ CREATE TABLE IF NOT EXISTS camera_intrinsic_publication_history (
     FOREIGN KEY(asset_id) REFERENCES camera_intrinsic_assets(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_camera_intrinsic_publication_history_asset ON camera_intrinsic_publication_history(asset_id, seq);
+""";
+
+    private const string HandEyeCalibrationAssetSchemaSql = """
+CREATE TABLE IF NOT EXISTS hand_eye_calibration_assets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    latest_version INTEGER NOT NULL,
+    published_version INTEGER NULL
+);
+CREATE TABLE IF NOT EXISTS hand_eye_calibration_versions (
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    model_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    note TEXT NOT NULL,
+    model_json TEXT NOT NULL,
+    source_document_json TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    PRIMARY KEY(asset_id, version),
+    FOREIGN KEY(asset_id) REFERENCES hand_eye_calibration_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_hand_eye_calibration_versions_created ON hand_eye_calibration_versions(asset_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS hand_eye_calibration_publication_history (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    at TEXT NOT NULL,
+    FOREIGN KEY(asset_id) REFERENCES hand_eye_calibration_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_hand_eye_calibration_publication_history_asset ON hand_eye_calibration_publication_history(asset_id, seq);
+""";
+
+    private const string HandEye3DCalibrationAssetSchemaSql = """
+CREATE TABLE IF NOT EXISTS hand_eye3d_calibration_assets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    latest_version INTEGER NOT NULL,
+    published_version INTEGER NULL
+);
+CREATE TABLE IF NOT EXISTS hand_eye3d_calibration_versions (
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    model_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    note TEXT NOT NULL,
+    model_json TEXT NOT NULL,
+    source_document_json TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    PRIMARY KEY(asset_id, version),
+    FOREIGN KEY(asset_id) REFERENCES hand_eye3d_calibration_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_hand_eye3d_calibration_versions_created ON hand_eye3d_calibration_versions(asset_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS hand_eye3d_calibration_publication_history (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    at TEXT NOT NULL,
+    FOREIGN KEY(asset_id) REFERENCES hand_eye3d_calibration_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_hand_eye3d_calibration_publication_history_asset ON hand_eye3d_calibration_publication_history(asset_id, seq);
 """;
 
     /// <summary>

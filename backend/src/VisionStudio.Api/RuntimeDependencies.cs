@@ -6,11 +6,13 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Provenance;
+using VisionStudio.Abstractions;
 using VisionStudio.Engine;
 using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Nodes;
 using VisionStudio.Engine.Robot;
+using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api;
 
@@ -144,7 +146,11 @@ public sealed class RuntimeDependencyManifestService(
     CameraSynchronizationGroupStore? synchronizationGroups = null,
     DeviceLeaseRegistry? commandGate = null,
     CameraIntrinsicAssetStore? cameraIntrinsicAssets = null,
-    AssetStore? assets = null)
+    AssetStore? assets = null,
+    HandEyeCalibrationAssetStore? handEyeAssets = null,
+    PlanarHandEyeCalibrationNode? handEyeSolver = null,
+    HandEye3DCalibrationAssetStore? handEye3DAssets = null,
+    HandEye3DCalibrationNode? handEye3DSolver = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
@@ -367,6 +373,20 @@ public sealed class RuntimeDependencyManifestService(
                 if (!string.IsNullOrWhiteSpace(intrinsicAssetId) && intrinsicAssetVersion > 0)
                     calibrationRefs.Add((IntrinsicCalibrationReference(intrinsicAssetId!), intrinsicAssetVersion));
             }
+            if (string.Equals(node.Type, "calibration.handEye2D", StringComparison.OrdinalIgnoreCase))
+            {
+                var handEyeAssetId = ResolveString(node, registration.Catalog, "handEyeAssetId");
+                var handEyeAssetVersion = ResolveInt(node, registration.Catalog, "handEyeAssetVersion");
+                if (!string.IsNullOrWhiteSpace(handEyeAssetId) && handEyeAssetVersion > 0)
+                    calibrationRefs.Add((HandEyeCalibrationReference(handEyeAssetId!), handEyeAssetVersion));
+            }
+            if (string.Equals(node.Type, "calibration.handEye3D", StringComparison.OrdinalIgnoreCase))
+            {
+                var handEye3DAssetId = ResolveString(node, registration.Catalog, "handEye3DAssetId");
+                var handEye3DAssetVersion = ResolveInt(node, registration.Catalog, "handEye3DAssetVersion");
+                if (!string.IsNullOrWhiteSpace(handEye3DAssetId) && handEye3DAssetVersion > 0)
+                    calibrationRefs.Add((HandEye3DCalibrationReference(handEye3DAssetId!), handEye3DAssetVersion));
+            }
         }
 
         if (synchronizationGroupIds.Count > 0)
@@ -542,6 +562,38 @@ public sealed class RuntimeDependencyManifestService(
                 if (workflow.Edges.Any(edge => string.Equals(edge.TargetNodeId, node.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(edge.TargetPort, "calibrationJson", StringComparison.OrdinalIgnoreCase)))
                     throw new InvalidOperationException($"Image undistort node '{node.Id}' cannot pin an intrinsic asset while calibrationJson is connected from another node. Pin a static model or remove the asset reference.");
                 await cameraIntrinsicAssets.RequireModelMatchAsync(assetId!, version, node.GetString("calibrationJson", "{}"), ct);
+            }
+            else if (string.Equals(node.Type, "calibration.handEye2D", StringComparison.OrdinalIgnoreCase))
+            {
+                var assetId = ResolveString(node, catalog, "handEyeAssetId");
+                var version = ResolveInt(node, catalog, "handEyeAssetVersion");
+                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
+                var hasVersion = version > 0;
+                if (version < 0 || hasAssetId != hasVersion)
+                    throw new InvalidOperationException($"Hand-eye node '{node.Id}' must specify both handEyeAssetId and a positive handEyeAssetVersion, or leave both unset.");
+                if (!hasAssetId) continue;
+                if (handEyeAssets is null || handEyeSolver is null)
+                    throw new InvalidOperationException("Workflow references a hand-eye calibration asset, but hand-eye calibration storage is unavailable.");
+                if (workflow.Edges.Any(edge => string.Equals(edge.TargetNodeId, node.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(edge.TargetPort, "samplesJson", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Hand-eye node '{node.Id}' cannot pin a hand-eye asset while samplesJson is connected from another node. Pin static samples or remove the asset reference.");
+                var result = await handEyeSolver.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
+                await handEyeAssets.RequireModelMatchAsync(assetId!, version, result.Outputs["calibrationJson"].Require<string>("calibrationJson"), ct);
+            }
+            else if (string.Equals(node.Type, "calibration.handEye3D", StringComparison.OrdinalIgnoreCase))
+            {
+                var assetId = ResolveString(node, catalog, "handEye3DAssetId");
+                var version = ResolveInt(node, catalog, "handEye3DAssetVersion");
+                var hasAssetId = !string.IsNullOrWhiteSpace(assetId);
+                var hasVersion = version > 0;
+                if (version < 0 || hasAssetId != hasVersion)
+                    throw new InvalidOperationException($"3D hand-eye node '{node.Id}' must specify both handEye3DAssetId and a positive handEye3DAssetVersion, or leave both unset.");
+                if (!hasAssetId) continue;
+                if (handEye3DAssets is null || handEye3DSolver is null)
+                    throw new InvalidOperationException("Workflow references a 3D hand-eye calibration asset, but 3D hand-eye calibration storage is unavailable.");
+                if (workflow.Edges.Any(edge => string.Equals(edge.TargetNodeId, node.Id, StringComparison.OrdinalIgnoreCase) && string.Equals(edge.TargetPort, "samplesJson", StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"3D hand-eye node '{node.Id}' cannot pin a hand-eye asset while samplesJson is connected from another node. Pin static samples or remove the asset reference.");
+                var result = await handEye3DSolver.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
+                await handEye3DAssets.RequireModelMatchAsync(assetId!, version, result.Outputs["calibrationJson"].Require<string>("calibrationJson"), ct);
             }
         }
     }
@@ -932,6 +984,22 @@ public sealed class RuntimeDependencyManifestService(
                     ?? throw new InvalidOperationException($"Workflow references camera intrinsic calibration '{intrinsicAssetId}' v{reference.Version}, but that immutable version does not exist.");
                 output.Add(new CalibrationRuntimeDependency(reference.AssetId, intrinsic.Version, intrinsic.SnapshotHash));
             }
+            else if (TryGetHandEyeCalibrationId(reference.AssetId, out var handEyeAssetId))
+            {
+                if (handEyeAssets is null)
+                    throw new InvalidOperationException("Workflow references a hand-eye calibration asset, but hand-eye calibration storage is unavailable.");
+                var handEye = await handEyeAssets.GetVersionAsync(handEyeAssetId, reference.Version, ct)
+                    ?? throw new InvalidOperationException($"Workflow references hand-eye calibration '{handEyeAssetId}' v{reference.Version}, but that immutable version does not exist.");
+                output.Add(new CalibrationRuntimeDependency(reference.AssetId, handEye.Version, handEye.SnapshotHash));
+            }
+            else if (TryGetHandEye3DCalibrationId(reference.AssetId, out var handEye3DAssetId))
+            {
+                if (handEye3DAssets is null)
+                    throw new InvalidOperationException("Workflow references a 3D hand-eye calibration asset, but 3D hand-eye calibration storage is unavailable.");
+                var handEye3D = await handEye3DAssets.GetVersionAsync(handEye3DAssetId, reference.Version, ct)
+                    ?? throw new InvalidOperationException($"Workflow references 3D hand-eye calibration '{handEye3DAssetId}' v{reference.Version}, but that immutable version does not exist.");
+                output.Add(new CalibrationRuntimeDependency(reference.AssetId, handEye3D.Version, handEye3D.SnapshotHash));
+            }
             else
             {
                 var snapshot = await calibrations.GetVersionAsync(reference.AssetId, reference.Version, ct)
@@ -947,6 +1015,34 @@ public sealed class RuntimeDependencyManifestService(
     private static bool TryGetIntrinsicCalibrationId(string reference, out string assetId)
     {
         const string prefix = "camera-intrinsics:";
+        if (reference.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            assetId = reference[prefix.Length..];
+            return true;
+        }
+        assetId = string.Empty;
+        return false;
+    }
+
+    private static string HandEyeCalibrationReference(string assetId) => "hand-eye-calibrations:" + assetId;
+
+    private static bool TryGetHandEyeCalibrationId(string reference, out string assetId)
+    {
+        const string prefix = "hand-eye-calibrations:";
+        if (reference.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            assetId = reference[prefix.Length..];
+            return true;
+        }
+        assetId = string.Empty;
+        return false;
+    }
+
+    private static string HandEye3DCalibrationReference(string assetId) => "hand-eye3d-calibrations:" + assetId;
+
+    private static bool TryGetHandEye3DCalibrationId(string reference, out string assetId)
+    {
+        const string prefix = "hand-eye3d-calibrations:";
         if (reference.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             assetId = reference[prefix.Length..];

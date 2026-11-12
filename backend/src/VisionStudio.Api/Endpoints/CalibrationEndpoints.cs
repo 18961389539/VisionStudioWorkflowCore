@@ -217,12 +217,122 @@ public static class CalibrationEndpoints
             { throw new ApiValidationException(ex.Message, ex); }
         }).RequireEngineer("calibration.wizard.handeye", "calibration");
 
+        app.MapPost("/api/calibration/wizard/handeye/sessions", (HandEyeWizardSaveRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.SaveHandEyeSession(request)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.handeye.save", "calibration")
+            .Produces<HandEyeWizardSessionDocument>();
+
+        app.MapGet("/api/calibration/wizard/handeye/sessions", (CalibrationWizardService wizard) =>
+            Results.Ok(wizard.ListHandEyeSessions()));
+
+        app.MapGet("/api/calibration/wizard/handeye/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.GetHandEyeSession(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+        }).Produces<HandEyeWizardSessionDocument>();
+
+        app.MapDelete("/api/calibration/wizard/handeye/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+            wizard.DeleteHandEyeSession(sessionId) ? Results.Ok(new { deleted = true }) : Results.NotFound())
+            .RequireEngineer("calibration.wizard.handeye.delete", "calibration");
+
+        app.MapGet("/api/hand-eye-calibrations", async (HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.ListAsync(ct))).Produces<IReadOnlyList<HandEyeCalibrationAssetDescriptor>>();
+
+        app.MapPost("/api/hand-eye-calibrations", async (CreateHandEyeAssetFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.CreateHandEyeAssetAsync(request, ct))).RequireEngineer("calibration.handeye-asset.create", "calibration")
+            .Produces<HandEyeCalibrationAssetDescriptor>();
+
+        app.MapGet("/api/hand-eye-calibrations/{id}", async (string id, HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+        {
+            var asset = await store.GetAsync(id, ct);
+            return asset is null ? Results.NotFound() : Results.Ok(asset);
+        }).Produces<HandEyeCalibrationAssetDescriptor>();
+
+        app.MapPost("/api/hand-eye-calibrations/{id}/versions", async (string id, SaveHandEyeVersionFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.AddHandEyeVersionAsync(id, request, ct))).RequireEngineer("calibration.handeye-asset.version.create", "calibration")
+            .Produces<HandEyeCalibrationVersionSnapshot>();
+
+        app.MapGet("/api/hand-eye-calibrations/{id}/versions/{version:int}", async (string id, int version, HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+        {
+            var snapshot = await store.GetVersionAsync(id, version, ct);
+            return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+        }).Produces<HandEyeCalibrationVersionSnapshot>();
+
+        app.MapGet("/api/hand-eye-calibrations/{id}/published", async (string id, HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.GetPublishedAsync(id, ct))).Produces<HandEyeCalibrationVersionSnapshot>();
+
+        app.MapPost("/api/hand-eye-calibrations/{id}/versions/{version:int}/publish", async (string id, int version, HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.handeye-asset.publish", "calibration")
+            .Produces<HandEyeCalibrationAssetDescriptor>();
+
+        app.MapPost("/api/hand-eye-calibrations/{id}/rollback/{version:int}", async (string id, int version, HandEyeCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.handeye-asset.rollback", "calibration")
+            .Produces<HandEyeCalibrationAssetDescriptor>();
+
         app.MapPost("/api/calibration/wizard/handeye3d/solve", async (CalibrationHandEye3DSolveRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
         {
             try { return Results.Ok(await wizard.SolveHandEye3DAsync(request, ct)); }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
             { throw new ApiValidationException(ex.Message, ex); }
         }).RequireEngineer("calibration.wizard.handeye3d", "calibration");
+
+        app.MapPost("/api/calibration/wizard/handeye3d/sessions", (HandEye3DWizardSaveRequest request, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.SaveHandEye3DSession(request)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+            { throw new ApiValidationException(ex.Message, ex); }
+        }).RequireEngineer("calibration.wizard.handeye3d.save", "calibration")
+            .Produces<HandEye3DWizardSessionDocument>();
+
+        app.MapGet("/api/calibration/wizard/handeye3d/sessions", (CalibrationWizardService wizard) =>
+            Results.Ok(wizard.ListHandEye3DSessions()));
+
+        app.MapGet("/api/calibration/wizard/handeye3d/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+        {
+            try { return Results.Ok(wizard.GetHandEye3DSession(sessionId)); }
+            catch (KeyNotFoundException ex) { throw new ApiNotFoundException(ex.Message); }
+        }).Produces<HandEye3DWizardSessionDocument>();
+
+        app.MapDelete("/api/calibration/wizard/handeye3d/sessions/{sessionId}", (string sessionId, CalibrationWizardService wizard) =>
+            wizard.DeleteHandEye3DSession(sessionId) ? Results.Ok(new { deleted = true }) : Results.NotFound())
+            .RequireEngineer("calibration.wizard.handeye3d.delete", "calibration");
+
+        app.MapGet("/api/hand-eye3d-calibrations", async (HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.ListAsync(ct))).Produces<IReadOnlyList<HandEye3DCalibrationAssetDescriptor>>();
+
+        app.MapPost("/api/hand-eye3d-calibrations", async (CreateHandEye3DAssetFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.CreateHandEye3DAssetAsync(request, ct))).RequireEngineer("calibration.handeye3d-asset.create", "calibration")
+            .Produces<HandEye3DCalibrationAssetDescriptor>();
+
+        app.MapGet("/api/hand-eye3d-calibrations/{id}", async (string id, HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+        {
+            var asset = await store.GetAsync(id, ct);
+            return asset is null ? Results.NotFound() : Results.Ok(asset);
+        }).Produces<HandEye3DCalibrationAssetDescriptor>();
+
+        app.MapPost("/api/hand-eye3d-calibrations/{id}/versions", async (string id, SaveHandEye3DVersionFromSessionRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
+            Results.Ok(await wizard.AddHandEye3DVersionAsync(id, request, ct))).RequireEngineer("calibration.handeye3d-asset.version.create", "calibration")
+            .Produces<HandEye3DCalibrationVersionSnapshot>();
+
+        app.MapGet("/api/hand-eye3d-calibrations/{id}/versions/{version:int}", async (string id, int version, HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+        {
+            var snapshot = await store.GetVersionAsync(id, version, ct);
+            return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
+        }).Produces<HandEye3DCalibrationVersionSnapshot>();
+
+        app.MapGet("/api/hand-eye3d-calibrations/{id}/published", async (string id, HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.GetPublishedAsync(id, ct))).Produces<HandEye3DCalibrationVersionSnapshot>();
+
+        app.MapPost("/api/hand-eye3d-calibrations/{id}/versions/{version:int}/publish", async (string id, int version, HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Publish", ct))).RequireEngineer("calibration.handeye3d-asset.publish", "calibration")
+            .Produces<HandEye3DCalibrationAssetDescriptor>();
+
+        app.MapPost("/api/hand-eye3d-calibrations/{id}/rollback/{version:int}", async (string id, int version, HandEye3DCalibrationAssetStore store, CancellationToken ct) =>
+            Results.Ok(await store.PublishAsync(id, version, "Rollback", ct))).RequireEngineer("calibration.handeye3d-asset.rollback", "calibration")
+            .Produces<HandEye3DCalibrationAssetDescriptor>();
         app.MapPost("/api/calibration/wizard/dual-camera/solve", async (CalibrationDualCameraSolveRequest request, CalibrationWizardService wizard, CancellationToken ct) =>
         {
             try { return Results.Ok(await wizard.SolveDualCameraAsync(request, ct)); }

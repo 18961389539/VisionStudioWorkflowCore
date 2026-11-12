@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Hosting;
 using OpenCvSharp;
 using VisionStudio.Abstractions;
@@ -49,7 +50,50 @@ public sealed record CalibrationHandEyeSolveRequest(
     string SourceFrame = "Camera",
     string TargetFrame = "",
     string Unit = "mm",
-    string SourceUnit = "mm");
+    string SourceUnit = "mm",
+    double AngularWeight = 50,
+    double VisionScale = 1,
+    string RobustLoss = "none");
+
+public sealed record HandEyeWizardSessionDocument(
+    string FormatVersion,
+    string SessionId,
+    string Name,
+    string UpdatedAt,
+    string SamplesJson,
+    string Mode,
+    double AngularWeight,
+    double VisionScale,
+    string RobustLoss,
+    double MaxTranslationError,
+    double MaxAngleErrorDeg,
+    string SourceFrame,
+    string TargetFrame,
+    string Unit,
+    string SourceUnit,
+    string? LastSolveSummaryJson)
+{
+    public const string CurrentVersion = "handeye-wizard-v1";
+}
+
+public sealed record HandEyeWizardSaveRequest(
+    string? SessionId,
+    string Name,
+    string SamplesJson,
+    string Mode = "eyeInHand",
+    double AngularWeight = 50,
+    double VisionScale = 1,
+    string RobustLoss = "none",
+    double MaxTranslationError = 0,
+    double MaxAngleErrorDeg = 0,
+    string SourceFrame = "Camera",
+    string TargetFrame = "",
+    string Unit = "mm",
+    string SourceUnit = "mm",
+    string? LastSolveSummaryJson = null);
+
+public sealed record CreateHandEyeAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
+public sealed record SaveHandEyeVersionFromSessionRequest(string SessionId, string? Note = null);
 
 public sealed record CalibrationHandEye3DSolveRequest(
     string SamplesJson,
@@ -60,7 +104,52 @@ public sealed record CalibrationHandEye3DSolveRequest(
     double RotationWeight = 50,
     string SourceFrame = "Camera",
     string TargetFrame = "",
-    string Unit = "mm");
+    string Unit = "mm",
+    string OutlierRejection = "none",
+    string CrossCheckMethod = "TSAI",
+    double MinTranslationSpan = 0);
+
+public sealed record HandEye3DWizardSessionDocument(
+    string FormatVersion,
+    string SessionId,
+    string Name,
+    string UpdatedAt,
+    string SamplesJson,
+    string Mode,
+    string Method,
+    double RotationWeight,
+    string OutlierRejection,
+    string CrossCheckMethod,
+    double MaxTranslationError,
+    double MaxRotationErrorDeg,
+    double MinTranslationSpan,
+    string SourceFrame,
+    string TargetFrame,
+    string Unit,
+    string? LastSolveSummaryJson)
+{
+    public const string CurrentVersion = "handeye3d-wizard-v1";
+}
+
+public sealed record HandEye3DWizardSaveRequest(
+    string? SessionId,
+    string Name,
+    string SamplesJson,
+    string Mode = "eyeInHand",
+    string Method = "DANIILIDIS",
+    double RotationWeight = 50,
+    string OutlierRejection = "none",
+    string CrossCheckMethod = "TSAI",
+    double MaxTranslationError = 0,
+    double MaxRotationErrorDeg = 0,
+    double MinTranslationSpan = 0,
+    string SourceFrame = "Camera",
+    string TargetFrame = "",
+    string Unit = "mm",
+    string? LastSolveSummaryJson = null);
+
+public sealed record CreateHandEye3DAssetFromSessionRequest(string SessionId, string Id, string Name, string? Description = null, string? Note = null);
+public sealed record SaveHandEye3DVersionFromSessionRequest(string SessionId, string? Note = null);
 
 /// <summary>
 /// HTTP-facing guided calibration wizards: intrinsics session store (memory + disk),
@@ -78,7 +167,7 @@ public sealed record CalibrationDualCameraSolveRequest(
     string Unit = "mm",
     int ImageWidth = 0,
     int ImageHeight = 0);
-public sealed class CalibrationWizardService
+public sealed partial class CalibrationWizardService
 {
     private readonly CalibrationIntrinsicsWizard.SessionStore _store = new();
     private readonly CalibrationDetectBoardNode _detectBoard;
@@ -88,6 +177,10 @@ public sealed class CalibrationWizardService
     private readonly DualCameraExtrinsicsNode _dualCamera;
     private readonly CameraManager _cameras;
     private readonly CameraIntrinsicAssetStore _intrinsicAssets;
+    private readonly HandEyeCalibrationAssetStore? _handEyeAssets;
+    private readonly HandEye3DCalibrationAssetStore? _handEye3DAssets;
+    private readonly WizardSessionStore<HandEyeWizardSessionDocument> _handEyeSessions;
+    private readonly WizardSessionStore<HandEye3DWizardSessionDocument> _handEye3DSessions;
     private readonly string _persistRoot;
     private static readonly JsonSerializerOptions PersistJson = new()
     {
@@ -104,7 +197,10 @@ public sealed class CalibrationWizardService
         DualCameraExtrinsicsNode dualCamera,
         CameraManager cameras,
         CameraIntrinsicAssetStore intrinsicAssets,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        HandEyeCalibrationAssetStore? handEyeAssets = null,
+        HandEye3DCalibrationAssetStore? handEye3DAssets = null,
+        ILogger<CalibrationWizardService>? logger = null)
     {
         _detectBoard = detectBoard;
         _intrinsics = intrinsics;
@@ -113,10 +209,23 @@ public sealed class CalibrationWizardService
         _dualCamera = dualCamera;
         _cameras = cameras;
         _intrinsicAssets = intrinsicAssets;
+        _handEyeAssets = handEyeAssets;
+        _handEye3DAssets = handEye3DAssets;
         _persistRoot = Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "calibration-wizard");
         Directory.CreateDirectory(_persistRoot);
         TryHydrateFromDisk();
+        _handEyeSessions = new WizardSessionStore<HandEyeWizardSessionDocument>(
+            Path.Combine(_persistRoot, "handeye"), "Hand-eye wizard", HandEyeWizardSessionDocument.CurrentVersion,
+            document => document.SessionId, document => document.FormatVersion, document => document.UpdatedAt,
+            (document, id) => document with { SessionId = id }, JsonOpts(), PersistJson, Warn(logger));
+        _handEye3DSessions = new WizardSessionStore<HandEye3DWizardSessionDocument>(
+            Path.Combine(_persistRoot, "handeye3d"), "3D hand-eye wizard", HandEye3DWizardSessionDocument.CurrentVersion,
+            document => document.SessionId, document => document.FormatVersion, document => document.UpdatedAt,
+            (document, id) => document with { SessionId = id }, JsonOpts(), PersistJson, Warn(logger));
     }
+
+    private static Action<string>? Warn(ILogger<CalibrationWizardService>? logger)
+        => logger is null ? null : text => logger.LogWarning("{WizardSessionIssue}", text);
 
     public CalibrationIntrinsicsWizard.SessionState Create(CalibrationWizardCreateRequest request)
     {
@@ -474,98 +583,6 @@ public sealed class CalibrationWizardService
     }
 
     public object Hints(string sessionId) => new { hints = PoseHints(ResolveSession(sessionId)) };
-
-    public async Task<object> SolveHandEyeAsync(CalibrationHandEyeSolveRequest request, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(request.SamplesJson))
-            throw new ApiValidationException("samplesJson is required.");
-        var parameters = new Dictionary<string, JsonElement>
-        {
-            ["samplesJson"] = JsonSerializer.SerializeToElement(request.SamplesJson),
-            ["mode"] = JsonSerializer.SerializeToElement(request.Mode),
-            ["maxTranslationError"] = JsonSerializer.SerializeToElement(request.MaxTranslationError),
-            ["maxAngleErrorDeg"] = JsonSerializer.SerializeToElement(request.MaxAngleErrorDeg),
-            ["sourceFrame"] = JsonSerializer.SerializeToElement(request.SourceFrame),
-            ["unit"] = JsonSerializer.SerializeToElement(request.Unit),
-            ["sourceUnit"] = JsonSerializer.SerializeToElement(request.SourceUnit)
-        };
-        if (!string.IsNullOrWhiteSpace(request.TargetFrame))
-            parameters["targetFrame"] = JsonSerializer.SerializeToElement(request.TargetFrame);
-
-        var node = new NodeDefinition("wizard-handeye", "calibration.handEye2D", "Wizard", null, parameters);
-        try
-        {
-            var result = await _handEye.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
-            return new
-            {
-                pose = result.Outputs.TryGetValue("pose", out var pose) ? pose.Value : null,
-                transform = result.Outputs.TryGetValue("transform", out var xf) ? xf.Value : null,
-                translationRms = result.Outputs["translationRms"].Require<double>("translationRms"),
-                angleRmsDeg = result.Outputs["angleRmsDeg"].Require<double>("angleRmsDeg"),
-                maxTranslationError = result.Outputs["maxTranslationError"].Require<double>("maxTranslationError"),
-                maxAngleErrorDeg = result.Outputs["maxAngleErrorDeg"].Require<double>("maxAngleErrorDeg"),
-                worstSampleIndex = result.Outputs["worstSampleIndex"].Require<long>("worstSampleIndex"),
-                sampleResidualsJson = result.Outputs["sampleResidualsJson"].Require<string>("sampleResidualsJson"),
-                summary = result.Summary,
-                samplesJson = request.SamplesJson,
-                mode = request.Mode
-            };
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new ApiValidationException(ex.Message, ex);
-        }
-    }
-
-    public async Task<object> SolveHandEye3DAsync(CalibrationHandEye3DSolveRequest request, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(request.SamplesJson))
-            throw new ApiValidationException("samplesJson is required.");
-        var parameters = new Dictionary<string, JsonElement>
-        {
-            ["samplesJson"] = JsonSerializer.SerializeToElement(request.SamplesJson),
-            ["mode"] = JsonSerializer.SerializeToElement(request.Mode),
-            ["method"] = JsonSerializer.SerializeToElement(request.Method),
-            ["maxTranslationError"] = JsonSerializer.SerializeToElement(request.MaxTranslationError),
-            ["maxRotationErrorDeg"] = JsonSerializer.SerializeToElement(request.MaxRotationErrorDeg),
-            ["rotationWeight"] = JsonSerializer.SerializeToElement(request.RotationWeight),
-            ["sourceFrame"] = JsonSerializer.SerializeToElement(request.SourceFrame),
-            ["unit"] = JsonSerializer.SerializeToElement(request.Unit)
-        };
-        if (!string.IsNullOrWhiteSpace(request.TargetFrame))
-            parameters["targetFrame"] = JsonSerializer.SerializeToElement(request.TargetFrame);
-
-        var node = new NodeDefinition("wizard-handeye-3d", "calibration.handEye3D", "Wizard", null, parameters);
-        try
-        {
-            var result = await _handEye3D.ExecuteAsync(new NodeExecutionContext(new Dictionary<string, VisionValue>()), node, ct);
-            return new
-            {
-                transform = result.Outputs["transform"].Value,
-                translationRms = result.Outputs["translationRms"].Require<double>("translationRms"),
-                rotationRmsDeg = result.Outputs["rotationRmsDeg"].Require<double>("rotationRmsDeg"),
-                robotTranslationSpan = result.Outputs["robotTranslationSpan"].Require<double>("robotTranslationSpan"),
-                maxTranslationError = result.Outputs["maxTranslationError"].Require<double>("maxTranslationError"),
-                maxRotationErrorDeg = result.Outputs["maxRotationErrorDeg"].Require<double>("maxRotationErrorDeg"),
-                worstSampleIndex = result.Outputs["worstSampleIndex"].Require<long>("worstSampleIndex"),
-                worstTranslationSampleIndex = result.Outputs["worstTranslationSampleIndex"].Require<long>("worstTranslationSampleIndex"),
-                worstRotationSampleIndex = result.Outputs["worstRotationSampleIndex"].Require<long>("worstRotationSampleIndex"),
-                sampleResidualsJson = result.Outputs["sampleResidualsJson"].Require<string>("sampleResidualsJson"),
-                summary = result.Summary,
-                samplesJson = request.SamplesJson,
-                mode = request.Mode,
-                method = request.Method
-            };
-        }
-        catch (OpenCVException ex)
-        {
-            throw new ApiValidationException($"OpenCV 3D hand-eye solve failed: {ex.Message}", ex);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new ApiValidationException(ex.Message, ex);
-        }
-    }
 
     private async Task<(bool Found, CameraCalibrationView? View, CalibrationViewQuality.Report Quality)> DetectBoardAsync(
         CalibrationIntrinsicsWizard.Session session, Mat image, CancellationToken ct)

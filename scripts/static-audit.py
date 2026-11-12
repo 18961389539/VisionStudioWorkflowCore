@@ -846,7 +846,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 291  # 2026-11-10：+6 模板图资产（list/create/get/versions/blob/delete）；新增端点必须同步此值（这本身就是一次可见的评审）
+expected_routes = 315  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；新增端点必须同步此值（这本身就是一次可见的评审）
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
