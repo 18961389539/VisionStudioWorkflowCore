@@ -88,5 +88,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/playwright-report
+          # 与 playwright.config.ts 的 html reporter outputFolder 保持一致；原先指向
+          # frontend/playwright-report，失败时永远 if-no-files-found:ignore，等于没传诊断产物。
+          path: artifacts/test-results/playwright-report
           if-no-files-found: ignore

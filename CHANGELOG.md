@@ -58,6 +58,13 @@
   中文值唯一、真实目录双语本地化）。
 - 门禁稳定性：v8 覆盖率产物移到系统临时目录（provider 会无条件递归删内部 `.tmp`，在本机会触发
   批量删除守卫并把 vitest 打断成 unhandled error）；后端覆盖率改用独立目录，只清少量 GUID 子目录。
+- 门禁稳定性（续）：E2E 段拉起真宿主前，对仅大小写不同的重复环境变量做进程内等价去重
+  （`HTTP_PROXY`/`http_proxy` 会让 Windows PowerShell 5.1 的 `Start-Process` 抛 `ArgumentException`）；
+  浏览器改用 `playwright install chromium --no-shell`，只装配置里实际启动的完整 Chromium，
+  不再每轮额外下载 118 MiB 的 headless shell；真后端宿主改为从 DLL 目录启动（原先 CWD 是仓库根，
+  宿主读不到 `appsettings.json` 而把 `AutoLoginAdmin` 退化成 false），并显式钉死该项配置、
+  把 `/api/auth/status` 响应打进门禁日志；每轮 e2e 用独立的临时 `outputDir`，避免 Playwright
+  递归清空历史 trace 时撞上批量删除守卫；修正 CI 上传 Playwright 报告的路径。CI 用例口径不变。
 
 ### 升级注意
 

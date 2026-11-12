@@ -105,6 +105,30 @@ spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进�
 `recipe-publication` 断言的是**请求本身**而不只是 toast：门禁参数没真发出去时，后端仍会拒绝，
 而界面看起来"成功了"。
 
+此外 `real-backend-smoke.spec.ts` 走 `request` fixture 直连真宿主，不经过浏览器：门禁先在
+`127.0.0.1:5199` 以独立数据根拉起 Debug 版 API，等 `/api/health` 返回 200 后再跑
+health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` → `/api/diagnostics/node-spans`
+整条链路；宿主不可达时该用例 skip 并打印原因，桩化用例照旧。真后端链路证明的是"契约端到端
+跑得通"，桩化用例证明的是"前端遇到某种 JSON 怎么表现"，两者不互相替代。
+
+两个环境相关的坑已固化在 `quality-gate.ps1` 里，别再删掉：
+
+- 启动宿主前调用 `Normalize-EnvironmentForStartProcess`，把 `HTTP_PROXY`/`http_proxy` 这种仅
+  大小写不同的重复键做进程内等价去重（取一个值、删全部变体、用规范名写回）。Windows PowerShell
+  5.1 的 `Start-Process` 用大小写不敏感字典复制环境，遇到它们会直接抛 `ArgumentException`，
+  宿主根本起不来，而且中文控制台里错误信息全是乱码。
+- `npx playwright install chromium --no-shell`：`playwright.config.ts` 用 `channel:'chromium'`
+  启动完整 Chromium，headless shell 从不被使用；默认安装会额外下载 118 MiB，在带代理的机器上
+  能把门禁拖十几分钟甚至卡死。跳过它不减少任何用例。
+- `Start-Process -WorkingDirectory $apiDll.DirectoryName`：ASP.NET Core 的 `ContentRootPath` 默认取
+  CWD，留在仓库根启动 `dotnet <dll>` 会让宿主找不到 `appsettings.json`，`Security` 全部退化成
+  默认值，`/api/auth/status` 的 `autoLogin` 变 false，冒烟第二步就红。门禁因此显式设置
+  `Security__AutoLoginAdmin=true`，并把 status 响应体打进日志；配置漂移时不用翻宿主日志。
+- 门禁给每轮注入唯一的 `VISIONSTUDIO_E2E_OUTPUT_DIR`（系统临时目录）：Playwright 启动会递归清空
+  `outputDir`，本机安全删除包装器对单批 >50 个条目要求人工确认，历史 trace 攒到上千个时测试
+  还没开始就红。不删历史产物就不触发守卫，CI 的用例口径也不变。`Upload Playwright report`
+  的路径已与 html reporter 的 `outputFolder` 对齐（原先指向不存在的位置，失败时等于没传产物）。
+
 ## 前端的两条棘轮（在 `npm run test:coverage` 里）
 
 | 用例 | 守什么 |

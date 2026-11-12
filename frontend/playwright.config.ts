@@ -8,7 +8,10 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   // 与后端覆盖率产物同区（artifacts/ 已在 .gitignore），避免污染 frontend 根目录。
-  outputDir: '../artifacts/test-results/playwright-output',
+  // 门禁脚本会用 VISIONSTUDIO_E2E_OUTPUT_DIR 给每轮注入一个全新的空目录：Playwright 启动时会
+  // 递归清空 outputDir，本机安全删除包装器对单批 >50 个条目要求人工确认，连跑几轮累积的
+  // trace/screenshot 会让"还没开始测就红"。直接跑 npm run test:e2e 时不设该变量，行为不变。
+  outputDir: process.env.VISIONSTUDIO_E2E_OUTPUT_DIR ?? '../artifacts/test-results/playwright-output',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
