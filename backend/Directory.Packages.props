@@ -37,7 +37,7 @@
     <PackageVersion Include="Microsoft.Net.Compilers.Toolset" Version="5.9.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="NModbus" Version="3.0.83" />
-    <PackageVersion Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />
+    <PackageVersion Include="OpenCvSharp5.Windows" Version="5.0.0.20261109" />
     <PackageVersion Include="S7netplus" Version="0.20.0" />
     <PackageVersion Include="System.IO.Ports" Version="8.0.0" />
     <PackageVersion Include="System.Numerics.Tensors" Version="10.0.12" />
