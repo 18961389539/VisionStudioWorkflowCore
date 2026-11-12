@@ -198,7 +198,7 @@ public sealed partial class BaslerPylonCameraDevice : ICameraDevice, ICameraTele
                 var pixelType = Enum.Parse(_assembly.GetType("Basler.Pylon.PixelType", true)!, outputName, true);
                 _converter.GetType().GetProperty("OutputPixelFormat")?.SetValue(_converter, pixelType);
                 var bytes = checked(width * height * channels);
-                var mat = new Mat(height, width, channels == 1 ? MatType.CV_8UC1 : MatType.CV_8UC3);
+                var mat = FrameMatPool.Rent(width, height, channels == 1 ? MatType.CV_8UC1 : MatType.CV_8UC3);
                 try
                 {
                     var pointerConvert = _converter.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)

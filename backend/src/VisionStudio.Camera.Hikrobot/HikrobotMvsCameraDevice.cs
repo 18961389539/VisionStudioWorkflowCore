@@ -193,15 +193,16 @@ public sealed partial class HikrobotMvsCameraDevice : ICameraDevice, ICameraTele
             _nativePixelFormat = "BGR8(MVS-converted)";
             var bytes = checked(width * height * 3);
             if (width <= 0 || height <= 0 || bytes > _bgrBufferBytes) throw new InvalidOperationException("Hikrobot returned invalid frame dimensions.");
-            var bgr = new Mat(height, width, MatType.CV_8UC3);
+            // 从帧池取（同尺寸帧复用），驱动随后写满整幅图；用完由 CameraFrameHub 的租约归还。
+            var bgr = FrameMatPool.Rent(width, height, MatType.CV_8UC3);
             unsafe { Buffer.MemoryCopy((void*)_bgrBuffer, (void*)bgr.Data, bytes, bytes); }
             Mat output = bgr;
             var pixelFormat = "Bgr8";
             if (_settings.OutputPixelFormat == CameraOutputPixelFormat.Mono8)
             {
-                var mono = new Mat();
+                var mono = FrameMatPool.Rent(width, height, MatType.CV_8UC1);
                 Cv2.CvtColor(bgr, mono, ColorConversionCodes.BGR2GRAY);
-                bgr.Dispose();
+                FrameMatPool.Return(bgr);
                 output = mono;
                 pixelFormat = "Mono8";
             }

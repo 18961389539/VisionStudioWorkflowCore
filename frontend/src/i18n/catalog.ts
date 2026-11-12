@@ -2100,7 +2100,7 @@ const parameterDescriptions: Record<string, string> = {
 };
 
 // 键是 API 的状态/枚举值（契约），不是界面自由文案。
-const statusNames: Record<string, string> = {
+export const statusNames: Record<string, string> = {
   'result-filtered': '未满足保存范围', 'exists-skipped': '同名文件已存在，已跳过',
   'empty-image-skipped': '空图像已跳过', saved: '已保存', UNCLASSIFIED: '未分类',
   Running: '运行中', Succeeded: '成功', Success: '成功', Failed: '失败', Error: '错误', Idle: '空闲',

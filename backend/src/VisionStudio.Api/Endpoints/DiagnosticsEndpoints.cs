@@ -45,6 +45,14 @@ public static class DiagnosticsEndpoints
             .Produces<IReadOnlyList<NodeDurationStatistic>>()
             .RequireOperator("diagnostics.node-durations", "diagnostics");
 
+        // 一键诊断包（2026-11-12）：现场排障不再要求"把整个数据根拷回来"。管理员专属——
+        // 包含审计尾部与日志尾部，里面会出现用户名、路径和设备地址。
+        app.MapGet("/api/diagnostics/bundle", async (DiagnosticBundleService bundle, CancellationToken ct) =>
+        {
+            var bytes = await bundle.CreateAsync(ct);
+            return Results.File(bytes, "application/zip", $"visionstudio-diagnostics-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.zip");
+        }).RequireAdministrator("diagnostics.bundle", "diagnostics");
+
         return app;
     }
 }

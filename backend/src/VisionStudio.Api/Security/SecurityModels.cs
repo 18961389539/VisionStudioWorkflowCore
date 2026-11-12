@@ -27,6 +27,16 @@ public sealed class SecurityOptions
     public int PasswordPbkdf2Iterations { get; set; } = 210_000;
     public string CookieName { get; set; } = "vs_session";
 
+    /// <summary>
+    /// 连续登录失败达到该次数后锁定账号（2026-11-12）。0 表示关闭锁定（只保留限流）。
+    /// 默认 5 次 / 15 分钟：厂内共享账号常见"走开没退出、别人乱试"，锁定要让误操作有成本，
+    /// 又不能让夜班因为按错几次键就叫不到人。
+    /// </summary>
+    public int MaxFailedLoginAttempts { get; set; } = 5;
+
+    /// <summary>锁定时长（分钟），仅在 <see cref="MaxFailedLoginAttempts"/> &gt; 0 时生效。</summary>
+    public int LockoutMinutes { get; set; } = 15;
+
     /// <summary>启动时免密码以内置管理员身份建立会话（默认关闭）。</summary>
     public bool AutoLoginAdmin { get; set; }
 

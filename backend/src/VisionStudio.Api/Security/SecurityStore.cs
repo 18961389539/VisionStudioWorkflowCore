@@ -44,10 +44,41 @@ public sealed class SecurityStore(SqliteMetadataDatabase database, IOptions<Secu
         await using var connection = await database.OpenConnectionAsync(ct);
         var row = await FindCredentialAsync(connection, request.Username, ct)
             ?? throw new ApiUnauthorizedException("Invalid username or password.");
+
+        var now = DateTimeOffset.UtcNow;
+        if (row.LockedUntil is { } lockedUntil && lockedUntil > now)
+            throw new ApiTooManyRequestsException(
+                $"Account is locked until {lockedUntil:yyyy-MM-dd HH:mm:ss} UTC after repeated failed sign-ins. " +
+                "Ask an administrator to unlock it, or wait for the window to pass.");
+        // 锁定窗口已过：先清零再验证，否则过期后的第一次输错会立刻重新锁死。
+        if (row.LockedUntil is not null)
+        {
+            await ClearFailedLoginsAsync(connection, row.User.Id, ct);
+            row = row with { FailedAttempts = 0, LockedUntil = null };
+        }
         if (!row.Enabled || !VerifyPassword(request.Password, row.Salt, row.Hash, row.Iterations))
+        {
+            if (row.Enabled) await RecordFailedLoginAsync(connection, row.User.Id, row.FailedAttempts + 1, now, ct);
             throw new ApiUnauthorizedException("Invalid username or password.");
+        }
+        if (row.FailedAttempts > 0) await ClearFailedLoginsAsync(connection, row.User.Id, ct);
 
         return await IssueSessionAsync(connection, row.User, ct);
+    }
+
+    /// <summary>管理员解锁：清空失败计数与锁定窗口（2026-11-12）。账号不存在时报 404。</summary>
+    public async Task<SecurityUserDto> UnlockAsync(string id, CancellationToken ct = default)
+    {
+        await using var connection = await database.OpenConnectionAsync(ct);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE security_users SET failed_attempts=0, locked_until=NULL WHERE id=$id;";
+        command.Parameters.AddWithValue("$id", id);
+        if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Security user '{id}' was not found.");
+        var updated = (await GetUserAsync(connection, id, ct, transaction))!;
+        await transaction.CommitAsync(ct);
+        return updated;
     }
 
     /// <summary>
@@ -212,7 +243,7 @@ WHERE s.token_hash=$token AND s.revoked_at IS NULL AND s.expires_at>$now AND u.e
         await using var transaction = connection.BeginTransaction(deferred: false);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "UPDATE security_users SET password_salt=$salt,password_hash=$hash,password_iterations=$iter,password_changed_at=$at,updated_at=$at WHERE id=$id;";
+        command.CommandText = "UPDATE security_users SET password_salt=$salt,password_hash=$hash,password_iterations=$iter,password_changed_at=$at,updated_at=$at,failed_attempts=0,locked_until=NULL WHERE id=$id;";
         command.Parameters.AddWithValue("$salt", salt); command.Parameters.AddWithValue("$hash", hash); command.Parameters.AddWithValue("$iter", iterations);
         command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O")); command.Parameters.AddWithValue("$id", id);
         if (await command.ExecuteNonQueryAsync(ct) == 0) throw new ApiNotFoundException($"Security user '{id}' was not found.");
@@ -294,7 +325,7 @@ VALUES($id,$username,$normalized,$display,$role,1,$salt,$hash,$iter,$at,$at,NULL
     private async Task<CredentialRow?> FindCredentialAsync(SqliteConnection connection, string username, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,username,display_name,role,enabled,created_at,updated_at,last_login_at,password_changed_at,password_salt,password_hash,password_iterations FROM security_users WHERE normalized_username=$username;";
+        command.CommandText = "SELECT id,username,display_name,role,enabled,created_at,updated_at,last_login_at,password_changed_at,password_salt,password_hash,password_iterations,failed_attempts,locked_until FROM security_users WHERE normalized_username=$username;";
         command.Parameters.AddWithValue("$username", NormalizeUsername(username));
         await using var reader = await command.ExecuteReaderAsync(ct); return await reader.ReadAsync(ct) ? ReadCredential(reader) : null;
     }
@@ -302,13 +333,38 @@ VALUES($id,$username,$normalized,$display,$role,1,$salt,$hash,$iter,$at,$at,NULL
     private async Task<CredentialRow?> FindCredentialByIdAsync(SqliteConnection connection, string id, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,username,display_name,role,enabled,created_at,updated_at,last_login_at,password_changed_at,password_salt,password_hash,password_iterations FROM security_users WHERE id=$id;";
+        command.CommandText = "SELECT id,username,display_name,role,enabled,created_at,updated_at,last_login_at,password_changed_at,password_salt,password_hash,password_iterations,failed_attempts,locked_until FROM security_users WHERE id=$id;";
         command.Parameters.AddWithValue("$id", id);
         await using var reader = await command.ExecuteReaderAsync(ct); return await reader.ReadAsync(ct) ? ReadCredential(reader) : null;
     }
 
-    private CredentialRow ReadCredential(SqliteDataReader r) => new(ReadUser(r), (byte[])r[9], (byte[])r[10], r.GetInt32(11), r.GetBoolean(4));
+    private CredentialRow ReadCredential(SqliteDataReader r) => new(ReadUser(r), (byte[])r[9], (byte[])r[10], r.GetInt32(11), r.GetBoolean(4), r.GetInt32(12), r.IsDBNull(13) ? null : DateTimeOffset.Parse(r.GetString(13)));
     private static SecurityUserDto ReadUser(SqliteDataReader r) => new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4), DateTimeOffset.Parse(r.GetString(5)), DateTimeOffset.Parse(r.GetString(6)), r.IsDBNull(7) ? null : DateTimeOffset.Parse(r.GetString(7)), DateTimeOffset.Parse(r.GetString(8)));
+
+    /// <summary>
+    /// 记录一次失败登录。达到上限时写入锁定截止时间；计数与锁定写在同一行，
+    /// 避免"计数加了、锁定没写"的半状态（并发失败请求最多多记一次，不会绕过上限）。
+    /// </summary>
+    private async Task RecordFailedLoginAsync(SqliteConnection connection, string id, int attempts, DateTimeOffset now, CancellationToken ct)
+    {
+        var max = Math.Max(0, _options.MaxFailedLoginAttempts);
+        if (max == 0) return;
+        var lockedUntil = attempts >= max ? now.AddMinutes(Math.Clamp(_options.LockoutMinutes, 1, 1440)) : (DateTimeOffset?)null;
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE security_users SET failed_attempts=$attempts, locked_until=$locked WHERE id=$id;";
+        command.Parameters.AddWithValue("$attempts", attempts);
+        command.Parameters.AddWithValue("$locked", lockedUntil is null ? DBNull.Value : lockedUntil.Value.ToString("O"));
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task ClearFailedLoginsAsync(SqliteConnection connection, string id, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE security_users SET failed_attempts=0, locked_until=NULL WHERE id=$id;";
+        command.Parameters.AddWithValue("$id", id);
+        await command.ExecuteNonQueryAsync(ct);
+    }
 
     private (byte[] Salt, byte[] Hash, int Iterations) HashPassword(string password)
     {
@@ -323,5 +379,5 @@ VALUES($id,$username,$normalized,$display,$role,1,$salt,$hash,$iter,$at,$at,NULL
     private static void ValidateUsername(string username) { var length = username?.Trim().Length ?? 0; if (length < 3 || length > 64) throw new ApiValidationException("Username must be 3 to 64 characters."); }
     private static void ValidatePassword(string password) { if (string.IsNullOrWhiteSpace(password) || password.Length < 10 || password.Length > 256) throw new ApiValidationException("Password must be 10 to 256 characters."); }
     private static void ValidateDisplayName(string? displayName) { if (displayName is { Length: > 128 }) throw new ApiValidationException("Display name must not exceed 128 characters."); }
-    private sealed record CredentialRow(SecurityUserDto User, byte[] Salt, byte[] Hash, int Iterations, bool Enabled);
+    private sealed record CredentialRow(SecurityUserDto User, byte[] Salt, byte[] Hash, int Iterations, bool Enabled, int FailedAttempts, DateTimeOffset? LockedUntil);
 }

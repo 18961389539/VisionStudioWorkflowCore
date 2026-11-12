@@ -272,6 +272,7 @@ public static class VisionStudioServiceRegistration
         services.AddSingleton<IAssetHealthProvider, DeviceAssetHealthProvider>();
         services.AddSingleton<IAssetHealthProvider, RobotAssetHealthProvider>();
         services.AddSingleton<DiagnosticsCenterService>();
+        services.AddSingleton<DiagnosticBundleService>();
         services.AddSingleton(_ => new DeviceProfileStore(Path.Combine(VisionStudioDataRoot.Resolve(environment.ContentRootPath), "devices")));
 
         var tcpSimulatorPort = configuration.GetValue("RobotTcpSimulator:Port", 40501);

@@ -83,6 +83,11 @@ Assert-LastExitCode 'static audit'
 & $python "$root/scripts/check-metric-floor.py"
 Assert-LastExitCode 'metric floor'
 
+# 文件规模预算（2026-11-12）：拆分是一次性动作，没有预算就会长回去。
+# 只许降不许升；新增超 1200 行的文件直接失败（scripts/size-budget.json）。
+& $python "$root/scripts/check-size-budget.py"
+Assert-LastExitCode 'size budget'
+
 # R08: production data must stay separated from the version package across publishes.
 & "$root/scripts/test-publish-data-separation.ps1"
 Assert-LastExitCode 'publish data separation'

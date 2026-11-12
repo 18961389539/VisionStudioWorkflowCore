@@ -85,6 +85,13 @@ public static class SecurityEndpoints
         }).RequireAuthorization(SecurityPolicies.Administrator).WithAudit("security.user.reset-password", "security-user")
             .Produces<ResetPasswordResult>();
 
+        // 解锁（2026-11-12）：连续失败锁定后，管理员不必改密就能恢复账号；解锁本身也进审计。
+        app.MapPost("/api/security/users/{id}/unlock", async (string id, HttpContext http, SecurityStore store, CancellationToken ct) =>
+        {
+            AuditContext.SetTarget(http, id); return Results.Ok(await store.UnlockAsync(id, ct));
+        }).RequireAuthorization(SecurityPolicies.Administrator).WithAudit("security.user.unlock", "security-user")
+            .Produces<SecurityUserDto>();
+
         app.MapGet("/api/audit", async (int? offset, int? limit, string? username, string? action, AuditEventStore audit, CancellationToken ct) =>
             Results.Ok(await audit.ListAsync(offset ?? 0, limit ?? 100, username, action, ct)))
             .RequireAuthorization(SecurityPolicies.Administrator).Produces<IReadOnlyList<AuditEventDto>>();

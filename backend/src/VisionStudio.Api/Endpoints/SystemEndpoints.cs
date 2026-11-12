@@ -2,6 +2,7 @@ using VisionStudio.Api.Contracts;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
 using VisionStudio.Engine;
+using VisionStudio.Engine.Camera;
 using VisionStudio.Engine.Device;
 using VisionStudio.Engine.Robot;
 using VisionStudio.Engine.Runtime;
@@ -116,7 +117,9 @@ public static class SystemEndpoints
                     writeFailures = logs.WriteFailures,
                     flushFailures = logs.FlushFailures,
                     drainTimeouts = logs.DrainTimeouts
-                }
+                },
+                // 相机帧池（2026-11-12）：复用率与驻留字节。没有这组数字，池只是"看不见的第二套内存账本"。
+                framePool = FrameMatPool.Snapshot()
             });
         }).AllowAnonymous();
 

@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using VisionStudio.Engine.Camera;
+using VisionStudio.Engine.Diagnostics;
 
 namespace VisionStudio.Engine.Runtime;
 
@@ -33,6 +35,13 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
     {
         var registration = registry.Require(node.Type);
         ValidateInputs(node, registration.Catalog, inputs);
+        // 标准遥测（2026-11-12）：无监听者时 StartActivity 返回 null，不建对象、不改变控制流。
+        // 放在 ValidateInputs 之后：端口校验失败属于"调用方接错线"，不该算一次节点执行。
+        using var activity = EngineTelemetry.ActivitySource.StartActivity("node.execute");
+        activity?.SetTag("vision.node.id", node.Id);
+        activity?.SetTag("vision.node.type", node.Type);
+        if (runId is not null) activity?.SetTag("vision.run.id", runId);
+        if (workflowScope is not null) activity?.SetTag("vision.scope", workflowScope);
         var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var timeoutMs = NodeTimeoutPolicy.Resolve(node);
         var timedOut = false;
@@ -44,17 +53,26 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
         catch (NodeTimeoutException)
         {
             timedOut = true;
+            activity?.SetTag("vision.node.timed_out", true);
+            activity?.SetStatus(ActivityStatusCode.Error, "node timeout");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             throw;
         }
         finally
         {
             // 只统计、不改变任何控制流：耗时样本用于给 __timeoutMs 选值（见 NodeDurationStatistics）。
             // 放在 finally 里是为了把"超时"和"抛异常"两类执行也计入——恰恰是最需要被看到的样本。
+            var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             durations?.Record(
                 node.Type,
-                System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                elapsedMs,
                 timeoutMs,
                 timedOut);
+            activity?.SetTag("vision.node.duration_ms", elapsedMs);
         }
         try
         {
@@ -63,8 +81,9 @@ public sealed class VisionNodeDispatcher(VisionNodeRegistry registry, NodeDurati
             ValidateOutputs(node, registration.Catalog, result.Outputs);
             return result;
         }
-        catch
+        catch (Exception ex)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             // A rejected contract must release returned resources before they enter the run's ownership table.
             var released = new HashSet<object>(ReferenceEqualityComparer.Instance);
             foreach (var value in result.Outputs.Values)

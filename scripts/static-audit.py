@@ -860,7 +860,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 315  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；新增端点必须同步此值（这本身就是一次可见的评审）
+expected_routes = 317  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；+2 = 诊断包 /api/diagnostics/bundle 与账号解锁 /api/security/users/{id}/unlock；新增端点必须同步此值（这本身就是一次可见的评审）
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -1696,6 +1696,59 @@ if 'acknowledgeMaturityNodes=true' not in read_safe('frontend/src/endpoints.ts')
 if 'NODE_MATURITY_ACK_REQUIRED' not in read_safe('frontend/src/components/RecipePublicationDialog.tsx'):
     fail('Publication dialog does not surface the maturity gate as a confirmable step')
 ok('Node maturity gate enforced on publish + recorded in audit (rollback exempt)')
+
+# 2026-11-12 批次：金样回归、诊断包、登录锁定、节点遥测、帧池。
+# 这五件事的共同点是"删掉任何一件都不会有测试变红"——夹具被删只是少跑一条用例，
+# 诊断包被打包了配置原文也不会报错。所以各留一条结构性断言。
+for _fixture in ('scratch-640x480.png', 'edge-640x480.png', 'ring-640x480.png'):
+    if not (ROOT / 'backend/tests/VisionStudio.Engine.Tests/Fixtures' / _fixture).is_file():
+        fail(f'Golden regression fixture missing: {_fixture} (regenerate with scripts/generate-golden-fixtures.py)')
+_golden = read_safe('backend/tests/VisionStudio.Engine.Tests/GoldenWorkflowRegressionTests.cs')
+for _token in ['WorkflowCoreVisionRunner', 'image.threshold', 'measure.caliper', 'measure.caliperCircle']:
+    if _token not in _golden: fail(f'Golden regression no longer runs the real pipeline path: {_token}')
+ok('Golden regression fixtures + pipeline-level cases present')
+
+_bundle = read_safe('backend/src/VisionStudio.Api/Diagnostics/DiagnosticBundleService.cs')
+# 只扫代码行：类注释里专门写了"不打包 appsettings"，按全文匹配会把它自己判成违规。
+_bundle_code = '\n'.join(line for line in _bundle.splitlines() if not line.strip().startswith('//'))
+if 'appsettings' in _bundle_code:
+    fail('Diagnostic bundle must not zip configuration files (appsettings may contain secrets)')
+if 'RequireAdministrator' not in read_safe('backend/src/VisionStudio.Api/Endpoints/DiagnosticsEndpoints.cs'):
+    fail('Diagnostic bundle endpoint is not administrator-only (audit tail + logs contain user names and paths)')
+ok('Diagnostic bundle stays administrator-only and excludes configuration files')
+
+_security_store = read_safe('backend/src/VisionStudio.Api/Security/SecurityStore.cs')
+for _token in ['failed_attempts', 'locked_until', 'RecordFailedLoginAsync', 'UnlockAsync']:
+    if _token not in _security_store: fail(f'Login lockout implementation missing: {_token}')
+if 'account_locked' not in read_safe('backend/src/VisionStudio.Api/Infrastructure/ApiExceptions.cs'):
+    fail('Locked accounts must answer 429 account_locked (401 makes clients retry and extends the lockout)')
+if "users/{id}/unlock" not in read_safe('backend/src/VisionStudio.Api/Endpoints/SecurityEndpoints.cs'):
+    fail('Administrator unlock endpoint is missing (a locked account would need a database edit)')
+ok('Login failure counter + lockout window + administrator unlock present')
+
+if 'SourceName = "VisionStudio.Engine"' not in read_safe('backend/src/VisionStudio.Engine/Diagnostics/EngineTelemetry.cs'):
+    fail('Engine telemetry ActivitySource name changed; exporters registered by name will stop receiving spans')
+_dispatcher = read_safe('backend/src/VisionStudio.Engine/Runtime/VisionNodeDispatcher.cs')
+for _token in ['StartActivity("node.execute")', 'vision.node.duration_ms', 'vision.node.timed_out']:
+    if _token not in _dispatcher: fail(f'Node execution telemetry missing: {_token}')
+ok('Node execution emits a standard Activity per run (duration + timeout tags)')
+
+if 'FrameMatPool.Return' not in read_safe('backend/src/VisionStudio.Engine/Camera/CameraFrameHub.cs'):
+    fail('Camera frame release no longer returns the Mat to the pool (per-frame LOH allocation returns)')
+for _driver in ('VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs',
+                'VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs'):
+    if 'FrameMatPool.Rent' not in read_safe(f'backend/src/{_driver}'):
+        fail(f'Camera driver allocates a Mat per frame instead of renting from the pool: {_driver}')
+if 'framePool' not in read_safe('backend/src/VisionStudio.Api/Endpoints/SystemEndpoints.cs'):
+    fail('/api/health does not expose frame pool counters (the pool becomes an invisible second memory ledger)')
+ok('Camera frames are pooled and the pool is observable through /api/health')
+
+for _doc in ('docs/golden-regression.md', 'docs/diagnostic-bundle.md', 'docs/login-lockout.md',
+             'docs/engine-telemetry.md', 'docs/frame-mat-pool.md'):
+    if not doc_present(_doc): fail(f'Missing design note for a 2026-11-12 capability: {_doc}')
+if not (ROOT / 'frontend/e2e/recipe-publication.spec.ts').is_file():
+    fail('Publication/rollback e2e spec is missing (maturity acknowledgement is only verified in jsdom)')
+ok('2026-11-12 capabilities keep their design notes and the publication e2e spec')
 
 # PowerShell 5.1 契约（2026-10-12 复核 F07 教训）：含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM——
 # 无 BOM 时 PS 5.1 按 ANSI 解析，中文字节会吞掉相邻语法行（publish-runtime.ps1 实测：

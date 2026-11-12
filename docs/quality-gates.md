@@ -37,6 +37,7 @@
 |---|---|---|
 | `static-audit.py` | 结构性与契约性断言：安全中间件顺序、反向代理边界、生产模拟器边界、发布门禁、脚本编码契约、文档必备 token | 按报文补齐实现；若断言本身过期（实现搬到别处），改断言并写清为什么 |
 | `check-metric-floor.py` | 节点目录条数与测试数量下限（`scripts/metric-floor.json`） | 覆盖率挡不住"删测试"——被删的往往是难覆盖的分支，删完覆盖率反而更高。数量下限是唯一能发现"测试悄悄消失"的信号 |
+| `check-size-budget.py` | 单文件行数预算（`scripts/size-budget.json`，默认 1200，目标 800） | 拆文件，或**下调**预算记录值。拆分是一次性动作，没有预算就会长回去——JLVisionMatching 拆到 973 行后，Compiler/NodeCatalog 仍在 1700/1600 行 |
 | `test-publish-data-separation.ps1` / `test-data-migration.ps1` | 发布包与数据根分离；迁移是"暂存→校验→标记→原子切换" | 修实现，不要放宽断言：这两条对应的是现场数据丢失风险 |
 | `test-publish-runtime.sh` | Bash 发布路径与 Windows 路径同一安全契约 | 同上；无 bash 的主机会跳过并打印说明 |
 | `dotnet test`（Release，排除 Soak，收集覆盖率） | 宿主 + 引擎行为 | 修代码；确实需要改期望时在 CHANGELOG 里写清理由 |
@@ -80,6 +81,33 @@ React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处、`ex
 Playwright + Chromium，覆盖 jsdom 无法验证的部分：布局引擎、Canvas 绘制、指针事件链、真实导航。
 失败时上传 `frontend/playwright-report`。单列一段的原因：它和单测的稳定性与耗时不是一个量级，
 混在一起会把"断言挂了"和"浏览器没起来"混成同一个红叉。
+
+spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进程**：真实浏览器 + 固定响应，
+既跑得了"点发布 → 收 409 → 确认 → 重发"这种跨请求链路，又不会因为宿主没起来而变红。
+目前两条：
+
+| spec | 覆盖 |
+|---|---|
+| `editor.spec.ts` | 编辑器基本链路 |
+| `recipe-publication.spec.ts` | 发布遇成熟度门禁 → 面板列 findings → 确认按钮禁用 → 勾选 → 成功；并断言第二次请求带 `acknowledgeMaturityNodes=true` |
+
+`recipe-publication` 断言的是**请求本身**而不只是 toast：门禁参数没真发出去时，后端仍会拒绝，
+而界面看起来"成功了"。
+
+## 前端的两条棘轮（在 `npm run test:coverage` 里）
+
+| 用例 | 守什么 |
+|---|---|
+| `apiContractParityCoverage.test.ts` | 契约对账的**覆盖面**只许变长：读 `types.ts` 与 `generated/apiContractParity.ts` 源码，要求除 `PENDING` 里的类型外全部有 `BackendFitsFrontend` 断言；`PENDING` 目前只剩 `WorkflowModuleParameter`，且 `PENDING.size <= 1` |
+| `i18nStatusKeys.test.ts` | 状态键必须是稳定标识符（`^[A-Za-z][A-Za-z0-9_.-]{0,39}$`），挡住"用英文句子当键"；并断言 `Running/Succeeded/Failed/Cancelled/Queued/Interrupted/Breakpoint` 必须存在 |
+
+契约断言本身是编译期的（`BackendFitsFrontend<Frontend, Backend extends Frontend>`），
+覆盖率用例防的是"新加一个 DTO 但没人写断言"——那种缺口不会让编译失败。
+
+请求方向（前端 → 后端）只断言**键集**（`apiContractParity.ts` 末尾的 `WorkflowPayloadRequestKeys` 等）：
+前端刻意允许表单数字为 `string | number`、可空字段缺省，用 `extends` 卡会逼着前端把类型写死。
+多余键才是静默失效的来源——`System.Text.Json` 默认忽略未知成员。**断言必须写在类型约束位置**，
+写在条件类型里（`Cond extends never ? true : Cond`）不会报错，等于空转。
 
 ## 发布门禁（产品行为，不是 CI）
 

@@ -25,5 +25,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\..\samples\*.json" Link="samples\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 金样夹具：固定输入图，不随代码生成（见 GoldenWorkflowRegressionTests）。 -->
+    <Content Include="Fixtures\*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

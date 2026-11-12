@@ -25,7 +25,7 @@ public sealed record SchemaMigrationHistoryEntry(
 /// </summary>
 public sealed class SqliteSchemaMigrationRunner
 {
-    public const int CurrentVersion = 27;
+    public const int CurrentVersion = 28;
 
     private static readonly IReadOnlyList<Migration> Migrations =
     [
@@ -63,7 +63,13 @@ public sealed class SqliteSchemaMigrationRunner
         new(24, "Versioned shape model assets (content-addressed blobs)", ShapeModelAssetSchemaSql),
         new(25, "Generic content-addressed assets (kind + metadata), shape data migrated", GenericAssetSchemaSql),
         new(26, "Versioned planar hand-eye calibration assets", HandEyeCalibrationAssetSchemaSql),
-        new(27, "Versioned SE(3) hand-eye calibration assets", HandEye3DCalibrationAssetSchemaSql)
+        new(27, "Versioned SE(3) hand-eye calibration assets", HandEye3DCalibrationAssetSchemaSql),
+        // 2026-11-12：登录失败计数与锁定窗口。此前只有 10 次/分钟限流，没有"这个账号已经
+        // 被连续试了 N 次"的状态——厂内共享账号的口令被慢速枚举时，日志里只有一串 401。
+        // 用 custom apply 而不是裸 ALTER：v3 基线库（早于安全域）没有 security_users，
+        // 恢复的旧快照也可能已经带列，裸 DDL 会以 "no such table" / "duplicate column" 失败。
+        new(28, "Login failure counter and lockout window", "", ApplyLoginLockoutColumnsAsync,
+            "security_users.failed_attempts INTEGER NOT NULL DEFAULT 0 + security_users.locked_until TEXT NULL")
     ];
 
     public async Task<SchemaMigrationStatus> MigrateAsync(SqliteConnection connection, CancellationToken ct = default)
@@ -298,6 +304,22 @@ SET base_workflow_hash = COALESCE(base_workflow_hash, workflow_hash),
         backfill.Transaction = tx;
         backfill.CommandText = "UPDATE jobs SET requires_validation=1 WHERE product_id IS NOT NULL OR recipe_code IS NOT NULL;";
         await backfill.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task ApplyLoginLockoutColumnsAsync(SqliteConnection connection, SqliteTransaction tx, CancellationToken ct)
+    {
+        if (!await TableExistsAsync(connection, tx, "security_users", ct)) return;
+        await EnsureColumnAsync(connection, tx, "security_users", "failed_attempts", "INTEGER NOT NULL DEFAULT 0", ct);
+        await EnsureColumnAsync(connection, tx, "security_users", "locked_until", "TEXT NULL", ct);
+    }
+
+    private static async Task<bool> TableExistsAsync(SqliteConnection connection, SqliteTransaction tx, string table, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = tx;
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=$name);";
+        command.Parameters.AddWithValue("$name", table);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0;
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection connection, SqliteTransaction tx, string table, string column, string declaration, CancellationToken ct)

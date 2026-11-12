@@ -114,12 +114,39 @@ npm run test:e2e
 **代价**：前端步骤由约 3 分钟增至约 4.5 分钟（覆盖率插桩 +34s，e2e +18s，浏览器安装首次较长后走缓存）。
 quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但已接近需要关注的水平。
 
+2026-11-12 起同一套检查按 `-Scope Backend / Frontend / E2E` 拆成三段并行（关键路径 25 分钟 → 三段并行），
+`-Scope All` 仍是原顺序，口径不变；细节见 [`quality-gates.md`](quality-gates.md)。
+
+### 1.5 2026-11-12 批次（九项一次性落地）
+
+这一批的共同出发点：**下面这些缺口都不是"功能没做"，而是"坏了没人知道"**。所以每一项都配了
+一条门禁或一条固定夹具，而不是只改代码。
+
+| # | 做了什么 | 证据 / 口径 |
+|---|---|---|
+| 1 | 流程级金样回归：三张提交进仓库的固定 PNG，走真实 `WorkflowCoreVisionRunner` | `GoldenWorkflowRegressionTests`、`docs/golden-regression.md` |
+| 2 | 发布/回滚真浏览器 e2e：桩化 `/api/**`，验证成熟度门禁的"确认后重发"链路与请求参数 | `frontend/e2e/recipe-publication.spec.ts` |
+| 3 | 契约收尾：对账断言 130 → 170 条；补请求方向键集断言；新增覆盖率棘轮 | `generated/apiContractParity.ts`、`apiContractParityCoverage.test.ts` |
+| 4 | 文件规模预算门禁（默认 1200 / 目标 800，棘轮式） | `scripts/size-budget.json` + `check-size-budget.py` |
+| 5 | 节点级 `ActivitySource` 遥测（无监听者零开销） | `EngineTelemetry`、`docs/engine-telemetry.md` |
+| 6 | 相机帧 `Mat` 复用池，`/api/health` 暴露命中/丢弃计数 | `FrameMatPool`、`docs/frame-mat-pool.md` |
+| 7 | 一键诊断包（管理员专用，不含配置原文/数据库/留证图） | `DiagnosticBundleService`、`docs/diagnostic-bundle.md` |
+| 8 | i18n 状态键守卫：键必须是稳定标识符，挡住"英文句子当键" | `i18nStatusKeys.test.ts` |
+| 9 | 登录失败计数与账号锁定（429 `account_locked`）+ 管理员解锁 | `docs/login-lockout.md` |
+
+顺带修掉的两处结构问题：`catalog.ts` 的 `statusNames` 由模块私有改为导出（否则守卫用例拿不到键集）；
+`engine-telemetry` / 帧池 / 诊断包 / 锁定 / 金样五件事各留一条 `static-audit.py` 结构性断言——
+它们都属"删掉不会有测试变红"的那类能力。
+
+**这一批的教训**：迁移脚本只允许连续版本号。锁定列本来想开 v29，但已有库的 `schema_info` 会停在 28，
+`FreshDatabase_RunsOrderedMigrations` 要求历史 1..N 连续，最终必须并回 v28 并清理被开发期污染的本地库——
+**checksum drift 是守卫在正确工作，不要放宽它**。
+
 ---
 
 ## 二、待办
 
 ### P1-4 契约单一真相源：`Produces<T>` → 生成 `types.ts`（第一批已完成）
-
 **原状**：`frontend/src/types.ts` 1,758 行手写后端 DTO 镜像；快照 101 schema；
 `apiContract.test.ts` 用 `PENDING_SPEC_DTOS` 棘轮记录"尚未进 spec 的核心 DTO"（7 个）。
 
@@ -160,6 +187,22 @@ quality-gate 的 `timeout-minutes` 为 25，当前总时长未触及上限，但
 `Produces<T>`，再用 `openapi-typescript` 生成替换，最后把 `apiContract.test.ts` 改成
 "生成类型与手写类型零差异"断言。**验收**：`types.ts` 不再手工维护。
 
+**2026-11-12 进展**：`generated/apiContractParity.ts` 的对账断言从 130 条补到 **170 条**——
+把此前 45 个"同名但没对账"的手写 DTO 中的 40 个纳入编译期 `Backend extends Frontend` 断言。
+只剩 `WorkflowModuleParameter`：前端把 `parameters.type` 收窄成封闭联合而 schema 是宽 string，
+属于有意收窄，不能直接断言。新增 `apiContractParityCoverage.test.ts` 把这条缺口做成棘轮
+（PENDING 只许变短），新增同名 DTO 时测试会强制要求补断言或显式登记。
+
+**请求方向**（2026-11-12 补）：170 条全是响应方向。反过来的 `Frontend extends Backend` 卡不通，
+也不是卡得越死越好——前端有两种刻意的放宽：表单数字允许 `string | number`，可空字段允许缺省。
+所以请求方向只断言**键集**：`WorkflowPayload` 及其 `nodes`/`edges` 元素里出现的键，后端 schema 必须认识
+（`System.Text.Json` 默认忽略未知成员，"多发一个字段"既不报错也不生效，是最典型的静默失效）。
+踩坑记录：断言必须放在**类型约束**位置（`AssertNoUnknownKeys<T extends never>`）——
+先写成 `type X = Cond extends never ? true : Cond` 时，多余键只是被解析成一个字面量类型，
+`tsc` 照样退出 0，断言完全空转；用 `Omit<Schema<'WorkflowDefinition'>, 'edges'>` 反向探针确认过现在真的会红。
+
+**仍未完成的是"收敛"本身**：`types.ts` 仍是 1,903 行手写镜像，下一步应改为 `type X = Schema<'X'>` 派生。
+
 **PowerShell 脚本编码约定（本轮踩坑）**：`scripts/*.ps1` 若含中文注释，文件**必须是带 BOM 的 UTF-8**。
 PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语法——表现为变量莫名是 `$null`、
 循环一次不执行、错误信息与代码不符。`export-openapi.ps1` 与 `quality-gate.ps1` 已补 BOM。
@@ -174,6 +217,14 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 
 **验收**：单文件 ≤ 800 行；拆分前后 `VisionStudio.Engine.Tests` 1815 项与 `Api.Tests` 421 项全绿且用例数不减。
 
+**2026-11-12 进展**：拆分本身仍未完成，但**先止住了继续膨胀**——新增 `scripts/size-budget.json`
+（默认上限 1200 / 目标 800）+ `check-size-budget.py` 进质量门禁。当前实测：
+`VisionWorkflowCompiler` 1740、`NodeCatalog` 1622、`ProductionRuntime` 1498、`InferenceNodes` 1373、
+`MeasurementGapNodes` 1314、`RuntimeDependencies` 1263、`types.ts` 1903、`App.tsx` 1672、
+`NodeConfigurationDialog` 1643；其余 540 余个源文件均在上限内。
+`JLVisionMatching` 已在 `10ce9fb` 拆到 973 行。预算只许降不许升：拆完一个就把记录值下调到新实测值，
+否则"拆小了"这件事不会被任何检查记住。
+
 ### P2-6 i18n 键设计
 
 `frontend/src/i18n/catalog.ts` 2,935 行，**以英文原文为键**（2,258 条）。改一句英文文案会静默丢掉对应中文。
@@ -182,12 +233,25 @@ PS 5.1 会把无 BOM 的 UTF-8 按系统 ANSI 解码，中文注释会破坏语�
 **动作**：迁到稳定 key（`node.<type>.<param>.label` 形式），保留一层英文原文到 key 的映射以维持渐进迁移；
 新增"未翻译 key"棘轮（计数只减不增）。
 
+**2026-11-12 进展（局部）**：完整迁移仍未做，但先给**新键**立了规矩——`i18nStatusKeys.test.ts` 要求
+状态键匹配 `^[A-Za-z][A-Za-z0-9_.-]{0,39}$`，即"英文句子不能当键"；并断言
+`Running/Succeeded/Failed/Cancelled/Queued/Interrupted/Breakpoint` 一定存在（这几条是生产面板的状态文案，
+丢了会让界面显示原始枚举名）。为此把 `catalog.ts` 里的 `statusNames` 从模块私有改为导出。
+存量 2,258 条仍然以原文为键，迁移时按"用到的先迁"分批做，不要一次性重写词表。
+
 ### P2-7 可观测性：ActivitySource
 
 已有 `RunObservability`、`RollingFileLogger`（含丢弃计数并经 `/api/health` 暴露）、`/api/health`，但无标准遥测。
 跨节点执行耗时的因果链只能事后从自研 trace 推断，无法接入 OTLP/Jaeger。
 
 **动作**：节点执行入口包 `Activity`（含 nodeType / runId / frame 标签），导出 OTLP 设为可选（默认关闭，不改变现场行为）。
+
+**2026-11-12 已完成**：`EngineTelemetry.ActivitySource`（Source 名 `VisionStudio.Engine`），
+在 `VisionNodeDispatcher` 的输入校验之后起 span，标签为
+`vision.node.id/type/run.id/scope/duration_ms/timed_out`，失败与超时置 `ActivityStatusCode.Error`。
+无监听者时 `StartActivity` 返回 null，后续标签全是空引用判断，**零开销**；不内置导出器，OTLP 由宿主按需
+`AddSource("VisionStudio.Engine")` 接入。口径与"为什么不建在校验之前"见
+[`engine-telemetry.md`](engine-telemetry.md)。
 
 ### P2-8 AlarmStore 全量 JSON 读写
 

@@ -198,7 +198,9 @@ public sealed class CameraFrameHub : IDisposable
         public void Release()
         {
             if (Interlocked.Decrement(ref _references) != 0) return;
-            Interlocked.Exchange(ref _image, null)?.Dispose();
+            // 引用计数归零 = 所有消费者都已释放；把 Mat 还给池而不是直接 Dispose。
+            // 相机路径每帧都会写满整幅图，复用不需要清零（见 FrameMatPool）。
+            FrameMatPool.Return(Interlocked.Exchange(ref _image, null));
         }
     }
 }

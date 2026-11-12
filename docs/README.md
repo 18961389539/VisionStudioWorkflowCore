@@ -60,7 +60,17 @@
 | [`quality-gates.md`](quality-gates.md) | 门禁口径与棘轮 |
 | [`archive/node-design-improvements-rounds-1-51.md`](archive/node-design-improvements-rounds-1-51.md) | 早期 51 轮节点改造记录（历史） |
 
-## 4. 写文档的约定
+## 4. 运维、安全与可观测性
+
+| 文档 | 内容 |
+|---|---|
+| [`diagnostic-bundle.md`](diagnostic-bundle.md) | 一键诊断包：打包什么、**刻意不打包什么**、日志尾部截断 |
+| [`login-lockout.md`](login-lockout.md) | 登录失败计数与账号锁定（429 而非 401）、按 IP 限流与按账号锁定的分工 |
+| [`engine-telemetry.md`](engine-telemetry.md) | 节点级 `ActivitySource` 遥测：标签口径、span 建在校验之后的原因 |
+| [`frame-mat-pool.md`](frame-mat-pool.md) | 相机帧 `Mat` 复用池：归还点、容量上限、不清零的安全前提、`/api/health` 计数 |
+| [`golden-regression.md`](golden-regression.md) | 流程级金样回归：固定 PNG 夹具、容差口径、重新生成后要改什么 |
+
+## 5. 写文档的约定
 
 - 日期落在文件名上：`*-audit-YYYY-MM-DD.md` 是一次性记录，结论要落到代码/测试，别让它成为唯一出处；
 - 能力边界（"只支持子集""近似口径"）必须与 `NodeMaturityCatalog` 的定级一致，不一致时先改目录声明；

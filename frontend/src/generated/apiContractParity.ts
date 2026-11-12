@@ -41,7 +41,8 @@ export type RunTraceRecordParity = BackendFitsFrontend<RunTraceRecord, Normalize
 export type NodeRunReportParity = BackendFitsFrontend<NodeRunReport, Normalize<Schema<'NodeRunReport'>>>;
 
 /**
- * 其余与后端 schema 同名、结构已对齐的 DTO（45 个）。
+ * 其余与后端 schema 同名、结构已对齐的 DTO（45 个；2026-11-12 已将其中 40 个纳入下方断言，
+ * 只剩 WorkflowModuleParameter 因前端收窄 parameters.type 而未收敛）。
  * 未列入的是已单独对账的 NodeCatalogItem / ParameterDescriptor / RunTraceRecord 三个；
  * required 表达已由 RequiredPropertiesSchemaTransformer 修正（带默认值/计算属性的非空字段），
  * 因此 CameraSettings / CameraCommissioningProfile / RunCounterPersistenceStatus / CalibrationWorkspaceRequest 也在此列。
@@ -232,3 +233,78 @@ export type Parity_RunTraceComparison = BackendFitsFrontend<Frontend.RunTraceCom
 export type Parity_PluginLoadInfo = BackendFitsFrontend<Frontend.PluginLoadInfo, Normalize<Schema<'PluginLoadInfo'>>>;
 export type Parity_PluginSdkInfo = BackendFitsFrontend<Frontend.PluginSdkInfo, Normalize<Schema<'PluginSdkInfo'>>>;
 export type Parity_PluginToolLoadInfo = BackendFitsFrontend<Frontend.PluginToolLoadInfo, Normalize<Schema<'PluginToolLoadInfo'>>>;
+
+/**
+ * 2026-11-12：把此前只在文档里说"还没对账"的 40 个同名 DTO 纳入编译期断言。
+ * 只剩 WorkflowModuleParameter 仍未收敛——它的 parameters 在前端收窄为
+ * ParameterDescriptor 的封闭 type 联合，而 schema 是宽 string，属于有意收窄，
+ * 不能简单断言 Backend extends Frontend。
+ */
+export type Parity_CalibrationHeatCell = BackendFitsFrontend<Frontend.CalibrationHeatCell, Normalize<Schema<'CalibrationHeatCell'>>>;
+export type Parity_CalibrationResidual = BackendFitsFrontend<Frontend.CalibrationResidual, Normalize<Schema<'CalibrationResidual'>>>;
+export type Parity_CalibrationVersionInfo = BackendFitsFrontend<Frontend.CalibrationVersionInfo, Normalize<Schema<'CalibrationVersionInfo'>>>;
+export type Parity_CameraAcquisitionStats = BackendFitsFrontend<Frontend.CameraAcquisitionStats, Normalize<Schema<'CameraAcquisitionStats'>>>;
+export type Parity_CameraCapabilities = BackendFitsFrontend<Frontend.CameraCapabilities, Normalize<Schema<'CameraCapabilities'>>>;
+export type Parity_CameraCommissioningCapabilities = BackendFitsFrontend<Frontend.CameraCommissioningCapabilities, Normalize<Schema<'CameraCommissioningCapabilities'>>>;
+export type Parity_CameraIntrinsicVersionInfo = BackendFitsFrontend<Frontend.CameraIntrinsicVersionInfo, Normalize<Schema<'CameraIntrinsicVersionInfo'>>>;
+export type Parity_CameraPtpClockState = BackendFitsFrontend<Frontend.CameraPtpClockState, Normalize<Schema<'CameraPtpClockState'>>>;
+export type Parity_CameraSynchronizationCommissioningAssessment = BackendFitsFrontend<Frontend.CameraSynchronizationCommissioningAssessment, Normalize<Schema<'CameraSynchronizationCommissioningAssessment'>>>;
+export type Parity_CameraSynchronizationCommissioningCameraEvidence = BackendFitsFrontend<Frontend.CameraSynchronizationCommissioningCameraEvidence, Normalize<Schema<'CameraSynchronizationCommissioningCameraEvidence'>>>;
+export type Parity_CameraSynchronizationMemberStatus = BackendFitsFrontend<Frontend.CameraSynchronizationMemberStatus, Normalize<Schema<'CameraSynchronizationMemberStatus'>>>;
+export type Parity_CameraSynchronizationPtpCameraDiagnostics = BackendFitsFrontend<Frontend.CameraSynchronizationPtpCameraDiagnostics, Normalize<Schema<'CameraSynchronizationPtpCameraDiagnostics'>>>;
+export type Parity_CameraSynchronizationPtpTrendPoint = BackendFitsFrontend<Frontend.CameraSynchronizationPtpTrendPoint, Normalize<Schema<'CameraSynchronizationPtpTrendPoint'>>>;
+export type Parity_CameraTimeSynchronizationStatus = BackendFitsFrontend<Frontend.CameraTimeSynchronizationStatus, Normalize<Schema<'CameraTimeSynchronizationStatus'>>>;
+export type Parity_GigECameraNetworkDiagnostic = BackendFitsFrontend<Frontend.GigECameraNetworkDiagnostic, Normalize<Schema<'GigECameraNetworkDiagnostic'>>>;
+export type Parity_GigEHostAddress = BackendFitsFrontend<Frontend.GigEHostAddress, Normalize<Schema<'GigEHostAddress'>>>;
+export type Parity_GigEHostNetworkInterface = BackendFitsFrontend<Frontend.GigEHostNetworkInterface, Normalize<Schema<'GigEHostNetworkInterface'>>>;
+export type Parity_GigENetworkAssessment = BackendFitsFrontend<Frontend.GigENetworkAssessment, Normalize<Schema<'GigENetworkAssessment'>>>;
+export type Parity_GigENetworkTrendPoint = BackendFitsFrontend<Frontend.GigENetworkTrendPoint, Normalize<Schema<'GigENetworkTrendPoint'>>>;
+export type Parity_GigENicLoadDiagnostic = BackendFitsFrontend<Frontend.GigENicLoadDiagnostic, Normalize<Schema<'GigENicLoadDiagnostic'>>>;
+export type Parity_HandEye3DCalibrationAssetDescriptor = BackendFitsFrontend<Frontend.HandEye3DCalibrationAssetDescriptor, Normalize<Schema<'HandEye3DCalibrationAssetDescriptor'>>>;
+export type Parity_HandEye3DCalibrationVersionSnapshot = BackendFitsFrontend<Frontend.HandEye3DCalibrationVersionSnapshot, Normalize<Schema<'HandEye3DCalibrationVersionSnapshot'>>>;
+export type Parity_HandEye3DWizardSessionDocument = BackendFitsFrontend<Frontend.HandEye3DWizardSessionDocument, Normalize<Schema<'HandEye3DWizardSessionDocument'>>>;
+export type Parity_HandEyeCalibrationAssetDescriptor = BackendFitsFrontend<Frontend.HandEyeCalibrationAssetDescriptor, Normalize<Schema<'HandEyeCalibrationAssetDescriptor'>>>;
+export type Parity_HandEyeCalibrationVersionSnapshot = BackendFitsFrontend<Frontend.HandEyeCalibrationVersionSnapshot, Normalize<Schema<'HandEyeCalibrationVersionSnapshot'>>>;
+export type Parity_HandEyeWizardSessionDocument = BackendFitsFrontend<Frontend.HandEyeWizardSessionDocument, Normalize<Schema<'HandEyeWizardSessionDocument'>>>;
+export type Parity_InvestigationCaseRun = BackendFitsFrontend<Frontend.InvestigationCaseRun, Normalize<Schema<'InvestigationCaseRun'>>>;
+export type Parity_InvestigationSignatureTrend = BackendFitsFrontend<Frontend.InvestigationSignatureTrend, Normalize<Schema<'InvestigationSignatureTrend'>>>;
+export type Parity_InvestigationTrendPoint = BackendFitsFrontend<Frontend.InvestigationTrendPoint, Normalize<Schema<'InvestigationTrendPoint'>>>;
+export type Parity_PluginBenchmarkRegressionGate = BackendFitsFrontend<Frontend.PluginBenchmarkRegressionGate, Normalize<Schema<'PluginBenchmarkRegressionGate'>>>;
+export type Parity_PluginWorkerInstanceStatus = BackendFitsFrontend<Frontend.PluginWorkerInstanceStatus, Normalize<Schema<'PluginWorkerInstanceStatus'>>>;
+export type Parity_ProductionPtpGuardGroupStatus = BackendFitsFrontend<Frontend.ProductionPtpGuardGroupStatus, Normalize<Schema<'ProductionPtpGuardGroupStatus'>>>;
+export type Parity_ProductionPtpGuardIssue = BackendFitsFrontend<Frontend.ProductionPtpGuardIssue, Normalize<Schema<'ProductionPtpGuardIssue'>>>;
+export type Parity_ProductionSynchronizationGuardGroupStatus = BackendFitsFrontend<Frontend.ProductionSynchronizationGuardGroupStatus, Normalize<Schema<'ProductionSynchronizationGuardGroupStatus'>>>;
+export type Parity_ProductionSynchronizationGuardIssue = BackendFitsFrontend<Frontend.ProductionSynchronizationGuardIssue, Normalize<Schema<'ProductionSynchronizationGuardIssue'>>>;
+export type Parity_ProductionSynchronizationTransportWindow = BackendFitsFrontend<Frontend.ProductionSynchronizationTransportWindow, Normalize<Schema<'ProductionSynchronizationTransportWindow'>>>;
+export type Parity_RobotCommandTraceEvent = BackendFitsFrontend<Frontend.RobotCommandTraceEvent, Normalize<Schema<'RobotCommandTraceEvent'>>>;
+export type Parity_RuntimeDependencyDrift = BackendFitsFrontend<Frontend.RuntimeDependencyDrift, Normalize<Schema<'RuntimeDependencyDrift'>>>;
+export type Parity_VisionTransform2D = BackendFitsFrontend<Frontend.VisionTransform2D, Normalize<Schema<'VisionTransform2D'>>>;
+export type Parity_WorkflowModulePort = BackendFitsFrontend<Frontend.WorkflowModulePort, Normalize<Schema<'WorkflowModulePort'>>>;
+
+/**
+ * 请求方向（2026-11-12）：上面的 170 条都是**响应方向**（后端 DTO 能喂给前端类型）。
+ * 请求方向不能简单反过来断言 `Frontend extends Backend`——前端有两种刻意的放宽：
+ * 表单里的数字允许 `string | number`（输入框给的是字符串），可空字段允许缺省（不必显式写 null）。
+ * 这两种放宽在序列化后都是合法的，用 `extends` 卡会逼着前端把类型写死，得不偿失。
+ *
+ * 真正会静默出问题的是**多余的键**：`System.Text.Json` 默认忽略未知成员，前端多发一个字段
+ * 既不报错也不生效——"这个选项为什么不起作用"就是这么来的。所以这里只断言键集：
+ * 前端请求体里出现的键，后端 schema 必须认识。嵌套的 nodes/edges 一并检查。
+ *
+ * 注意断言必须写在**类型约束**位置（`AssertNever<T extends never>`）：写成
+ * `type X = Cond extends never ? true : Cond` 只会把多余键解析成一个字面量类型，不会报错，
+ * 等于空转。研发时用 `Omit<Schema<'WorkflowDefinition'>, 'edges'>` 探过，确认现在真的会红。
+ */
+type KeysOf<T> = T extends object ? keyof T & string : never;
+type UnknownKeys<Sent, Accepted> = Exclude<KeysOf<Sent>, KeysOf<Accepted>>;
+type ElementOf<T> = T extends readonly (infer U)[] ? U : never;
+/** 多余键必须为空集；有的话 TS 会在错误信息里点名是哪个键。 */
+type AssertNoUnknownKeys<T extends never> = T;
+
+export type WorkflowPayloadRequestKeys = AssertNoUnknownKeys<UnknownKeys<WorkflowPayload, Normalize<Schema<'WorkflowDefinition'>>>>;
+export type WorkflowNodeRequestKeys = AssertNoUnknownKeys<
+  UnknownKeys<ElementOf<WorkflowPayload['nodes']>, ElementOf<Schema<'WorkflowDefinition'>['nodes']>>
+>;
+export type WorkflowEdgeRequestKeys = AssertNoUnknownKeys<
+  UnknownKeys<ElementOf<WorkflowPayload['edges']>, ElementOf<Schema<'WorkflowDefinition'>['edges']>>
+>;

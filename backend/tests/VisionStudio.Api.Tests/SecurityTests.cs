@@ -189,6 +189,45 @@ public sealed class SecurityTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/catalog")).StatusCode);
     }
 
+    /// <summary>
+    /// 连续失败锁定（2026-11-12）：5 次错误后即使口令正确也拒绝，管理员解锁后恢复。
+    /// 只靠 10 次/分钟限流挡不住慢速枚举——每个 IP 每天仍有 14400 次机会。
+    /// </summary>
+    [Fact]
+    public async Task RepeatedFailedLogins_LockTheAccount_UntilAnAdministratorUnlocksIt()
+    {
+        using var factory = new SecureVisionStudioApiFactory();
+        using var admin = factory.CreateFreshClient();
+        await EnsureAdminAsync(admin);
+
+        var created = await admin.PostAsJsonAsync("/api/security/users", new
+        {
+            username = "locked.operator", displayName = "Locked Operator", role = "Operator", password = "Operator!234"
+        });
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var userId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+        using var client = factory.CreateFreshClient();
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var failed = await client.PostAsJsonAsync("/api/auth/login", new { username = "locked.operator", password = "WrongPass!234" });
+            Assert.Equal(HttpStatusCode.Unauthorized, failed.StatusCode);
+        }
+
+        var locked = await client.PostAsJsonAsync("/api/auth/login", new { username = "locked.operator", password = "Operator!234" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, locked.StatusCode);
+        Assert.Contains("locked", await locked.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+
+        var unlock = await admin.PostAsync($"/api/security/users/{userId}/unlock", null);
+        Assert.Equal(HttpStatusCode.OK, unlock.StatusCode);
+
+        var recovered = await client.PostAsJsonAsync("/api/auth/login", new { username = "locked.operator", password = "Operator!234" });
+        Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
+
+        var audit = await admin.GetFromJsonAsync<JsonElement>("/api/audit?action=security.user.unlock");
+        Assert.Contains(audit.EnumerateArray(), item => item.GetProperty("target").GetString() == userId);
+    }
+
     private static async Task<JsonElement> EnsureAdminAsync(HttpClient client)
     {
         var status = await client.GetFromJsonAsync<JsonElement>("/api/auth/status");
