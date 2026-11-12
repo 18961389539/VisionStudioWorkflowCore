@@ -25,7 +25,7 @@ jobs:
       DOTNET_NOLOGO: '1'
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -53,7 +53,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -69,7 +69,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 真后端冒烟（2026-11-12）：real-backend-smoke.spec.ts 需要一个真实宿主，
       # 由 quality-gate.ps1 -Scope E2E 先 build 再拉起；没有 SDK 就只剩桩化用例在跑。
       - uses: actions/setup-dotnet@v4

@@ -23,7 +23,7 @@ jobs:
       VISION_SOAK_ROBOT_ITERATIONS: ${{ inputs.robot_iterations || '50' }}
       VISION_SOAK_MATH_ITERATIONS: '50000'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
