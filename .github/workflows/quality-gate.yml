@@ -43,7 +43,7 @@ jobs:
         run: ./scripts/quality-gate.ps1 -Scope Backend
       - name: Upload coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-and-test-results
           path: artifacts/test-results
@@ -85,7 +85,7 @@ jobs:
         run: ./scripts/quality-gate.ps1 -Scope E2E
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           # 与 playwright.config.ts 的 html reporter outputFolder 保持一致；原先指向
