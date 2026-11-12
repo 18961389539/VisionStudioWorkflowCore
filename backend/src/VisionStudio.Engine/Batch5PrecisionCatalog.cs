@@ -13,7 +13,7 @@ public static class Batch5PrecisionCatalog
     /// <summary>
     /// match.shape 的宿主协议字段：训练请求（调优工作区临时注入、不落盘）与训练结果元数据（随节点保存）。
     ///
-    /// 为什么声明在目录里：这些键的读取发生在 <c>Algorithms/JLVisionMatching.cs</c>，不在 <c>Nodes/</c> 下，
+    /// 为什么声明在目录里：这些键的读取发生在 <c>Algorithms/JLVisionMatching*.cs</c>，不在 <c>Nodes/</c> 下，
     /// 而"执行器读取的键必须在目录中声明"的自动闸门（scripts/static-audit.py）按 Nodes/ 的类块扫描，
     /// 过去完全漏掉了它们——一个 16 MB 的隐藏参数没有任何契约约束。声明为 Internal 后：不进配置面板、
     /// 不写新节点默认值、但进入目录契约与生成快照。

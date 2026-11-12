@@ -279,14 +279,14 @@
 **先纠正一个判断**：`match.shape` 的 train/run 两阶段其实早就实现了——训练由调优工作区带外触发
 （`trainingMode=true`），结果以 base64 存回节点参数 `trainedModelData`（≤16 MB），配 `trainedModelConfig`
 参数指纹，`modelMode=trained` 时运行期只反序列化、不再训练。真正缺的不是拆分，而是**契约**：
-这 22 个键在 `Algorithms/JLVisionMatching.cs` 里读取，而参数闸门只扫 `Nodes/` 的类块，
+这 22 个键在 `Algorithms/JLVisionMatching*.cs` 里读取，而参数闸门只扫 `Nodes/` 的类块，
 所以它们从未进过目录——一个 16 MB 的隐藏参数不受任何校验。
 
 | 变更 | 说明 |
 | --- | --- |
 | 22 个键声明为 `Internal` | 训练请求（`trainingMode` / `trainingImageData` / `trainingCombine*` / `trainingOriginOverride*` / `trainingReference*`）与训练结果元数据（`trainedModelData` / `trainedModelConfig` / `trainedSourceImage` / `trainedWidth/Height` / `trainedOrigin*` / `trainedPoseOffset*`），Group=`Host Protocol`；不进配置面板、不写新节点默认值，但进入目录契约与生成快照 |
 | 描述补充 | `match.shape` 描述写明模型随节点以 base64 保存、16 MB 上限、参数指纹变化必须重训、`modelMode=trained` 未训练前拒绝运行 |
-| 审计闸门扩展 | `static-audit.py` 新增两条：① `JLVisionMatching.cs` 的读取必须由 `match.shape`/`match.template` 声明（比"任意节点声明"更严）；② `Algorithms/` 下任何 `node.GetX("键")` 都必须至少被一个目录节点声明 |
+| 审计闸门扩展 | `static-audit.py` 新增两条：① `JLVisionMatching*.cs`（拆分后为一族 partial，按家族聚合扫描）的读取必须由 `match.shape`/`match.template` 声明（比"任意节点声明"更严）；② `Algorithms/` 下任何 `node.GetX("键")` 都必须至少被一个目录节点声明 |
 
 **没有拆成两个节点**，理由：模型是高至 16 MB 的二进制块，走端口要么塞进 `String`（污染追踪/制品），
 要么需要一套 modelId 资产库；而一旦有了资产库，一个 run 节点 + `modelId` 就够了，两个节点反而多余。
@@ -313,8 +313,8 @@
 | --- | --- | --- |
 | 参数默认值对账 | `node.GetX("参数", 字面量兜底)` 必须等于目录 `defaultValue`；不一致即失败 | **531** 处数值兜底 |
 | 输入端口类型对账 | `context.Require<T>("端口")` / `RequireImage("端口")` 的期望类型必须与目录 `dataType` 一致；端口不存在也报错 | **171** 处读取 |
-| 算法层参数归属 | `JLVisionMatching.cs` 的读取必须由 `match.shape`/`match.template` 声明 | 75 处读取 |
-| 算法层孤儿键 | `Algorithms/` 下任何读取至少被一个目录节点声明 | 77 个键 |
+| 算法层参数归属 | `JLVisionMatching*.cs` 的读取必须由 `match.shape`/`match.template` 声明，且读取数量不得低于 82（拆分后按家族聚合，下限防止漏扫某个 partial） | 82 处读取 |
+| 算法层孤儿键 | `Algorithms/` 下任何读取至少被一个目录节点声明 | 84 个键 |
 
 归属按类块切分（与既有的参数契约检查同一套切法）：辅助类没有 `Type` 声明，其内部读取不会被算到上一个节点头上。
 这正是 2026-11-02 一次性审计里 52 条报错中 51 条误报的根因——`region.fromRoi` 的那条就是 `RegionShapeProcessing` 辅助类被误算。

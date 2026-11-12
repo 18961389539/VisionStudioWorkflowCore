@@ -146,14 +146,28 @@ ok(f'Catalog parameter contract: {len(declared_parameters)} nodes, no undeclared
 # 算法层参数契约：JLVisionMatching 承担 match.shape / match.template 的训练与匹配，它的 node.GetX("...")
 # 读取不在 Nodes/ 的类块扫描范围内——这是历史盲区（trainedModelData 等 22 个键从未进过目录）。
 # 这里按"该文件的读取必须由它服务的两个节点之一声明"来卡，比"任意节点声明即可"更严。
-algo_matching = read_safe('backend/src/VisionStudio.Engine/Algorithms/JLVisionMatching.cs')
+#
+# 2026-11-12 该文件按域拆成 JLVisionMatching*.cs 一族 partial（原单文件 2809 行）。
+# 必须把整个家族拼起来扫：只读主文件会让这条断言静默变弱——Execute 之外的读取搬走后，
+# 剩下的键仍然全部合法，断言照常打绿，但覆盖面已经缩水。所以这里既按 glob 聚合，
+# 又给读取数量设下限（MATCHING_READ_FLOOR），两个方向都堵住。
+MATCHING_READ_FLOOR = 82
+matching_dir = ROOT / 'backend/src/VisionStudio.Engine/Algorithms'
+matching_files = sorted(matching_dir.glob('JLVisionMatching*.cs'))
+if not matching_files:
+    fail('JLVisionMatching*.cs not found; the algorithm-layer parameter contract cannot be checked.')
+algo_matching = '\n'.join(path.read_text(encoding='utf-8') for path in matching_files)
 matching_reads = set(re.findall(r'node\.Get\w+\(\s*"([^"]+)"', algo_matching))
 matching_declared = declared_parameters.get('match.shape', set()) | declared_parameters.get('match.template', set())
 matching_drift = sorted(matching_reads - matching_declared)
 if matching_drift:
     fail(f'JLVisionMatching reads undeclared parameter(s): {", ".join(matching_drift)}')
+elif len(matching_reads) < MATCHING_READ_FLOOR:
+    fail(f'JLVisionMatching parameter reads dropped to {len(matching_reads)} (floor {MATCHING_READ_FLOOR}). '
+         '继续拆分时漏读了某个 partial，或参数被删；确认后下调本值并在提交说明里写明原因。')
 else:
-    ok(f'Algorithm-layer parameter contract: {len(matching_reads)} reads covered by match.shape/match.template')
+    ok(f'Algorithm-layer parameter contract: {len(matching_reads)} reads across '
+       f'{len(matching_files)} partial file(s) covered by match.shape/match.template')
 
 # 兜底：Algorithms/ 下任何 node.GetX("key") 都必须至少被一个目录节点声明，防止拼写错误或孤儿键。
 algo_reads: set[str] = set()
