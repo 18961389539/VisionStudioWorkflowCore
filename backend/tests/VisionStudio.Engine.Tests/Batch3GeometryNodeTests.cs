@@ -63,6 +63,87 @@ public sealed class Batch3GeometryNodeTests
     }
 
     [Fact]
+    public async Task HandEyeReportsUncertaintyConvergenceAndCrossCheck()
+    {
+        var x=new Pose(18,-7,0.31); var y=new Pose(210,45,-0.2);
+        var robots=new[]{new Pose(0,0,-0.7),new Pose(70,20,-0.25),new Pose(120,-40,0.2),new Pose(-30,90,0.65),new Pose(55,105,1.05),new Pose(160,35,1.35)};
+        var samples=robots.Select(r=>{
+            var vision=Compose(Inverse(x),Compose(Inverse(r),y));
+            return new{robot=new{x=r.X,y=r.Y,thetaDeg=r.Theta*180/Math.PI},vision=new{x=vision.X,y=vision.Y,thetaDeg=vision.Theta*180/Math.PI}};
+        }).ToArray();
+        var result=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=JsonSerializer.Serialize(new{samples})})),default);
+        Assert.True(result.Outputs["converged"].Require<bool>("converged"));
+        Assert.InRange(result.Outputs["iterations"].Require<long>("iterations"),1,100);
+        var condition=result.Outputs["conditionNumber"].Require<double>("conditionNumber");
+        Assert.True(double.IsFinite(condition)&&condition>=1);
+        Assert.True(result.Outputs["stdDevX"].Require<double>("stdDevX")>=0);
+        Assert.True(result.Outputs["stdDevY"].Require<double>("stdDevY")>=0);
+        Assert.True(result.Outputs["angleStdDevDeg"].Require<double>("angleStdDevDeg")>=0);
+        Assert.False(result.Outputs.ContainsKey("outlierSampleIndex"));
+        Assert.InRange(result.Outputs["crossCheckTranslationDelta"].Require<double>("crossCheckTranslationDelta"),0,0.01);
+        Assert.InRange(result.Outputs["crossCheckAngleDeltaDeg"].Require<double>("crossCheckAngleDeltaDeg"),0,0.01);
+        var model=JsonSerializer.Deserialize<HandEyeCalibrationModel>(result.Outputs["calibrationJson"].Require<string>("calibrationJson"))!;
+        Assert.Equal("eyeInHand",model.Mode); Assert.Equal(x.X,model.X,2); Assert.Equal(x.Theta*180/Math.PI,model.ThetaDeg,2);
+    }
+
+    [Fact]
+    public async Task HandEyeFlagsOutlierAndTukeyRejectsIt()
+    {
+        var x=new Pose(18,-7,0.31); var y=new Pose(210,45,-0.2);
+        var robots=new[]{new Pose(0,0,-0.7),new Pose(70,20,-0.25),new Pose(120,-40,0.2),new Pose(-30,90,0.65),new Pose(55,105,1.05),new Pose(160,35,1.35),new Pose(95,-65,0.85),new Pose(-55,25,1.2)};
+        var samples=robots.Select(r=>{
+            var vision=Compose(Inverse(x),Compose(Inverse(r),y));
+            return new{robot=new{x=r.X,y=r.Y,thetaDeg=r.Theta*180/Math.PI},vision=new{x=vision.X,y=vision.Y,thetaDeg=vision.Theta*180/Math.PI}};
+        }).ToArray();
+        samples[3]=samples[3] with{vision=samples[3].vision with{x=samples[3].vision.x+12}};
+        var json=JsonSerializer.Serialize(new{samples});
+        var plain=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json})),default);
+        var robust=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,robustLoss="tukey"})),default);
+        Assert.Equal(3L,plain.Outputs["outlierSampleIndex"].Require<long>("outlierSampleIndex"));
+        Assert.Equal(3L,robust.Outputs["outlierSampleIndex"].Require<long>("outlierSampleIndex"));
+        var plainPose=plain.Outputs["pose"].Require<VisionPose2D>("pose");
+        var robustPose=robust.Outputs["pose"].Require<VisionPose2D>("pose");
+        var plainError=Math.Sqrt(Math.Pow(plainPose.X-x.X,2)+Math.Pow(plainPose.Y-x.Y,2));
+        var robustError=Math.Sqrt(Math.Pow(robustPose.X-x.X,2)+Math.Pow(robustPose.Y-x.Y,2));
+        Assert.True(robustError<plainError,$"tukey={robustError:0.###} plain={plainError:0.###}");
+        Assert.InRange(robustError,0,0.5);
+    }
+
+    [Fact]
+    public async Task HandEyeVisionScaleConvertsPixelSamplesAndWarnsOnUnitMismatch()
+    {
+        var x=new Pose(18,-7,0.31); var y=new Pose(210,45,-0.2);
+        var robots=new[]{new Pose(0,0,-0.7),new Pose(70,20,-0.25),new Pose(120,-40,0.2),new Pose(-30,90,0.65),new Pose(55,105,1.05),new Pose(160,35,1.35)};
+        var samples=robots.Select(r=>{
+            var vision=Compose(Inverse(x),Compose(Inverse(r),y));
+            return new{robot=new{x=r.X,y=r.Y,thetaDeg=r.Theta*180/Math.PI},vision=new{x=vision.X/0.05,y=vision.Y/0.05,thetaDeg=vision.Theta*180/Math.PI}};
+        }).ToArray();
+        var json=JsonSerializer.Serialize(new{samples});
+        var scaled=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,visionScale=0.05,sourceUnit="px",unit="mm"})),default);
+        var pose=scaled.Outputs["pose"].Require<VisionPose2D>("pose");
+        Assert.Equal(x.X,pose.X,2); Assert.Equal(x.Y,pose.Y,2); Assert.Equal(x.Theta*180/Math.PI,pose.ThetaDeg,2);
+        Assert.Null(scaled.Summary["unitWarning"]);
+        var unscaled=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,sourceUnit="px",unit="mm"})),default);
+        Assert.NotNull(unscaled.Summary["unitWarning"]);
+    }
+
+    [Fact]
+    public async Task HandEyeConnectedSamplesOverrideParametersAndAssetPinMustBePaired()
+    {
+        var x=new Pose(18,-7,0.31); var y=new Pose(210,45,-0.2);
+        var robots=new[]{new Pose(0,0,-0.7),new Pose(70,20,-0.25),new Pose(120,-40,0.2),new Pose(-30,90,0.65),new Pose(55,105,1.05),new Pose(160,35,1.35)};
+        var samples=robots.Select(r=>{
+            var vision=Compose(Inverse(x),Compose(Inverse(r),y));
+            return new{robot=new{x=r.X,y=r.Y,thetaDeg=r.Theta*180/Math.PI},vision=new{x=vision.X,y=vision.Y,thetaDeg=vision.Theta*180/Math.PI}};
+        }).ToArray();
+        var context=new NodeExecutionContext(new Dictionary<string,VisionValue>{{"samplesJson",VisionValue.String(JsonSerializer.Serialize(new{samples}))}});
+        var result=await new PlanarHandEyeCalibrationNode().ExecuteAsync(context,Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson="{}"})),default);
+        Assert.Equal(x.X,result.Outputs["pose"].Require<VisionPose2D>("pose").X,2);
+        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=JsonSerializer.Serialize(new{samples}),handEyeAssetId="he-a"})),default));
+        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=JsonSerializer.Serialize(new{samples}),handEyeAssetVersion=2})),default));
+    }
+
+    [Fact]
     public async Task DetectionCollectionsFilterSortCountAndExtractTypedItem()
     {
         IReadOnlyList<VisionDetection> source=[Detection(100,8,0.8,0.85,7),Detection(50,2,0.3,0.4,3),Detection(200,5,0.9,0.95,7)];
@@ -134,4 +215,21 @@ public sealed class Batch3GeometryNodeTests
     private readonly record struct Pose(double X,double Y,double Theta);
     private static Pose Compose(Pose a,Pose b){var c=Math.Cos(a.Theta);var s=Math.Sin(a.Theta);return new(a.X+c*b.X-s*b.Y,a.Y+s*b.X+c*b.Y,a.Theta+b.Theta);}
     private static Pose Inverse(Pose p)=>new(-Math.Cos(p.Theta)*p.X-Math.Sin(p.Theta)*p.Y,Math.Sin(p.Theta)*p.X-Math.Cos(p.Theta)*p.Y,-p.Theta);
+    [Fact]
+    public async Task HandEyeConditionGateIsScaleInvariantAndValidated()
+    {
+        var x=new Pose(18,-7,0.31); var y=new Pose(210,45,-0.2);
+        var robots=new[]{new Pose(0,0,-0.7),new Pose(70,20,-0.25),new Pose(120,-40,0.2),new Pose(-30,90,0.65),new Pose(55,105,1.05),new Pose(160,35,1.35)};
+        var samples=robots.Select(r=>{
+            var vision=Compose(Inverse(x),Compose(Inverse(r),y));
+            return new{robot=new{x=r.X,y=r.Y,thetaDeg=r.Theta*180/Math.PI},vision=new{x=vision.X,y=vision.Y,thetaDeg=vision.Theta*180/Math.PI}};
+        }).ToArray();
+        var json=JsonSerializer.Serialize(new{samples});
+        var permissive=await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,maxConditionNumber=1e6})),default);
+        var condition=permissive.Outputs["conditionNumber"].Require<double>("conditionNumber");
+        Assert.InRange(condition,1e-9,1e6);
+        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,maxConditionNumber=-1})),default));
+        await Assert.ThrowsAsync<InvalidOperationException>(async()=>await new PlanarHandEyeCalibrationNode().ExecuteAsync(new(new Dictionary<string,VisionValue>()),Node("calibration.handEye2D",JsonSerializer.Serialize(new{mode="eyeInHand",samplesJson=json,maxConditionNumber=1e-6})),default));
+    }
+
 }

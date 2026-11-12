@@ -7,6 +7,7 @@ namespace VisionStudio.Engine.Nodes;
 
 public sealed record HandEye3DSample(double[] RobotToBase, double[] TargetToCamera);
 public sealed record HandEye3DRequest(List<HandEye3DSample> Samples);
+public sealed record HandEye3DCalibrationModel(string Mode, string Method, string SourceFrame, string TargetFrame, string Unit, double[] Matrix, string OutlierRejection);
 
 /// <summary>3D rigid hand-eye calibration from robot and calibration-target homogeneous transforms. OpenCV backend (Cv2.CalibrateHandEye); no JLVision hand-eye API in this package. Summary sets calibrationBackend=opencv.</summary>
 public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
@@ -20,10 +21,13 @@ public sealed class HandEye3DCalibrationNode : IVisionNodeExecutor
 
         if (node is null) throw new InvalidOperationException(Type + " requires a node definition.");
         if (context is null) throw new ArgumentNullException(nameof(context));
-HandEye3DRequest request;
+        var json = context.TryGetValue("samplesJson", out var connectedSamples)
+            ? connectedSamples.Require<string>("samplesJson")
+            : node.GetString("samplesJson", "{}");
+        HandEye3DRequest request;
         try
         {
-            request = JsonSerializer.Deserialize<HandEye3DRequest>(node.GetString("samplesJson", "{}"),
+            request = JsonSerializer.Deserialize<HandEye3DRequest>(json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new JsonException("empty payload");
         }
         catch (JsonException ex) { throw new InvalidOperationException($"Invalid samplesJson: {ex.Message}", ex); }
@@ -41,32 +45,211 @@ HandEye3DRequest request;
 
         var mode = node.GetString("mode", "eyeInHand").Trim();
         var eyeInHand = mode.Equals("eyeInHand", StringComparison.OrdinalIgnoreCase);
-        if (!eyeInHand && !mode.Equals("eyeToHand", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Mode must be eyeInHand or eyeToHand.");
+        var methodName = node.GetString("method", "DANIILIDIS").Trim().ToUpperInvariant();
+        var outlierRejection = node.GetString("outlierRejection", "none").Trim().ToLowerInvariant();
+        var crossCheckMethodName = node.GetString("crossCheckMethod", "TSAI").Trim().ToUpperInvariant();
+        var rotationWeight = node.GetDouble("rotationWeight", 50);
+        var minTranslationSpan = node.GetDouble("minTranslationSpan", 0);
+        // Screening is O(rounds x samples) CalibrateHandEye calls. Without a cap a 1000-sample set with
+        // successive accepted removals would run ~500k solves and blow the node timeout.
+        var maxRejections = node.GetInt("maxRejections", 20);
+        var minRmsImprovement = node.GetDouble("minRmsImprovement", 0.5);
+        var maxTranslationGate = node.GetDouble("maxTranslationError", 0);
+        var maxRotationGate = node.GetDouble("maxRotationErrorDeg", 0);
+        // Ranges come from the shared rule set so the wizard API and this node cannot drift apart.
+        if (HandEyeSettings.ValidateSpatial(mode, methodName, rotationWeight, outlierRejection, crossCheckMethodName,
+                maxTranslationGate, maxRotationGate, minTranslationSpan, maxRejections, minRmsImprovement) is { } settingsError)
+            throw new InvalidOperationException(settingsError);
+        var method = ParseMethod(methodName);
         ValidateMotion(samples);
         var robotTranslationSpan = TranslationSpan(samples);
+        if (minTranslationSpan > 0 && robotTranslationSpan < minTranslationSpan)
+            throw new InvalidOperationException($"Robot translation span {robotTranslationSpan:0.####} is below minTranslationSpan {minTranslationSpan:0.####}; translation is poorly constrained \u2014 move the robot through a larger volume.");
+        var assetId = node.GetString("handEye3DAssetId", "").Trim();
+        var assetVersion = node.GetInt("handEye3DAssetVersion", 0);
+        if (assetVersion < 0 || (assetId.Length > 0) != (assetVersion > 0))
+            throw new InvalidOperationException("handEye3DAssetId and a positive handEye3DAssetVersion must be provided together, or both left unset.");
         cancellationToken.ThrowIfCancellationRequested();
 
-        var methodName = node.GetString("method", "DANIILIDIS").Trim().ToUpperInvariant();
-        var method = methodName switch
+        // Iterative rejection via leave-one-out influence: hand-eye least squares spreads a bad pair's
+        // error non-locally (the outlier can even show a small residual), so residual ranking alone misses
+        // it. Each round refits without every candidate and keeps the removal that most reduces RMS,
+        // accepting only a halving-or-better improvement; stops at the six-sample minimum or a clean fit.
+        var kept = Enumerable.Range(0, samples.Count).ToList();
+        var rejected = new List<int>();
+        var cameraToRobot = SolveSubset(samples, kept, eyeInHand, method);
+        var outlierFloor = 1e-6 * Math.Max(1, robotTranslationSpan);
+        if (outlierRejection == "iterative" && maxRejections > 0)
         {
-            "TSAI" => HandEyeCalibrationMethod.TSAI,
-            "PARK" => HandEyeCalibrationMethod.PARK,
-            "HORAUD" => HandEyeCalibrationMethod.HORAUD,
-            "ANDREFF" => HandEyeCalibrationMethod.ANDREFF,
-            "DANIILIDIS" => HandEyeCalibrationMethod.DANIILIDIS,
-            _ => throw new InvalidOperationException("method must be TSAI, PARK, HORAUD, ANDREFF, or DANIILIDIS.")
-        };
+            while (kept.Count > 6 && rejected.Count < maxRejections)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var currentRms = KeptTranslationRms(samples, kept, cameraToRobot, eyeInHand);
+                if (currentRms <= outlierFloor) break;
+                var bestPosition = -1;
+                var bestRms = double.PositiveInfinity;
+                double[]? bestFit = null;
+                for (var k = 0; k < kept.Count; k++)
+                {
+                    var trial = kept.Where((_, j) => j != k).ToList();
+                    double[] trialFit;
+                    try { trialFit = SolveSubset(samples, trial, eyeInHand, method); }
+                    catch (Exception ex) when (ex is OpenCVException or InvalidOperationException) { continue; }
+                    var trialRms = KeptTranslationRms(samples, trial, trialFit, eyeInHand);
+                    if (trialRms < bestRms) { bestRms = trialRms; bestPosition = k; bestFit = trialFit; }
+                }
+                if (bestPosition < 0 || bestFit is null || !(bestRms < minRmsImprovement * currentRms)) break;
+                rejected.Add(kept[bestPosition]);
+                kept.RemoveAt(bestPosition);
+                cameraToRobot = bestFit;
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var rotations = new List<Mat>(samples.Count * 2);
+        // Residuals are reported for every original sample (stable indexing) against the final fit;
+        // RMS/gates/worst rankings use only the kept set.
+        var stationaryAll = samples.Select(s => StationaryPose(s, cameraToRobot, eyeInHand)).ToArray();
+        var meanPose = MeanRigid(kept.Select(i => stationaryAll[i]).ToArray());
+        var rejectedSet = new HashSet<int>(rejected);
+        var sampleResiduals = samples.Select((sample, index) => new
+        {
+            index,
+            translationError = TranslationDistance(stationaryAll[index], meanPose),
+            rotationErrorDeg = RotationDistanceDeg(stationaryAll[index], meanPose),
+            rejected = rejectedSet.Contains(index),
+            robotTranslation = new { x = sample.RobotToBase[3], y = sample.RobotToBase[7], z = sample.RobotToBase[11] },
+            targetTranslation = new { x = sample.TargetToCamera[3], y = sample.TargetToCamera[7], z = sample.TargetToCamera[11] }
+        }).ToArray();
+        var keptResiduals = sampleResiduals.Where(r => !r.rejected).ToArray();
+        var translationRms = Math.Sqrt(keptResiduals.Average(x => x.translationError * x.translationError));
+        var rotationRmsDeg = Math.Sqrt(keptResiduals.Average(x => x.rotationErrorDeg * x.rotationErrorDeg));
+        var maxTranslationError = keptResiduals.Max(x => x.translationError);
+        var maxRotationErrorDeg = keptResiduals.Max(x => x.rotationErrorDeg);
+        var worstTranslationIndex = keptResiduals.OrderByDescending(x => x.translationError).First().index;
+        var worstRotationIndex = keptResiduals.OrderByDescending(x => x.rotationErrorDeg).First().index;
+        var keptCombined = keptResiduals.Select(x => Math.Sqrt(x.translationError * x.translationError + Math.Pow(x.rotationErrorDeg * Math.PI / 180 * rotationWeight, 2))).ToArray();
+        var worstSampleIndex = keptResiduals.OrderByDescending(x => Math.Sqrt(x.translationError * x.translationError + Math.Pow(x.rotationErrorDeg * Math.PI / 180 * rotationWeight, 2))).First().index;
+        var medianCombined = Median(keptCombined);
+        var maxCombined = keptCombined.Max();
+        var outlierSampleIndex = medianCombined > 0 && maxCombined > 3 * medianCombined && maxCombined > outlierFloor ? worstSampleIndex : (int?)null;
+        if (new[] { translationRms, rotationRmsDeg, maxTranslationError, maxRotationErrorDeg }.Any(x => !double.IsFinite(x)))
+            throw new InvalidOperationException("3D hand-eye solve returned non-finite quality metrics.");
+
+        // Unit self-check: a robot stream in mm with target poses in m (or pixel-derived units) does not
+        // produce an obviously invalid matrix - it shows up as a residual proportional to the motion.
+        // Report-only, but it raises warningCount so failOnWarning / run gates can act on it.
+        var residualToSpanRatio = robotTranslationSpan > 1e-12 ? maxTranslationError / robotTranslationSpan : 0d;
+        var unitWarning = robotTranslationSpan > 1e-12 && residualToSpanRatio > 0.1
+            ? $"Largest sample residual {maxTranslationError:0.####} is {residualToSpanRatio:0.0%} of the robot translation span {robotTranslationSpan:0.####}; verify that robot and calibration-target poses share the same translation unit (e.g. both mm) and that the target is rigid."
+            : null;
+
+        if (maxTranslationGate > 0 && maxTranslationError > maxTranslationGate)
+            throw new InvalidOperationException($"Hand-eye sample {worstTranslationIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslationGate:0.####}; remove or re-teach that pose pair.");
+        if (maxRotationGate > 0 && maxRotationErrorDeg > maxRotationGate)
+            throw new InvalidOperationException($"Hand-eye sample {worstRotationIndex} rotation residual {maxRotationErrorDeg:0.####} deg exceeds maxRotationErrorDeg {maxRotationGate:0.####}; remove or re-teach that pose pair.");
+
+        // Independent confidence signal: a second closed-form method on the same kept set. Agreement
+        // implies a well-constrained solution; divergence flags degenerate data. Report-only.
+        double? crossCheckTranslationDelta = null;
+        double? crossCheckAngleDeltaDeg = null;
+        if (crossCheckMethodName != "NONE" && crossCheckMethodName != methodName)
+        {
+            try
+            {
+                var crossFit = SolveSubset(samples, kept, eyeInHand, ParseMethod(crossCheckMethodName));
+                crossCheckTranslationDelta = TranslationDistance(cameraToRobot, crossFit);
+                crossCheckAngleDeltaDeg = RotationDistanceDeg(cameraToRobot, crossFit);
+            }
+            catch (Exception ex) when (ex is OpenCVException or InvalidOperationException)
+            {
+                // cross-check is best-effort; never fail the primary solve because of it
+            }
+        }
+
+        var sourceFrame = CoordinateValidation.RequireFrame(node.GetString("sourceFrame", "Camera"), "sourceFrame");
+        var defaultTarget = eyeInHand ? "RobotTool" : "RobotBase";
+        var targetFrameValue = node.GetString("targetFrame", defaultTarget);
+        if (string.IsNullOrWhiteSpace(targetFrameValue)) targetFrameValue = defaultTarget;
+        var targetFrame = CoordinateValidation.RequireFrame(targetFrameValue, "targetFrame");
+        var unit = CoordinateValidation.RequireUnit(node.GetString("unit", "mm"), "unit");
+        var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, cameraToRobot);
+        var canonicalMode = eyeInHand ? "eyeInHand" : "eyeToHand";
+        var calibrationModel = new HandEye3DCalibrationModel(canonicalMode, methodName, sourceFrame, targetFrame, unit, cameraToRobot, outlierRejection);
+        var summary = new Dictionary<string, object?>
+        {
+            ["mode"] = canonicalMode, ["method"] = methodName,
+            ["sampleCount"] = samples.Count, ["usedSampleCount"] = kept.Count, ["translationRms"] = translationRms,
+            ["rotationRmsDeg"] = rotationRmsDeg, ["maxTranslationError"] = maxTranslationError,
+            ["maxRotationErrorDeg"] = maxRotationErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
+            ["worstTranslationSampleIndex"] = worstTranslationIndex, ["worstRotationSampleIndex"] = worstRotationIndex,
+            ["outlierSampleIndex"] = outlierSampleIndex, ["rejectedSampleIndices"] = rejected,
+            ["robotTranslationSpan"] = robotTranslationSpan, ["rotationWeight"] = rotationWeight,
+            ["outlierRejection"] = outlierRejection, ["crossCheckMethod"] = crossCheckMethodName,
+            ["minTranslationSpan"] = minTranslationSpan,
+            ["maxRejections"] = maxRejections, ["minRmsImprovement"] = minRmsImprovement,
+            ["residualToSpanRatio"] = residualToSpanRatio, ["unitWarning"] = unitWarning,
+            ["warningCount"] = unitWarning is null ? 0 : 1,
+            ["crossCheckTranslationDelta"] = crossCheckTranslationDelta, ["crossCheckAngleDeltaDeg"] = crossCheckAngleDeltaDeg,
+            ["handEye3DAssetId"] = assetId.Length == 0 ? null : assetId,
+            ["handEye3DAssetVersion"] = assetVersion == 0 ? null : assetVersion,
+            ["transform"] = transform, ["sampleResiduals"] = sampleResiduals,
+            ["calibrationBackend"] = "opencv",
+            ["algorithmBackend"] = "opencv",
+            ["algorithmDetail"] = "opencv-calibrateHandEye-" + methodName
+        };
+        var outputs = new Dictionary<string, VisionValue>
+        {
+            ["transform"] = VisionValue.Transform3D(transform),
+            ["calibrationJson"] = VisionValue.String(JsonSerializer.Serialize(calibrationModel)),
+            ["translationRms"] = VisionValue.Double(translationRms),
+            ["rotationRmsDeg"] = VisionValue.Double(rotationRmsDeg),
+            ["robotTranslationSpan"] = VisionValue.Double(robotTranslationSpan),
+            ["maxTranslationError"] = VisionValue.Double(maxTranslationError),
+            ["maxRotationErrorDeg"] = VisionValue.Double(maxRotationErrorDeg),
+            ["worstSampleIndex"] = VisionValue.Integer(worstSampleIndex),
+            ["worstTranslationSampleIndex"] = VisionValue.Integer(worstTranslationIndex),
+            ["worstRotationSampleIndex"] = VisionValue.Integer(worstRotationIndex),
+            ["usedSampleCount"] = VisionValue.Integer(kept.Count),
+            ["rejectedSampleIndicesJson"] = VisionValue.String(JsonSerializer.Serialize(rejected)),
+            ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
+        };
+        if (outlierSampleIndex is not null) outputs["outlierSampleIndex"] = VisionValue.Integer(outlierSampleIndex.Value);
+        if (crossCheckTranslationDelta is not null) outputs["crossCheckTranslationDelta"] = VisionValue.Double(crossCheckTranslationDelta.Value);
+        if (crossCheckAngleDeltaDeg is not null) outputs["crossCheckAngleDeltaDeg"] = VisionValue.Double(crossCheckAngleDeltaDeg.Value);
+        var diag = CoordinateValidation.Diagnostics(Type, ("mode", canonicalMode), ("method", methodName),
+            ("sampleCount", samples.Count), ("usedSampleCount", kept.Count), ("translationRms", translationRms), ("rotationRmsDeg", rotationRmsDeg),
+            ("maxTranslationError", maxTranslationError), ("maxRotationErrorDeg", maxRotationErrorDeg), ("robotTranslationSpan", robotTranslationSpan),
+            ("outlierRejection", outlierRejection), ("outlierSampleIndex", outlierSampleIndex), ("rejectedSampleIndices", rejected),
+            ("maxRejections", maxRejections), ("minRmsImprovement", minRmsImprovement),
+            ("residualToSpanRatio", residualToSpanRatio), ("unitWarning", unitWarning),
+            ("crossCheckMethod", crossCheckMethodName), ("crossCheckTranslationDelta", crossCheckTranslationDelta), ("crossCheckAngleDeltaDeg", crossCheckAngleDeltaDeg),
+            ("sourceFrame", sourceFrame), ("targetFrame", targetFrame), ("unit", unit));
+        outputs["diagnostics"] = VisionValue.String(diag); summary["diagnostics"] = diag;
+        return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
+    }
+
+    private static HandEyeCalibrationMethod ParseMethod(string name) => name switch
+    {
+        "TSAI" => HandEyeCalibrationMethod.TSAI,
+        "PARK" => HandEyeCalibrationMethod.PARK,
+        "HORAUD" => HandEyeCalibrationMethod.HORAUD,
+        "ANDREFF" => HandEyeCalibrationMethod.ANDREFF,
+        "DANIILIDIS" => HandEyeCalibrationMethod.DANIILIDIS,
+        _ => throw new InvalidOperationException("method must be TSAI, PARK, HORAUD, ANDREFF, or DANIILIDIS.")
+    };
+
+    private static double[] SolveSubset(List<HandEye3DSample> samples, IReadOnlyList<int> indices, bool eyeInHand, HandEyeCalibrationMethod method)
+    {
+        var mats = new List<Mat>(indices.Count * 4);
         try
         {
-            var robotRotations = new List<Mat>(samples.Count);
-            var robotTranslations = new List<Mat>(samples.Count);
-            var targetRotations = new List<Mat>(samples.Count);
-            var targetTranslations = new List<Mat>(samples.Count);
-            foreach (var sample in samples)
+            var robotRotations = new List<Mat>(indices.Count);
+            var robotTranslations = new List<Mat>(indices.Count);
+            var targetRotations = new List<Mat>(indices.Count);
+            var targetTranslations = new List<Mat>(indices.Count);
+            foreach (var index in indices)
             {
+                var sample = samples[index];
                 var robot = eyeInHand ? sample.RobotToBase : Inverse(sample.RobotToBase);
                 var robotR = ToRotationMat(robot);
                 var robotT = ToTranslationMat(robot);
@@ -74,17 +257,14 @@ HandEye3DRequest request;
                 var targetT = ToTranslationMat(sample.TargetToCamera);
                 robotRotations.Add(robotR); robotTranslations.Add(robotT);
                 targetRotations.Add(targetR); targetTranslations.Add(targetT);
-                rotations.AddRange([robotR, robotT, targetR, targetT]);
+                mats.AddRange([robotR, robotT, targetR, targetT]);
             }
-
             using var outputRotation = new Mat();
             using var outputTranslation = new Mat();
             Cv2.CalibrateHandEye(robotRotations, robotTranslations, targetRotations, targetTranslations,
                 outputRotation, outputTranslation, method);
-            cancellationToken.ThrowIfCancellationRequested();
             if (outputRotation.Empty() || outputTranslation.Empty())
                 throw new InvalidOperationException("OpenCV returned an empty 3D hand-eye solution; collect more varied poses.");
-
             var cameraToRobot = Identity();
             for (var row = 0; row < 3; row++)
             for (var col = 0; col < 3; col++) cameraToRobot[row * 4 + col] = outputRotation.At<double>(row, col);
@@ -92,89 +272,31 @@ HandEye3DRequest request;
             cameraToRobot[7] = outputTranslation.Rows == 3 ? outputTranslation.At<double>(1, 0) : outputTranslation.At<double>(0, 1);
             cameraToRobot[11] = outputTranslation.Rows == 3 ? outputTranslation.At<double>(2, 0) : outputTranslation.At<double>(0, 2);
             ValidateRigid(cameraToRobot, "calibration output");
-
-            // Recover the stationary calibration target pose in each sample, then measure scatter around
-            // the mean pose. In eye-to-hand mode the target is rigidly attached to the robot tool.
-            var stationary = samples.Select(sample => eyeInHand
-                ? Multiply(Multiply(sample.RobotToBase, cameraToRobot), sample.TargetToCamera)
-                : Multiply(Multiply(Inverse(sample.RobotToBase), cameraToRobot), sample.TargetToCamera)).ToArray();
-            var meanPose = MeanRigid(stationary);
-            var sampleResiduals = stationary.Select((pose, index) => new
-            {
-                index,
-                translationError = TranslationDistance(pose, meanPose),
-                rotationErrorDeg = RotationDistanceDeg(pose, meanPose),
-                robotTranslation = new { x = samples[index].RobotToBase[3], y = samples[index].RobotToBase[7], z = samples[index].RobotToBase[11] },
-                targetTranslation = new { x = samples[index].TargetToCamera[3], y = samples[index].TargetToCamera[7], z = samples[index].TargetToCamera[11] }
-            }).ToArray();
-            var translationRms = Math.Sqrt(sampleResiduals.Average(x => x.translationError * x.translationError));
-            var rotationRmsDeg = Math.Sqrt(sampleResiduals.Average(x => x.rotationErrorDeg * x.rotationErrorDeg));
-            var maxTranslationError = sampleResiduals.Max(x => x.translationError);
-            var maxRotationErrorDeg = sampleResiduals.Max(x => x.rotationErrorDeg);
-            var worstTranslationIndex = sampleResiduals.OrderByDescending(x => x.translationError).First().index;
-            var worstRotationIndex = sampleResiduals.OrderByDescending(x => x.rotationErrorDeg).First().index;
-            var rotationWeight = node.GetDouble("rotationWeight", 50);
-            if (!double.IsFinite(rotationWeight) || rotationWeight is < 0.001 or > 1e6)
-                throw new InvalidOperationException("rotationWeight must be finite and between 0.001 and 1000000 translation units per radian.");
-            var worstSampleIndex = sampleResiduals.OrderByDescending(x => Math.Sqrt(x.translationError * x.translationError + Math.Pow(x.rotationErrorDeg * Math.PI / 180 * rotationWeight, 2))).First().index;
-            if (new[] { translationRms, rotationRmsDeg, maxTranslationError, maxRotationErrorDeg }.Any(x => !double.IsFinite(x)))
-                throw new InvalidOperationException("3D hand-eye solve returned non-finite quality metrics.");
-
-            var maxTranslationGate = node.GetDouble("maxTranslationError", 0);
-            var maxRotationGate = node.GetDouble("maxRotationErrorDeg", 0);
-            if (!double.IsFinite(maxTranslationGate) || maxTranslationGate is < 0 or > 1e6)
-                throw new InvalidOperationException("maxTranslationError must be finite and between 0 and 1000000 (0 disables).");
-            if (!double.IsFinite(maxRotationGate) || maxRotationGate is < 0 or > 180)
-                throw new InvalidOperationException("maxRotationErrorDeg must be finite and between 0 and 180 (0 disables).");
-            if (maxTranslationGate > 0 && maxTranslationError > maxTranslationGate)
-                throw new InvalidOperationException($"Hand-eye sample {worstTranslationIndex} translation residual {maxTranslationError:0.####} exceeds maxTranslationError {maxTranslationGate:0.####}; remove or re-teach that pose pair.");
-            if (maxRotationGate > 0 && maxRotationErrorDeg > maxRotationGate)
-                throw new InvalidOperationException($"Hand-eye sample {worstRotationIndex} rotation residual {maxRotationErrorDeg:0.####} deg exceeds maxRotationErrorDeg {maxRotationGate:0.####}; remove or re-teach that pose pair.");
-
-            var sourceFrame = CoordinateValidation.RequireFrame(node.GetString("sourceFrame", "Camera"), "sourceFrame");
-            var defaultTarget = eyeInHand ? "RobotTool" : "RobotBase";
-            var targetFrameValue = node.GetString("targetFrame", defaultTarget);
-            if (string.IsNullOrWhiteSpace(targetFrameValue)) targetFrameValue = defaultTarget;
-            var targetFrame = CoordinateValidation.RequireFrame(targetFrameValue, "targetFrame");
-            var unit = CoordinateValidation.RequireUnit(node.GetString("unit", "mm"), "unit");
-            var transform = new VisionTransform3D(sourceFrame, targetFrame, unit, cameraToRobot);
-            var summary = new Dictionary<string, object?>
-            {
-                ["mode"] = eyeInHand ? "eyeInHand" : "eyeToHand", ["method"] = methodName,
-                ["sampleCount"] = samples.Count, ["translationRms"] = translationRms,
-                ["rotationRmsDeg"] = rotationRmsDeg, ["maxTranslationError"] = maxTranslationError,
-                ["maxRotationErrorDeg"] = maxRotationErrorDeg, ["worstSampleIndex"] = worstSampleIndex,
-                ["worstTranslationSampleIndex"] = worstTranslationIndex, ["worstRotationSampleIndex"] = worstRotationIndex,
-                ["robotTranslationSpan"] = robotTranslationSpan, ["rotationWeight"] = rotationWeight,
-                ["transform"] = transform, ["sampleResiduals"] = sampleResiduals,
-                ["calibrationBackend"] = "opencv",
-                ["algorithmBackend"] = "opencv",
-            ["algorithmDetail"] = "opencv-calibrateHandEye-" + methodName
-            };
-            var outputs = new Dictionary<string, VisionValue>
-            {
-                ["transform"] = VisionValue.Transform3D(transform),
-                ["translationRms"] = VisionValue.Double(translationRms),
-                ["rotationRmsDeg"] = VisionValue.Double(rotationRmsDeg),
-                ["robotTranslationSpan"] = VisionValue.Double(robotTranslationSpan),
-                ["maxTranslationError"] = VisionValue.Double(maxTranslationError),
-                ["maxRotationErrorDeg"] = VisionValue.Double(maxRotationErrorDeg),
-                ["worstSampleIndex"] = VisionValue.Integer(worstSampleIndex),
-                ["worstTranslationSampleIndex"] = VisionValue.Integer(worstTranslationIndex),
-                ["worstRotationSampleIndex"] = VisionValue.Integer(worstRotationIndex),
-                ["sampleResidualsJson"] = VisionValue.String(JsonSerializer.Serialize(sampleResiduals))
-            };
-            var diag = CoordinateValidation.Diagnostics(Type, ("mode", eyeInHand ? "eyeInHand" : "eyeToHand"), ("method", methodName),
-                ("sampleCount", samples.Count), ("translationRms", translationRms), ("rotationRmsDeg", rotationRmsDeg),
-                ("maxTranslationError", maxTranslationError), ("maxRotationErrorDeg", maxRotationErrorDeg), ("robotTranslationSpan", robotTranslationSpan),
-                ("sourceFrame", sourceFrame), ("targetFrame", targetFrame), ("unit", unit));
-            outputs["diagnostics"] = VisionValue.String(diag); summary["diagnostics"] = diag;
-            return ValueTask.FromResult(new NodeExecutorResult(outputs, summary));
+            return cameraToRobot;
         }
         finally
         {
-            foreach (var mat in rotations) mat.Dispose();
+            foreach (var mat in mats) mat.Dispose();
         }
+    }
+
+    private static double[] StationaryPose(HandEye3DSample sample, double[] cameraToRobot, bool eyeInHand)
+        => eyeInHand
+            ? Multiply(Multiply(sample.RobotToBase, cameraToRobot), sample.TargetToCamera)
+            : Multiply(Multiply(Inverse(sample.RobotToBase), cameraToRobot), sample.TargetToCamera);
+
+    private static double KeptTranslationRms(List<HandEye3DSample> samples, IReadOnlyList<int> kept, double[] cameraToRobot, bool eyeInHand)
+    {
+        var stationary = kept.Select(i => StationaryPose(samples[i], cameraToRobot, eyeInHand)).ToArray();
+        var mean = MeanRigid(stationary);
+        return Math.Sqrt(stationary.Average(p => { var d = TranslationDistance(p, mean); return d * d; }));
+    }
+
+    private static double Median(double[] values)
+    {
+        var sorted = (double[])values.Clone();
+        Array.Sort(sorted);
+        return sorted.Length % 2 == 1 ? sorted[sorted.Length / 2] : (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
     }
 
     private static void ValidateMotion(IReadOnlyList<HandEye3DSample> samples)

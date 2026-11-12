@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "hash": "b2d708f6b62bf493e40ae8623541a265ca2b6a21d9096a5202d9f51795b6022b",
+  "hash": "19238aaa56ee95b6c05ba58ae9cb41acd46f78033d4ee8d17b5433b549a6d123",
   "items": [
     {
       "type": "image.acquire",
@@ -995,6 +995,11 @@
           "name": "exec",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "samplesJson",
+          "dataType": "String",
+          "required": false
         }
       ],
       "outputs": [
@@ -1006,6 +1011,11 @@
         {
           "name": "transform",
           "dataType": "Transform2D",
+          "required": true
+        },
+        {
+          "name": "calibrationJson",
+          "dataType": "String",
           "required": true
         },
         {
@@ -1044,6 +1054,11 @@
           "required": true
         },
         {
+          "name": "outlierSampleIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
           "name": "robotRotationCoverageDeg",
           "dataType": "Double",
           "required": true
@@ -1067,6 +1082,46 @@
           "name": "sampleResidualsJson",
           "dataType": "String",
           "required": true
+        },
+        {
+          "name": "converged",
+          "dataType": "Boolean",
+          "required": true
+        },
+        {
+          "name": "iterations",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "conditionNumber",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "stdDevX",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "stdDevY",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "angleStdDevDeg",
+          "dataType": "Double",
+          "required": true
+        },
+        {
+          "name": "crossCheckTranslationDelta",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "crossCheckAngleDeltaDeg",
+          "dataType": "Double",
+          "required": false
         },
         {
           "name": "diagnostics",
@@ -1114,7 +1169,18 @@
           "type": "textarea",
           "defaultValue": "{}",
           "group": "Samples",
-          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; robot is the robot TCP pose, vision is the workpiece pose measured in camera coordinates, and thetaDeg is counter-clockwise. At least four diverse pairs with distinct robot poses; max 1000."
+          "description": "{samples:[{robot:{x,y,thetaDeg},vision:{x,y,thetaDeg}},...]}; robot is the robot TCP pose, vision is the workpiece pose measured in camera coordinates, and thetaDeg is counter-clockwise. At least four diverse pairs with distinct robot poses; max 1000. Connected samplesJson takes precedence. Prefer the Hand-Eye Wizard (Devices → Calibration) to accumulate, gate, and persist pose pairs."
+        },
+        {
+          "name": "visionScale",
+          "label": "Vision Scale (target units per vision unit)",
+          "type": "number",
+          "defaultValue": 1,
+          "min": 1E-06,
+          "max": 1000000,
+          "step": 0.001,
+          "group": "Samples",
+          "description": "Multiplies vision X/Y before solving, e.g. mm per pixel when robot poses are in mm and vision poses in px. Keep 1 when both streams already share the target unit; a sourceUnit/unit mismatch with scale 1 raises a unitWarning."
         },
         {
           "name": "angularWeight",
@@ -1125,7 +1191,25 @@
           "max": 1000000,
           "step": 1,
           "group": "Validation",
-          "description": "Translation-equivalent weight for angular closure residuals. Adjust to the characteristic working distance; default 50 preserves prior behavior."
+          "description": "Ranking-only weight. The angular closure residual is measured against its circular mean, so it is invariant in the solved pose and cannot bias the transform; this weight sets the translation-equivalent unit used by maxAngleErrorDeg, worstSampleIndex and outlierSampleIndex. Default 50 preserves prior behavior."
+        },
+        {
+          "name": "robustLoss",
+          "label": "Robust Loss",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None (least squares)",
+              "value": "none"
+            },
+            {
+              "label": "Tukey biweight (IRLS, rejects outlier pairs)",
+              "value": "tukey"
+            }
+          ],
+          "group": "Validation",
+          "description": "Tukey biweight reweights each pose pair by its closure residual (3x-median cutoff) so a single bad pair is fully rejected instead of dragging the fit. Per-sample residuals and gates are still reported unweighted."
         },
         {
           "name": "maxTranslationError",
@@ -1151,12 +1235,24 @@
           "description": "Maximum allowed angular residual in degrees; 0 disables the gate."
         },
         {
+          "name": "maxConditionNumber",
+          "label": "Max Condition Number (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000000,
+          "step": 1,
+          "group": "Validation",
+          "description": "Gate on the scale-invariant condition number of the observation Jacobian: column-normalised, then square-rooted, so it is neither inflated by the chosen unit nor squared by the normal equations. Above roughly 1e3 the pose set is poorly conditioned; 0 disables the gate."
+        },
+        {
           "name": "sourceFrame",
           "label": "Transform Source Frame",
           "type": "text",
           "defaultValue": "Camera",
           "group": "Frames",
-          "description": "Name of the source coordinate frame."
+          "description": "Name of the source coordinate frame.",
+          "advanced": true
         },
         {
           "name": "targetFrame",
@@ -1164,7 +1260,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Frames",
-          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand."
+          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand.",
+          "advanced": true
         },
         {
           "name": "sourceUnit",
@@ -1172,7 +1269,8 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Frames",
-          "description": "Unit of the source frame (mm, px, ...)."
+          "description": "Unit of the vision source coordinates (mm, px, ...). When it differs from unit, set visionScale to convert.",
+          "advanced": true
         },
         {
           "name": "unit",
@@ -1180,11 +1278,33 @@
           "type": "text",
           "defaultValue": "mm",
           "group": "Frames",
-          "description": "Coordinate / measurement unit emitted on outputs.",
+          "description": "Coordinate / measurement unit emitted on outputs; robot poses are assumed to be in this unit.",
           "advanced": true
+        },
+        {
+          "name": "handEyeAssetId",
+          "label": "Hand-Eye Asset ID",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Asset",
+          "description": "Optional immutable hand-eye calibration asset used to verify the solved transform during publication and production dependency checks.",
+          "advanced": true
+        },
+        {
+          "name": "handEyeAssetVersion",
+          "label": "Hand-Eye Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999,
+          "step": 1,
+          "group": "Asset",
+          "description": "Version of the named hand-eye asset; must be set together with handEyeAssetId, or both left unset.",
+          "advanced": true,
+          "integer": true
         }
       ],
-      "description": "Planar SE(2) hand-eye (algorithmBackend=managed; not OpenCV/JLVision). Fill samplesJson with robot/vision pose pairs → pose/transform; eye-in-hand or eye-to-hand. Key params: angularWeight, translation/angle residual gates. Rotation coverage and translation spans are reported as metrics, and a minimum of 8 deg rotation span plus 0.001 translation spread is required to avoid ill-conditioned planar fits. Needs rotation and translation in both streams; rejects duplicate robot poses; not 3D (use handEye3D). Failures: poor diversity, residual gates, near-pure translation.",
+      "description": "Planar SE(2) hand-eye (algorithmBackend=managed; not OpenCV/JLVision). Fill samplesJson (or wire it; connected input wins) with robot/vision pose pairs → pose/transform; eye-in-hand or eye-to-hand. Key params: visionScale for px→mm vision coordinates, angularWeight (ranking only), robustLoss none/tukey, translation/angle residual gates, maxConditionNumber observability gate, handEyeAssetId/Version pinning verified at publication. Reports per-sample residuals, outlierSampleIndex (3x-median flag), scale-invariant condition number, parameter std devs, converged/iterations, and an independent AX=XB algebraic cross-check delta. A differing sourceUnit with visionScale=1 raises unitWarning and warningCount=1. Rotation coverage and translation spans are reported as metrics; needs ≥8 deg rotation span plus 0.001 translation spread in both streams; rejects duplicate robot poses; not 3D (use handEye3D). Failures: poor diversity, residual gates, near-pure translation, asset mismatch.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
@@ -1210,12 +1330,22 @@
           "name": "exec",
           "dataType": "Control",
           "required": true
+        },
+        {
+          "name": "samplesJson",
+          "dataType": "String",
+          "required": false
         }
       ],
       "outputs": [
         {
           "name": "transform",
           "dataType": "Transform3D",
+          "required": true
+        },
+        {
+          "name": "calibrationJson",
+          "dataType": "String",
           "required": true
         },
         {
@@ -1257,6 +1387,31 @@
           "name": "worstRotationSampleIndex",
           "dataType": "Integer",
           "required": true
+        },
+        {
+          "name": "outlierSampleIndex",
+          "dataType": "Integer",
+          "required": false
+        },
+        {
+          "name": "usedSampleCount",
+          "dataType": "Integer",
+          "required": true
+        },
+        {
+          "name": "rejectedSampleIndicesJson",
+          "dataType": "String",
+          "required": true
+        },
+        {
+          "name": "crossCheckTranslationDelta",
+          "dataType": "Double",
+          "required": false
+        },
+        {
+          "name": "crossCheckAngleDeltaDeg",
+          "dataType": "Double",
+          "required": false
         },
         {
           "name": "sampleResidualsJson",
@@ -1329,7 +1484,81 @@
           "type": "textarea",
           "defaultValue": "{}",
           "group": "Samples",
-          "description": "{samples:[{robotToBase:[16 row-major values],targetToCamera:[16 row-major values]},...]}; each is a rigid homogeneous transform. At least six poses with rotation about two non-parallel axes; max 1000."
+          "description": "{samples:[{robotToBase:[16 row-major values],targetToCamera:[16 row-major values]},...]}; each is a rigid homogeneous transform. At least six poses with rotation about two non-parallel axes; max 1000. Connected samplesJson takes precedence. Prefer the 3D Hand-Eye Wizard to import, gate, and persist pose pairs."
+        },
+        {
+          "name": "outlierRejection",
+          "label": "Outlier Rejection",
+          "type": "select",
+          "defaultValue": "none",
+          "options": [
+            {
+              "label": "None (use all samples)",
+              "value": "none"
+            },
+            {
+              "label": "Iterative (leave-one-out influence, refit)",
+              "value": "iterative"
+            }
+          ],
+          "group": "Validation",
+          "description": "Each round refits without every sample and keeps the removal that most reduces translation RMS, accepting only an improvement below minRmsImprovement, stopping at six samples, maxRejections removals, or a clean fit. Hand-eye least squares spreads a bad pair's error non-locally, so this influence test catches outliers that residual ranking misses. Cost is quadratic in sample count, hence the removal cap. Rejected indices are reported; residuals/gates use the kept set."
+        },
+        {
+          "name": "maxRejections",
+          "label": "Max Rejections",
+          "type": "number",
+          "defaultValue": 20,
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "group": "Validation",
+          "description": "Upper bound on iterative removals (each round rescans every remaining sample, so the screening cost is O(maxRejections x samples) CalibrateHandEye calls). 0 disables iterative screening."
+        },
+        {
+          "name": "minRmsImprovement",
+          "label": "Min RMS Improvement Ratio",
+          "type": "number",
+          "defaultValue": 0.5,
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "group": "Validation",
+          "description": "A removal is accepted only when the refit RMS drops below this fraction of the current RMS. Lower it (e.g. 0.8) to clean moderate outliers; 1 accepts any strict improvement and will over-fit."
+        },
+        {
+          "name": "crossCheckMethod",
+          "label": "Cross-Check Method",
+          "type": "select",
+          "defaultValue": "TSAI",
+          "options": [
+            {
+              "label": "None",
+              "value": "NONE"
+            },
+            {
+              "label": "Tsai",
+              "value": "TSAI"
+            },
+            {
+              "label": "Park",
+              "value": "PARK"
+            },
+            {
+              "label": "Horaud",
+              "value": "HORAUD"
+            },
+            {
+              "label": "Andreff",
+              "value": "ANDREFF"
+            },
+            {
+              "label": "Daniilidis",
+              "value": "DANIILIDIS"
+            }
+          ],
+          "group": "Validation",
+          "description": "Runs a second solver on the kept set and reports the transform delta vs the primary method (report-only confidence signal). Skipped when equal to the primary method or NONE."
         },
         {
           "name": "rotationWeight",
@@ -1340,7 +1569,7 @@
           "max": 1000000,
           "step": 1,
           "group": "Validation",
-          "description": "Used only to rank the combined worst sample; it does not alter the OpenCV fit or separate residuals."
+          "description": "Used only to rank the combined worst sample and outlier rule; it does not alter the OpenCV fit or separate residuals."
         },
         {
           "name": "maxTranslationError",
@@ -1351,7 +1580,8 @@
           "max": 1000000,
           "step": 0.001,
           "group": "Validation",
-          "description": "Gate on worst per-sample translation residual; 0 disables the gate."
+          "description": "Gate on worst per-sample translation residual; 0 disables the gate.",
+          "advanced": true
         },
         {
           "name": "maxRotationErrorDeg",
@@ -1363,7 +1593,20 @@
           "step": 0.01,
           "unit": "deg",
           "group": "Validation",
-          "description": "Gate on worst per-sample rotation residual in degrees; 0 disables the gate."
+          "description": "Gate on worst per-sample rotation residual in degrees; 0 disables the gate.",
+          "advanced": true
+        },
+        {
+          "name": "minTranslationSpan",
+          "label": "Min Robot Translation Span (0=off)",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 1000000000,
+          "step": 0.001,
+          "group": "Validation",
+          "description": "Gate on the maximum pairwise robot translation distance; 0 disables. Guards against poorly-constrained translation from near-pure-rotation motion.",
+          "advanced": true
         },
         {
           "name": "sourceFrame",
@@ -1371,7 +1614,8 @@
           "type": "text",
           "defaultValue": "Camera",
           "group": "Frames",
-          "description": "Frame name stamped on the solved transform source."
+          "description": "Frame name stamped on the solved transform source.",
+          "advanced": true
         },
         {
           "name": "targetFrame",
@@ -1379,7 +1623,8 @@
           "type": "text",
           "defaultValue": "",
           "group": "Frames",
-          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand."
+          "description": "Blank defaults to RobotTool for eye-in-hand, RobotBase for eye-to-hand.",
+          "advanced": true
         },
         {
           "name": "unit",
@@ -1389,9 +1634,31 @@
           "group": "Frames",
           "description": "Translation unit carried on the solved transform, e.g. mm.",
           "advanced": true
+        },
+        {
+          "name": "handEye3DAssetId",
+          "label": "Hand-Eye 3D Asset ID",
+          "type": "text",
+          "defaultValue": "",
+          "group": "Asset",
+          "description": "Optional immutable 3D hand-eye calibration asset used to verify the solved transform during publication and production dependency checks.",
+          "advanced": true
+        },
+        {
+          "name": "handEye3DAssetVersion",
+          "label": "Hand-Eye 3D Asset Version",
+          "type": "number",
+          "defaultValue": 0,
+          "min": 0,
+          "max": 999999,
+          "step": 1,
+          "group": "Asset",
+          "description": "Version of the named 3D hand-eye asset; must be set together with handEye3DAssetId, or both left unset.",
+          "advanced": true,
+          "integer": true
         }
       ],
-      "description": "Full SE(3) hand-eye (algorithmBackend=opencv, Cv2.CalibrateHandEye; no JLVision hand-eye API). Fill samplesJson with row-major 4×4 robotToBase and targetToCamera → Transform3D. Key params: mode, OpenCV method, residual gates, frame names/units. Requires ≥6 samples with two non-parallel rotation axes. Failures: non-rigid matrices, single-axis/translation-only motion, residual gates.",
+      "description": "Full SE(3) hand-eye (algorithmBackend=opencv, Cv2.CalibrateHandEye; no JLVision hand-eye API). Fill samplesJson (or wire it; connected input wins) with row-major 4×4 robotToBase and targetToCamera → Transform3D/calibrationJson. Key params: mode, OpenCV method, outlierRejection none/iterative with maxRejections and minRmsImprovement, crossCheckMethod, residual gates, minTranslationSpan, frame names/units, handEye3DAssetId/Version pinning verified at publication. Reports per-sample residuals, outlierSampleIndex (3x-median flag), rejected indices, used sample count, a second-method cross-check delta, and unitWarning/warningCount when the residual is large relative to the robot translation span (unit mismatch or non-rigid target). Requires ≥6 samples with two non-parallel rotation axes. Failures: non-rigid matrices, single-axis/translation-only motion, residual gates, asset mismatch.",
       "pluginId": "builtin",
       "capabilities": {
         "supportsRoi": false,
