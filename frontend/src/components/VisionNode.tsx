@@ -64,13 +64,15 @@ export default function VisionNode({ id, data, selected }: NodeProps) {
     output: new Set(outputConnections.map((c) => c.sourceHandle).filter(Boolean) as string[]),
   }), [inputConnections, outputConnections]);
 
-  const selectPorts = (ports: PortLike[], connected: Set<string>) => {
-    if (portsExpanded || connection.inProgress || ports.length <= 5) return ports;
+  const selectPorts = (ports: PortLike[], connected: Set<string>, side: 'input' | 'output') => {
+    // 每侧 ≤3 个端口全显示；>3 时折叠，仅保留 控制/已连接/前 3 个非控制端口。
+    // 必填只在输入侧强制显示（提示接线）；输出端口默认 required=true，若也保留会让阈值失效。
+    if (portsExpanded || connection.inProgress || ports.length <= 3) return ports;
     const primary = new Set(ports.filter((port) => port.dataType !== 'Control').slice(0, 3).map((port) => port.name));
-    return ports.filter((port) => port.dataType === 'Control' || port.required || connected.has(port.name) || primary.has(port.name));
+    return ports.filter((port) => port.dataType === 'Control' || (side === 'input' && port.required) || connected.has(port.name) || primary.has(port.name));
   };
-  const visibleInputs = selectPorts(inputs, connectedHandles.input);
-  const visibleOutputs = selectPorts(outputs, connectedHandles.output);
+  const visibleInputs = selectPorts(inputs, connectedHandles.input, 'input');
+  const visibleOutputs = selectPorts(outputs, connectedHandles.output, 'output');
   const hiddenCount = inputs.length + outputs.length - visibleInputs.length - visibleOutputs.length;
   const portSignature = JSON.stringify([visibleInputs.map((p) => p.name), visibleOutputs.map((p) => p.name)]);
   // 展开/折叠后刷新 Handle 坐标，既有连线仍绑定原端口 ID。

@@ -224,6 +224,26 @@ describe('canvas node presentation', () => {
     expect(screen.getByTitle('必需输入未连接')).toBeTruthy();
   });
 
+  it('collapses required output ports so the threshold is not defeated by the required default', () => {
+    const requiredOutputs = [
+      { name: 'next', dataType: 'Control' }, { name: 'image', dataType: 'Image', required: true },
+      { name: 'width', dataType: 'Integer', required: true }, { name: 'height', dataType: 'Integer', required: true },
+      { name: 'channels', dataType: 'Integer', required: true }, { name: 'meanIntensity', dataType: 'Double', required: true },
+      { name: 'diagnostics', dataType: 'String', required: true }
+    ];
+    render(component({ ...base, outputs: requiredOutputs }));
+    expect(screen.getByTestId('source-next')).toBeTruthy();
+    expect(screen.getByTestId('source-image')).toBeTruthy();
+    expect(screen.getByTestId('source-width')).toBeTruthy();
+    expect(screen.getByTestId('source-height')).toBeTruthy();
+    expect(screen.queryByTestId('source-channels')).toBeNull();
+    expect(screen.queryByTestId('source-meanIntensity')).toBeNull();
+    expect(screen.queryByTestId('source-diagnostics')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '展开其余端口（3）' }));
+    expect(screen.getByTestId('source-channels')).toBeTruthy();
+    expect(screen.getByTestId('source-diagnostics')).toBeTruthy();
+  });
+
   it('marks changed parameters as pending and treats success/OK as historical', () => {
     const { container } = render(component({ ...base, stale: true } as typeof base));
     expect(screen.getByText('参数已修改，待运行')).toBeTruthy();
