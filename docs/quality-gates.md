@@ -63,9 +63,16 @@
 `coverage-summary.json` / `lcov.info` 复制回 `artifacts/test-results/frontend-coverage/` 留档。
 原因：vitest 的 v8 provider 会无条件递归删除内部的 `.tmp`（每个测试文件一个 json，100+ 个），
 在本机会撞上批量删除守卫并抛 unhandled error——日志只剩一行 `RUN`，看起来像测试自己崩了。
-临时目录是守卫明确放行的范围，而覆盖率本来就是一次性中间物。
+临时目录是守卫明确放行的范围，而覆盖率本来就是一次性中间物。同理，Vite 的 `cacheDir` 与
+Vitest 5 的 `fsModuleCachePath` 也指到系统临时目录：默认 `node_modules/.vitest-cache` 连跑几轮
+会攒出 500+ 文件，开跑前的清理同样撞守卫并报成 `Startup Error`。
 后端覆盖率同理单独放 `artifacts/test-results/backend-coverage/`，每轮只清几个 GUID 子目录，
 避免旧报告混进"并集覆盖"把本轮没走到的行顶成已覆盖。
+
+2026-11-12 起 `testTimeout` / `hookTimeout` 为 30 s、`maxWorkers` 封顶 4：CI 的 2~4 vCPU runner
+上，15 s + 8 个 jsdom worker 会让重渲染用例反复超时，进而连锁拖垮同批的 DOM 断言。放宽的只是
+"卡住才失败"的上限与并发度，断言内容与覆盖率阈值一点没松；两个会抢在 state 更新前的
+`getByText` 也改成了等待。
 
 ### 为什么用 oxlint 而不是 ESLint
 
@@ -111,7 +118,7 @@ health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` �
 整条链路；宿主不可达时该用例 skip 并打印原因，桩化用例照旧。真后端链路证明的是"契约端到端
 跑得通"，桩化用例证明的是"前端遇到某种 JSON 怎么表现"，两者不互相替代。
 
-两个环境相关的坑已固化在 `quality-gate.ps1` 里，别再删掉：
+下面几个环境相关的坑已固化在 `quality-gate.ps1` 里，别再删掉：
 
 - 启动宿主前调用 `Normalize-EnvironmentForStartProcess`，把 `HTTP_PROXY`/`http_proxy` 这种仅
   大小写不同的重复键做进程内等价去重（取一个值、删全部变体、用规范名写回）。Windows PowerShell
@@ -128,6 +135,11 @@ health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` �
   `outputDir`，本机安全删除包装器对单批 >50 个条目要求人工确认，历史 trace 攒到上千个时测试
   还没开始就红。不删历史产物就不触发守卫，CI 的用例口径也不变。`Upload Playwright report`
   的路径已与 html reporter 的 `outputFolder` 对齐（原先指向不存在的位置，失败时等于没传产物）。
+- 三段并行时每段都是独立 checkout，E2E job 不经过 Frontend 段：`-Scope E2E` 会在缺少
+  `frontend/node_modules/@playwright/test` 时按锁文件 `npm ci`，否则 `npx playwright` 会临时拉一个
+  与 `package-lock.json` 不一致的版本，随后 `npm run test:e2e` 找不到命令。本地已有依赖时跳过。
+  环境去重只在 Windows PowerShell 5.1 执行，pwsh（CI 的 shell）直接跳过——已用 pwsh 7 +
+  `CI=true` 本地复跑 9 个用例确认这条路径。
 
 ## 前端的两条棘轮（在 `npm run test:coverage` 里）
 

@@ -67,6 +67,11 @@ function Assert-LastExitCode([string]$step) {
 # 写回同一个值。子命令看到的代理配置不变，环境块里却不再有冲突。只影响本次门禁进程及其
 # 子进程，不写用户级/机器级环境变量；值本身也不改，所以不影响 CI 的代理链路。
 function Normalize-EnvironmentForStartProcess {
+    # 这个缺陷只属于 Windows PowerShell 5.1：pwsh（CI 用的 shell）基于 .NET Core，
+    # Start-Process 不再做那次大小写不敏感的字典复制；而 .NET 对"同名不同大小写"的删除语义
+    # 在 5.1 与 7 下并不一致，在 pwsh 里强行规范化反而删不干净、被下面的复查挡住，
+    # 把一个本来不存在的失败引进来。本机实测：5.1 需要它，7.x 直接跳过即可。
+    if ($PSVersionTable.PSVersion.Major -ge 6) { return }
     $snapshot = [System.Environment]::GetEnvironmentVariables()
     $groups = @{}
     foreach ($key in @($snapshot.Keys)) {
@@ -335,6 +340,22 @@ if ($runE2E) {
 # 拉起子进程前先规范化环境：Start-Process 遇到 HTTP_PROXY / http_proxy 这类仅大小写不同的
 # 重复键会直接抛 ArgumentException，见 Normalize-EnvironmentForStartProcess 的说明。
 Normalize-EnvironmentForStartProcess
+
+# CI 三段并行时每段都是独立 checkout：E2E job 不跑 Frontend 段，node_modules 不会凭空出现。
+# 缺依赖时按锁文件装一次（CI 口径），本地已有则跳过，不让每次冒烟都重装几百 MB。
+# 不能只靠 `npx playwright install`：找不到本地 @playwright/test 时 npx 会临时拉一个最新版，
+# 与 package-lock 里的版本不一致，随后 `npm run test:e2e` 直接找不到命令。
+$e2ePlaywrightPackage = Join-Path $root 'frontend/node_modules/@playwright/test/package.json'
+if (-not (Test-Path -LiteralPath $e2ePlaywrightPackage)) {
+    Write-Host 'E2E: frontend dependencies missing; running npm ci from the lockfile.'
+    Push-Location "$root/frontend"
+    try {
+        npm ci --no-audit --no-fund
+        Assert-LastExitCode 'npm ci for e2e'
+    }
+    finally { Pop-Location }
+}
+
 # 真后端冒烟（2026-11-12）：e2e 默认把 /api/** 全桩掉，测的是"前端遇到某种 JSON 怎么表现"。
 # 这里额外拉起一个真实宿主（独立端口 + 独立数据根），跑 real-backend-smoke.spec.ts：
 # 登录 → 目录 → 真执行 → 追溯落库 → 节点 span。桩化用例照旧，不受影响。

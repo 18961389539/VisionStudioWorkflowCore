@@ -67,7 +67,9 @@ describe('PluginPackagePanel install smoke', () => {
     await waitFor(() => expect(install).not.toBeDisabled());
     fireEvent.click(install);
 
-    expect(await screen.findByText(/signature not trusted/)).toBeTruthy();
+    // CI 的慢 runner 上「安装请求 → 后端拒绝 → 错误提示」可能超过 findByText 的 1s 默认等待；
+    // 只延长等待，不改变断言内容，也不跳过失败路径。
+    expect(await screen.findByText(/signature not trusted/, {}, { timeout: 10_000 })).toBeTruthy();
     // 失败后不清理已选文件：用户修正（如信任发布者）后可直接重试。
     expect(install).not.toBeDisabled();
   });

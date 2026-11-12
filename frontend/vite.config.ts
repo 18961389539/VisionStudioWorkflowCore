@@ -6,6 +6,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  // Vite/Vitest 的磁盘缓存（2026-11-12）：默认落在 node_modules/.vite 与
+  // node_modules/.vitest-cache，连续跑几轮门禁会攒出上千个小文件；Vitest 开跑前清理它们时
+  // 会撞上本机安全删除守卫（单批 >50 个条目要求人工确认），报成 "Startup Error" 而不是测试失败。
+  // 系统临时目录是守卫明确放行的范围，缓存本来也是一次性中间物。
+  cacheDir: path.join(os.tmpdir(), 'visionstudio-vite-cache'),
   // R12（2026-10-12 复审）：首屏拆分已通过两条途径落地：
   //  · App.tsx 的低频面板 React.lazy 动态导入——每个面板独立 chunk，首屏不下载；
   //  · rolldown 默认 code splitting 的共享依赖自动分块（antd 组件级 chunk 等）。
@@ -42,13 +47,17 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
-    // jsdom 下多次完整渲染的用例在满载时接近 5s 默认期限（120 顶点多边形、圆几何联动等），
-    // 统一放宽到 15s；断言未放宽，只是避免负载造成的假失败。
-    testTimeout: 15_000,
-    // 28 核机器默认会并发拉起 ~27 个 worker，每个都创建 jsdom；共享/高负载机器上
-    // "worker 启动超时"是本仓库历史偶发失败源。封顶 8 个（CI 4 vCPU 自然低于上限），
-    // 换来稳定的门禁；全量覆盖率仍在一两分钟内完成。
-    maxWorkers: 8,
+    // 与 cacheDir 同理：Vitest 5 的 fsModuleCache 默认写 node_modules/.vitest-cache，
+    // 单独指到系统临时目录，避免任何一处缓存清理撞上批量删除守卫。
+    fsModuleCachePath: path.join(os.tmpdir(), 'visionstudio-vitest-module-cache'),
+    // jsdom 下多次完整渲染的用例在满载时接近默认期限（120 顶点多边形、圆几何联动等）。
+    // 2026-11-12：CI 的 2~4 vCPU runner 上 15s 仍反复超时，放宽到 30s；只是把"卡住才失败"
+    // 的上限拉长，断言口径一点没松。hook 同理，避免 beforeEach 在慢 runner 上先超时。
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+    // 8 → 4（2026-11-12）：CI runner 上 8 个 jsdom worker 抢 CPU 是超时的另一半原因；
+    // 28 核本机也不再拉满 27 个 worker，换来稳定门禁，全量覆盖率仍在一两分钟内完成。
+    maxWorkers: 4,
     // 覆盖率棘轮：基线在此记录，阈值只升不降。断言未覆盖的 UI 分支不计入
     // （types.ts 为纯类型声明，generated 为机器生成，均无运行时语句）。
     coverage: {

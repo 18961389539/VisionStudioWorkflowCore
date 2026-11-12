@@ -64,7 +64,15 @@
   不再每轮额外下载 118 MiB 的 headless shell；真后端宿主改为从 DLL 目录启动（原先 CWD 是仓库根，
   宿主读不到 `appsettings.json` 而把 `AutoLoginAdmin` 退化成 false），并显式钉死该项配置、
   把 `/api/auth/status` 响应打进门禁日志；每轮 e2e 用独立的临时 `outputDir`，避免 Playwright
-  递归清空历史 trace 时撞上批量删除守卫；修正 CI 上传 Playwright 报告的路径。CI 用例口径不变。
+  递归清空历史 trace 时撞上批量删除守卫；修正 CI 上传 Playwright 报告的路径。
+- 门禁稳定性（CI 段）：`-Scope E2E` 在缺 `node_modules` 时按锁文件 `npm ci`——三段并行各独立
+  checkout，原先 E2E job 根本没有前端依赖，`npx playwright` 会临时拉一个与锁文件不一致的版本；
+  环境去重只在 Windows PowerShell 5.1 执行（pwsh/.NET Core 无此缺陷且删除语义不同），
+  已用 pwsh 7 + `CI=true` 本地复跑 9 个 e2e 用例验证。
+- 门禁稳定性（前端段）：Vite `cacheDir` 与 Vitest `fsModuleCachePath` 改到系统临时目录
+  （默认 `node_modules/.vitest-cache` 攒到 500+ 文件后，清理会撞批量删除守卫并报 `Startup Error`）；
+  `testTimeout`/`hookTimeout` 15 s → 30 s、`maxWorkers` 8 → 4，适配 CI 的慢 runner；
+  两个会抢在 state 更新前的 DOM 断言改成等待（断言内容不变）。CI 用例口径不变。
 
 ### 升级注意
 

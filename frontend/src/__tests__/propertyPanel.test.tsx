@@ -257,7 +257,8 @@ describe('PropertyPanel script editor preview', () => {
     expect(await screen.findByRole('textbox', { name: '脚本代码' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '格式化' }));
     expect(await screen.findByText('脚本存在语法错误，已保留原内容。')).toBeTruthy();
-    expect(screen.getByText('CS1002')).toBeTruthy();
+    // 诊断列表是另一次 state 更新渲染的；慢 runner 上同步 getByText 会抢在它出现之前。
+    expect(await screen.findByText('CS1002')).toBeTruthy();
     expect(onChange).not.toHaveBeenCalled();
   });
 
