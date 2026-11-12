@@ -140,7 +140,12 @@ public sealed class TcpJsonRobotAdapter : IRobot2DAdapter
     private CancellationTokenSource? _pollCts;
     private Task? _pollTask;
 
-    public TcpJsonRobotAdapter(string id, string name, string host, int port)
+    /// <param name="simulated">
+    /// 目标端点是否为内置模拟器。现场最危险的误判是"以为在驱动真机，其实连的是模拟器"——
+    /// 命令全部成功、状态一路正常，产线上却没有任何东西动。该标识随快照下发到 UI 与审计，
+    /// 让"虚拟"可见，而不是靠 driver/model 字符串去猜。
+    /// </param>
+    public TcpJsonRobotAdapter(string id, string name, string host, int port, bool simulated = false)
     {
         Id = id;
         Name = name;
@@ -150,7 +155,7 @@ public sealed class TcpJsonRobotAdapter : IRobot2DAdapter
             Id, Name, "ABB", "TCP JSON Simulator", "tcp-json", "RobotBase", "mm",
             RobotConnectionState.Disconnected, RobotHandshakeState.Disconnected, RobotHandshakeSignals.Empty,
             new VisionCoordinatePose2D(520, 240, 28, "RobotBase", "mm"), null, 0, false, false, null,
-            new RobotRuntimeSettings(), Capabilities, DateTimeOffset.UtcNow);
+            new RobotRuntimeSettings(), Capabilities, DateTimeOffset.UtcNow, simulated);
     }
 
     public string Id { get; }

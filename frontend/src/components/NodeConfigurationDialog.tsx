@@ -2,7 +2,7 @@ import MetrologyObjectEditor from './MetrologyObjectEditor';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { Alert, Button, Collapse, InputNumber, Modal, Select, Segmented, Space, Tabs, Tag, Tooltip } from 'antd';
-import type { NodeCatalogItem, NodeFrameRule, PortDescriptor, RunResult, VisionOverlay, VisionRoi, VisionValueSnapshot } from '../types';
+import type { NodeCatalogItem, PortDescriptor, RunResult, VisionOverlay, VisionRoi } from '../types';
 import NodeCategoryIcon from './NodeCategoryIcon';
 import NodeDescription from './NodeDescription';
 import PropertyPanel from './PropertyPanel';
@@ -28,13 +28,11 @@ import { maturityLabel, maturityLevel, maturityTitle } from '../nodeMaturity';
 import { canonicalParameterGroup, portDisplayName } from '../i18n/catalog';
 import { fallbackCatalogRaw } from '../catalog';
 import { effectiveSampleWidth, normalizeCaliperCircleArc } from '../caliperCircleSampling';
-import { catalogItemChangesImageFrame, declaredFrameChange, legacyFrameChangingNodeTypes } from '../frameSemantics';
 import { useShapeMatchWorkspace } from './useShapeMatchWorkspace';
 import {
   connectedCircleGeometry, connectedSearchLineGeometry, geometrySourceImageFrameNodeIds,
   mapMeasurementGeometry, parameterMeta, rigidPixelTransform, roiSourceFrameNodeIdsForEdge,
-  transformEndpointImageFrameNodeIds, transformMappedImageFrameNodeIds, transformSourceLineage,
-  type RigidPixelTransform
+  transformEndpointImageFrameNodeIds, transformMappedImageFrameNodeIds, transformSourceLineage
 } from './nodeConfigurationGeometry';
 
 export type NodeConfigurationTab = 'parameters' | 'image' | 'details' | 'result';
@@ -452,7 +450,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     useRunImages({ result: displayedResult, selectedId: previewNodeId, nodes, edges, nodeLabels });
   const cropRoiForImage = isImageCrop && !cropRoiInputConnected
     ? (draft.roi as VisionRoi | null | undefined) ?? (legacyCropBoundsPresent
-      ? legacyCropRectangle(draft, imageViewerSource.width, imageViewerSource.height) : undefined)
+      ? legacyCropRectangle(draft, imageViewerSource.width ?? 0, imageViewerSource.height ?? 0) : undefined)
     : undefined;
   const issues = configurationIssues(catalogItem, draft, { connectedInputPorts });
   // script.csharp：把节点测试结果压缩成编辑器内联预览（输出/日志/预算/图像）。
@@ -487,10 +485,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     trainingView, setTrainingView,
     showSavedTrainingImage, setShowSavedTrainingImage,
     trainingSamples, setTrainingSamples,
+    // oxlint-disable-next-line no-unused-vars -- 待接线：界面未渲染该预览/样本数据，保留数据流待接回
     searchWorkspacePreview, setSearchWorkspacePreview,
     trainingBusy, trainingImageBusy, searchImageBusy,
     trainedModelData, trainedSourceImage, trainedPreviewData, legacyWorkflow, trainedSettings,
     trainingStale, shapeSearchBlocked, capturedTrainingImage, hasLosslessTrainingImage,
+    // oxlint-disable-next-line no-unused-vars -- 待接线：界面未渲染该预览/样本数据，保留数据流待接回
     trainingSampleData, effectiveTrainingSampleCount, changedTrainingLabels, showTrainedTemplatePreview,
     fetchTrainingImage, addCurrentTrainingSample, fetchSearchImage, trainShapeModel, locateSavedTrainingImage
   } = useShapeMatchWorkspace({
@@ -513,12 +513,12 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
     && imageSource === 'input' && previewNodeId === node.id && selectedInputAvailable);
   if (isImageCrop && !cropRoiInputConnected && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
-    const imageExtentIssue = cropRoiOutsideImageIssue(cropRoiForImage, imageViewerSource.width, imageViewerSource.height);
+    const imageExtentIssue = cropRoiOutsideImageIssue(cropRoiForImage, imageViewerSource.width ?? 0, imageViewerSource.height ?? 0);
     if (imageExtentIssue) issues.push(imageExtentIssue);
   }
   if (measurementNodeTypes.includes(catalogItem.type) && !connectedRoiInput && !resultStale && imageSource === 'input'
     && previewNodeId === node.id && selectedInputAvailable) {
-    const imageExtentIssue = measurementRoiOutsideImageIssue(draft.roi, imageViewerSource.width, imageViewerSource.height);
+    const imageExtentIssue = measurementRoiOutsideImageIssue(draft.roi, imageViewerSource.width ?? 0, imageViewerSource.height ?? 0);
     if (imageExtentIssue) issues.push(imageExtentIssue);
   }
   const measurementGeometryType = isCaliperCircle ? 'circle'
@@ -1180,7 +1180,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         : roiImageView === 'reference' ? '在已保存基准图上编辑 ROI。重新设为基准会同步迁移已有区域；当前图与修正结果只读。'
           : '当前图像只读。切回已保存基准图像编辑区域，避免对当前图上的选区重复施加位移。';
   const details = <div className="node-info">
-    <NodeDescription text={catalogItem.description} />
+    <NodeDescription text={catalogItem.description ?? undefined} />
     <h3>输入端口</h3><PortTable ports={catalogItem.inputs} input />
     <h3>输出端口</h3><PortTable ports={withSwitchPorts(catalogItem, draft).outputs} />
     {catalogItem.parameters.some((parameter) => !parameter.internal) && <>
@@ -1232,7 +1232,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
           Training: '模型训练', 'Origin Estimation': '原点估算', Candidates: '特征筛选', General: '训练图像来源',
           Matching: '匹配条件', 'Multi-target': '多目标定位', Search: '搜索范围'
         } as Record<string, string>)[['trainingAngleRangeDeg', 'scaleTolerancePercent', 'scaleToleranceXPercent', 'scaleToleranceYPercent'].includes(parameter.name)
-          ? 'Training' : canonicalParameterGroup(parameter.group)] ?? parameter.group
+          ? 'Training' : canonicalParameterGroup(parameter.group)] ?? parameter.group ?? undefined
       }))
     } : searchLineInputEdge ? { ...catalogItem, parameters: catalogItem.parameters.filter(parameter =>
       !['startX', 'startY', 'endX', 'endY'].includes(parameter.name))
@@ -1489,7 +1489,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
         {shapeMode === 'training' && <div className="shape-training-panel">
           <strong>建立形状模型</strong>
           <p>获取图像 → 绘制模型区域 → 可选绘制模型周围“正常时不应有边缘”的杂乱区域 → 可重复采集并加入最多 4 张同尺寸样本 → 融合稳定轮廓训练复合模型 → 测试搜索。每张图像都会锁定；后续样本先按首张模型定位，再自动变换模型区域、杂乱区域和姿态。</p>
-          {draft.clutterRoi && <Button size="small" onClick={() => changeParameter('clutterRoi', undefined)} disabled={locked}>清除杂乱区域（关闭杂乱度评分）</Button>}
+          {Boolean(draft.clutterRoi) && <Button size="small" onClick={() => changeParameter('clutterRoi', undefined)} disabled={locked}>清除杂乱区域（关闭杂乱度评分）</Button>}
           <p>训练来源：{templateSourceNodeId ? `模板输入 ← ${nodeLabels[templateSourceNodeId] ?? templateSourceNodeId}（优先使用此输入）` : String(draft.templatePath || '请填写下方模板图像路径或连接模板输入')}</p>
           {(capturedTrainingImage || trainingSamples.length > 0) && <div className="shape-training-panel">
             <p>样本训练：{effectiveTrainingSampleCount}/4 张。系统会保留达到出现比例的共同轮廓，过滤单张样本中的偶发特征；当前图像会自动参与训练。</p>
@@ -1529,7 +1529,7 @@ export default function NodeConfigurationDialog({ node, catalogItem, catalogItem
             ? `X ${100 - Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceXPercent ?? draft.scaleToleranceXPercent ?? 0)}% · Y ${100 - Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%～${100 + Number(trainedSettings?.scaleToleranceYPercent ?? draft.scaleToleranceYPercent ?? 0)}%`
             : `${100 - Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%～${100 + Number(trainedSettings?.scaleTolerancePercent ?? draft.scaleTolerancePercent ?? 0)}%`}
             <Button size="small" type="link" disabled={locked} onClick={() => changeShapeWorkspaceTab('training')}>调整模型范围</Button></p>}
-          {draft.searchRoi && <Button size="small" onClick={() => changeParameter('searchRoi', undefined)} disabled={locked}>清除搜索区域（恢复全图搜索）</Button>}
+          {Boolean(draft.searchRoi) && <Button size="small" onClick={() => changeParameter('searchRoi', undefined)} disabled={locked}>清除搜索区域（恢复全图搜索）</Button>}
           {!trainedModelData && !legacyWorkflow && <Alert showIcon type="warning" title="尚未训练模型" description="先建立模型，即可在当前窗口运行搜索；无需先应用或关闭窗口。" />}
           {trainedModelData && trainingStale && <Alert showIcon type="warning" title="训练参数已变化，需要重新训练" description={`已修改：${changedTrainingLabels}。`} />}
           {shapeSearchBlocked && <Button disabled={locked} onClick={() => changeShapeWorkspaceTab('training')}>前往模型训练</Button>}

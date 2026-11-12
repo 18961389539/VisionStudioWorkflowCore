@@ -154,6 +154,9 @@ public static class VisionStudioServiceRegistration
 
         services.AddProblemDetails();
         services.AddExceptionHandler<ApiExceptionHandler>();
+        // 反向代理边界（2026-11-12）：解析 X-Forwarded-For/Proto，使限流分区与 Secure Cookie
+        // 拿到真实客户端 IP / scheme。默认关闭，见 ReverseProxyRegistration 的说明。
+        services.AddVisionStudioForwardedHeaders(configuration);
         services.Configure<SecurityOptions>(configuration.GetSection("Security"));
         services.AddSingleton<SecurityStore>();
         services.AddSingleton<AuditEventStore>();

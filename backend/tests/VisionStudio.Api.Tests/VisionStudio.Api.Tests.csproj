@@ -6,6 +6,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 显式引用 ASP.NET Core 共享框架：测试项目用的是 Microsoft.NET.Sdk（非 Web SDK），
+         而 ReverseProxyTests 要直接断言 ForwardedHeadersOptions（Microsoft.AspNetCore.HttpOverrides）。 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
     <PackageReference Include="xunit" Version="2.9.3" />

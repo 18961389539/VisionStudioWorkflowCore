@@ -56,7 +56,7 @@ describe('PluginPackagePanel install smoke', () => {
     stubBrowserApis();
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<PluginPackagePanel open onClose={() => undefined} onCatalogRefresh={() => undefined} />);
+    render(<PluginPackagePanel open onClose={() => undefined} onCatalogRefresh={async () => {}} />);
 
     // 安装按钮依赖已选择的文件：直接调用上传回调等效于用户选择文件。
     const file = new File([new Uint8Array([1, 2, 3])], 'demo.vspkg');

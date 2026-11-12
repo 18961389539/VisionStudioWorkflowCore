@@ -24,13 +24,13 @@ type State = { error?: Error; report?: string };
  * 一键导出为文本——现场 console 无法直接导出，UI 故障必须留下可交给后端工程师的耐久证据。
  */
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = {};
+  override state: State = {};
 
   static getDerivedStateFromError(error: Error): State {
     return { error };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
+  override componentDidCatch(error: Error, info: ErrorInfo) {
     const report = [
       'VisionStudio UI crash report',
       `scope: ${this.props.scope ?? 'application root'}`,
@@ -94,7 +94,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     );
   }
 
-  render() {
+  override render() {
     if (this.state.error) {
       if (this.props.variant === 'panel') return this.renderPanelFallback(this.state.error);
       return (

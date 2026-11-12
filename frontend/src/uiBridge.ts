@@ -13,6 +13,8 @@ export function onConfigureNode(listener: NodeDetailsListener): () => void {
 }
 
 export function configureNode(nodeId: string): void {
+  // 快照迭代：回调内可能订阅/退订，先复制集合避免遍历中途变更。
+  // oxlint-disable-next-line no-useless-spread -- Set 快照迭代是有意的语义，不是冗余展开
   for (const listener of [...configurationListeners]) listener(nodeId);
 }
 
@@ -24,5 +26,7 @@ export function onShowNodeDetails(listener: NodeDetailsListener): () => void {
 
 /** 节点 footer 的“详情”入口调用：把节点交给外壳并打开结果弹窗。 */
 export function showNodeDetails(nodeId: string): void {
+  // 快照迭代：回调内可能订阅/退订，先复制集合避免遍历中途变更。
+  // oxlint-disable-next-line no-useless-spread -- Set 快照迭代是有意的语义，不是冗余展开
   for (const listener of [...listeners]) listener(nodeId);
 }

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Drawer, Form, Input, InputNumber, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, message, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd';
 import { responseErrorMessage } from '../apiErrors';
 import type { PrepareWorkflowChange, PreparedWorkflowChange } from '../useWorkflowChanges';
-import type { ExtractWorkflowModuleResult, WorkflowModuleDescriptor, WorkflowModuleVersion, WorkflowPayload } from '../types';
+import type {
+  ExtractWorkflowModuleResult, WorkflowModuleDescriptor, WorkflowModuleVersion, WorkflowPayload
+} from '../types';
 import { apiFetch } from '../apiClient';
 import { apiUrl, modules as moduleEndpoints } from '../endpoints';
 

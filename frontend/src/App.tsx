@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   addEdge,
   Background,
@@ -33,7 +33,6 @@ import { automaticResultHeight } from './layout';
 import { catalogNodeData, fallbackCatalogHash, fallbackCatalogRaw, fallbackCatalogSchemaVersion, makeDefaultParameters, validateCatalog } from './catalog';
 import { localizeCatalog } from './i18n';
 import { useI18n } from './i18n/provider';
-import { APP_VERSION } from './version';
 import { useThemeMode } from './theme';
 import { SecurityAccountBadge } from './security';
 import { demos, type DemoKey } from './demos';
@@ -55,8 +54,8 @@ import { cloneParameters, type NodeParameters } from './nodeConfigurationState';
 import { applyReferenceParameters } from './roiReference';
 import { withSwitchPorts } from './switchPorts';
 import { migrateNodeType } from './legacyNodes';
-import { compatiblePorts, type PortRecommendation } from './toolboxModel';
-import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, PortDescriptor, WorkflowPayload, WorkflowModuleParameter, WorkflowModuleVersion } from './types';
+import { compatiblePorts } from './toolboxModel';
+import type { NodeCatalogItem, PluginLoadInfo, PluginSdkInfo, WorkflowPayload, WorkflowModuleVersion } from './types';
 import { apiFetch } from './apiClient';
 import { apiUrl, plugins as pluginEndpoints, workflows } from './endpoints';
 
@@ -78,7 +77,7 @@ const AboutPanel = lazy(() => import('./components/AboutPanel'));
 // 模块级共享件（LazyPanel / 常量 / 类型 / 图数据纯函数）见 ./appEditorShared（巨型组件拆分，2026-10-23）。
 import {
   LazyPanel, nodeTypes,
-  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, DEMO_GROUPS, DEMO_LABELS,
+  CANVAS_FIT_PADDING, COLLAPSED_RESULT_BAR_HEIGHT, DEMO_LABELS,
   NEW_NODE_HEIGHT, NEW_NODE_WIDTH, RECENT_NODES_LIMIT, SPOT_GAP, WORKFLOW_IO_TIMEOUT_MS,
   edgePresentation, getPorts, hydrateNodesFromCatalog, initial,
   moduleCatalogFromNode, moduleMetadata, persistNodeCompact, persistRecentNodeTypes, readNodeCompact, readRecentNodeTypes,
@@ -103,11 +102,14 @@ function Editor() {
     [rawCatalog, lang]
   );
   const [catalogSource, setCatalogSource] = useState<'runtime' | 'fallback'>('fallback');
+  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
   const [catalogHash, setCatalogHash] = useState(fallbackCatalogHash);
   const [catalogSchemaVersion, setCatalogSchemaVersion] = useState(fallbackCatalogSchemaVersion);
   const [catalogError, setCatalogError] = useState<string>();
   const [plugins, setPlugins] = useState<PluginLoadInfo[]>([]);
+  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
   const [pluginSdk, setPluginSdk] = useState<PluginSdkInfo>();
+  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
   const [pluginRescanning, setPluginRescanning] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
@@ -287,7 +289,7 @@ function Editor() {
   const workflowSnapshot = useMemo(() => JSON.stringify(snapshotSource), [snapshotSource]);
   // 拖拽时节点名不会变，从冻结快照派生可避免每帧重建 + 让 RunPanel 的 memo 生效
   const nodeLabels = useMemo(
-    () => Object.fromEntries(snapshotSource.nodes.map((node) => [node.id, node.name])),
+    () => Object.fromEntries(snapshotSource.nodes.map((node) => [node.id, String(node.name ?? node.id)])),
     [snapshotSource]);
 
   // 底部结果区要按类型显示中文名：此前每次渲染都 Object.fromEntries 一遍 171 条目录。
@@ -337,7 +339,7 @@ function Editor() {
   useEffect(() => cancelLongPress, [cancelLongPress]);
   const displayEdges = useMemo(() => highlightedEdgeId
     ? edges.map((edge) => edge.id === highlightedEdgeId
-      ? { ...edge, animated: false, style: { ...(edge.style ?? {}), stroke: '#ff4d4f', strokeWidth: 2.5 } }
+      ? { ...edge, animated: false, style: { ...edge.style, stroke: '#ff4d4f', strokeWidth: 2.5 } }
       : edge)
     : edges, [edges, highlightedEdgeId]);
 
@@ -460,6 +462,7 @@ function Editor() {
       .catch(() => setPluginSdk(undefined));
   }, [messageApi, setNodes]);
 
+  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
   const rescanPlugins = useCallback(async () => {
     setPluginRescanning(true);
     try {
@@ -480,6 +483,7 @@ function Editor() {
   useEffect(() => { refreshCatalog(); }, [refreshCatalog]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
+  // oxlint-disable-next-line no-unused-vars -- 待接线：App 拆分（2026-10-23）后展示入口丢失，保留状态待恢复
   const selectedCatalog = catalog.find((c) => c.type === selectedNode?.data.typeKey) ?? moduleCatalogFromNode(selectedNode);
   const configurationNode = nodes.find((node) => node.id === nodeConfigurationId);
   const configurationCatalog = catalog.find((item) => item.type === configurationNode?.data.typeKey) ?? moduleCatalogFromNode(configurationNode);
@@ -937,7 +941,7 @@ function Editor() {
     if (!selectedId) return messageApi.warning('先选择一个节点');
     setNodes((current) => current.map((node) =>
       node.id === selectedId
-        ? { ...node, data: { ...node.data, breakpoint: !Boolean(node.data.breakpoint) } }
+        ? { ...node, data: { ...node.data, breakpoint: !node.data.breakpoint } }
         : node
     ));
   };

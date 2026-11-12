@@ -123,7 +123,8 @@ export default function MetrologyObjectEditor({ value, onChange, imageSrc, width
       <Button danger disabled={locked || !active} onClick={() => { commit(objects.filter((_, index) => index !== selectedIndex)); setSelected(Math.max(0, selected - 1)); }}>删除对象</Button>
       <Select aria-label="添加计量对象" value={undefined} placeholder="添加对象（填写坐标）" disabled={locked || objects.length >= 512} style={{ width: 200 }}
         options={Object.entries(kinds).map(([value, label]) => ({ value, label }))} onChange={kind => {
-          commit([...objects, metrologyObjectFromDrag(kind, { x: imageWidth / 2, y: imageHeight / 2 }, { x: imageWidth / 2 + 40, y: imageHeight / 2 + 40 }, nextName())]); setSelected(objects.length);
+          if (!kind || !(kind in kinds)) return;
+          commit([...objects, metrologyObjectFromDrag(kind as MetrologyObject['type'], { x: imageWidth / 2, y: imageHeight / 2 }, { x: imageWidth / 2 + 40, y: imageHeight / 2 + 40 }, nextName())]); setSelected(objects.length);
         }} />
     </Space>
     {active && Object.hasOwn(metrologyFields, active.type) && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>

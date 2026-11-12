@@ -48,7 +48,7 @@ const coordinateInputPorts: Record<string, string[]> = {
   'calibration.cameraIntrinsics': ['calibrationDataJson']
 };
 
-function portNameIs(actual: string | undefined, expected: string): boolean {
+function portNameIs(actual: string | null | undefined, expected: string): boolean {
   return actual?.toLowerCase() === expected.toLowerCase();
 }
 

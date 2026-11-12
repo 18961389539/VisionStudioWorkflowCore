@@ -50,7 +50,7 @@ export function migrateNodeType(
 ): { type: string; parameters: Record<string, unknown> } {
   const rule = nodeTypeMigrations[type.toLowerCase()];
   if (!rule) return { type, parameters: parameters ?? {} };
-  const merged: Record<string, unknown> = { ...(parameters ?? {}) };
+  const merged: Record<string, unknown> = { ...parameters };
 
   if (rule.remap) {
     const raw = merged[rule.remap.from];

@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
-import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text } from 'react-konva';
 import type { OverlayPoint, VisionOverlay, VisionRoi, VisionRoiBrushStroke } from '../types';
 import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
 import { createPixelBuffer, readPixel } from '../imagePixels';
@@ -9,11 +9,10 @@ import { circleArcThroughThreePoints, circleThroughThreePoints } from '../circle
 import { clamp, clipSegmentToImage, nearestDiagnosticSpoke, CaliperDiagnosticShape, caliperLineProfileSpanHandles,
   caliperLineProfileWidthHandle, caliperCircleProfileWidthHandle, caliperCircleArcHandles, caliperCircleBandHandles,
   circleRadiusHandle, radialResizeCursor, closestHandle, polygonHandleIndices, boundedMeasurementPoint,
-  flatten, brushPath, polygonPreviewPoints, maxInteractiveCircleRadius, clampCircleCenter,
+  polygonPreviewPoints, maxInteractiveCircleRadius, clampCircleCenter,
   clampCaliperCircleCenter, normalizeRect, roiBounds, pointInsideRoi, pointInsidePolygon, brushRoiBounds,
   polygonRoiBounds, clampRoiMove, applyRoiDrag, OverlayShape, useHtmlImage, readPixelated, persistPixelated,
-  HANDLE_HIT, MAX_POLYGON_HANDLES, MIN_EDGE_HANDLE_SPAN, MAX_MEASUREMENT_COORDINATE, MAX_POLYGON_PREVIEW_POINTS,
-  PIXELATED_KEY, brushPathCache, polygonPreviewCache
+  HANDLE_HIT, MAX_POLYGON_HANDLES, MIN_EDGE_HANDLE_SPAN
 } from './imageViewerUtils';
 import type { Point, ViewState, RoiDragMode, MeasurementDragMode, CircleDrawMode, ToolMode, RoiMoveBounds, CaliperDiagnosticSelection } from './imageViewerTypes';
 import type { MeasurementGeometry } from './imageViewerUtils';
@@ -452,7 +451,7 @@ export default function ImageViewer({
     const ip = imagePoint(p);
     if (caliperDiagnosticSelection) {
       const index = nearestDiagnosticSpoke(caliperDiagnosticSelection, ip, view.scale);
-      if (index !== undefined) caliperDiagnosticSelection.onSelect(index);
+      if (index !== undefined) caliperDiagnosticSelection.onSelect?.(index);
       else panStart.current = { pointer: p, view };
       return;
     }

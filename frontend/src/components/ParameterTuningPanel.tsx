@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Divider, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
+import {
+  Alert, Button, Card, Col, Divider, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Switch,
+  Table, Tag, Typography, message
+} from 'antd';
 import ImageViewer from './ImageViewer';
 import MatrixEditor from './MatrixEditor';
 import type {
@@ -30,9 +33,9 @@ function ParameterEditor({ descriptor, value, onChange, nodeType }: { descriptor
   const effective = value ?? descriptor.defaultValue;
   if (nodeType === 'jlvision.matrixOp' && ['matrixA', 'matrixB'].includes(descriptor.name))
     return <MatrixEditor label={descriptor.label} value={String(effective ?? '')} onChange={onChange} />;
-  if (descriptor.type === 'number') return <InputNumber aria-label={descriptor.label} style={{ width: '100%' }} value={descriptor.optional && effective == null ? null : Number(effective ?? 0)} min={descriptor.min} max={descriptor.max} step={descriptor.step} onChange={onChange} />;
+  if (descriptor.type === 'number') return <InputNumber aria-label={descriptor.label} style={{ width: '100%' }} value={descriptor.optional && effective == null ? null : Number(effective ?? 0)} min={descriptor.min ?? undefined} max={descriptor.max ?? undefined} step={descriptor.step ?? undefined} onChange={onChange} />;
   if (descriptor.type === 'boolean') return <Switch aria-label={descriptor.label} checked={Boolean(effective)} onChange={onChange} />;
-  if (descriptor.type === 'select') return <Select aria-label={descriptor.label} style={{ width: '100%' }} value={String(effective ?? '')} options={descriptor.options} onChange={onChange} />;
+  if (descriptor.type === 'select') return <Select aria-label={descriptor.label} style={{ width: '100%' }} value={String(effective ?? '')} options={descriptor.options ?? undefined} onChange={onChange} />;
   if (descriptor.type === 'textarea') return <Input.TextArea aria-label={descriptor.label} autoSize={{ minRows: 3, maxRows: 8 }} value={String(effective ?? '')} onChange={(e) => onChange(e.target.value)} />;
   return <Input aria-label={descriptor.label} value={String(effective ?? '')} onChange={(e) => onChange(e.target.value)} />;
 }
@@ -104,7 +107,7 @@ export default function ParameterTuningPanel({ open, onClose, currentWorkflow, c
   const updateNode = (mutate: (parameters: ParamMap) => ParamMap) => {
     if (!nodeId) return;
     setRevision((value) => value + 1);
-    setWorkflow((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, parameters: mutate({ ...(node.parameters ?? {}) }) } : node) }));
+    setWorkflow((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, parameters: mutate({ ...node.parameters }) } : node) }));
   };
   const updateParameter = (key: string, value: unknown) => updateNode((p) => ({ ...p, [key]: value }));
   const updateRoi = (value?: VisionRoi) => updateNode((p) => { if (value) p.roi = value; else delete p.roi; return p; });

@@ -1,4 +1,4 @@
-import type { NodeCatalogItem } from './types';
+
 import type { Lang } from './i18n/lang';
 
 /**

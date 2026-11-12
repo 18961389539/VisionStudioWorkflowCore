@@ -362,6 +362,8 @@ export function validateNodeConfiguration(
       const matches = [...template.matchAll(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g)];
       const names = new Set(matches.map(match => match[1].toLowerCase()));
       const supported = ['timestamp', 'date', 'runid', 'saveid', 'nodeid', 'result', 'partid', 'sequence'];
+      // 控制字符是有意的：Windows 文件名禁用的 0x00-0x1F 必须拦在最前面。
+      // oxlint-disable-next-line no-control-regex -- 校验 Windows 非法文件名字符，控制字符必须显式列入
       if (!template || template.length > 512 || /[<>:"/\\|?*\x00-\x1f]/.test(template)
         || /[{}]/.test(template.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, '')) || [...names].some(name => !supported.includes(name)))
         issues.push('文件名模板无效；仅支持 timestamp/date/runId/saveId/nodeId/result/partId/sequence，不含目录和扩展名。');
@@ -405,8 +407,8 @@ export function validateNodeConfiguration(
     const value = numericParameter(name);
     const descriptor = catalog.parameters.find((parameter) => parameter.name === name);
     if (value === undefined
-      || (descriptor?.min !== undefined && value < descriptor.min)
-      || (descriptor?.max !== undefined && value > descriptor.max)) return undefined;
+      || (descriptor?.min != null && value < descriptor.min)
+      || (descriptor?.max != null && value > descriptor.max)) return undefined;
     return value;
   };
   const roundedParameter = (value: number, minimum: number, maximum: number) =>

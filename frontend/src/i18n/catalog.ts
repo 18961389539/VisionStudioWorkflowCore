@@ -184,7 +184,7 @@ const parameterGroups: Record<string, string> = {
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
-export function canonicalParameterGroup(group?: string): string {
+export function canonicalParameterGroup(group?: string | null): string {
   return group ? sourceParameterGroups[group] ?? group : 'General';
 }
 

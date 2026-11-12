@@ -24,6 +24,15 @@ app.Logger.LogInformation(
     VisionStudioDataRoot.Resolve(app.Environment.ContentRootPath),
     typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown");
 
+// 反向代理策略进启动横幅：部署在代理后面却没开 X-Forwarded-*，表现是"全厂共享登录配额"
+// 和"审计 IP 全是代理地址"，从日志必须一眼看出来。
+app.Logger.LogInformation("Reverse proxy forwarded headers: {ForwardedHeaders}",
+    ReverseProxyRegistration.Describe(app.Configuration));
+
+// 必须是管线里第一个中间件：限流分区、Secure Cookie 判定、审计来源 IP 都依赖它改写后的
+// RemoteIpAddress / Scheme。放在后面等于没配。
+app.UseForwardedHeaders();
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
@@ -36,7 +45,13 @@ app.UseAuthentication();
 app.UseMiddleware<RuntimeOnlyMiddleware>();
 app.UseAuthorization();
 
-app.MapOpenApi().AllowAnonymous();
+// OpenAPI 文档是完整的攻击面清单（全部路由、DTO 字段、枚举取值），不该匿名挂在生产端口上。
+// Development 保留匿名：scripts/export-openapi.ps1 与前端契约对账都依赖它（脚本以
+// ASPNETCORE_ENVIRONMENT=Development 启动），否则快照导出必须先造一个管理员会话。
+var openApi = app.MapOpenApi();
+if (app.Environment.IsDevelopment()) openApi.AllowAnonymous();
+else openApi.RequireAuthorization(SecurityPolicies.Administrator);
+
 app.MapVisionStudioApi();
 app.MapHub<DiagnosticsHub>("/hubs/diagnostics").RequireAuthorization();
 app.MapFallbackToFile("index.html").AllowAnonymous();

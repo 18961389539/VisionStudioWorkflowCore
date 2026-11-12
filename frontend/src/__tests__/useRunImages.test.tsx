@@ -108,7 +108,7 @@ describe('run image catalog ownership', () => {
     vi.stubGlobal('fetch', fetchMock);
     const hook = renderHook(() => useRunImages(props));
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(hook.result.current.imageCatalogLoading).toBe(false);
     act(() => hook.result.current.retryImageCatalog());
     await act(async () => {});
@@ -148,7 +148,7 @@ describe('run image catalog ownership', () => {
     await act(async () => {});
     hook.rerender({ ...props, result: { ...result, runId: 'run-2' } });
     await act(async () => {});
-    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     await act(async () => { oldBody.resolve({ runId: 'run-1', images: [] }); });
     expect(hook.result.current.runImageCatalog?.runId).toBe('run-2');
     expect(hook.result.current.selectedOutputAvailable).toBe(true);
@@ -170,7 +170,7 @@ describe('run image catalog ownership', () => {
     await act(async () => {});
     hook.unmount();
     const renderCount = rendered.mock.calls.length;
-    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     await act(async () => { body.resolve({ runId: 'run-1', images: [image] }); });
     expect(rendered).toHaveBeenCalledTimes(renderCount);
   });

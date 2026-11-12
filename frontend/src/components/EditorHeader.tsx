@@ -26,7 +26,7 @@ type EditorHeaderProps = {
   debug: { inSession: boolean; statusText: string };
   run: { running: boolean; debugBusy: boolean; onRun: () => void; onAbort: () => void; startedAt?: number };
   workflow: { name: string; id: string; onRename: (name: string) => void; dirty: boolean; lastSavedAt?: Date };
-  validation: { status: string; summary: string; needsRevalidate: boolean; issueCount: number; busy: boolean; onValidate: () => void };
+  validation: { status: string; summary?: string; needsRevalidate: boolean; issueCount: number; busy: boolean; onValidate: () => void };
   catalogError?: string;
   save: { busy: boolean; onSave: () => void };
 };

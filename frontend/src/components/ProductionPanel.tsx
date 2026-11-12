@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import {
+  Alert, Button, Checkbox, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table,
+  Tabs, Tag, Typography
+} from 'antd';
 import type { AlarmRecord, ProductionRuntimeStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { isProductionConfig, isProductionStatus } from '../productionConfig';
 import { useProductionMonitor, type DeviceActionPendingState } from '../useProductionMonitor';
 import { useProductionConfigDraft } from '../useProductionConfigDraft';
 import { useProductionActions } from '../useProductionActions';
-import { apiUrl, alarms as alarmEndpoints, jobs as jobEndpoints } from '../endpoints';
+import { apiUrl, alarms as alarmEndpoints } from '../endpoints';
 
 export type { DeviceActionPendingState } from '../useProductionMonitor';
 

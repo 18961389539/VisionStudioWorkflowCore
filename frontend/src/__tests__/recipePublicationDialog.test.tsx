@@ -229,6 +229,48 @@ describe('发布核对生命周期', () => {
     expect(onPublished).not.toHaveBeenCalled();
   });
 
+  it('发布门禁：未成熟节点要求勾选确认，确认后带 acknowledge 重新提交', async () => {
+    const finding = { nodeId: 'detect', nodeType: 'inference.obb', nodeName: 'OBB 检测', maturity: 'Experimental', reason: '无模型包可跑端到端' };
+    const calls: string[] = [];
+    const base = handler();
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        calls.push(String(url));
+        // 第一次不带确认 → 门禁 409；带确认 → 正常发布。
+        if (String(url).includes('acknowledgeMaturityNodes=true')) return response({ ...recipe(), publishedVersion: 1, updatedAt: newTime });
+        return response({ code: 'NODE_MATURITY_ACK_REQUIRED', message: '该版本包含 1 个未达到 Stable 的节点', findings: [finding] }, 409);
+      }
+      return base(url, init);
+    }));
+    mount({ ...target, rollback: false });
+    await screen.findByText('当前生效 V3 → 目标 V1');
+    fireEvent.click(confirmButton(false));
+    // 门禁不是"条件已变化"：必须列出节点、给出理由，而不是让用户去重新核对。
+    expect(await screen.findByText('OBB 检测')).toBeInTheDocument();
+    expect(screen.getByText(/无模型包可跑端到端/)).toBeInTheDocument();
+    expect(confirmButton(false)).toBeDisabled();
+    expect(screen.queryByText(/配方或发布条件已变化/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(confirmButton(false)).toBeEnabled();
+    fireEvent.click(confirmButton(false));
+    await waitFor(() => expect(calls.at(-1)).toContain('acknowledgeMaturityNodes=true'));
+  });
+
+  it('发布门禁：确认过的版本再次提交时自动带上 acknowledge', async () => {
+    // 反向守卫：普通 409（并发修订冲突）不能被误判成门禁，否则会跳过真正该拦的检查。
+    const base = handler();
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return response({ detail: '版本已被其他人更新', code: 'revision_mismatch' }, 409);
+      return base(url, init);
+    }));
+    mount({ ...target, rollback: false });
+    await screen.findByText('当前生效 V3 → 目标 V1');
+    fireEvent.click(confirmButton(false));
+    expect(await screen.findByText(/配方或发布条件已变化/)).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
   it('读取超时给出重试入口，不留下无期限加载状态', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn((_url: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {

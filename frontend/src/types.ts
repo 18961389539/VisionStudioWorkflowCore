@@ -28,10 +28,10 @@ export type ParameterDescriptor = {
   /** 留空或 null 时使用执行器根据当前输入确定的默认值。 */
   optional?: boolean;
   integer?: boolean;
-  min?: number;
-  max?: number;
-  step?: number;
-  options?: ParameterOption[];
+  min?: number | null;
+  max?: number | null;
+  step?: number | null;
+  options?: ParameterOption[] | null;
   unit?: string | null;
   group?: string | null;
   description?: string | null;
@@ -47,8 +47,9 @@ export type ParameterDescriptor = {
    * 只影响展示，不影响执行器读取或校验。
    */
   advanced?: boolean;
-  variantParameter?: string;
-  variants?: Record<string, { label?: string | null; description?: string | null; suggestions?: ParameterOption[] | null; min?: number | null; max?: number | null; step?: number | null; defaultValue?: unknown; unit?: string | null }>;
+  variantParameter?: string | null;
+  /** 后端以 nullable 字典声明：null 与缺省等价，表示该参数没有变体。 */
+  variants?: Record<string, { label?: string | null; description?: string | null; suggestions?: ParameterOption[] | null; min?: number | null; max?: number | null; step?: number | null; defaultValue?: unknown; unit?: string | null }> | null;
   /** 连接这些输入端口时忽略本参数（端口优先）。 */
   overriddenByPorts?: string[] | null;
 };
@@ -206,7 +207,7 @@ export type RunResult = {
   haltNodeId?: string | null;
   haltReason?: string | null;
   qualityDisposition?: string | null;
-  controlFlowDecisions?: ControlFlowDecision[];
+  controlFlowDecisions?: ControlFlowDecision[] | null;
 };
 
 export type PluginToolLoadInfo = {
@@ -541,6 +542,11 @@ export type RobotDescriptor = {
   settings: RobotRuntimeSettings;
   capabilities: RobotCapabilities;
   updatedAt: string;
+  /**
+   * 后端标记的虚拟/仿真适配器（2026-11-12）。现场最危险的误判是"以为在驱动真机，
+   * 其实连的是内置模拟器"：命令全部成功、状态一路正常，产线却没有任何动作。
+   */
+  simulated?: boolean;
 };
 
 export type RobotCommandTraceEvent = {
@@ -583,7 +589,7 @@ export type WorkflowPayload =
     nodes: Array<Omit<BackendNodeDefinition, 'name' | 'position' | 'parameters'> & {
       name?: string | null;
       position?: { x: number; y: number } | null;
-      parameters?: Record<string, unknown>;
+      parameters?: Record<string, unknown> | null;
     }>;
     edges: Array<Omit<BackendEdgeDefinition, 'kind' | 'isControl'> & {
       kind?: string | null;
@@ -972,7 +978,7 @@ export type VisionTransform2D = {
   h00: number; h01: number; h02: number;
   h10: number; h11: number; h12: number;
   h20: number; h21: number; h22: number;
-  matrix?: number[];
+  matrix?: number[] | null;
 };
 
 export type VisionTransform3D = {
@@ -996,7 +1002,7 @@ export type CalibrationWorkspaceRequest = {
   targetFrame: string;
   targetUnit: string;
   points: CalibrationWorkspacePoint[];
-  verificationPoints?: CalibrationWorkspacePoint[];
+  verificationPoints?: CalibrationWorkspacePoint[] | null;
   heatmapColumns: number;
   heatmapRows: number;
   maxRmse?: number;
@@ -1431,10 +1437,10 @@ export type AssetHealthSnapshot = {
   state: string;
   connected: boolean;
   activity: string;
-  error?: string;
+  error?: string | null;
   metrics: Record<string, number>;
   updatedAt: string;
-  key: string;
+  key?: string | null;
 };
 
 export type AssetEventEnvelope = {
@@ -1448,8 +1454,8 @@ export type AssetEventEnvelope = {
   level: AssetHealthLevel;
   state: string;
   message: string;
-  previousState?: string;
-  metadata?: Record<string, string>;
+  previousState?: string | null;
+  metadata?: Record<string, string> | null;
 };
 
 export type DiagnosticsSummary = {

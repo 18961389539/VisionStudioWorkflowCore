@@ -96,12 +96,16 @@ public sealed class RuntimeBootstrapHostedService(
         robots.Register(new VirtualAbbRobotAdapter());
         robots.Register(new VirtualPlcRobotBridgeAdapter());
 
-        var enabled = !environment.IsEnvironment("Testing") && configuration.GetValue("RobotTcpSimulator:Enabled", true);
-        if (!enabled) return;
+        if (!RobotSimulatorPolicy.ShouldStart(configuration, environment, out var reason))
+        {
+            // 生产环境里配了 Enabled=true 不能静默忽略：现场必须能从日志看到"我配的东西没生效"。
+            if (reason.Length > 0) logger.LogWarning("Built-in TCP robot simulator will not start: {Reason}", reason);
+            return;
+        }
 
         var simulator = services.GetRequiredService<TcpRobotSimulatorServer>();
         await simulator.StartAsync(cancellationToken);
-        robots.Register(new TcpJsonRobotAdapter("tcp-sim-1", "TCP ABB Simulator", "127.0.0.1", simulator.Port));
+        robots.Register(new TcpJsonRobotAdapter("tcp-sim-1", "TCP ABB Simulator", "127.0.0.1", simulator.Port, simulated: true));
     }
 
     private async Task RegisterDevicesAsync(CancellationToken cancellationToken)
@@ -245,4 +249,45 @@ public sealed class VendorProvenanceBootstrapHostedService(
         "robot" => robots.List().Any(x => string.Equals(x.Id, assetId, StringComparison.OrdinalIgnoreCase)),
         _ => false
     };
+}
+
+/// <summary>
+/// 内置 TCP 机器人模拟器的启用策略（2026-11-12）。
+///
+/// 故障形态：<c>appsettings.json</c> 默认 <c>RobotTcpSimulator:Enabled=true</c>，而 Production 覆盖文件
+/// 里没有这一节，于是现场部署会在 40501 端口开一个 TCP 机器人服务，并注册 <c>tcp-sim-1</c> 适配器。
+/// 工艺员在机器人面板里选中它、下发目标、看到 InPosition——产线却没有任何动作，排查方向被彻底带偏。
+///
+/// 因此：生产一律不启动模拟器，配置里写了也跳过并留下告警（fail-closed，但不把"配置写错"升级成
+/// "整线停摆"）。现场演示虚拟机器人请使用 Development 环境。
+/// </summary>
+internal static class RobotSimulatorPolicy
+{
+    internal static bool ShouldStart(IConfiguration configuration, IWebHostEnvironment environment)
+        => ShouldStart(configuration, environment, out _);
+
+    internal static bool ShouldStart(IConfiguration configuration, IWebHostEnvironment environment, out string reason)
+    {
+        var configured = configuration.GetValue("RobotTcpSimulator:Enabled", true);
+        if (!configured)
+        {
+            reason = string.Empty; // 显式关闭：无需告警。
+            return false;
+        }
+
+        if (environment.IsProduction())
+        {
+            reason = "RobotTcpSimulator:Enabled=true is ignored in Production; virtual robots must not be selectable in a field deployment.";
+            return false;
+        }
+
+        if (environment.IsEnvironment("Testing"))
+        {
+            reason = "disabled in the Testing environment to keep tests hermetic.";
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
+    }
 }

@@ -50,7 +50,9 @@ public static class JobEndpoints
         app.MapPost("/api/jobs/{id}/versions/{version:int}/publish", async (
             string id,
             int version,
+            bool? acknowledgeMaturityNodes,
             DateTimeOffset? expectedUpdatedAt,
+            HttpContext http,
             JobStore jobs,
             VisionWorkflowCompiler compiler,
             WorkflowModuleExpander modules,
@@ -60,9 +62,30 @@ public static class JobEndpoints
             var snapshot = await jobs.GetVersionAsync(id, version, ct)
                 ?? throw new ApiNotFoundException($"Version {version} does not exist for job '{id}'.");
             await ValidateWorkflowAsync(snapshot.Workflow, compiler, modules, ct);
+
+            // 发布门禁（2026-11-12）：含未成熟节点必须显式确认。此前成熟度只是 UI 徽标，
+            // 点"发布"没有任何阻力，发布之后这条信息也消失了（配方管理只显示"已发布"）。
+            var findings = NodeMaturityGate.Scan(snapshot.Workflow);
+            if (findings.Count > 0)
+            {
+                if (acknowledgeMaturityNodes != true)
+                {
+                    return Results.Json(
+                        new NodeMaturityGate.AcknowledgementRequired(
+                            NodeMaturityGate.AcknowledgementRequired.ResponseCode,
+                            $"该版本包含 {findings.Count} 个未达到 Stable 的节点（Experimental/Preview）。确认继续后才会发布，确认记录进入审计。",
+                            findings),
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+                // 写进审计 target：发布历史里能查到"谁确认了哪些未成熟节点"。
+                AuditContext.SetTarget(http, $"{id}@v{version} {NodeMaturityGate.Describe(findings)}");
+            }
+
             var manifest = await dependencies.CaptureAsync(snapshot.Workflow, ct);
             return Results.Ok(await jobs.PublishAsync(id, version, "Publish", manifest, ct, expectedUpdatedAt));
-        }).Produces<JobDescriptor>().RequireEngineer("job.publish", "job");
+        }).Produces<JobDescriptor>()
+          .Produces<NodeMaturityGate.AcknowledgementRequired>(StatusCodes.Status409Conflict)
+          .RequireEngineer("job.publish", "job");
 
         app.MapPost("/api/jobs/{id}/rollback/{version:int}", async (
             string id,

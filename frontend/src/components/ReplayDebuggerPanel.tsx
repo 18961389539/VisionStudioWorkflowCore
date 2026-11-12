@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../apiErrors';
-import { Alert, Button, Checkbox, Col, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Col, Input, Modal, Row, Space, Table, Tag, Typography, message } from 'antd';
 import type { NodeRunReport, OfflineReplayContext, OfflineReplayResult, WorkflowPayload } from '../types';
 import { apiFetch } from '../apiClient';
 import { runs, traces } from '../endpoints';

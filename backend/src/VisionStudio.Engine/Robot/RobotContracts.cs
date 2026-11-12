@@ -109,7 +109,13 @@ public sealed record RobotDescriptor(
     string? Error,
     RobotRuntimeSettings Settings,
     RobotCapabilities Capabilities,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>
+    /// 虚拟/仿真适配器标识（2026-11-12）。现场最危险的误判是"以为在驱动真机，其实连的是
+    /// 内置模拟器"：命令走通、状态正常、节拍漂亮，但产线上没有任何东西动。UI 与审计必须能
+    /// 一眼分辨，而不是靠 driver 字符串猜。
+    /// </summary>
+    bool Simulated = false);
 
 public sealed record RobotCommandReceipt(
     long CommandId,

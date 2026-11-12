@@ -26,8 +26,10 @@ export const jobs = {
   validate: (id: string, version: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${version}/validation`),
   dependencies: (id: string) => apiUrl(`jobs/${encodeURIComponent(id)}/dependencies/validate`),
   diff: (id: string, from: number, to: number) => apiUrl(`jobs/${encodeURIComponent(id)}/versions/${from}/diff/${to}`),
-  publishVersion: (id: string, version: string, expectedUpdatedAt: string) =>
-    apiUrl(`jobs/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}`),
+  // acknowledgeMaturity：版本内含 Preview/Experimental 节点时，后端要求显式确认后才发布
+  // （2026-11-12 发布门禁）。确认记录进审计 target，可在发布历史里回查。
+  publishVersion: (id: string, version: string, expectedUpdatedAt: string, acknowledgeMaturity = false) =>
+    apiUrl(`jobs/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}${acknowledgeMaturity ? '&acknowledgeMaturityNodes=true' : ''}`),
   rollbackVersion: (id: string, version: string, expectedUpdatedAt: string) =>
     apiUrl(`jobs/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}?expectedUpdatedAt=${encodeURIComponent(expectedUpdatedAt)}`)
 } as const;

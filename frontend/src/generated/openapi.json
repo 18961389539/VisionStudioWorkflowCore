@@ -6611,6 +6611,13 @@
             }
           },
           {
+            "name": "acknowledgeMaturityNodes",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "expectedUpdatedAt",
             "in": "query",
             "schema": {
@@ -6626,6 +6633,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobDescriptor"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementRequired"
                 }
               }
             }
@@ -9602,6 +9619,28 @@
   },
   "components": {
     "schemas": {
+      "AcknowledgementRequired": {
+        "required": [
+          "code",
+          "message",
+          "findings"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          }
+        }
+      },
       "AddValidationDatasetItemsRequest": {
         "required": [
           "items"
@@ -16559,6 +16598,33 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "Finding": {
+        "required": [
+          "nodeId",
+          "nodeType",
+          "nodeName",
+          "maturity",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeType": {
+            "type": "string"
+          },
+          "nodeName": {
+            "type": "string"
+          },
+          "maturity": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },
@@ -24640,7 +24706,8 @@
           "error",
           "settings",
           "capabilities",
-          "updatedAt"
+          "updatedAt",
+          "simulated"
         ],
         "type": "object",
         "properties": {
@@ -24716,6 +24783,10 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "simulated": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

@@ -910,6 +910,34 @@ if '/api/auth/' not in read_safe('backend/src/VisionStudio.Api/Infrastructure/Ru
 # UI wording checks migrated to behaviour tests (see STATIC_AUDIT_TRIAGE.md).
 security_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.json'))
 if not security_settings.get('Security', {}).get('Enabled', False): fail('Security is not enabled by default')
+# 反向代理边界（2026-11-12）：限流按 Connection.RemoteIpAddress 分区、Cookie 的 Secure 取
+# Request.IsHttps。部署在 TLS 终止代理之后若不在限流之前解析 X-Forwarded-*，全厂会共享
+# 10 次/分钟登录配额，且 Secure 失效、审计来源 IP 全是代理地址。
+reverse_proxy_source=read_safe('backend/src/VisionStudio.Api/Hosting/ReverseProxyRegistration.cs')
+if 'app.UseForwardedHeaders();' not in program:
+    fail('Program.cs does not call app.UseForwardedHeaders() (reverse proxy boundary missing)')
+if program.index('app.UseForwardedHeaders();') > program.index('app.UseRateLimiter();'):
+    fail('app.UseForwardedHeaders() must run before app.UseRateLimiter() (rate-limit partition needs the real client IP)')
+if 'AddVisionStudioForwardedHeaders' not in read_safe('backend/src/VisionStudio.Api/Hosting/VisionStudioServiceRegistration.cs'):
+    fail('ForwardedHeaders options are not registered in AddVisionStudioHost')
+for token in ['ForwardLimit', 'KnownIPNetworks', 'KnownProxies']:
+    if token not in reverse_proxy_source: fail(f'ForwardedHeaders hardening missing: {token}')
+if security_settings.get('ReverseProxy', {}).get('Enabled', True):
+    fail('ReverseProxy must default to disabled (enabling it without a trusted proxy lets any client spoof X-Forwarded-For)')
+if 'MapOpenApi().AllowAnonymous()' in program:
+    fail('OpenAPI document must not be anonymous outside Development (full attack surface listing)')
+# 生产环境的虚拟硬件边界（2026-11-12）：appsettings.json 默认开启内置 TCP 机器人模拟器。
+# 只靠配置文件不够——现场配置会被复制、会被改，代码必须自己拒绝。
+production_settings=json.loads(read_safe('backend/src/VisionStudio.Api/appsettings.Production.json'))
+if production_settings.get('RobotTcpSimulator', {}).get('Enabled', True):
+    fail('RobotTcpSimulator must be disabled in Production (a virtual robot must not be selectable in the field)')
+bootstrap_source=read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs')
+if 'environment.IsProduction()' not in bootstrap_source:
+    fail('Robot bootstrap must hard-refuse the simulator in Production, not only rely on appsettings')
+if 'simulated: true' not in bootstrap_source:
+    fail('Simulator-backed robot adapter must be registered with simulated: true so the UI can flag it')
+if 'bool Simulated' not in read_safe('backend/src/VisionStudio.Engine/Robot/RobotContracts.cs'):
+    fail('RobotDescriptor must expose a Simulated flag (otherwise a virtual robot is indistinguishable in UI/audit)')
 ok('V0.24 RBAC + PBKDF2 local users + revocable sessions + audit trail present')
 
 # V0.25 RuntimeDependencyManifest / production provenance
@@ -1007,7 +1035,12 @@ for rel in ['FRAMESET_WORKFLOW.md','MIGRATION_V035_TO_V036.md']:
 # DEMO_GROUPS/DEMO_LABELS (App.tsx) — the old hard-coded `value: 'frameSet'` literal no longer
 # exists, so the previous assertion failed while the feature was intact. Assert the current
 # representation instead (behaviour-test migration tracked in STATIC_AUDIT_TRIAGE.md).
-if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') or 'DEMO_GROUPS' not in frontend_app:
+# 2026-11-12：App.tsx 拆分后模板选择器落在 components/TemplateGalleryModal.tsx，
+# DEMO_GROUPS 定义在 appEditorShared 并由该组件消费；App.tsx 只剩入口。
+# 断言改指向真实消费方，避免"功能还在、断言失效"的假失败。
+if 'frameSet: frameSetDemo' not in read_safe('frontend/src/demos.ts') \
+        or 'DEMO_GROUPS' not in read_safe('frontend/src/components/TemplateGalleryModal.tsx') \
+        or 'TemplateGalleryModal' not in frontend_app:
     fail('V0.36 frontend synchronized FrameSet demo is missing')
 ok('V0.36 first-class synchronized FrameSet workflow primitive + zero-copy extraction present')
 
@@ -1633,6 +1666,22 @@ publish_ps=read_safe('scripts/publish-runtime.ps1')
 if '--check' not in publish_sh or 'VisionStudio.CatalogExporter' not in publish_sh or '--check' not in publish_ps or 'VisionStudio.CatalogExporter' not in publish_ps:
     fail('Runtime publish path can bypass generated catalog staleness check')
 ok('V0.27 backend-authoritative runtime Catalog + generated offline fallback present')
+
+# 节点成熟度发布门禁（2026-11-12）：成熟度此前只是工具箱里的徽标，点"发布"没有任何阻力，
+# 发布之后这条信息也消失了。门禁必须留在 publish 路径上，且回滚不受影响。
+maturity_gate=read_safe('backend/src/VisionStudio.Api/NodeMaturityGate.cs')
+job_endpoints_source=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
+for token in ['NodeMaturityCatalog.Declarations', 'AcknowledgementRequired', 'NODE_MATURITY_ACK_REQUIRED']:
+    if token not in maturity_gate: fail(f'Node maturity gate implementation missing: {token}')
+for token in ['NodeMaturityGate.Scan', 'acknowledgeMaturityNodes', 'AuditContext.SetTarget']:
+    if token not in job_endpoints_source: fail(f'Job publish path does not enforce node maturity: {token}')
+if 'NodeMaturityGate.Scan' in read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs').split('/rollback/')[-1]:
+    fail('Rollback must not be gated by node maturity (the target version was already acknowledged)')
+if 'acknowledgeMaturityNodes=true' not in read_safe('frontend/src/endpoints.ts'):
+    fail('Frontend cannot acknowledge the maturity gate (publish would always fail on Preview nodes)')
+if 'NODE_MATURITY_ACK_REQUIRED' not in read_safe('frontend/src/components/RecipePublicationDialog.tsx'):
+    fail('Publication dialog does not surface the maturity gate as a confirmable step')
+ok('Node maturity gate enforced on publish + recorded in audit (rollback exempt)')
 
 # PowerShell 5.1 契约（2026-10-12 复核 F07 教训）：含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM——
 # 无 BOM 时 PS 5.1 按 ANSI 解析，中文字节会吞掉相邻语法行（publish-runtime.ps1 实测：

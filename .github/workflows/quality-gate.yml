@@ -4,8 +4,17 @@ on:
   push:
   pull_request:
 
+# 同一分支上的新提交取消旧运行：门禁的价值在于"当前提交是否干净"，
+# 排队跑完一个已被取代的提交既浪费 runner 又延迟反馈。
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  quality-gate:
+  # 2026-11-12：由单条 25 分钟串行流水线拆成三段可并行的作用域（-Scope）。
+  # 口径没有放松——三段全绿才算通过；拆开只是为了把关键路径从"最长的一段"降到"三段之和/并行"，
+  # 并且让失败点一眼可见（前端 lint 挂了不用等后端覆盖率跑完）。
+  backend:
     runs-on: windows-latest
     timeout-minutes: 25
     env:
@@ -13,24 +22,66 @@ jobs:
       # （原行阈值 60 形同虚设）。与 scripts/quality-gate.ps1 的默认值保持一致，提升后同步上调。
       MIN_LINE_COVERAGE: '81'
       MIN_BRANCH_COVERAGE: '60'
+      DOTNET_NOLOGO: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Run quality gate
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('backend/**/*.csproj', 'backend/**/Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Run backend quality gate
         shell: pwsh
-        run: ./scripts/quality-gate.ps1
+        run: ./scripts/quality-gate.ps1 -Scope Backend
       - name: Upload coverage artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-and-test-results
           path: artifacts/test-results
+          if-no-files-found: ignore
+
+  frontend:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Run frontend quality gate
+        shell: pwsh
+        run: ./scripts/quality-gate.ps1 -Scope Frontend
+
+  # e2e 单列：真浏览器 + 构建产物，稳定性与耗时都和单测不同量级，混在一起会把
+  # "测试挂了"和"浏览器没起来"混成一个红叉。
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Run frontend e2e gate
+        shell: pwsh
+        run: ./scripts/quality-gate.ps1 -Scope E2E
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
           if-no-files-found: ignore

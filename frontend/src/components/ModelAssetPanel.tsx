@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message } from 'antd';
 import { apiFetch } from '../apiClient';
 import { responseErrorMessage } from '../apiErrors';
 import { modelAssets } from '../endpoints';

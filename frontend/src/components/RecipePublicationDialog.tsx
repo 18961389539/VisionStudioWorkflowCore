@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Modal, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Checkbox, Modal, Space, Spin, Tag, Typography } from 'antd';
 import type { JobDescriptor, JobVersionDiff } from '../types';
-import { responseErrorMessage } from '../apiErrors';
+import { apiErrorMessage, readErrorPayload, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
 import { jobs } from '../endpoints';
 
 export type PublicationTarget = { jobId: string; name: string; version: number; rollback: boolean };
+/** 后端发布门禁返回的未成熟节点（2026-11-12）：字段与 NodeMaturityGate.Finding 对齐。 */
+type MaturityFinding = { nodeId: string; nodeType: string; nodeName: string; maturity: string; reason: string };
+type MaturityBlocked = { message: string; findings: MaturityFinding[] };
+const MATURITY_CODE = 'NODE_MATURITY_ACK_REQUIRED';
 type Review = { job: JobDescriptor; diff?: JobVersionDiff; blockedReason?: string };
 type Props = { target: PublicationTarget; onCancel: () => void; onPublished: (job: JobDescriptor) => void };
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -16,6 +20,28 @@ async function readJson<T>(url: string, signal: AbortSignal): Promise<T> {
   return response.json();
 }
 
+/**
+ * 识别发布门禁响应。必须逐字段校验：把任意 409 当成"缺确认"会放行真正该拦下的发布，
+ * 反过来把门禁当成"条件已变化"则会让工程师陷在重新核对的循环里。
+ */
+function isMaturityBlocked(payload: unknown): payload is { message: string; findings: MaturityFinding[] } {
+  if (payload == null || typeof payload !== 'object') return false;
+  const candidate = payload as { code?: unknown; message?: unknown; findings?: unknown };
+  if (candidate.code !== MATURITY_CODE || typeof candidate.message !== 'string' || !Array.isArray(candidate.findings)) return false;
+  if (candidate.findings.length === 0) return false;
+  return candidate.findings.every((item) => item != null && typeof item === 'object'
+    && typeof (item as MaturityFinding).nodeId === 'string'
+    && typeof (item as MaturityFinding).nodeType === 'string'
+    && typeof (item as MaturityFinding).nodeName === 'string'
+    && typeof (item as MaturityFinding).maturity === 'string'
+    && typeof (item as MaturityFinding).reason === 'string');
+}
+
+function maturityMessage(payload: { message?: unknown }): string {
+  return typeof payload.message === 'string' && payload.message.trim() ? payload.message.trim()
+    : '该版本包含未达到 Stable 的节点，确认后才会发布。';
+}
+
 /** 发布对象、对比基线和并发修订一起核对；失败留在对话框内，写入不自动重试。 */
 export default function RecipePublicationDialog({ target, onCancel, onPublished }: Props) {
   const [review, setReview] = useState<Review>();
@@ -23,6 +49,9 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string>();
   const [requiresReload, setRequiresReload] = useState(false);
+  // 发布门禁：含 Preview/Experimental 节点的版本需要再点一次（勾选后确认）。
+  const [maturity, setMaturity] = useState<MaturityBlocked>();
+  const [maturityAcknowledged, setMaturityAcknowledged] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const publishingRef = useRef(false);
   const generationRef = useRef(0);
@@ -86,12 +115,23 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
     // 保留后端原始时间精度；不能转为 Date 再序列化，否则会丢失亚毫秒修订。
     const url = target.rollback
       ? jobs.rollbackVersion(target.jobId, String(target.version), review.job.updatedAt)
-      : jobs.publishVersion(target.jobId, String(target.version), review.job.updatedAt);
+      : jobs.publishVersion(target.jobId, String(target.version), review.job.updatedAt, Boolean(maturity) && maturityAcknowledged);
     try {
       const response = await apiFetch(url, { method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       if (!current()) return;
       if (!response.ok) {
-        const detail = await responseErrorMessage(response, `${action}失败（HTTP ${response.status}）`);
+        const payload = await readErrorPayload(response);
+        // 发布门禁不是"条件已变化"：目标本身没错，缺的是一次显式确认。把它做成可继续的一步，
+        // 而不是让工程师在"重新核对"里循环——那样只会训练出"看到红字就再点一次"的习惯。
+        if (response.status === 409 && isMaturityBlocked(payload)) {
+          if (current()) {
+            setMaturity({ message: maturityMessage(payload), findings: payload.findings });
+            setMaturityAcknowledged(false);
+            setError(undefined);
+          }
+          return;
+        }
+        const detail = apiErrorMessage(payload, `${action}失败（HTTP ${response.status}）`);
         if (current()) {
           setError(response.status === 409 ? `配方或发布条件已变化，请重新核对后再确认。${detail}` : detail);
           setRequiresReload(response.status === 409 || response.status >= 500);
@@ -125,7 +165,7 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
       <Button disabled={publishing} onClick={cancel}>取消</Button>
       <Button disabled={publishing || loading} onClick={() => { if (!publishingRef.current) setAttempt((value) => value + 1); }}>重新核对</Button>
       <Button type="primary" danger={target.rollback} loading={publishing}
-        disabled={loading || !review || Boolean(review.blockedReason) || requiresReload} onClick={() => void confirm()}>确认{action}</Button>
+        disabled={loading || !review || Boolean(review.blockedReason) || requiresReload || (Boolean(maturity) && !maturityAcknowledged)} onClick={() => void confirm()}>确认{action}</Button>
     </Space>}>
     <Typography.Paragraph>配方：{target.jobId} · 目标版本 V{target.version}</Typography.Paragraph>
     {loading && <Space><Spin size="small" />正在核对生效版本、验证结论和变更…</Space>}
@@ -133,6 +173,20 @@ export default function RecipePublicationDialog({ target, onCancel, onPublished 
     {review && <>
       <Typography.Paragraph>验证结论：{version?.validation?.accepted ? '通过' : '未通过'}{typeof accuracy === 'number' ? ` · 准确率 ${(accuracy * 100).toFixed(2)}%` : ''}</Typography.Paragraph>
       {review.blockedReason && <Alert type="warning" showIcon title={review.blockedReason} />}
+      {maturity && <div className="publication-maturity-gate" style={{ margin: '12px 0' }}>
+        <Alert type="warning" showIcon title={maturity.message}
+          description={<ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {maturity.findings.map((finding) => <li key={finding.nodeId} style={{ marginBottom: 4 }}>
+              <Tag color={finding.maturity === 'Experimental' ? 'red' : 'gold'}>{finding.maturity === 'Experimental' ? '实验' : '预览'}</Tag>
+              <Typography.Text strong>{finding.nodeName}</Typography.Text>
+              <Typography.Text type="secondary">（{finding.nodeType} / {finding.nodeId}）</Typography.Text>
+              <div><Typography.Text type="secondary">{finding.reason}</Typography.Text></div>
+            </li>)}
+          </ul>} />
+        <Checkbox checked={maturityAcknowledged} onChange={(event) => setMaturityAcknowledged(event.target.checked)} style={{ marginTop: 8 }}>
+          我已了解上述节点尚未达到 Stable，确认由本配方承担现场验证责任
+        </Checkbox>
+      </div>}
       <Typography.Paragraph strong>{review.job.publishedVersion == null ? '首次发布：当前没有生效版本可比较。' : `当前生效 V${review.job.publishedVersion} → 目标 V${target.version}`}</Typography.Paragraph>
       {review.diff && <pre className="job-diff-pre">{review.diff.changes.length
         ? review.diff.changes.map((change) => `${change.kind}  ${change.path}\n  ${change.before ?? '∅'} → ${change.after ?? '∅'}`).join('\n\n')

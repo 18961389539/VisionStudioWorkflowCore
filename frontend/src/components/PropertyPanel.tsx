@@ -258,9 +258,9 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
           disabled={disabled}
           value={parameters[parameter.name] === null || parameter.optional && parameters[parameter.name] === undefined && parameter.defaultValue == null
             ? null : Number(parameters[parameter.name] ?? parameter.defaultValue ?? 0)}
-          min={parameter.min}
-          max={parameter.max}
-          step={parameter.step}
+          min={parameter.min ?? undefined}
+          max={parameter.max ?? undefined}
+          step={parameter.step ?? undefined}
           onChange={(value) => onChange(parameter.name, value)}
         />
       );
@@ -283,7 +283,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
     if (parameter.type === 'textarea') {
       const value = String(parameters[parameter.name] ?? parameter.defaultValue ?? '');
       if (isJsonParameter(catalogItem.type, parameter.name))
-        return <JsonTextarea label={parameter.label} value={value} description={parameter.description}
+        return <JsonTextarea label={parameter.label} value={value} description={parameter.description ?? undefined}
           example={jsonExampleFor(catalogItem.type, parameter.name)}
           status={status} disabled={disabled} onChange={(next) => onChange(parameter.name, next)} />;
       return (
@@ -320,7 +320,7 @@ export default function PropertyPanel({ node, catalogItem, onChange, disabled = 
         filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
           || String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())}
         value={String(parameters[parameter.name] ?? parameter.defaultValue ?? '')}
-        options={parameter.options}
+        options={parameter.options ?? undefined}
         onChange={(value) => {
           onChange(parameter.name, value);
           if (parameter.variantParameter !== parameter.name) return;

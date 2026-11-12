@@ -3,7 +3,9 @@
  * 这些函数不依赖 React 组件树，只操作图数据（nodes/edges）、目录项与类型。
  */
 import type { Edge, Node } from '@xyflow/react';
-import type { NodeCatalogItem, NodeFrameRule, ParameterDescriptor, VisionRoi, VisionValueSnapshot } from '../types';
+import type {
+  NodeCatalogItem, NodeFrameRule, ParameterDescriptor, VisionRoi, VisionRoiBrushStroke, VisionValueSnapshot
+} from '../types';
 import type { MeasurementGeometry } from './ImageViewer';
 import type { NodeParameters } from '../nodeConfigurationState';
 import { catalogItemChangesImageFrame, declaredFrameChange, legacyFrameChangingNodeTypes } from '../frameSemantics';
@@ -70,7 +72,7 @@ export function connectedRoiGeometry(value: unknown): VisionRoi | undefined {
   }
   if (roi.type === 'Brush' && Array.isArray(roi.strokes) && roi.strokes.length > 0 && roi.strokes.length <= 100_000) {
     let totalPoints = 0;
-    const strokes = [];
+    const strokes: VisionRoiBrushStroke[] = [];
     for (const value of roi.strokes) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
       const stroke = value as Record<string, unknown>;

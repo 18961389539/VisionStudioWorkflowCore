@@ -14,7 +14,7 @@ vi.mock('../components/ImageViewer', async importOriginal => {
     <output data-testid="geometry-editable">{String(props.measurementGeometryEditable)}</output>
     {props.caliperDiagnosticSelection && <div data-testid="diagnostic-geometry" data-center-x={props.caliperDiagnosticSelection.center.x}
       data-center-y={props.caliperDiagnosticSelection.center.y} data-index={props.caliperDiagnosticSelection.index}>
-      <button onClick={() => props.caliperDiagnosticSelection!.onSelect(1)}>选择第二条诊断卡尺</button>
+      <button onClick={() => props.caliperDiagnosticSelection?.onSelect?.(1)}>选择第二条诊断卡尺</button>
     </div>}
   </div> };
 });

@@ -4,7 +4,7 @@ import type { RobotCommandTraceRecord, RobotDescriptor, RobotRuntimeSettings } f
 import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
-import { apiUrl, robots as robotEndpoints, robotTraces } from '../endpoints';
+import { robots as robotEndpoints, robotTraces } from '../endpoints';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const ROBOT_POLL_TIMEOUT_MS = 5000;
@@ -194,6 +194,8 @@ export default function RobotPanel({ open, onClose }: Props) {
             columns={[
               { title: 'ID', dataIndex: 'id', width: 125 },
               { title: '驱动', dataIndex: 'driver', width: 110 },
+              // 虚拟适配器必须一眼可辨：模拟器命令全部成功，产线上却没有任何动作。
+              { title: '类型', width: 64, render: (_: unknown, row) => row.simulated ? <Tag color="orange">虚拟</Tag> : <Tag color="green">实机</Tag> },
               { title: '连接状态', width: 95, render: (_: unknown, row) => <Tag color={connectionColor[row.connectionState]}>{localizeStatus(row.connectionState)}</Tag> },
               { title: '状态', width: 105, render: (_: unknown, row) => <Tag color={handshakeColor[row.handshakeState]}>{localizeStatus(row.handshakeState)}</Tag> },
               { title: '指令编号', dataIndex: 'lastCommandId', width: 55 },

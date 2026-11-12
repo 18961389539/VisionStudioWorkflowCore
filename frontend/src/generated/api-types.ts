@@ -7917,6 +7917,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: {
+                    acknowledgeMaturityNodes?: boolean;
                     expectedUpdatedAt?: string;
                 };
                 header?: never;
@@ -7935,6 +7936,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["JobDescriptor"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AcknowledgementRequired"];
                     };
                 };
             };
@@ -11198,6 +11208,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcknowledgementRequired: {
+            code: string;
+            message: string;
+            findings: components["schemas"]["Finding"][];
+        };
         AddValidationDatasetItemsRequest: {
             items: components["schemas"]["ValidationDatasetItemInput"][];
         };
@@ -13016,6 +13031,13 @@ export interface components {
             name?: null | string;
             source?: null | string;
             path?: null | string;
+        };
+        Finding: {
+            nodeId: string;
+            nodeType: string;
+            nodeName: string;
+            maturity: string;
+            reason: string;
         };
         FrameResolveRequest: {
             transforms: components["schemas"]["FrameTransformDefinition"][];
@@ -15079,6 +15101,8 @@ export interface components {
             capabilities: components["schemas"]["RobotCapabilities"];
             /** Format: date-time */
             updatedAt: string;
+            /** @default false */
+            simulated: boolean;
         };
         RobotHandshakeSignals: {
             /** Format: date-time */

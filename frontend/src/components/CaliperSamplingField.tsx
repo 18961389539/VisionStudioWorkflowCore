@@ -32,9 +32,9 @@ export default function CaliperSamplingField({ parameter, rawValue, disabled, on
         onClick={() => onChange({ [parameter.name]: parameter.defaultValue })}>↺</Button>
       <InputNumber size="small" aria-label={parameter.label} aria-describedby={hintId} aria-invalid={Boolean(issue)}
         status={issue ? 'error' : undefined} disabled={disabled} min={minimum} max={maximum}
-        step={parameter.step} value={numeric} onChange={change} />
+        step={parameter.step ?? undefined} value={numeric} onChange={change} />
     </div>
-    <Slider min={minimum} max={maximum} step={parameter.step} disabled={disabled}
+    <Slider min={minimum} max={maximum} step={parameter.step ?? undefined} disabled={disabled}
       ariaLabelForHandle={`${parameter.label}滑动调节`} ariaValueTextFormatterForHandle={next => `${next} ${parameter.unit ?? ''}`}
       value={projectionWidth ?? sliderValue} tooltip={{ formatter: next => `${next} ${parameter.unit ?? ''}` }} onChange={change} />
     <span id={hintId} className={'caliper-circle-sampling-hint' + (issue ? ' has-error' : '')}>

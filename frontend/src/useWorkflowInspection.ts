@@ -5,7 +5,7 @@ import { serverIssueFromMessage, validateWorkflow, type WorkflowIssue } from './
 import { apiErrorMessage, responseErrorMessage } from './apiErrors';
 import { withRequestTimeout } from './requestTimeout';
 import { apiFetch } from './apiClient';
-import { workflows, validation } from './endpoints';
+import { workflows } from './endpoints';
 
 type ValidationState = { status: 'unvalidated' | 'ok' | 'issues'; summary?: string };
 type Params = {

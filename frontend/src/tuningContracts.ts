@@ -1,4 +1,6 @@
-import type { ParameterTuningPreviewResult, ValidationDatasetDetail, ValidationDatasetSummary, ValidationRunRecord } from './types';
+import type {
+  ParameterTuningPreviewResult, ValidationDatasetDetail, ValidationDatasetSummary, ValidationRunRecord
+} from './types';
 import { isRunResult } from './runResult';
 
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -13,11 +15,13 @@ export function isDatasetDetail(value: unknown, id: string): value is Validation
       && ['OK', 'NG'].includes(String(item.expectedDisposition)) && typeof item.replayReady === 'boolean' && typeof item.displayName === 'string');
 }
 export function isValidationRun(value: unknown, id: string): value is ValidationRunRecord {
-  return object(value) && value.datasetId === id && typeof value.runId === 'string' && value.runId.length > 0
-    && ['Running', 'Completed', 'Cancelled', 'Failed'].includes(String(value.status)) && typeof value.workflowHash === 'string'
-    && finite(value.requestedCount) && finite(value.completedCount)
-    && (value.summary == null || (object(value.summary) && ['total', 'completed', 'trueOk', 'trueNg', 'falseOk', 'falseNg', 'errors',
-      'accuracy', 'falseOkRate', 'falseNgRate', 'p50DurationMs', 'p95DurationMs', 'p99DurationMs', 'maxDurationMs'].every((key) => finite(value.summary[key]))));
+  if (!object(value) || value.datasetId !== id || typeof value.runId !== 'string' || value.runId.length === 0
+    || !['Running', 'Completed', 'Cancelled', 'Failed'].includes(String(value.status)) || typeof value.workflowHash !== 'string'
+    || !finite(value.requestedCount) || !finite(value.completedCount)) return false;
+  const summary = value.summary;
+  return summary == null || (object(summary) && ['total', 'completed', 'trueOk', 'trueNg', 'falseOk', 'falseNg', 'errors',
+    'accuracy', 'falseOkRate', 'falseNgRate', 'p50DurationMs', 'p95DurationMs', 'p99DurationMs', 'maxDurationMs']
+    .every((key) => finite(summary[key])));
 }
 export function isTuningPreview(value: unknown, datasetId: string, itemId: string, nodeId: string, fullWorkflow: boolean): value is ParameterTuningPreviewResult {
   if (!object(value) || value.datasetId !== datasetId || value.itemId !== itemId || value.fullWorkflow !== fullWorkflow || !isRunResult(value.replay)) return false;

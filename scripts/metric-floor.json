@@ -1,9 +1,9 @@
 {
   "_comment": "度量下限（棘轮）：只许升不许降。下调必须与本次提交一起改这个文件，并在提交说明里写明删了什么、为什么。由 scripts/check-metric-floor.py 在质量门禁中校验。",
-  "_updated": "2026-10-29",
-  "_note": "本轮上调：Engine 1263→1280（NodeDurationStatistics 10 项 + 计数器键/时间戳/锁 4 项 + 超时上限 3 项）；Api 414→418（保留期回收/旧快照保留/临时文件清理）；frontendTestFiles 91→92。",
+  "_updated": "2026-11-12",
+  "_note": "本轮上调到实测值：此前的 1280/418/92 已分别滞后实际 96/71/9 项——滞后太多的棘轮等于没有棘轮，删掉几十个测试也不会变红。本次后端新增 20 项（ReverseProxy 9 / RobotSimulatorPolicy 4 / NodeMaturityGate 7），前端发布对话框新增 2 个用例（同一文件，故 frontendTestFiles 不变）。今后删测试必须同改本文件并说明原因。",
   "catalogNodes": 242,
-  "backendEngineTestMethods": 1280,
-  "backendApiTestMethods": 418,
-  "frontendTestFiles": 92
+  "backendEngineTestMethods": 1376,
+  "backendApiTestMethods": 489,
+  "frontendTestFiles": 101
 }

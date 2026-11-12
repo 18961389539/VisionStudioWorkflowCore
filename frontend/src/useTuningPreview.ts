@@ -35,7 +35,8 @@ export function useTuningPreview(params: Params) {
 
   const run = async (fullWorkflow: boolean, automatic = false): Promise<boolean> => {
     const context = latest.current;
-    if (!active.current || !context.ready || !context.sample?.replayReady || !context.nodeId) return false;
+    const sample = context.sample;
+    if (!active.current || !context.ready || !sample?.replayReady || !context.nodeId) return false;
     const pending = operation.current;
     if (pending?.key === context.key && pending.fullWorkflow === fullWorkflow && (!pending.automatic || automatic)) return false;
     invalidate();
@@ -47,16 +48,16 @@ export function useTuningPreview(params: Params) {
     try {
       const data: unknown = await withRequestTimeout(controller, 60_000, async () => {
         const response = await apiFetch(apiUrl('tuning/preview'), { method: 'POST', signal: controller.signal,
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: context.sample.datasetId,
-            itemId: context.sample.itemId, workflow: JSON.parse(context.snapshot), targetNodeId: context.nodeId, fullWorkflow }) });
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId: sample.datasetId,
+            itemId: sample.itemId, workflow: JSON.parse(context.snapshot), targetNodeId: context.nodeId, fullWorkflow }) });
         controller.signal.throwIfAborted();
         if (!response.ok) throw new Error(await responseErrorMessage(response, `离线预览失败（HTTP ${response.status}）`));
         return response.json();
       });
       if (!owns() || controller.signal.aborted) return false;
-      if (!isTuningPreview(data, context.sample.datasetId, context.sample.itemId, context.nodeId, fullWorkflow)
-        || data.sourceKind !== context.sample.sourceKind || data.sourceRef !== context.sample.sourceRef
-        || data.expectedDisposition !== context.sample.expectedDisposition
+      if (!isTuningPreview(data, sample.datasetId, sample.itemId, context.nodeId, fullWorkflow)
+        || data.sourceKind !== sample.sourceKind || data.sourceRef !== sample.sourceRef
+        || data.expectedDisposition !== sample.expectedDisposition
         || (data.selectedNodeReport && data.selectedNodeReport.nodeType !== context.workflow.nodes.find((node) => node.id === context.nodeId)?.type)) {
         throw new Error('预览响应与当前样本、节点或运行模式不匹配');
       }

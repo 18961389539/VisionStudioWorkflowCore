@@ -17,7 +17,7 @@ function deferred<T>() {
 
 function mount(baseline: DocumentBaseline = { id: 'A', revision: 'r1' }) {
   const generationRef = { current: 1 };
-  const baselineRef = { current: baseline };
+  const baselineRef: { current: DocumentBaseline } = { current: baseline };
   const onSaved = vi.fn();
   const confirmOverwrite = vi.fn(async () => true);
   const messages = { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() };

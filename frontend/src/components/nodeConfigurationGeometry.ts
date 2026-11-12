@@ -67,7 +67,8 @@ export function geometrySourceImageFrameNodeIds(geometryEdge: Edge | undefined, 
 export function roiSourceFrameNodeIdsForEdge(roiEdge: Edge | undefined, nodes: Node[], edges: Edge[], catalogItems: NodeCatalogItem[]): string[] {
   if (!roiEdge) return [];
   const source = nodes.find((item) => item.id === roiEdge.source);
-  const type = String(source?.data.typeKey ?? '').toLowerCase();
+  if (!source) return [];
+  const type = String(source.data.typeKey ?? '').toLowerCase();
   const sourceCatalog = catalogItems.find((item) => item.type.toLowerCase() === type);
   const output = sourceCatalog?.outputs.find((port) => port.name.toLowerCase() === String(roiEdge.sourceHandle ?? '').toLowerCase());
   if (output?.dataType.toLowerCase() !== 'roi') return [];

@@ -77,7 +77,8 @@ public abstract class SimulatedHandshakeRobotAdapter : IRobot2DAdapter, IHardwar
                 _error,
                 _settings,
                 Capabilities,
-                _updatedAt);
+                _updatedAt,
+                Simulated: true);
         }
     }
 

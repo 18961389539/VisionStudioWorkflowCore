@@ -2,16 +2,11 @@
  * ImageViewer 的纯逻辑工具函数与子组件。
  * 包含：卡尺轮廓 handle 计算、ROI 几何操作、形状渲染子组件。
  */
-import type { Point, ViewState, RoiDragMode, MeasurementDragMode, CaliperDiagnosticSelection, RoiMoveBounds } from './imageViewerTypes';
+import type { Point, ViewState, RoiDragMode, CaliperDiagnosticSelection, RoiMoveBounds } from './imageViewerTypes';
 import type { VisionOverlay, VisionRoi, VisionRoiBrushStroke, OverlayPoint } from '../types';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, InputNumber, Segmented, Select, Space, Switch, Tooltip } from 'antd';
-import { Arrow, Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import { parameterFingerprint, roiConfigurationIssue } from '../nodeConfigurationState';
-import { createPixelBuffer, readPixel } from '../imagePixels';
-import { buildCaliperCircleAngles, circleArcSpan, effectiveSampleWidth, normalizeCaliperAngle, normalizeCaliperCircleArc } from '../caliperCircleSampling';
-import { circleArcThroughThreePoints, circleThroughThreePoints } from '../circleConstruction';
-import type { CaliperSpokeDiagnostic } from '../caliperCircleDiagnostics';
+import { memo, useEffect, useState } from 'react';
+import { Arrow, Circle, Group, Line, Rect, Text } from 'react-konva';
+import { buildCaliperCircleAngles, circleArcSpan, normalizeCaliperAngle } from '../caliperCircleSampling';
 
 export { buildCaliperCircleAngles } from '../caliperCircleSampling';
 

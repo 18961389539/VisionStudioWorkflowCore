@@ -53,7 +53,8 @@ export function useWorkflowChanges(params: Params) {
     const generation = generationRef.current;
     const valid = () => generation === latest.current.generationRef.current && snapshot === latest.current.snapshot && stillValid();
     if (!valid()) return Promise.resolve(false);
-    pendingRef.current && finish(pendingRef.current, false);
+    // 上一笔排队请求作废：显式 if 而非常量短路，便于后续在这里补日志。
+    if (pendingRef.current) finish(pendingRef.current, false);
     return new Promise((resolve) => {
       const value: Pending = { label, run, valid, resolve };
       if (!latest.current.dirty) { resolve(execute(value)); return; }

@@ -95,7 +95,7 @@ describe('调优数据集读取', () => {
     expect(result.current.runs.some((run) => run.runId === 'new')).toBe(true);
   });
 
-  it.each(['list', 'detail', 'runs'])('拒绝 %s 的无效或混属数据，不用错误响应清空其它资源', async (resource) => {
+  it.each(['list', 'detail', 'runs'] as const)('拒绝 %s 的无效或混属数据，不用错误响应清空其它资源', async (resource) => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => resource === 'list' && url === '/api/validation/datasets' ? jsonResponse({})
       : resource === 'detail' && url.endsWith('/A') ? jsonResponse(tuningDataset('B'))
         : resource === 'runs' && url.endsWith('/A/runs') ? jsonResponse([tuningRun('B')]) : handler(url)));
