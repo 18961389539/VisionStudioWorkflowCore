@@ -1,0 +1,65 @@
+version: 2
+
+# 依赖更新（2026-11-12 接入）。
+#
+# 为什么需要它：仓库里 24 个 NuGet 包 + 320 个 npm 包，没有任何自动化的版本/安全信息渠道。
+# 2026-11-12 首次跑 `npm audit` 就发现 vite 8.3.2 带 2 个 high 漏洞、undici 带 1 个——
+# 这些不会让构建失败，只会在某天变成"为什么这台机器能被任意命令执行"。
+#
+# 节奏：每周一次，只开有限个 PR；Microsoft.Extensions.* 与测试栈分组，避免一次刷出十几个 PR。
+# 安全更新（security updates）不受 schedule 限制，由 GitHub 立即开 PR。
+updates:
+  - package-ecosystem: nuget
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    groups:
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+          - "Microsoft.AspNetCore.*"
+      test-stack:
+        patterns:
+          - "xunit*"
+          - "coverlet*"
+          - "Microsoft.NET.Test.Sdk"
+    labels:
+      - dependencies
+      - backend
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    groups:
+      react-stack:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+          - "@vitejs/*"
+      test-stack:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@playwright/*"
+          - "jsdom"
+    labels:
+      - dependencies
+      - frontend
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - ci

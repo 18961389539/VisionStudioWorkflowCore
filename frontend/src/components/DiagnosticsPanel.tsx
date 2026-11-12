@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
 import { Alert, Button, Modal, Segmented, Space, Statistic, Table, Tag, Typography } from 'antd';
-import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary, RunCounterPersistenceStatus } from '../types';
+import type { AssetEventEnvelope, AssetHealthLevel, AssetHealthSnapshot, AssetKind, DiagnosticsSummary, NodeSpanRecord, NodeSpanSnapshot, RunCounterPersistenceStatus } from '../types';
 import { localizeStatus } from '../i18n';
 import { apiFetch } from '../apiClient';
 import { apiUrl } from '../endpoints';
@@ -14,25 +14,51 @@ const levelColor: Record<AssetHealthLevel, string> = {
 };
 const severityColor: Record<string, string> = { Info: 'blue', Warning: 'orange', Error: 'red', Critical: 'magenta' };
 
+/**
+ * 节点 span 快照的形状校验。
+ *
+ * 端点是后加的：老宿主根本没有它（请求会失败，调用处已经兜住）。但"请求成功、body 不是这个形状"
+ * 同样会发生（网关错误页、被中间件包了一层的响应、代理返回的 JSON 壳），而渲染期读
+ * `spans.recent.length` 一抛，整个诊断面板会连带其他区块一起白屏。形状不符即当作"没有这份数据"，
+ * 面板其余部分照常显示。
+ */
+function normalizeNodeSpans(raw: unknown): NodeSpanSnapshot | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as Partial<NodeSpanSnapshot>;
+  if (!Array.isArray(value.recent) || !Array.isArray(value.failures)) return undefined;
+  return {
+    capturedAt: typeof value.capturedAt === 'string' ? value.capturedAt : '',
+    capacity: Number(value.capacity ?? 0),
+    captured: Number(value.captured ?? 0),
+    overwritten: Number(value.overwritten ?? 0),
+    recent: value.recent,
+    failures: value.failures
+  };
+}
+
 export default function DiagnosticsPanel({ open, onClose }: Props) {
   const [assets, setAssets] = useState<AssetHealthSnapshot[]>([]);
   const [events, setEvents] = useState<AssetEventEnvelope[]>([]);
   const [summary, setSummary] = useState<DiagnosticsSummary>();
   const [counters, setCounters] = useState<RunCounterPersistenceStatus>();
+  const [spans, setSpans] = useState<NodeSpanSnapshot>();
   const [filter, setFilter] = useState<Filter>('All');
   const [live, setLive] = useState<'connecting' | 'connected' | 'reconnecting' | 'offline'>('offline');
   const [error, setError] = useState<string>();
 
   const refresh = useCallback(async () => {
     try {
-      const [a, e, s, c] = await Promise.all([
+      const [a, e, s, c, n] = await Promise.all([
         apiFetch(apiUrl('diagnostics/assets')), apiFetch(apiUrl('diagnostics/events?take=250')), apiFetch(apiUrl('diagnostics/summary')),
         // 计数器落盘状态是附加信息：单独兜住失败，不让它把整个诊断面板判成"不可用"。
-        apiFetch(apiUrl('diagnostics/run-counters')).catch(() => undefined)
+        apiFetch(apiUrl('diagnostics/run-counters')).catch(() => undefined),
+        // 单次执行快照同理：老版本宿主没有这个端点，面板其余部分必须照常可用。
+        apiFetch(apiUrl('diagnostics/node-spans?recent=64')).catch(() => undefined)
       ]);
       if (!a.ok || !e.ok || !s.ok) throw new Error('Diagnostics API unavailable');
       setAssets(await a.json()); setEvents(await e.json()); setSummary(await s.json()); setError(undefined);
       setCounters(c && c.ok ? await c.json() : undefined);
+      setSpans(n && n.ok ? normalizeNodeSpans(await n.json()) : undefined);
     } catch (ex) { setError(ex instanceof Error ? ex.message : 'Diagnostics API unavailable'); }
   }, []);
 
@@ -134,5 +160,37 @@ export default function DiagnosticsPanel({ open, onClose }: Props) {
           ]} />
       </section>
     </div>
+
+    {/* 单次执行事实（2026-11-12）：分位数（node-durations）回答"平时多慢"，
+        这里回答"刚才那一次为什么慢"。数据来自引擎侧进程内环形缓冲，重启清零。 */}
+    {spans && (
+      <section className="diagnostics-spans">
+        <Typography.Title level={5}>
+          最近节点执行
+          <Typography.Text type="secondary" className="diagnostics-spans-note">
+            显示 {spans.recent.length} 条 / 本次进程共捕获 {spans.captured} 条
+            {spans.overwritten > 0 ? `；已回卷 ${spans.overwritten} 条，以下不是全量` : ''}
+          </Typography.Text>
+        </Typography.Title>
+        <Table<NodeSpanRecord> size="small" pagination={false} rowKey={x => String(x.sequence)} dataSource={spans.recent}
+          scroll={{ y: 220 }}
+          columns={[
+            { title: '时间', width: 96, render: (_, x) => new Date(x.at).toLocaleTimeString('zh-CN', { hour12: false }) },
+            { title: '节点', width: 210, render: (_, x) => <><b>{x.nodeType}</b><div className="muted-code">{x.nodeId}</div></> },
+            { title: '运行 / 作用域', width: 160, ellipsis: true, render: (_, x) => <span className="muted-code">{x.runId ?? '—'}{x.scope ? ` / ${x.scope}` : ''}</span> },
+            {
+              title: '耗时', width: 96, align: 'right',
+              render: (_, x) => <span className={x.timedOut ? 'diagnostic-error' : undefined}>{x.durationMs.toFixed(1)} ms</span>
+            },
+            {
+              title: '状态', width: 96,
+              render: (_, x) => x.timedOut
+                ? <Tag color="orange">超时</Tag>
+                : x.status === 'Error' ? <Tag color="red">失败</Tag> : <Tag color="green">成功</Tag>
+            },
+            { title: '错误', dataIndex: 'error', ellipsis: true, render: (v?: string | null) => v ? <span className="diagnostic-error">{v}</span> : '—' }
+          ]} />
+      </section>
+    )}
   </Modal>;
 }

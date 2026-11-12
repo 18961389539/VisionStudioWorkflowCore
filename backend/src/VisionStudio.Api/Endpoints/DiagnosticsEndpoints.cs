@@ -45,6 +45,14 @@ public static class DiagnosticsEndpoints
             .Produces<IReadOnlyList<NodeDurationStatistic>>()
             .RequireOperator("diagnostics.node-durations", "diagnostics");
 
+        // 单次执行事实（2026-11-12）：分位数回答"这个节点平时多慢"，回答不了"刚才那一次为什么慢"。
+        // 数据来自 NodeSpanBuffer（EngineTelemetry 的进程内消费者），重启清零，Overwritten>0 表示
+        // Recent 只是环形缓冲里剩下的部分，不是全量。
+        app.MapGet("/api/diagnostics/node-spans", (int? recent, NodeSpanBuffer spans) =>
+            Results.Ok(spans.Snapshot(Math.Clamp(recent ?? 64, 0, 512))))
+            .Produces<NodeSpanSnapshot>()
+            .RequireOperator("diagnostics.node-spans", "diagnostics");
+
         // 一键诊断包（2026-11-12）：现场排障不再要求"把整个数据根拷回来"。管理员专属——
         // 包含审计尾部与日志尾部，里面会出现用户名、路径和设备地址。
         app.MapGet("/api/diagnostics/bundle", async (DiagnosticBundleService bundle, CancellationToken ct) =>

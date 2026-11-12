@@ -37,7 +37,24 @@
 同理，span 用 `using var` 绑定在方法作用域上，`finally` 里先补耗时标签再退出——
 超时和异常路径都会留下带状态与耗时的 span，只记录成功的埋点等于只测了健康路径。
 
-## 怎么接
+## 进程内消费者（2026-11-12，默认开启）
+
+只埋点没有消费者时 `StartActivity` 返回 null，这一层在产线上恒为空。宿主因此内置了
+`NodeSpanBuffer`（`backend/src/VisionStudio.Engine/Diagnostics/NodeSpanBuffer.cs`）：
+
+- 构造时向 `EngineTelemetry.ActivitySource` 注册 `ActivityListener`，`Dispose` 时摘除；
+- 环形缓冲 1024 条（约 200 KB），记录 `nodeId/nodeType/runId/scope/durationMs/timedOut/status/error`；
+- **不落盘**：重启清零，避免上一批工艺的耗时混进本次排障；
+- 两个出口：`GET /api/diagnostics/node-spans?recent=64`（Operator）与诊断包里的
+  `diagnostics/node-spans.json`（Administrator）。
+
+读的时候必须看 `overwritten`：大于 0 表示缓冲已回卷，`recent` 只是尾部，不是全量。分位数仍归
+`NodeDurationStatistics`（`/api/diagnostics/node-durations`）——两者分工是"平时多慢"与"刚才那一次"。
+
+测试隔离：`NodeSpanBuffer(capacity, source)` 的第二个参数允许传入私有 `ActivitySource`，
+断言不会与并行测试共用静态 Source 而互相污染。
+
+## 外部导出（可选）
 
 进程内注册监听（自测、临时排障）：
 

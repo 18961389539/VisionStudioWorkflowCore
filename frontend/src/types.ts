@@ -15,10 +15,7 @@ export type PortDescriptor = {
   label?: string;
 };
 
-export type ParameterOption = {
-  label: string;
-  value: string;
-};
+export type ParameterOption = ContractSchema<'ParameterOption'>;
 
 export type ParameterDescriptor = {
   name: string;
@@ -83,13 +80,7 @@ export type NodeFrameRule = {
 export type NodeOutputFrameSource = ContractSchema<'NodeOutputFrameSource'>;
 
 /** 非图像输出（ROI/几何/检测框）的帧来源声明。 */
-export type NodeOutputFrameRule = {
-  source: NodeOutputFrameSource;
-  outputPort?: string | null;
-  inputPort?: string | null;
-  whenParameter?: string | null;
-  whenValues?: string[] | null;
-};
+export type NodeOutputFrameRule = ContractSchema<'NodeOutputFrameRule'>;
 
 /** 只输出 transform 的节点的帧声明（模板→图像、组合、求逆）。 */
 export type NodeTransformFrameDeclaration = {
@@ -183,13 +174,7 @@ export type VisionRoiBrushStroke = {
   points: OverlayPoint[];
 };
 
-export type ControlFlowDecision = {
-  nodeId: string;
-  nodeType: string;
-  activeBranches: string[];
-  selectedBranch?: string | null;
-  condition?: boolean | null;
-};
+export type ControlFlowDecision = ContractSchema<'ControlFlowDecision'>;
 
 export type RunResult = {
   runId: string;
@@ -1251,25 +1236,9 @@ export type DeviceConnectionState = ContractSchema<'DeviceConnectionState'>;
 export type DeviceTagQuality = ContractSchema<'DeviceTagQuality'>;
 export type DeviceTagDataType = ContractSchema<'DeviceTagDataType'>;
 
-export type DeviceTagDefinition = {
-  id: string;
-  name: string;
-  address: string;
-  dataType: DeviceTagDataType;
-  writable: boolean;
-  unit?: string | null;
-  description?: string | null;
-};
+export type DeviceTagDefinition = ContractSchema<'DeviceTagDefinition'>;
 
-export type DeviceTagSample = {
-  deviceId: string;
-  tagId: string;
-  dataType: DeviceTagDataType;
-  value: unknown;
-  quality: DeviceTagQuality;
-  timestamp: string;
-  error?: string | null;
-};
+export type DeviceTagSample = ContractSchema<'DeviceTagSample'>;
 
 export type DeviceRuntimeSettings = {
   pollIntervalMs: number;
@@ -1294,13 +1263,7 @@ export type DeviceRuntimeStats = {
   runtimeError?: string | null;
 };
 
-export type DeviceDriverCapabilities = {
-  supportsBatchRead: boolean;
-  supportsBatchWrite: boolean;
-  supportsDiagnostics: boolean;
-  realIo: boolean;
-  supportsString: boolean;
-};
+export type DeviceDriverCapabilities = ContractSchema<'DeviceDriverCapabilities'>;
 
 export type DeviceProtocolDiagnostics = {
   transactions: number;
@@ -1386,7 +1349,7 @@ export type ProductionRuntimeStatus = {
   synchronizationGuard?: ProductionSynchronizationGuardSnapshot | null;
 };
 
-export type ProductionPtpGuardIssue = { code: string; groupId: string; message: string };
+export type ProductionPtpGuardIssue = ContractSchema<'ProductionPtpGuardIssue'>;
 export type ProductionPtpGuardGroupStatus = {
   groupId: string; groupName: string; requiredByScheduledCapture: boolean; requiredByGroupPolicy: boolean;
   liveReady: boolean; windowRuns: number; evidenceRuns: number; ptpReadyRate?: number | null; p95MaxAbsOffsetNs?: number | null;
@@ -1400,7 +1363,7 @@ export type ProductionSynchronizationTransportWindow = {
   evidenceMode: string; nativeCameras: number; nativeEvidenceRuns: number; receivedFrames: number; lostFrames: number; failedFrames: number; bufferUnderruns: number;
   nativeFrameLossRate?: number | null; lostPackets: number; failedPackets: number; resendRequests: number; resentPackets: number; resynchronizations: number; averageThroughputMbps?: number | null;
 };
-export type ProductionSynchronizationGuardIssue = { code: string; groupId: string; message: string; liveRecoverable: boolean };
+export type ProductionSynchronizationGuardIssue = ContractSchema<'ProductionSynchronizationGuardIssue'>;
 export type ProductionSynchronizationGuardGroupStatus = {
   groupId: string; groupName: string; liveReady: boolean; windowRuns: number; evidenceRuns: number; completedRuns: number; failedRuns: number; cancelledRuns: number;
   completionRate: number; frameTimeoutRuns: number; frameTimeoutRate: number; actionCommandFailureRuns: number; actionAckShortfallRuns: number; skewViolationRuns: number;
@@ -1410,23 +1373,11 @@ export type ProductionSynchronizationGuardSnapshot = {
   enabled: boolean; healthy: boolean; evaluatedAt: string; groups: ProductionSynchronizationGuardGroupStatus[]; issues: ProductionSynchronizationGuardIssue[]; summary?: string | null; liveRecoverableOnly?: boolean;
 };
 
-export type AlarmRecord = {
-  id: string;
-  code: string;
-  severity: 'Info' | 'Warning' | 'Error' | 'Critical';
-  source: string;
-  message: string;
-  active: boolean;
-  acknowledged: boolean;
-  raisedAt: string;
-  recoveredAt?: string | null;
-  acknowledgedAt?: string | null;
-  runId?: string | null;
-};
+export type AlarmRecord = ContractSchema<'AlarmRecord'>;
 
-export type AssetKind = 'Camera' | 'Device' | 'Robot';
-export type AssetHealthLevel = 'Unknown' | 'Healthy' | 'Degraded' | 'Faulted' | 'Offline';
-export type AssetEventSeverity = 'Info' | 'Warning' | 'Error' | 'Critical';
+export type AssetKind = ContractSchema<'AssetKind'>;
+export type AssetHealthLevel = ContractSchema<'AssetHealthLevel'>;
+export type AssetEventSeverity = ContractSchema<'AssetEventSeverity'>;
 
 export type AssetHealthSnapshot = {
   kind: AssetKind;
@@ -1443,20 +1394,7 @@ export type AssetHealthSnapshot = {
   key?: string | null;
 };
 
-export type AssetEventEnvelope = {
-  eventId: string;
-  timestamp: string;
-  kind: AssetKind;
-  assetId: string;
-  assetName: string;
-  type: string;
-  severity: AssetEventSeverity;
-  level: AssetHealthLevel;
-  state: string;
-  message: string;
-  previousState?: string | null;
-  metadata?: Record<string, string> | null;
-};
+export type AssetEventEnvelope = ContractSchema<'AssetEventEnvelope'>;
 
 export type DiagnosticsSummary = {
   total: number;
@@ -1517,21 +1455,9 @@ export type MediaItemDescriptor = {
 };
 
 
-export type HardwareProvenanceData = {
-  manufacturer?: string | null;
-  productName?: string | null;
-  model?: string | null;
-  serialNumber?: string | null;
-  hardwareRevision?: string | null;
-  firmwareVersion?: string | null;
-  softwareVersion?: string | null;
-  controllerVersion?: string | null;
-  programName?: string | null;
-  programHash?: string | null;
-  attributes?: Record<string, string> | null;
-};
+export type HardwareProvenanceData = ContractSchema<'HardwareProvenanceData'>;
 
-export type HardwareProvenanceDeclaration = HardwareProvenanceData;
+export type HardwareProvenanceDeclaration = ContractSchema<'HardwareProvenanceDeclaration'>;
 
 export type HardwareProvenanceSnapshot = {
   kind: 'camera' | 'device' | 'robot';
@@ -1550,18 +1476,7 @@ export type HardwareProvenanceSnapshot = {
   liveProbeError?: string | null;
 };
 
-export type CameraCommissioningCapabilities = {
-  featureBrowser: boolean;
-  gigENetworkTuning: boolean;
-  triggerDelay: boolean;
-  lineDebouncer: boolean;
-  strobeOutput: boolean;
-  ptp: boolean;
-  actionCommand: boolean;
-  inputLines?: string[] | null;
-  outputLines?: string[] | null;
-  outputSources?: string[] | null;
-};
+export type CameraCommissioningCapabilities = ContractSchema<'CameraCommissioningCapabilities'>;
 
 export type CameraCommissioningProfile = {
   schemaVersion: number;
@@ -1622,7 +1537,7 @@ export type CameraFeatureProfileRecord = {
   updatedAt: string;
 };
 
-export type CameraPtpClockState = 'Unsupported' | 'Disabled' | 'Initializing' | 'Listening' | 'Master' | 'Slave' | 'Locked' | 'Faulted' | 'Unknown';
+export type CameraPtpClockState = ContractSchema<'CameraPtpClockState'>;
 export type CameraTimeSynchronizationStatus = {
   cameraId: string;
   driver: string;
@@ -1900,4 +1815,36 @@ export type InvestigationTrendDashboard = {
   evidenceOccurrences: number;
   timeline: InvestigationTrendPoint[];
   topSignatures: InvestigationSignatureTrend[];
+};
+
+/**
+ * 节点级 span 的单次记录（2026-11-12）。
+ * 来源 `diagnostics/node-spans`，与 `EngineTelemetry` 的标签口径一一对应：
+ * `nodeId`/`nodeType` 对齐画布节点，`runId`/`scope` 用于串链，`durationMs` 与
+ * `vision.node.duration_ms` 同值。`sequence` 是进程内自增序号，环形覆盖后仍可判先后。
+ */
+export type NodeSpanRecord = {
+  sequence: number;
+  at: string;
+  nodeId: string;
+  nodeType: string;
+  runId?: string | null;
+  scope?: string | null;
+  durationMs: number;
+  timedOut: boolean;
+  status: string;
+  error?: string | null;
+};
+
+/**
+ * 最近执行快照。`overwritten > 0` 表示缓冲已回卷，`recent` 只是尾部而不是全量——
+ * 展示时必须让这一点可见，否则会把"最近 64 条"误读成"全部都很慢"。
+ */
+export type NodeSpanSnapshot = {
+  capturedAt: string;
+  capacity: number;
+  captured: number;
+  overwritten: number;
+  recent: NodeSpanRecord[];
+  failures: NodeSpanRecord[];
 };

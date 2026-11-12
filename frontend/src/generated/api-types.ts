@@ -401,6 +401,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/security/users/{id}/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SecurityUserDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/audit": {
         parameters: {
             query?: never;
@@ -1563,6 +1600,76 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["NodeDurationStatistic"][];
                     };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/node-spans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    recent?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NodeSpanSnapshot"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
             };
         };
@@ -14120,6 +14227,33 @@ export interface components {
              * @default 0
              */
             endOffsetMs: number | string;
+        };
+        NodeSpanRecord: {
+            /** Format: int64 */
+            sequence: number | string;
+            /** Format: date-time */
+            at: string;
+            nodeId: string;
+            nodeType: string;
+            runId: null | string;
+            scope: null | string;
+            /** Format: double */
+            durationMs: number | string;
+            timedOut: boolean;
+            status: string;
+            error: null | string;
+        };
+        NodeSpanSnapshot: {
+            /** Format: date-time */
+            capturedAt: string;
+            /** Format: int32 */
+            capacity: number | string;
+            /** Format: int64 */
+            captured: number | string;
+            /** Format: int64 */
+            overwritten: number | string;
+            recent: components["schemas"]["NodeSpanRecord"][];
+            failures: components["schemas"]["NodeSpanRecord"][];
         };
         NodeTimelineObservation: {
             runId: string;

@@ -280,6 +280,8 @@ export type Parity_RobotCommandTraceEvent = BackendFitsFrontend<Frontend.RobotCo
 export type Parity_RuntimeDependencyDrift = BackendFitsFrontend<Frontend.RuntimeDependencyDrift, Normalize<Schema<'RuntimeDependencyDrift'>>>;
 export type Parity_VisionTransform2D = BackendFitsFrontend<Frontend.VisionTransform2D, Normalize<Schema<'VisionTransform2D'>>>;
 export type Parity_WorkflowModulePort = BackendFitsFrontend<Frontend.WorkflowModulePort, Normalize<Schema<'WorkflowModulePort'>>>;
+export type Parity_NodeSpanRecord = BackendFitsFrontend<Frontend.NodeSpanRecord, Normalize<Schema<'NodeSpanRecord'>>>;
+export type Parity_NodeSpanSnapshot = BackendFitsFrontend<Frontend.NodeSpanSnapshot, Normalize<Schema<'NodeSpanSnapshot'>>>;
 
 /**
  * 请求方向（2026-11-12）：上面的 170 条都是**响应方向**（后端 DTO 能喂给前端类型）。

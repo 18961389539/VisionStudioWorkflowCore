@@ -5,6 +5,7 @@ import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
 import { apiUrl, devices as deviceEndpoints } from '../endpoints';
+import { useMonitorSnapshot } from '../useMonitorStream';
 
 type Props = { open: boolean; onClose: () => void };
 type WriteForm = { tagId: string; value: string };
@@ -18,9 +19,12 @@ const connectionColor: Record<string, string> = {
 };
 const qualityColor: Record<string, string> = { Good: 'green', Uncertain: 'gold', Bad: 'red', Disconnected: 'default' };
 
-// Q11：轮询节拍、单请求超时与数据 TTL（500ms 轮询的 6 倍）。超过 TTL 没有新的成功刷新即标记陈旧。
+// Q11：单请求超时与数据 TTL（原 500 ms 轮询的 6 倍）。超过 TTL 没有新的成功刷新即标记陈旧。
 const DEVICE_POLL_TIMEOUT_MS = 5000;
 const DEVICE_STALE_TTL_MS = 3000;
+// 2026-11-12：变化由服务端推送触发，定时器退回"断线兜底"角色；陈旧判定另有独立节拍（见下方 effect）。
+const DEVICE_POLL_FALLBACK_MS = 10_000;
+const DEVICE_STALE_CHECK_MS = 500;
 
 const modbusTags: DeviceTagDefinition[] = [
   { id: 'ready', name: 'PLC Ready', address: 'C:0', dataType: 'Boolean', writable: false },
@@ -57,6 +61,7 @@ const displayValue = (value: unknown) => {
 };
 
 export default function DevicePanel({ open, onClose }: Props) {
+  const monitorSnapshot = useMonitorSnapshot(open);
   const [devices, setDevices] = useState<DeviceDescriptor[]>([]);
   // F11：最近一次成功刷新的时间与陈旧标识——静默轮询失败不能只是"保留旧数据"而不留痕迹。
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
@@ -81,6 +86,8 @@ export default function DevicePanel({ open, onClose }: Props) {
   const refreshAbort = useRef<AbortController | null>(null);
   const lastSuccessRef = useRef<number | null>(null);
   const openedAtRef = useRef<number | null>(null);
+  // 兜底轮询的上次触发时刻：与"上次成功时刻"分开记，否则每次成功刷新都会把兜底窗口重新推后。
+  const lastPollRef = useRef<number>(0);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
   const refreshInFlight = useRef(false);
@@ -123,13 +130,19 @@ export default function DevicePanel({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     openedAtRef.current = Date.now();
+    lastPollRef.current = Date.now();
     refresh();
+    // 2026-11-12：轮询由 500 ms 降为 10 s 兜底（变化改由服务端推送触发），但**陈旧判定不能
+    // 跟着放慢**——否则数据烂了 10 s 才提示，面板大部分时间在骗人。所以这里把两件事拆开：
+    // 每 500 ms 只做一次时间戳比较（决定"多久没刷新算旧"），真正发请求要等满 10 s 兜底窗口。
     const timer = window.setInterval(() => {
-      // Q11：TTL 判定独立于请求结果——pending 的请求不会触发 catch，但仍必须进入 stale。
       const freshnessAnchor = lastSuccessRef.current ?? openedAtRef.current;
       if (freshnessAnchor != null && Date.now() - freshnessAnchor > DEVICE_STALE_TTL_MS) setStale(true);
-      void refresh(true);
-    }, 500);
+      if (Date.now() - lastPollRef.current >= DEVICE_POLL_FALLBACK_MS) {
+        lastPollRef.current = Date.now();
+        void refresh(true);
+      }
+    }, DEVICE_STALE_CHECK_MS);
     return () => {
       window.clearInterval(timer);
       refreshGeneration.current++;
@@ -138,6 +151,11 @@ export default function DevicePanel({ open, onClose }: Props) {
       refreshInFlight.current = false;
     };
   }, [open]);
+
+  // 设备状态变化（连上/掉线/故障）由服务端推送通知，面板立即拉详情。
+  useEffect(() => {
+    if (monitorSnapshot) void refresh(true);
+  }, [monitorSnapshot?.capturedAt]);
 
   useEffect(() => {
     if (!selected) return;

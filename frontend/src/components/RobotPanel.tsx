@@ -5,6 +5,7 @@ import { localizeStatus } from '../i18n';
 import { apiErrorMessage, responseErrorMessage } from '../apiErrors';
 import { apiFetch } from '../apiClient';
 import { robots as robotEndpoints, robotTraces } from '../endpoints';
+import { useMonitorSnapshot } from '../useMonitorStream';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const ROBOT_POLL_TIMEOUT_MS = 5000;
@@ -32,6 +33,7 @@ const handshakeColor: Record<string, string> = {
 const signalColor = (value: boolean, danger = false) => value ? (danger ? 'red' : 'green') : 'default';
 
 export default function RobotPanel({ open, onClose }: Props) {
+  const monitorSnapshot = useMonitorSnapshot(open);
   const [robots, setRobots] = useState<RobotDescriptor[]>([]);
   const [traces, setTraces] = useState<RobotCommandTraceRecord[]>([]);
   const [selectedId, setSelectedId] = useState('virtual-abb-1');
@@ -85,9 +87,15 @@ export default function RobotPanel({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     refresh();
-    const timer = window.setInterval(() => refresh(true), 300);
+    // 2026-11-12：300 ms 轮询改为推送触发（服务端内容变化才广播），定时器只做断线兜底。
+    const timer = window.setInterval(() => refresh(true), 10_000);
     return () => window.clearInterval(timer);
   }, [open, selectedId]);
+
+  // 推送到达即刷新：状态变化（连上/掉线/故障）在 1 s 内反映到面板，不再靠高频轮询去撞。
+  useEffect(() => {
+    if (monitorSnapshot) void refresh(true);
+  }, [monitorSnapshot?.capturedAt]);
 
   useEffect(() => {
     if (!selected) return;

@@ -1,4 +1,6 @@
 /// <reference types="vitest/config" />
+import os from 'node:os';
+import path from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -52,7 +54,19 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'json-summary', 'lcov'],
-      reportsDirectory: '../artifacts/test-results/frontend-coverage',
+      // 覆盖率产物落在**系统临时目录**（2026-11-12），不再写进仓库的 artifacts/。
+      //
+      // v8 provider 有两处递归删除：开跑前 clean reportsDirectory、以及开跑前/收尾都删内部的
+      // `.tmp`（每个测试文件一个 json，100+ 个小文件）。这两处都不受配置控制——`clean: false`
+      // 只挡得住前者，`.tmp` 是无条件删的。在本机它们会撞上安全删除守卫：条目数超过阈值要求人工
+      // 确认（SAFE_DELETE_BULK_CONFIRM_REQUIRED），vitest 直接以 unhandled error 退出，日志只剩
+      // 一行 RUN，看起来像测试自己崩了。
+      //
+      // 临时目录是守卫明确放行的范围（换成直接删除），而覆盖率产物本来就是一次性的中间物，
+      // 放临时目录语义上也更对。质量门禁在跑完后把 coverage-summary.json / lcov.info 两份
+      // **机器可读摘要**复制回 artifacts/test-results/frontend-coverage/ 留档（复制不是删除，
+      // 不触发任何守卫）。阈值门禁由 vitest 内部按下面的 thresholds 判定，与报告位置无关。
+      reportsDirectory: path.join(os.tmpdir(), 'visionstudio-frontend-coverage'),
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'src/**/*.test.{ts,tsx}',

@@ -18,6 +18,7 @@
 | `diagnostics/assets.json` | 资产明细 | 具体是哪个资产 |
 | `diagnostics/run-counters.json` | 跨轮计数器落盘状态 | 计数器有没有落后于实际轮次 |
 | `diagnostics/node-durations.json` | 每节点耗时分位数 | 哪个节点变慢 |
+| `diagnostics/node-spans.json` | 最近 64 次节点执行 + 失败清单（含 `overwritten`） | 刚才那一次为什么慢/为什么失败 |
 | `audit/tail.json` | 最近 200 条审计事件 | 谁改了什么、发布/解锁动作 |
 | `logs/*.log` | 最新一个日志文件的**尾部**（≤ 512 KB） | 直接看栈 |
 | `README.txt` | 条目说明与"不含什么" | 现场人员自己就知道该再要什么 |

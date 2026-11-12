@@ -30,6 +30,17 @@ def read_safe(rel: str) -> str:
     return path.read_text(encoding='utf-8')
 
 
+# 一个类被拆成多个 partial 文件后，"某个 token 在不在这个类里"不能再只看单文件：
+# VisionWorkflowCompiler 已按域拆成 .Validation/.Frames/.Structured/.Legacy。审计要守的是
+# "这套语义还在编译器里"，不是"这些字在某个特定文件名里"。
+def read_family(rel_glob: str) -> str:
+    parts = sorted(ROOT.glob(rel_glob))
+    if not parts:
+        fail(f'Required source family missing: {rel_glob}')
+        return ''
+    return '\n'.join(p.read_text(encoding='utf-8') for p in parts)
+
+
 # Root-level process documents (architecture notes / migration guides) are no longer kept in the
 # repository. Document checks are advisory: when a document is present its content is still
 # validated; when absent the check is skipped with a note instead of failing the gate.
@@ -592,8 +603,13 @@ for rel in required:
         fail(f'Missing required architecture artifact: {rel}')
 
 api_csproj=read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj')
+# 2026-11-12 起版本号由中央包管理（Directory.Packages.props）持有，csproj 里不再写 Version。
+# 断言拆成两半：引用必须在 API 项目里，版本必须在 CPM 清单里——任何一半丢了都算破坏。
+packages_props=read_safe('backend/Directory.Packages.props')
 if 'Microsoft.AspNetCore.OpenApi' not in api_csproj: fail('OpenAPI package missing from API csproj')
-if 'Microsoft.Data.Sqlite' not in api_csproj or '10.0.12' not in api_csproj: fail('Microsoft.Data.Sqlite 10.0.12 missing from API csproj')
+if 'Microsoft.Data.Sqlite' not in api_csproj: fail('Microsoft.Data.Sqlite missing from API csproj')
+if 'Microsoft.Data.Sqlite' not in packages_props or '10.0.12' not in packages_props:
+    fail('Microsoft.Data.Sqlite 10.0.12 missing from Directory.Packages.props')
 if 'services.AddOpenApi(' not in host_registration or 'app.MapOpenApi()' not in program: fail('OpenAPI service/endpoint not wired')
 if 'AddSchemaTransformer<JsonElementSchemaTransformer>' not in host_registration: fail('JsonElement OpenAPI schema transformer not registered')
 if 'AddDocumentTransformer<StructSchemaRequiredDocumentTransformer>' not in host_registration: fail('Struct schema required document transformer not registered')
@@ -601,7 +617,7 @@ if 'V0.63' not in endpoint_sources: fail('API health version not V0.63')
 api_smoke=read_safe('backend/tests/VisionStudio.Api.Tests/ApiSmokeTests.cs')
 if 'v0.63' not in api_smoke.lower(): fail('API smoke test does not assert V0.63 health surface')
 if 'RuntimeOnlyPolicy.IsMutationAllowed' not in api_sources: fail('Runtime-only explicit mutation allowlist is missing')
-compiler=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.cs')
+compiler=read_family('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler*.cs')
 if 'WorkflowFingerprint.Compute' not in compiler: fail('Compiler does not use semantic WorkflowFingerprint')
 if 'ValidateParallelCapabilities' not in compiler: fail('Compiler does not enforce SupportsParallel capability')
 if 'CreatePipelineStep' not in compiler or 'PipelineSegments' not in compiler or 'VisionExecutionPolicy.IsPipelineEligible' not in compiler:
@@ -860,7 +876,7 @@ normalized_routes = [(method.lower(), path) for method, path in route_pairs]
 if len(normalized_routes) != len(set(normalized_routes)):
     duplicates = sorted({x for x in normalized_routes if normalized_routes.count(x) > 1})
     fail(f'Duplicate endpoint mappings: {duplicates}')
-expected_routes = 317  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；+2 = 诊断包 /api/diagnostics/bundle 与账号解锁 /api/security/users/{id}/unlock；新增端点必须同步此值（这本身就是一次可见的评审）
+expected_routes = 318  # 2026-11-12：+24 = 平面手眼 12（会话 4 + 资产 8）+ 三维手眼 12（会话 4 + 资产 8）；+2 = 诊断包 /api/diagnostics/bundle 与账号解锁 /api/security/users/{id}/unlock；+1 = 节点单次执行快照 /api/diagnostics/node-spans；新增端点必须同步此值（这本身就是一次可见的评审）
 if len(set(normalized_routes)) != expected_routes:
     fail(f'Full route inventory changed unexpectedly: expected {expected_routes}, got {len(set(normalized_routes))}')
 ok(f'Full endpoint inventory: {len(set(normalized_routes))}')
@@ -1860,6 +1876,119 @@ for package in ['JLVisionLib', 'Microsoft.ML.OnnxRuntime']:
     if f'Include="{package}"' not in algorithm_project:
         fail(f'Missing algorithm backend dependency: {package}')
 ok('JLVision traditional algorithms + ONNX Runtime; explicit 3D hand-eye/preview exceptions, no OpenCV DNN fallback')
+
+# ---------------------------------------------------------------------------
+# 版本与变更日志一致性（2026-11-12）
+#
+# 交付物必须能自证："现场跑的 0.63.0 是哪一个版本、升级要注意什么"。版本号手工维护，
+# 最容易漏的一步就是升了版本却没写 CHANGELOG——现场于是拿到一个没有升级说明的包。
+api_project = read_safe('backend/src/VisionStudio.Api/VisionStudio.Api.csproj')
+version_match = re.search(r'<Version>\s*([^<\s]+)\s*</Version>', api_project)
+if not version_match:
+    fail('VisionStudio.Api.csproj is missing <Version>')
+else:
+    api_version = version_match.group(1)
+    changelog = read_safe('CHANGELOG.md')
+    if f'## {api_version}' not in changelog:
+        fail(f'CHANGELOG.md has no section for version {api_version} '
+             f'(expected a "## {api_version} - YYYY-MM-DD" heading)')
+    else:
+        ok(f'CHANGELOG covers the shipped version {api_version}')
+
+# ---------------------------------------------------------------------------
+# 空 catch 的说明约束（2026-11-12）
+#
+# 为什么管这个：`catch { }` 本身不等于是 bug——清理临时文件、探测可选属性时"忽略"是正确的。
+# 但一个空的 catch 没有任何说明时，下一个人无法区分"我确认可以忽略"与"我忘了处理"，
+# 而静默失败恰恰是这类代码最贵的事故形态（写盘失败被吞、审计丢事件被吞）。
+# 规则刻意宽松：只要 catch 行到 `}` 之间出现 `//`，就认为作者已经交代过原因。
+# 存量按文件锁计数（行号会漂移，锁行号会让门禁变成噪声），新增即红。
+EMPTY_CATCH_BASELINE = 'scripts/empty-catch-baseline.json'
+
+
+def scan_empty_catch_violations(root: pathlib.Path) -> dict[str, list[int]]:
+    violations: dict[str, list[int]] = {}
+    source_root = root / 'backend/src'
+    if not source_root.exists():
+        return violations
+    for path in sorted(source_root.rglob('*.cs')):
+        rel = path.relative_to(root).as_posix()
+        if '/obj/' in rel or '/bin/' in rel:
+            continue
+        lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith('//') or not re.search(r'\bcatch\b', stripped):
+                continue
+            # 同行空 catch：`catch { }` / `catch (Exception) { }` / `} catch { } // 原因`
+            # 注意不锚定行尾：`try { X(); } catch { }` 这类内联写法后面还有 `}`，
+            # 锚定 `$` 会整条漏检（2026-11-12 探针发现：门禁写了但抓不到最常见的形态）。
+            inline = re.search(r'\bcatch\b\s*(\([^)]*\))?\s*\{\s*\}', stripped)
+            if inline:
+                after = stripped[inline.end():].strip()
+                # 行注释或块注释都算说明：只认 `//` 会逼着作者把 `/* */` 改写成 `//`，
+                # 那不是提高可读性，只是迎合门禁。
+                if not (after.startswith('//') or after.startswith('/*')):
+                    violations.setdefault(rel, []).append(i + 1)
+                continue
+            # 多行空 catch：catch 之后紧跟 `{`，`{` 之后紧跟 `}`
+            tail = re.sub(r'^.*?\bcatch\b', 'catch', stripped)
+            if '{' in tail:
+                continue
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j >= len(lines) or lines[j].strip() != '{':
+                continue
+            k = j + 1
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            if k >= len(lines) or lines[k].strip() != '}':
+                continue
+            explained = any('//' in lines[m] or '/*' in lines[m] for m in range(i, k + 1))
+            if not explained:
+                violations.setdefault(rel, []).append(i + 1)
+    return violations
+
+
+empty_catch_hits = scan_empty_catch_violations(ROOT)
+if '--write-empty-catch-baseline' in sys.argv:
+    payload = {
+        '_comment': (
+            '空 catch 的存量基线（棘轮）：值是该文件中"未写忽略原因"的空 catch 数量。'
+            '只许降不许升——新增空 catch 必须写成 `catch { /* 或 // 原因 */ }` 或补注释，'
+            '否则 static-audit 直接失败。行号会漂移，故按文件计数而不是锁行号。'
+        ),
+        '_updated': '2026-11-12',
+        'unexplainedByFile': {rel: len(items) for rel, items in sorted(empty_catch_hits.items())},
+    }
+    (ROOT / EMPTY_CATCH_BASELINE).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    print(f'Empty-catch baseline written: {sum(len(v) for v in empty_catch_hits.values())} '
+          f'unexplained clause(s) across {len(empty_catch_hits)} file(s) -> {EMPTY_CATCH_BASELINE}')
+    print('Other audit results were ignored because --write-empty-catch-baseline only refreshes the baseline.')
+    sys.exit(0)
+
+baseline_file = ROOT / EMPTY_CATCH_BASELINE
+if not baseline_file.exists():
+    fail(f'Missing empty-catch baseline: {EMPTY_CATCH_BASELINE} (run static-audit.py --write-empty-catch-baseline once)')
+else:
+    allowed_by_file = json.loads(baseline_file.read_text(encoding='utf-8')).get('unexplainedByFile', {})
+    for rel in sorted(set(allowed_by_file) | set(empty_catch_hits)):
+        allowed = allowed_by_file.get(rel, 0)
+        actual_lines = empty_catch_hits.get(rel, [])
+        if len(actual_lines) > allowed:
+            fail(f'Unexplained empty catch added in {rel}: {len(actual_lines)} > {allowed} '
+                 f'(lines {actual_lines}). Add a "// reason" comment or handle the error.')
+    baseline_total = sum(allowed_by_file.values())
+    actual_total = sum(len(v) for v in empty_catch_hits.values())
+    if actual_total > baseline_total:
+        fail(f'Unexplained empty catch total grew: {actual_total} > {baseline_total}')
+    elif actual_total < baseline_total:
+        ok(f'Empty catch: {baseline_total - actual_total} baseline entr(y/ies) now explained — '
+           f'downshift scripts/empty-catch-baseline.json')
+    ok(f'Empty catch: {actual_total} unexplained clause(s) locked by baseline '
+       f'({EMPTY_CATCH_BASELINE})')
 
 if errors:
     print('STATIC AUDIT FAILED')

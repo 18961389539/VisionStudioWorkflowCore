@@ -740,6 +740,8 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .diagnostics-grid { display: grid; grid-template-columns: minmax(620px,1.08fr) minmax(520px,.92fr); gap: 16px; min-height: 560px; }
 .diagnostics-grid section { min-width: 0; padding: 10px; border: 1px solid var(--vs-border-panel); border-radius: 7px; background: var(--vs-bg-card); }
 .diagnostic-error { color: var(--vs-text-danger); }
+.diagnostics-spans { margin-top: 16px; padding: 10px; border: 1px solid var(--vs-border-panel); border-radius: 7px; background: var(--vs-bg-card); }
+.diagnostics-spans-note { margin-left: 10px; font-size: 12px; font-weight: 400; }
 @media (max-width: 1120px) { .diagnostics-grid { grid-template-columns: 1fr; } .diagnostics-summary { grid-template-columns: repeat(3,1fr); } }
 .runtime-diagnostics-button { position: fixed; top: 24px; right: 24px; z-index: 1100; }
 

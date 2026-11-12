@@ -1,0 +1,22 @@
+{
+  "_comment": "VisionWorkflowCompiler 按域拆成 5 个 partial 文件（纯移动）。切点是成员边界，多重集校验由 split-cs-members.py 完成。",
+  "source": "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.cs",
+  "declaration": "public sealed class VisionWorkflowCompiler(VisionNodeRegistry registry)",
+  "partialDeclaration": "public sealed partial class VisionWorkflowCompiler(VisionNodeRegistry registry)",
+  "partialDeclarationBare": "public sealed partial class VisionWorkflowCompiler",
+  "mainGroup": "shell",
+  "cutPoints": [114, 243, 818, 1090, 1567],
+  "groups": {
+    "shell": [[14, 113]],
+    "validation": [[114, 242], [818, 1089]],
+    "frames": [[243, 817]],
+    "structured": [[1090, 1566]],
+    "legacy": [[1567, 1724]]
+  },
+  "outputs": {
+    "validation": "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.Validation.cs",
+    "frames": "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.Frames.cs",
+    "structured": "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.Structured.cs",
+    "legacy": "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.Legacy.cs"
+  }
+}

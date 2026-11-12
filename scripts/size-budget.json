@@ -5,13 +5,12 @@
   "defaultMaxLines": 1200,
   "targetMaxLines": 800,
   "budgets": {
-    "backend/src/VisionStudio.Engine/Runtime/VisionWorkflowCompiler.cs": 1740,
     "backend/src/VisionStudio.Engine/NodeCatalog.cs": 1622,
     "backend/src/VisionStudio.Api/ProductionRuntime.cs": 1498,
     "backend/src/VisionStudio.Engine/Nodes/InferenceNodes.cs": 1373,
     "backend/src/VisionStudio.Engine/Nodes/MeasurementGapNodes.cs": 1314,
     "backend/src/VisionStudio.Api/RuntimeDependencies.cs": 1263,
-    "frontend/src/types.ts": 1903,
+    "frontend/src/types.ts": 1850,
     "frontend/src/App.tsx": 1672,
     "frontend/src/components/NodeConfigurationDialog.tsx": 1643
   }

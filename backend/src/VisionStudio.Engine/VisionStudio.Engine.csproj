@@ -13,19 +13,19 @@
     <ProjectReference Include="..\VisionStudio.Scripting\VisionStudio.Scripting.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />
-    <PackageReference Include="JLVisionLib" Version="1.0.0" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
-    <PackageReference Include="System.Numerics.Tensors" Version="10.0.12" />
-    <PackageReference Include="WorkflowCore" Version="3.21.0" />
-    <PackageReference Include="WorkflowCore.DSL" Version="3.21.0" />
-    <PackageReference Include="NModbus" Version="3.0.83" />
-    <PackageReference Include="S7netplus" Version="0.20.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageReference Include="OpenCvSharp5.Windows" />
+    <PackageReference Include="JLVisionLib" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="System.Numerics.Tensors" />
+    <PackageReference Include="WorkflowCore" />
+    <PackageReference Include="WorkflowCore.DSL" />
+    <PackageReference Include="NModbus" />
+    <PackageReference Include="S7netplus" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <!-- 串口私有协议（光源控制器/扫码枪/拧紧枪）：System.IO.Ports 8.0.0 已在本地缓存，离线可还原。 -->
-    <PackageReference Include="System.IO.Ports" Version="8.0.0" />
-    <PackageReference Include="ZXing.Net" Version="0.16.11" />
-    <PackageReference Include="TesseractOCR" Version="5.5.2" />
+    <PackageReference Include="System.IO.Ports" />
+    <PackageReference Include="ZXing.Net" />
+    <PackageReference Include="TesseractOCR" />
   </ItemGroup>
 </Project>

@@ -43,6 +43,8 @@
 | `dotnet test`（Release，排除 Soak，收集覆盖率） | 宿主 + 引擎行为 | 修代码；确实需要改期望时在 CHANGELOG 里写清理由 |
 | `check-warning-baseline.ps1` | 编译器/分析器告警不新增（`scripts/warning-baseline.txt`） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
 | `check-coverage.py` | 合并行/分支覆盖率下限 | 行 81 / 分支 60 是棘轮：只升不降，提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
+| `static-audit.py` 的空 catch 规则（2026-11-12） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 按文件锁存量 106 处） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。存量下降后**同步下调**基线，否则棘轮失效 |
+| `dotnet list package --vulnerable`（2026-11-12） | NuGet 已知漏洞只拦 high/critical；离线时打印跳过而不是失败 | 在 `backend/Directory.Packages.props` 升版本。版本只在这一处改——24 个包原先散落在 15 个 csproj 里 |
 
 覆盖率棘轮的由来：原阈值 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化。分支覆盖率单独
 设门槛，是因为行覆盖挡不住"行走了、分支只走一边"——`if (x) return;` 走一次就算整行覆盖。
@@ -52,6 +54,7 @@
 | 检查 | 守什么 |
 |---|---|
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
+| `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
 | `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径 |
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理） |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |

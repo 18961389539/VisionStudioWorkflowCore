@@ -6,6 +6,7 @@ import { localizeStatus } from '../i18n';
 import { responseErrorMessage } from '../apiErrors';
 import { apiFetch, cachedGet, invalidateCache, RequestToken } from '../apiClient';
 import { apiUrl, cameras as cameraEndpoints, cameraSync, cameraFeatureProfiles, media } from '../endpoints';
+import { useMonitorSnapshot } from '../useMonitorStream';
 
 // R04：轮询超时——请求挂起时必须暴露失败，而不是让旧数据静默伪装成最新。
 const CAMERA_POLL_TIMEOUT_MS = 5000;
@@ -26,6 +27,7 @@ async function responseError(response: Response, fallback: string) {
 }
 
 export default function CameraPanel({ open, onClose }: Props) {
+  const monitorSnapshot = useMonitorSnapshot(open);
   const [cameras, setCameras] = useState<CameraDescriptor[]>([]);
   const [adapters, setAdapters] = useState<CameraAdapterDescriptor[]>([]);
   const [discovered, setDiscovered] = useState<CameraDiscoveredDevice[]>([]);
@@ -326,9 +328,15 @@ export default function CameraPanel({ open, onClose }: Props) {
     refreshAdapters();
     refreshMedia();
     refreshSyncGroups();
-    const timer = window.setInterval(() => refresh(true), 1000);
+    // 2026-11-12：1 s 轮询改为推送触发（服务端内容变化才广播），定时器只做断线兜底。
+    const timer = window.setInterval(() => refresh(true), 10_000);
     return () => window.clearInterval(timer);
   }, [open]);
+
+  // 相机列表/状态变化时立即刷新；预览仍由本地 500 ms tick 驱动，不经过网络。
+  useEffect(() => {
+    if (monitorSnapshot) void refresh(true);
+  }, [monitorSnapshot?.capturedAt]);
 
   useEffect(() => { if (open) refreshMedia(true); }, [mediaCollection, mediaLabel]);
   useEffect(() => { if (open) { refreshSyncStatus(true); refreshSyncRuns(true); refreshSyncStatistics(true); refreshSyncPtpDiagnostics(true); refreshGigEDiagnostics(true); refreshSyncTests(true); } }, [open, selectedSyncId]);

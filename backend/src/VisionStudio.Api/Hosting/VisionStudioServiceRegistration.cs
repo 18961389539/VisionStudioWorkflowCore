@@ -302,6 +302,21 @@ public static class VisionStudioServiceRegistration
 
         // 每节点耗时统计：给 __timeoutMs 选值提供数据，由 dispatcher 自动注入。
         services.AddSingleton<NodeDurationStatistics>();
+        // 节点级 span 的进程内消费者（2026-11-12）：EngineTelemetry 只产生 Activity，
+        // 没有监听者时 StartActivity 返回 null，等于整层在产线上恒为空。单例在这里注册监听，
+        // 容器释放时摘除；诊断端点与诊断包都从它取"单次执行"事实（分位数仍在 NodeDurationStatistics）。
+        // 显式工厂而不是 AddSingleton<NodeSpanBuffer>()：容器里有一个内置的 ActivitySource
+        // （名字是 Microsoft.AspNetCore），构造函数推断会把它注入进来，导致只监听 HTTP span。
+        // NodeSpanSource 包装让这种注入在类型上不可能，这里再钉一次注册方式。
+        services.AddSingleton(_ => new NodeSpanBuffer());
+        // 必须由宿主启动时解析一次：单例是惰性的，只 AddSingleton 不 AddHostedService 的话，
+        // 监听器要等到第一个诊断请求才注册，之前的 span 全部丢失（真后端冒烟抓到的坑）。
+        services.AddHostedService<NodeSpanTelemetryHostedService>();
+
+        // 设备监视推送（2026-11-12）：单例保存订阅数，后台每秒采集一次描述符，
+        // 内容变化才广播。没有订阅者时不做序列化。
+        services.AddSingleton<MonitorSubscriptions>();
+        services.AddHostedService<MonitorBroadcastService>();
         services.AddSingleton<VisionNodeDispatcher>();
         services.AddSingleton<VisionNodeRuntime>();
         services.AddSingleton<VisionPipelineExecutor>();

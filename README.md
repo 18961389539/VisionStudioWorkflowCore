@@ -83,14 +83,20 @@ cd frontend; npm install; npm run dev
 
 ```
 Produces<T>()  →  frontend/src/generated/openapi.json  →  api-types.ts  →  apiContractParity.ts 编译期对账
+                                                      ↘  typeBindings.ts（手写视图的键集绑定）
 ```
 
 ```powershell
 dotnet build backend/VisionStudio.slnx            # 导出脚本用 --no-build 启动
 pwsh scripts/export-openapi.ps1                    # 刷新 OpenAPI 快照
 cd frontend; npm run generate:api-types            # 刷新 TS 类型（一次性 TS5 环境，不污染依赖）
+npm run generate:type-bindings                     # 刷新手写视图的键集绑定（后端删/改字段会红）
 bash scripts/generate-frontend-catalog.sh          # 节点目录有改动时刷新目录快照
 ```
 
 `apiContractParity.ts` 用 `Backend extends Frontend` 做编译期对账：后端新增字段不会失败，但前端
 声明了后端没有的字段会失败——这正是"手写镜像先漂移、运行时才发现"的那类问题。
+
+`typeBindings.ts` 管的是另一半：`types.ts` 是**刻意更宽松的 UI 视图**（可选字段、可空性按渲染需要放宽），
+不能直接替换成生成的 DTO。生成器对 147 个同名类型断言"手写键集 ⊆ 后端键集"：后端加字段不红，
+后端删字段/改名而手写还在用就红。三个刻意的 UI 扩展在生成器里列了豁免与原因。

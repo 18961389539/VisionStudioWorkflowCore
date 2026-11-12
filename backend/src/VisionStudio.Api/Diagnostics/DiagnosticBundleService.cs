@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using VisionStudio.Api.Hosting;
 using VisionStudio.Api.Infrastructure;
 using VisionStudio.Api.Security;
+using VisionStudio.Engine.Diagnostics;
 using VisionStudio.Engine.Runtime;
 
 namespace VisionStudio.Api.Diagnostics;
@@ -29,6 +30,7 @@ public sealed class DiagnosticBundleService(
     DiagnosticsCenterService diagnostics,
     RunCounterPersistence runCounters,
     NodeDurationStatistics nodeDurations,
+    NodeSpanBuffer nodeSpans,
     RollingFileLoggerProvider logs,
     AuditEventStore audits,
     IWebHostEnvironment environment)
@@ -83,6 +85,9 @@ public sealed class DiagnosticBundleService(
             WriteJson(zip, "diagnostics/assets.json", diagnostics.Assets());
             WriteJson(zip, "diagnostics/run-counters.json", runCounters.Status());
             WriteJson(zip, "diagnostics/node-durations.json", nodeDurations.Snapshot());
+            // 单次执行事实（2026-11-12）：node-durations 只有分位数，回答不了"刚才哪一次慢"。
+            // 这里给最近 64 条 + 最近失败清单，容量与覆盖计数一并写出去，避免把残缺当全量。
+            WriteJson(zip, "diagnostics/node-spans.json", nodeSpans.Snapshot());
             WriteJson(zip, "audit/tail.json", await audits.ListAsync(0, AuditTailCount, null, null, cancellationToken));
 
             var logPath = LatestLogFile(Path.Combine(dataRoot, "logs"));
@@ -99,6 +104,7 @@ public sealed class DiagnosticBundleService(
                 - diagnostics/assets.json       资产明细
                 - diagnostics/run-counters.json 跨轮计数器落盘状态
                 - diagnostics/node-durations.json 每节点耗时分位数
+                - diagnostics/node-spans.json   最近 64 次节点执行 + 失败清单（进程内环形缓冲）
                 - audit/tail.json               最近 200 条审计事件
                 - logs/*.log                    最近一天日志的尾部（最多 512 KB）
 

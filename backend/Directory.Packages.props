@@ -1,0 +1,53 @@
+<Project>
+
+  <!--
+    中央包管理（Central Package Management，2026-11-12）。
+
+    为什么要有这个文件：24 个包的版本此前散落在 15 个 csproj 里，同一个包在不同项目里
+    各写一遍版本号——升级时漏改一处，构建就会在两个版本间静默取高者，出问题的地方
+    往往离改动很远。CPM 让"这个仓库用哪个版本"只有一处答案。
+
+    改造前已确认无版本冲突（24 个包各只有一个版本），所以这是一次纯搬迁，不涉及升级。
+    注意 `System.IO.Ports` 仍是 8.0.0 而其余 Microsoft.Extensions.* 是 10.0.12：
+    这是历史遗留的混版本，**本次不动**——升版本要单独验证串口行为，不能夹在治理改造里。
+
+    约定：
+    - csproj 里只写 `<PackageReference Include="X" />`，不再带 Version；
+    - 新增包先在这里登记，再在 csproj 引用；
+    - 升级包版本只改这里。
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- 传递依赖的版本由各自的直接依赖决定，避免把传递依赖强行拉到同一版本引入行为变化。 -->
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="JLVisionLib" Version="1.0.0" />
+    <PackageVersion Include="McMaster.NETCore.Plugins" Version="2.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <PackageVersion Include="Microsoft.Net.Compilers.Toolset" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="NModbus" Version="3.0.83" />
+    <PackageVersion Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />
+    <PackageVersion Include="S7netplus" Version="0.20.0" />
+    <PackageVersion Include="System.IO.Ports" Version="8.0.0" />
+    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.12" />
+    <PackageVersion Include="TesseractOCR" Version="5.5.2" />
+    <PackageVersion Include="WorkflowCore" Version="3.21.0" />
+    <PackageVersion Include="WorkflowCore.DSL" Version="3.21.0" />
+    <PackageVersion Include="ZXing.Net" Version="0.16.11" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+
+</Project>

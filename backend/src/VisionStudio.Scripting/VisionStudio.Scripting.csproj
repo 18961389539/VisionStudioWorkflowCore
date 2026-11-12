@@ -9,7 +9,7 @@
     <InternalsVisibleTo Include="VisionStudio.Engine.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="5.9.0" />
-    <PackageReference Include="OpenCvSharp5.Windows" Version="5.0.0.20260905" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" />
+    <PackageReference Include="OpenCvSharp5.Windows" />
   </ItemGroup>
 </Project>

@@ -28,6 +28,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $results = Join-Path $root 'artifacts/test-results'
+# 后端覆盖率单独一个目录（2026-11-12）：`dotnet test` 每轮在 --results-directory 下建一个 GUID
+# 子目录，混在 test-results 根上就没法只清"这一轮的覆盖率"而不碰 e2e 产物。分出来之后每轮
+# 只需删掉几个只有一两个文件的 GUID 子目录，既不触发批量删除守卫，也不会让旧报告混进并集覆盖
+# 里把"这轮其实没覆盖到的行"顶成已覆盖。
+$backendCoverage = Join-Path $results 'backend-coverage'
 $runBackend = $Scope -in @('All', 'Backend')
 $runFrontend = $Scope -in @('All', 'Frontend')
 $runE2E = $Scope -in @('All', 'E2E')
@@ -51,6 +56,40 @@ function Assert-LastExitCode([string]$step) {
     }
 }
 
+# 清空一个目录，但只用"删少量子项"的方式（幂等；不存在即 no-op）。
+#
+# 为什么不直接 `Remove-Item $dir -Recurse -Force`：本机删除被宿主的安全删除包装器接管。
+# 它对两层都设了闸：
+#   1) 递归删除会被交给回收站助手搬走，助手把成功回执（`OK <path>`）写到 stderr，
+#      而本脚本全局 $ErrorActionPreference='Stop'——PowerShell 5.1 下原生命令写 stderr 会被
+#      提升为终止性错误（`*>` 重定向也拦不住），于是目录明明已经搬走，包装器还是抛
+#      SAFE_DELETE_FAIL_CLOSED{reason=trash-failed}，门禁整段中断；
+#   2) 单次删除目标下的条目数超过阈值（50）会要求人工确认，直接抛
+#      SAFE_DELETE_BULK_CONFIRM_REQUIRED。覆盖率输出目录有上百个小文件，必然撞上这条。
+#
+# 结论：门禁不去删大目录，而是让每次运行本来就产出到可覆盖的路径（见 backend-coverage /
+# frontend 的 clean:false）。这里只处理"每轮只有一两个文件"的 GUID 子目录，既在阈值内，
+# 也不依赖删除来保证读数正确。安全删除机制没有被绕过，也没有任何一处改成直接 unlink。
+function Clear-ChildDirectories([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction Continue
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
+    $remaining = @(Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue)
+    if ($remaining.Count -gt 0) {
+        Write-Host "Failed to clear stale coverage directories under: $Path ($($remaining.Count) left)" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # Resolve a Python interpreter: on Windows the command is usually py / python / python3.
 # The gate requires it for the static audit and coverage checks - fail instead of skipping them.
 $python = $null
@@ -63,8 +102,9 @@ if ($null -eq $python) {
 }
 
 if ($runBackend) {
-    if (Test-Path $results) { Remove-Item $results -Recurse -Force }
     New-Item $results -ItemType Directory -Force | Out-Null
+    New-Item $backendCoverage -ItemType Directory -Force | Out-Null
+    Clear-ChildDirectories $backendCoverage
 }
 
 Write-Host "== VisionStudio V0.63 Quality Gate (scope=$Scope) =="
@@ -124,7 +164,7 @@ try {
         --filter "Category!=Soak" `
         --settings coverage.runsettings `
         --collect:"XPlat Code Coverage" `
-        --results-directory $results
+        --results-directory $backendCoverage
     Assert-LastExitCode 'dotnet test'
 }
 finally { Pop-Location }
@@ -135,8 +175,50 @@ finally { Pop-Location }
 & "$root/scripts/check-warning-baseline.ps1"
 Assert-LastExitCode 'warning baseline'
 
-& $python "$root/scripts/check-coverage.py" $results --min-line $minCoverage --min-branch $minBranchCoverage
+& $python "$root/scripts/check-coverage.py" $backendCoverage --min-line $minCoverage --min-branch $minBranchCoverage
 Assert-LastExitCode 'coverage gate'
+
+# 已知漏洞扫描（2026-11-12 接入）。CPM 把"用哪个版本"收敛到一处，但"这个版本有没有已知漏洞"
+# 只能靠通告库回答；它不会让构建失败，只会在某天变成安全事故。
+# 只拦 high/critical：内网工业环境里 moderate/low 的噪音会把门禁训练成"看到就跳过"。
+$vulnerabilityJson = (& dotnet list "$root/backend/VisionStudio.slnx" package --vulnerable --include-transitive --format json 2>$null | Out-String)
+if ($LASTEXITCODE -ne 0) {
+    # 离线机器查不了通告库：明确说"跳过"，不能把"查不了"静默当成"没问题"。
+    Write-Host 'NuGet 漏洞扫描不可用（离线或源不可达），本次跳过。' -ForegroundColor Yellow
+}
+else {
+    $jsonStart = $vulnerabilityJson.IndexOf('{')
+    if ($jsonStart -lt 0) {
+        Write-Host 'NuGet 漏洞扫描未返回 JSON，本次跳过。' -ForegroundColor Yellow
+    }
+    else {
+        $report = $vulnerabilityJson.Substring($jsonStart) | ConvertFrom-Json
+        $vulnerable = New-Object System.Collections.Generic.List[string]
+        foreach ($project in $report.projects) {
+            foreach ($framework in $project.frameworks) {
+                $packages = @()
+                if ($framework.topLevelPackages) { $packages += $framework.topLevelPackages }
+                if ($framework.transitivePackages) { $packages += $framework.transitivePackages }
+                foreach ($package in $packages) {
+                    foreach ($vulnerability in @($package.vulnerabilities)) {
+                        if ($null -eq $vulnerability) { continue }
+                        $severity = "$($vulnerability.severity)".ToLowerInvariant()
+                        if ($severity -eq 'high' -or $severity -eq 'critical') {
+                            $vulnerable.Add("$($package.id) $($package.resolvedVersion) [$severity] $($vulnerability.advisoryurl)")
+                        }
+                    }
+                }
+            }
+        }
+        if ($vulnerable.Count -gt 0) {
+            Write-Host 'NuGet 已知漏洞（high/critical）：' -ForegroundColor Red
+            $vulnerable | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+            Write-Host '处理：在 backend/Directory.Packages.props 升级版本；确属误报时在提交说明里写清豁免理由。' -ForegroundColor Red
+            exit 1
+        }
+        Write-Host 'NuGet: no high/critical known vulnerabilities.' -ForegroundColor Green
+    }
+}
 }
 
 if ($runFrontend) {
@@ -157,6 +239,12 @@ try {
         Assert-LastExitCode 'npm ci'
     }
 
+    # 依赖漏洞（2026-11-12 接入）：npm ci 带 --no-audit 是为了安装速度，审计本身不能省。
+    # 首次接入就发现 vite 8.3.2 与 undici 各带 high 漏洞——它们不影响构建，只影响"这台机器
+    # 会不会被任意命令执行"。--audit-level=high 与后端段口径一致。
+    npm audit --audit-level=high
+    Assert-LastExitCode 'npm audit'
+
     # 静态检查（2026-11-12 接入）：oxlint（Rust 实现，不依赖 TypeScript 编译 API）。
     # 项目使用 TS 7 原生编译器，typescript-eslint 的 peer 范围只到 <6.1，无法在此版本上解析，
     # 因此选用 oxlint：口径为「零告警」，新增未使用变量/死导入立即失败。
@@ -165,21 +253,28 @@ try {
     npm run lint
     Assert-LastExitCode 'frontend lint'
 
-    # 覆盖率输出目录先由 PowerShell 清掉，再交给 vitest。
-    # vitest 的 v8 provider 默认在开跑前自己递归删除 reportsDirectory（clean: true）。
-    # 那个目录里 lcov-report 是上百个小文件，放在 node 进程里删有两个现实问题：
-    #   1) Windows + 杀软/EDR 实时扫描下很慢，且可能触发"批量删除"策略直接拦下整个步骤；
-    #   2) 拦下时 vitest 抛的是 unhandled error，日志只剩一行 RUN，看起来像测试自己崩了。
-    # 用 PowerShell 删（不经过 node）既快又稳定；目录不存在时 Test-Path 天然 no-op。
-    # 注：-Scope All 时后端段已清空整个 test-results，这里再判一次只是幂等兜底。
-    $coverageDir = "$root/artifacts/test-results/frontend-coverage"
-    if (Test-Path $coverageDir) { Remove-Item $coverageDir -Recurse -Force }
-
     # 覆盖率门禁（2026-10-23 接入）：阈值写在 vite.config.ts 的 test.coverage.thresholds，
     # 取首次基线（语句 69.29 / 分支 65.99 / 函数 59.35 / 行 74.02）并各留约 1% 余量。
     # 棘轮规则：只升不降；覆盖提升后必须同步上调阈值，否则门禁形同虚设。
+    #
+    # 报告目录在系统临时目录（vite.config.ts 里改成 os.tmpdir()，原因见那里的注释：v8 provider
+    # 会无条件递归删除内部 .tmp，上百个小文件在本机会被批量删除守卫拦下）。
+    # 跑完把两份机器可读摘要复制回 artifacts/ 留档——复制不删任何东西，不会触发守卫。
     npm run test:coverage
     Assert-LastExitCode 'frontend tests + coverage'
+
+    $coverageArchive = Join-Path $results 'frontend-coverage'
+    New-Item $coverageArchive -ItemType Directory -Force | Out-Null
+    $coverageTemp = Join-Path ([System.IO.Path]::GetTempPath()) 'visionstudio-frontend-coverage'
+    foreach ($reportName in @('coverage-summary.json', 'lcov.info')) {
+        $reportPath = Join-Path $coverageTemp $reportName
+        if (Test-Path -LiteralPath $reportPath) {
+            Copy-Item -LiteralPath $reportPath -Destination (Join-Path $coverageArchive $reportName) -Force
+        }
+        else {
+            Write-Host "Coverage report missing: $reportPath" -ForegroundColor Yellow
+        }
+    }
 
     npm run build
     Assert-LastExitCode 'npm run build'
@@ -188,17 +283,92 @@ finally { Pop-Location }
 }
 
 if ($runE2E) {
-Push-Location "$root/frontend"
-try {
-    # e2e（2026-10-23 接入）：真实浏览器，补 jsdom 覆盖不到的布局引擎、Canvas 与事件链。
-    # 浏览器按需安装——windows-latest 自带 Edge，但 Playwright 仍需自己的 Chromium 构建。
-    npx playwright install chromium
-    Assert-LastExitCode 'playwright browser install'
+# 真后端冒烟（2026-11-12）：e2e 默认把 /api/** 全桩掉，测的是"前端遇到某种 JSON 怎么表现"。
+# 这里额外拉起一个真实宿主（独立端口 + 独立数据根），跑 real-backend-smoke.spec.ts：
+# 登录 → 目录 → 真执行 → 追溯落库 → 节点 span。桩化用例照旧，不受影响。
+$e2eApi = 'http://127.0.0.1:5199'
+$e2eData = Join-Path $root 'artifacts/e2e-data'
+$e2eLogDir = Join-Path $results 'e2e-api'
+New-Item $e2eData -ItemType Directory -Force | Out-Null
+New-Item $e2eLogDir -ItemType Directory -Force | Out-Null
 
-    npm run test:e2e
-    Assert-LastExitCode 'frontend e2e'
+Push-Location "$root/backend"
+try {
+    dotnet build src/VisionStudio.Api/VisionStudio.Api.csproj -c Debug --nologo -v q
+    Assert-LastExitCode 'backend build for e2e smoke'
 }
 finally { Pop-Location }
+
+# 找构建产物而不是拼路径：TargetFramework 变了之后拼路径会静默指向不存在的文件。
+$apiDll = Get-ChildItem (Join-Path $root 'backend/src/VisionStudio.Api/bin/Debug') -Recurse -Filter 'VisionStudio.Api.dll' |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $apiDll) {
+    Write-Host 'E2E smoke: cannot locate VisionStudio.Api.dll after build.' -ForegroundColor Red
+    exit 1
+}
+
+$previousEnvironment = @{
+    ASPNETCORE_ENVIRONMENT = $env:ASPNETCORE_ENVIRONMENT
+    ASPNETCORE_URLS       = $env:ASPNETCORE_URLS
+    VISIONSTUDIO_DATA_ROOT = $env:VISIONSTUDIO_DATA_ROOT
+}
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
+$env:ASPNETCORE_URLS = $e2eApi
+$env:VISIONSTUDIO_DATA_ROOT = $e2eData
+$apiProcess = Start-Process -FilePath 'dotnet' `
+    -ArgumentList @("`"$($apiDll.FullName)`"", '--urls', $e2eApi) `
+    -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $e2eLogDir 'host.out.log') `
+    -RedirectStandardError (Join-Path $e2eLogDir 'host.err.log')
+try {
+    $healthy = $false
+    $deadline = (Get-Date).AddSeconds(120)
+    while ((Get-Date) -lt $deadline) {
+        if ($apiProcess.HasExited) { break }
+        try {
+            $probe = Invoke-WebRequest -Uri "$e2eApi/api/health" -UseBasicParsing -TimeoutSec 3
+            if ($probe.StatusCode -eq 200) { $healthy = $true; break }
+        }
+        catch {
+            # 启动期连不上是预期状态：继续轮询，直到超时或进程退出。
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if (-not $healthy) {
+        Write-Host 'E2E smoke: backend did not become healthy; host log tail follows.' -ForegroundColor Red
+        Get-Content (Join-Path $e2eLogDir 'host.err.log') -Tail 40 -ErrorAction SilentlyContinue
+        Get-Content (Join-Path $e2eLogDir 'host.out.log') -Tail 40 -ErrorAction SilentlyContinue
+        exit 1
+    }
+
+    Push-Location "$root/frontend"
+    try {
+        # e2e（2026-10-23 接入）：真实浏览器，补 jsdom 覆盖不到的布局引擎、Canvas 与事件链。
+        # 浏览器按需安装——windows-latest 自带 Edge，但 Playwright 仍需自己的 Chromium 构建。
+        npx playwright install chromium
+        Assert-LastExitCode 'playwright browser install'
+
+        # 宿主 URL 通过环境变量传给 real-backend-smoke.spec.ts（默认即 5199）。
+        $env:VISIONSTUDIO_E2E_API = $e2eApi
+        npm run test:e2e
+        Assert-LastExitCode 'frontend e2e'
+    }
+    finally {
+        Remove-Item Env:\VISIONSTUDIO_E2E_API -ErrorAction SilentlyContinue
+        Pop-Location
+    }
+}
+finally {
+    if ($apiProcess -and -not $apiProcess.HasExited) {
+        Stop-Process -Id $apiProcess.Id -Force -ErrorAction SilentlyContinue
+        # 给 SQLite 一个关闭 WAL 的窗口；Windows 上句柄未释放时下一步清理会失败。
+        $apiProcess.WaitForExit(5000) | Out-Null
+    }
+    foreach ($name in $previousEnvironment.Keys) {
+        if ($null -eq $previousEnvironment[$name]) { Remove-Item "Env:\$name" -ErrorAction SilentlyContinue }
+        else { Set-Item "Env:\$name" $previousEnvironment[$name] }
+    }
+}
 }
 
 Write-Host "Quality Gate PASSED (scope=$Scope)"

@@ -35,12 +35,23 @@ describe('DevicePanel polling', () => {
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText(/最后更新/).textContent).not.toContain('数据可能已过期');
 
+    // 陈旧判定与轮询节拍解耦：此时还没发第二次请求，但数据已过 TTL，必须标出来。
     await act(async () => { vi.advanceTimersByTime(3500); });
     expect(screen.getByText(/数据可能已过期/)).toBeTruthy();
-    expect(calls).toBe(2); // pending 请求未结束前不并发发起下一次轮询，避免响应倒序覆盖。
+    expect(calls).toBe(1);
 
-    await act(async () => { vi.advanceTimersByTime(2000); await Promise.resolve(); });
+    // 10 s 兜底窗口到期才发第二次；它挂住期间不得并发发起下一次，避免响应倒序覆盖。
+    await act(async () => { vi.advanceTimersByTime(7000); await Promise.resolve(); });
+    expect(calls).toBe(2);
+    await act(async () => { vi.advanceTimersByTime(4000); await Promise.resolve(); });
+    expect(calls).toBe(2);
+
+    // 挂起请求在 5 s 超时后中止（必须单独推进并冲刷微任务：中止的 Promise 回调若还没跑，
+    // in-flight 标记仍占着，下一个兜底窗口会被当成并发请求而拦掉——这正是要守的行为）。
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
+    // 再满一个 10 s 兜底窗口，恢复成功后陈旧标记必须消失。
+    await act(async () => { vi.advanceTimersByTime(5000); await Promise.resolve(); });
+    expect(calls).toBe(3);
     expect(screen.getByText(/最后更新/).textContent).not.toContain('数据可能已过期');
   });
 

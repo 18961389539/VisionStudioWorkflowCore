@@ -104,13 +104,53 @@ if (-not (Test-Path (Join-Path $staging 'VisionStudio.Api.dll'))) {
     exit 1
 }
 
+# 交付可追溯（2026-11-12）：包内写 build-info.json。
+#
+# 版本号来自 csproj，是**手工维护**的；同一个 0.63.0 可能对应几十次构建。现场报"0.63 有问题"时，
+# 没有 commit 就无法回答"到底是哪一次、什么时候构建的"。这里在 swap 之前写进 staging，
+# 保证随包走、且与包里实际产出的 DLL 哈希对应（不是构建后再补的推测值）。
+function Write-BuildInfo([string]$packageDir) {
+    $dll = Join-Path $packageDir 'VisionStudio.Api.dll'
+    $version = 'unknown'
+    if (Test-Path $dll) {
+        $productVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion
+        if ($productVersion) { $version = $productVersion }
+    }
+
+    $commit = ''
+    $branch = ''
+    $dirty = $null
+    try {
+        # 无 git 的构建机（离线打包）不应因此失败：三个值留空，其余字段仍然有效。
+        $commit = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
+        $branch = (& git -C $root rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim()
+        $dirty = ((& git -C $root status --porcelain 2>$null | Out-String).Trim().Length -gt 0)
+    }
+    catch {
+        # 明确吞掉：可追溯信息是附加证据，不能让发布流程因 git 缺失而中断。
+    }
+
+    $info = [ordered]@{
+        version          = $version
+        commit           = $commit
+        branch           = $branch
+        workingTreeDirty = $dirty
+        builtAt          = (Get-Date).ToString('o')
+        builtBy          = "$env:USERNAME@$env:COMPUTERNAME"
+        apiDllSha256     = if (Test-Path $dll) { (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+        dataRoot         = $fullDataRoot
+    }
+    Set-Content -Path (Join-Path $packageDir 'build-info.json') -Value ($info | ConvertTo-Json -Depth 4) -Encoding utf8
+}
+Write-BuildInfo $staging
+
 # R08/F07 (2026-10-12 review): smoke-start the staged candidate before swapping. A package that
 # cannot start must never replace the current version. The candidate runs with ITS OWN content
 # root (WorkingDirectory=$staging) under the Production environment with an isolated data root and
 # the approved test configuration (security and simulators off), and the check verifies more than
 # an HTTP 200: required assets, health endpoint, the packaged frontend (wwwroot index) and a clean
 # plugin/dependency load in the host log.
-$smokeRequiredAssets = @('VisionStudio.Api.dll', 'appsettings.json', 'wwwroot/index.html', 'VisionStudio.Plugin.Worker.dll')
+$smokeRequiredAssets = @('VisionStudio.Api.dll', 'appsettings.json', 'wwwroot/index.html', 'VisionStudio.Plugin.Worker.dll', 'build-info.json')
 $missingAssets = @($smokeRequiredAssets | Where-Object { -not (Test-Path (Join-Path $staging $_)) })
 if ($missingAssets.Count -gt 0) {
     Write-Host "Candidate package is missing required assets: $($missingAssets -join ', '). Keeping the current package." -ForegroundColor Red
