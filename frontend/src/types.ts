@@ -1135,6 +1135,112 @@ export type CalibrationHandEyeResidual = {
   vision: { x: number; y: number; thetaDeg: number };
 };
 
+export type HandEyeWizardSessionDocument = {
+  formatVersion: string;
+  sessionId: string;
+  name: string;
+  updatedAt: string;
+  samplesJson: string;
+  mode: string;
+  angularWeight: number;
+  visionScale: number;
+  robustLoss: string;
+  maxTranslationError: number;
+  maxAngleErrorDeg: number;
+  sourceFrame: string;
+  targetFrame: string;
+  unit: string;
+  sourceUnit: string;
+  lastSolveSummaryJson?: string | null;
+};
+
+export type HandEyeWizardSessionSummary = {
+  sessionId: string;
+  name: string;
+  updatedAt: string;
+  mode: string;
+  sampleCount: number;
+  hasSolve: boolean;
+};
+
+export type HandEyeCalibrationAssetDescriptor = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  latestVersion: number;
+  publishedVersion?: number | null;
+  versions: Array<{ version: number; snapshotHash: string; modelHash: string; createdAt: string; note: string; published: boolean }>;
+  publicationHistory: Array<{ version: number; action: string; at: string }>;
+};
+
+export type HandEyeCalibrationVersionSnapshot = {
+  assetId: string;
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  model: unknown;
+  sourceDocumentJson: string;
+  summaryJson: string;
+};
+
+export type HandEye3DWizardSessionDocument = {
+  formatVersion: string;
+  sessionId: string;
+  name: string;
+  updatedAt: string;
+  samplesJson: string;
+  mode: string;
+  method: string;
+  rotationWeight: number;
+  outlierRejection: string;
+  crossCheckMethod: string;
+  maxTranslationError: number;
+  maxRotationErrorDeg: number;
+  minTranslationSpan: number;
+  sourceFrame: string;
+  targetFrame: string;
+  unit: string;
+  lastSolveSummaryJson?: string | null;
+};
+
+export type HandEye3DWizardSessionSummary = {
+  sessionId: string;
+  name: string;
+  updatedAt: string;
+  mode: string;
+  method: string;
+  sampleCount: number;
+  hasSolve: boolean;
+};
+
+export type HandEye3DCalibrationAssetDescriptor = {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  latestVersion: number;
+  publishedVersion?: number | null;
+  versions: Array<{ version: number; snapshotHash: string; modelHash: string; createdAt: string; note: string; published: boolean }>;
+  publicationHistory: Array<{ version: number; action: string; at: string }>;
+};
+
+export type HandEye3DCalibrationVersionSnapshot = {
+  assetId: string;
+  version: number;
+  snapshotHash: string;
+  modelHash: string;
+  createdAt: string;
+  note: string;
+  model: unknown;
+  sourceDocumentJson: string;
+  summaryJson: string;
+};
+
 export type DeviceConnectionState = ContractSchema<'DeviceConnectionState'>;
 export type DeviceTagQuality = ContractSchema<'DeviceTagQuality'>;
 export type DeviceTagDataType = ContractSchema<'DeviceTagDataType'>;

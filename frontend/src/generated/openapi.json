@@ -2144,6 +2144,357 @@
         }
       }
     },
+    "/api/calibration/wizard/handeye/sessions": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandEyeWizardSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeWizardSessionDocument"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/calibration/wizard/handeye/sessions/{sessionId}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeWizardSessionDocument"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HandEyeCalibrationAssetDescriptor"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHandEyeAssetFromSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}/versions": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveHandEyeVersionFromSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}/published": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}/versions/{version}/publish": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye-calibrations/{id}/rollback/{version}": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEyeCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/calibration/wizard/handeye3d/solve": {
       "post": {
         "tags": [
@@ -2162,6 +2513,357 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/calibration/wizard/handeye3d/sessions": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandEye3DWizardSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DWizardSessionDocument"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/calibration/wizard/handeye3d/sessions/{sessionId}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DWizardSessionDocument"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HandEye3DCalibrationAssetDescriptor"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHandEye3DAssetFromSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}/versions": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveHandEye3DVersionFromSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}/published": {
+      "get": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationVersionSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}/versions/{version}/publish": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationAssetDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hand-eye3d-calibrations/{id}/rollback/{version}": {
+      "post": {
+        "tags": [
+          "VisionStudio.Api"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandEye3DCalibrationAssetDescriptor"
+                }
+              }
+            }
           }
         }
       }
@@ -9559,7 +10261,10 @@
           "rotationWeight",
           "sourceFrame",
           "targetFrame",
-          "unit"
+          "unit",
+          "outlierRejection",
+          "crossCheckMethod",
+          "minTranslationSpan"
         ],
         "type": "object",
         "properties": {
@@ -9612,6 +10317,23 @@
           "unit": {
             "type": "string",
             "default": "mm"
+          },
+          "outlierRejection": {
+            "type": "string",
+            "default": "none"
+          },
+          "crossCheckMethod": {
+            "type": "string",
+            "default": "TSAI"
+          },
+          "minTranslationSpan": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
           }
         }
       },
@@ -9624,7 +10346,10 @@
           "sourceFrame",
           "targetFrame",
           "unit",
-          "sourceUnit"
+          "sourceUnit",
+          "angularWeight",
+          "visionScale",
+          "robustLoss"
         ],
         "type": "object",
         "properties": {
@@ -9668,6 +10393,28 @@
           "sourceUnit": {
             "type": "string",
             "default": "mm"
+          },
+          "angularWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 50
+          },
+          "visionScale": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 1
+          },
+          "robustLoss": {
+            "type": "string",
+            "default": "none"
           }
         }
       },
@@ -13913,6 +14660,68 @@
           }
         }
       },
+      "CreateHandEye3DAssetFromSessionRequest": {
+        "required": [
+          "sessionId",
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "CreateHandEyeAssetFromSessionRequest": {
+        "required": [
+          "sessionId",
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "CreateInvestigationVerificationRequest": {
         "required": [
           "datasetId",
@@ -16610,6 +17419,864 @@
           },
           "level": {
             "type": "string"
+          }
+        }
+      },
+      "HandEye3DCalibrationAssetDescriptor": {
+        "required": [
+          "id",
+          "name",
+          "description",
+          "createdAt",
+          "updatedAt",
+          "latestVersion",
+          "publishedVersion",
+          "versions",
+          "publicationHistory"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latestVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandEye3DCalibrationVersionInfo"
+            }
+          },
+          "publicationHistory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandEye3DCalibrationPublicationEvent"
+            }
+          }
+        }
+      },
+      "HandEye3DCalibrationModel": {
+        "required": [
+          "mode",
+          "method",
+          "sourceFrame",
+          "targetFrame",
+          "unit",
+          "matrix",
+          "outlierRejection"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "sourceFrame": {
+            "type": "string"
+          },
+          "targetFrame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "matrix": {
+            "type": "array",
+            "items": {
+              "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+              "type": [
+                "number",
+                "string"
+              ],
+              "format": "double"
+            }
+          },
+          "outlierRejection": {
+            "type": "string"
+          }
+        }
+      },
+      "HandEye3DCalibrationPublicationEvent": {
+        "required": [
+          "version",
+          "action",
+          "at"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "action": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HandEye3DCalibrationVersionInfo": {
+        "required": [
+          "version",
+          "snapshotHash",
+          "modelHash",
+          "createdAt",
+          "note",
+          "published"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "snapshotHash": {
+            "type": "string"
+          },
+          "modelHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          },
+          "published": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HandEye3DCalibrationVersionSnapshot": {
+        "required": [
+          "assetId",
+          "version",
+          "snapshotHash",
+          "modelHash",
+          "createdAt",
+          "note",
+          "model",
+          "sourceDocumentJson",
+          "summaryJson"
+        ],
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "snapshotHash": {
+            "type": "string"
+          },
+          "modelHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/HandEye3DCalibrationModel"
+          },
+          "sourceDocumentJson": {
+            "type": "string"
+          },
+          "summaryJson": {
+            "type": "string"
+          }
+        }
+      },
+      "HandEye3DWizardSaveRequest": {
+        "required": [
+          "sessionId",
+          "name",
+          "samplesJson",
+          "mode",
+          "method",
+          "rotationWeight",
+          "outlierRejection",
+          "crossCheckMethod",
+          "maxTranslationError",
+          "maxRotationErrorDeg",
+          "minTranslationSpan",
+          "sourceFrame",
+          "targetFrame",
+          "unit"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "samplesJson": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "default": "eyeInHand"
+          },
+          "method": {
+            "type": "string",
+            "default": "DANIILIDIS"
+          },
+          "rotationWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 50
+          },
+          "outlierRejection": {
+            "type": "string",
+            "default": "none"
+          },
+          "crossCheckMethod": {
+            "type": "string",
+            "default": "TSAI"
+          },
+          "maxTranslationError": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "maxRotationErrorDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "minTranslationSpan": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "sourceFrame": {
+            "type": "string",
+            "default": "Camera"
+          },
+          "targetFrame": {
+            "type": "string",
+            "default": ""
+          },
+          "unit": {
+            "type": "string",
+            "default": "mm"
+          },
+          "lastSolveSummaryJson": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "HandEye3DWizardSessionDocument": {
+        "required": [
+          "formatVersion",
+          "sessionId",
+          "name",
+          "updatedAt",
+          "samplesJson",
+          "mode",
+          "method",
+          "rotationWeight",
+          "outlierRejection",
+          "crossCheckMethod",
+          "maxTranslationError",
+          "maxRotationErrorDeg",
+          "minTranslationSpan",
+          "sourceFrame",
+          "targetFrame",
+          "unit",
+          "lastSolveSummaryJson"
+        ],
+        "type": "object",
+        "properties": {
+          "formatVersion": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "samplesJson": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "rotationWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "outlierRejection": {
+            "type": "string"
+          },
+          "crossCheckMethod": {
+            "type": "string"
+          },
+          "maxTranslationError": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxRotationErrorDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "minTranslationSpan": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "sourceFrame": {
+            "type": "string"
+          },
+          "targetFrame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "lastSolveSummaryJson": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "HandEyeCalibrationAssetDescriptor": {
+        "required": [
+          "id",
+          "name",
+          "description",
+          "createdAt",
+          "updatedAt",
+          "latestVersion",
+          "publishedVersion",
+          "versions",
+          "publicationHistory"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latestVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandEyeCalibrationVersionInfo"
+            }
+          },
+          "publicationHistory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandEyeCalibrationPublicationEvent"
+            }
+          }
+        }
+      },
+      "HandEyeCalibrationModel": {
+        "required": [
+          "mode",
+          "sourceFrame",
+          "targetFrame",
+          "unit",
+          "sourceUnit",
+          "x",
+          "y",
+          "thetaDeg",
+          "angularWeight",
+          "visionScale",
+          "robustLoss"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "sourceFrame": {
+            "type": "string"
+          },
+          "targetFrame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "sourceUnit": {
+            "type": "string"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "thetaDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "angularWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "visionScale": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "robustLoss": {
+            "type": "string"
+          }
+        }
+      },
+      "HandEyeCalibrationPublicationEvent": {
+        "required": [
+          "version",
+          "action",
+          "at"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "action": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HandEyeCalibrationVersionInfo": {
+        "required": [
+          "version",
+          "snapshotHash",
+          "modelHash",
+          "createdAt",
+          "note",
+          "published"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "snapshotHash": {
+            "type": "string"
+          },
+          "modelHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          },
+          "published": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HandEyeCalibrationVersionSnapshot": {
+        "required": [
+          "assetId",
+          "version",
+          "snapshotHash",
+          "modelHash",
+          "createdAt",
+          "note",
+          "model",
+          "sourceDocumentJson",
+          "summaryJson"
+        ],
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "snapshotHash": {
+            "type": "string"
+          },
+          "modelHash": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/HandEyeCalibrationModel"
+          },
+          "sourceDocumentJson": {
+            "type": "string"
+          },
+          "summaryJson": {
+            "type": "string"
+          }
+        }
+      },
+      "HandEyeWizardSaveRequest": {
+        "required": [
+          "sessionId",
+          "name",
+          "samplesJson",
+          "mode",
+          "angularWeight",
+          "visionScale",
+          "robustLoss",
+          "maxTranslationError",
+          "maxAngleErrorDeg",
+          "sourceFrame",
+          "targetFrame",
+          "unit",
+          "sourceUnit"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "samplesJson": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "default": "eyeInHand"
+          },
+          "angularWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 50
+          },
+          "visionScale": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 1
+          },
+          "robustLoss": {
+            "type": "string",
+            "default": "none"
+          },
+          "maxTranslationError": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "maxAngleErrorDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double",
+            "default": 0
+          },
+          "sourceFrame": {
+            "type": "string",
+            "default": "Camera"
+          },
+          "targetFrame": {
+            "type": "string",
+            "default": ""
+          },
+          "unit": {
+            "type": "string",
+            "default": "mm"
+          },
+          "sourceUnit": {
+            "type": "string",
+            "default": "mm"
+          },
+          "lastSolveSummaryJson": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "HandEyeWizardSessionDocument": {
+        "required": [
+          "formatVersion",
+          "sessionId",
+          "name",
+          "updatedAt",
+          "samplesJson",
+          "mode",
+          "angularWeight",
+          "visionScale",
+          "robustLoss",
+          "maxTranslationError",
+          "maxAngleErrorDeg",
+          "sourceFrame",
+          "targetFrame",
+          "unit",
+          "sourceUnit",
+          "lastSolveSummaryJson"
+        ],
+        "type": "object",
+        "properties": {
+          "formatVersion": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "samplesJson": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "angularWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "visionScale": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "robustLoss": {
+            "type": "string"
+          },
+          "maxTranslationError": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxAngleErrorDeg": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "sourceFrame": {
+            "type": "string"
+          },
+          "targetFrame": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "sourceUnit": {
+            "type": "string"
+          },
+          "lastSolveSummaryJson": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -23928,6 +25595,40 @@
         }
       },
       "SaveCameraIntrinsicVersionFromSessionRequest": {
+        "required": [
+          "sessionId"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SaveHandEye3DVersionFromSessionRequest": {
+        "required": [
+          "sessionId"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SaveHandEyeVersionFromSessionRequest": {
         "required": [
           "sessionId"
         ],

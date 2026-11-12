@@ -205,7 +205,11 @@ export const calibration = {
   wizardSessionExport: (sessionId: string) => apiUrl(`calibration/wizard/sessions/${encodeURIComponent(sessionId)}/export`),
   wizardSessionDisableOutliers: (sessionId: string) => apiUrl(`calibration/wizard/sessions/${encodeURIComponent(sessionId)}/disable-outliers`),
   wizardHandEyeSolve: apiUrl('calibration/wizard/handeye/solve'),
-  wizardHandEye3DSolve: apiUrl('calibration/wizard/handeye3d/solve')
+  wizardHandEyeSessions: apiUrl('calibration/wizard/handeye/sessions'),
+  wizardHandEyeSession: (sessionId: string) => apiUrl(`calibration/wizard/handeye/sessions/${encodeURIComponent(sessionId)}`),
+  wizardHandEye3DSolve: apiUrl('calibration/wizard/handeye3d/solve'),
+  wizardHandEye3DSessions: apiUrl('calibration/wizard/handeye3d/sessions'),
+  wizardHandEye3DSession: (sessionId: string) => apiUrl(`calibration/wizard/handeye3d/sessions/${encodeURIComponent(sessionId)}`)
 } as const;
 
 // ── calibrations (assets) ────────────────────────────────────────────────────
@@ -226,6 +230,26 @@ export const cameraIntrinsics = {
   version: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   publish: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish`),
   rollback: (id: string, version: string) => apiUrl(`camera-intrinsics/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}`)
+} as const;
+
+// ── hand-eye-calibrations ────────────────────────────────────────────────────
+export const handEyeCalibrations = {
+  list: apiUrl('hand-eye-calibrations'),
+  byId: (id: string) => apiUrl(`hand-eye-calibrations/${encodeURIComponent(id)}`),
+  versions: (id: string) => apiUrl(`hand-eye-calibrations/${encodeURIComponent(id)}/versions`),
+  version: (id: string, version: string) => apiUrl(`hand-eye-calibrations/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  publish: (id: string, version: string) => apiUrl(`hand-eye-calibrations/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish`),
+  rollback: (id: string, version: string) => apiUrl(`hand-eye-calibrations/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}`)
+} as const;
+
+// ── hand-eye3d-calibrations ──────────────────────────────────────────────────
+export const handEye3DCalibrations = {
+  list: apiUrl('hand-eye3d-calibrations'),
+  byId: (id: string) => apiUrl(`hand-eye3d-calibrations/${encodeURIComponent(id)}`),
+  versions: (id: string) => apiUrl(`hand-eye3d-calibrations/${encodeURIComponent(id)}/versions`),
+  version: (id: string, version: string) => apiUrl(`hand-eye3d-calibrations/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  publish: (id: string, version: string) => apiUrl(`hand-eye3d-calibrations/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/publish`),
+  rollback: (id: string, version: string) => apiUrl(`hand-eye3d-calibrations/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version)}`)
 } as const;
 
 // ── camera-feature-profiles ──────────────────────────────────────────────────

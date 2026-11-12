@@ -2763,6 +2763,405 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/calibration/wizard/handeye/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HandEyeWizardSaveRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeWizardSessionDocument"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/wizard/handeye/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeWizardSessionDocument"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationAssetDescriptor"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateHandEyeAssetFromSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SaveHandEyeVersionFromSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}/published": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}/versions/{version}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye-calibrations/{id}/rollback/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEyeCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/calibration/wizard/handeye3d/solve": {
         parameters: {
             query?: never;
@@ -2791,6 +3190,405 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/wizard/handeye3d/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HandEye3DWizardSaveRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DWizardSessionDocument"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calibration/wizard/handeye3d/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DWizardSessionDocument"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationAssetDescriptor"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateHandEye3DAssetFromSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SaveHandEye3DVersionFromSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}/published": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationVersionSnapshot"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}/versions/{version}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationAssetDescriptor"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hand-eye3d-calibrations/{id}/rollback/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    version: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HandEye3DCalibrationAssetDescriptor"];
+                    };
                 };
             };
         };
@@ -10617,6 +11415,15 @@ export interface components {
             targetFrame: string;
             /** @default mm */
             unit: string;
+            /** @default none */
+            outlierRejection: string;
+            /** @default TSAI */
+            crossCheckMethod: string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            minTranslationSpan: number | string;
         };
         CalibrationHandEyeSolveRequest: {
             samplesJson: string;
@@ -10640,6 +11447,18 @@ export interface components {
             unit: string;
             /** @default mm */
             sourceUnit: string;
+            /**
+             * Format: double
+             * @default 50
+             */
+            angularWeight: number | string;
+            /**
+             * Format: double
+             * @default 1
+             */
+            visionScale: number | string;
+            /** @default none */
+            robustLoss: string;
         };
         CalibrationHeatCell: {
             /** Format: int32 */
@@ -11729,6 +12548,20 @@ export interface components {
             description?: null | string;
             note?: null | string;
         };
+        CreateHandEye3DAssetFromSessionRequest: {
+            sessionId: string;
+            id: string;
+            name: string;
+            description?: null | string;
+            note?: null | string;
+        };
+        CreateHandEyeAssetFromSessionRequest: {
+            sessionId: string;
+            id: string;
+            name: string;
+            description?: null | string;
+            note?: null | string;
+        };
         CreateInvestigationVerificationRequest: {
             datasetId: string;
             baselineValidationRunId: string;
@@ -12386,6 +13219,246 @@ export interface components {
             /** Format: double */
             currentUtilization: number | string;
             level: string;
+        };
+        HandEye3DCalibrationAssetDescriptor: {
+            id: string;
+            name: string;
+            description: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: int32 */
+            latestVersion: number | string;
+            /** Format: int32 */
+            publishedVersion: null | number | string;
+            versions: components["schemas"]["HandEye3DCalibrationVersionInfo"][];
+            publicationHistory: components["schemas"]["HandEye3DCalibrationPublicationEvent"][];
+        };
+        HandEye3DCalibrationModel: {
+            mode: string;
+            method: string;
+            sourceFrame: string;
+            targetFrame: string;
+            unit: string;
+            matrix: (number | string)[];
+            outlierRejection: string;
+        };
+        HandEye3DCalibrationPublicationEvent: {
+            /** Format: int32 */
+            version: number | string;
+            action: string;
+            /** Format: date-time */
+            at: string;
+        };
+        HandEye3DCalibrationVersionInfo: {
+            /** Format: int32 */
+            version: number | string;
+            snapshotHash: string;
+            modelHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            note: string;
+            published: boolean;
+        };
+        HandEye3DCalibrationVersionSnapshot: {
+            assetId: string;
+            /** Format: int32 */
+            version: number | string;
+            snapshotHash: string;
+            modelHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            note: string;
+            model: components["schemas"]["HandEye3DCalibrationModel"];
+            sourceDocumentJson: string;
+            summaryJson: string;
+        };
+        HandEye3DWizardSaveRequest: {
+            sessionId: null | string;
+            name: string;
+            samplesJson: string;
+            /** @default eyeInHand */
+            mode: string;
+            /** @default DANIILIDIS */
+            method: string;
+            /**
+             * Format: double
+             * @default 50
+             */
+            rotationWeight: number | string;
+            /** @default none */
+            outlierRejection: string;
+            /** @default TSAI */
+            crossCheckMethod: string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            maxTranslationError: number | string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            maxRotationErrorDeg: number | string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            minTranslationSpan: number | string;
+            /** @default Camera */
+            sourceFrame: string;
+            /** @default  */
+            targetFrame: string;
+            /** @default mm */
+            unit: string;
+            lastSolveSummaryJson?: null | string;
+        };
+        HandEye3DWizardSessionDocument: {
+            formatVersion: string;
+            sessionId: string;
+            name: string;
+            updatedAt: string;
+            samplesJson: string;
+            mode: string;
+            method: string;
+            /** Format: double */
+            rotationWeight: number | string;
+            outlierRejection: string;
+            crossCheckMethod: string;
+            /** Format: double */
+            maxTranslationError: number | string;
+            /** Format: double */
+            maxRotationErrorDeg: number | string;
+            /** Format: double */
+            minTranslationSpan: number | string;
+            sourceFrame: string;
+            targetFrame: string;
+            unit: string;
+            lastSolveSummaryJson: null | string;
+        };
+        HandEyeCalibrationAssetDescriptor: {
+            id: string;
+            name: string;
+            description: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: int32 */
+            latestVersion: number | string;
+            /** Format: int32 */
+            publishedVersion: null | number | string;
+            versions: components["schemas"]["HandEyeCalibrationVersionInfo"][];
+            publicationHistory: components["schemas"]["HandEyeCalibrationPublicationEvent"][];
+        };
+        HandEyeCalibrationModel: {
+            mode: string;
+            sourceFrame: string;
+            targetFrame: string;
+            unit: string;
+            sourceUnit: string;
+            /** Format: double */
+            x: number | string;
+            /** Format: double */
+            y: number | string;
+            /** Format: double */
+            thetaDeg: number | string;
+            /** Format: double */
+            angularWeight: number | string;
+            /** Format: double */
+            visionScale: number | string;
+            robustLoss: string;
+        };
+        HandEyeCalibrationPublicationEvent: {
+            /** Format: int32 */
+            version: number | string;
+            action: string;
+            /** Format: date-time */
+            at: string;
+        };
+        HandEyeCalibrationVersionInfo: {
+            /** Format: int32 */
+            version: number | string;
+            snapshotHash: string;
+            modelHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            note: string;
+            published: boolean;
+        };
+        HandEyeCalibrationVersionSnapshot: {
+            assetId: string;
+            /** Format: int32 */
+            version: number | string;
+            snapshotHash: string;
+            modelHash: string;
+            /** Format: date-time */
+            createdAt: string;
+            note: string;
+            model: components["schemas"]["HandEyeCalibrationModel"];
+            sourceDocumentJson: string;
+            summaryJson: string;
+        };
+        HandEyeWizardSaveRequest: {
+            sessionId: null | string;
+            name: string;
+            samplesJson: string;
+            /** @default eyeInHand */
+            mode: string;
+            /**
+             * Format: double
+             * @default 50
+             */
+            angularWeight: number | string;
+            /**
+             * Format: double
+             * @default 1
+             */
+            visionScale: number | string;
+            /** @default none */
+            robustLoss: string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            maxTranslationError: number | string;
+            /**
+             * Format: double
+             * @default 0
+             */
+            maxAngleErrorDeg: number | string;
+            /** @default Camera */
+            sourceFrame: string;
+            /** @default  */
+            targetFrame: string;
+            /** @default mm */
+            unit: string;
+            /** @default mm */
+            sourceUnit: string;
+            lastSolveSummaryJson?: null | string;
+        };
+        HandEyeWizardSessionDocument: {
+            formatVersion: string;
+            sessionId: string;
+            name: string;
+            updatedAt: string;
+            samplesJson: string;
+            mode: string;
+            /** Format: double */
+            angularWeight: number | string;
+            /** Format: double */
+            visionScale: number | string;
+            robustLoss: string;
+            /** Format: double */
+            maxTranslationError: number | string;
+            /** Format: double */
+            maxAngleErrorDeg: number | string;
+            sourceFrame: string;
+            targetFrame: string;
+            unit: string;
+            sourceUnit: string;
+            lastSolveSummaryJson: null | string;
         };
         HardwareProvenanceData: {
             manufacturer?: null | string;
@@ -14243,6 +15316,14 @@ export interface components {
             note?: null | string;
         };
         SaveCameraIntrinsicVersionFromSessionRequest: {
+            sessionId: string;
+            note?: null | string;
+        };
+        SaveHandEye3DVersionFromSessionRequest: {
+            sessionId: string;
+            note?: null | string;
+        };
+        SaveHandEyeVersionFromSessionRequest: {
             sessionId: string;
             note?: null | string;
         };
