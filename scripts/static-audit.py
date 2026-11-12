@@ -107,7 +107,7 @@ api_source_files = list((ROOT/'backend/src/VisionStudio.Api').rglob('*.cs'))
 api_sources = '\n'.join(p.read_text(encoding='utf-8') for p in api_source_files)
 host_bootstrap = read_safe('backend/src/VisionStudio.Api/Hosting/BootstrapHostedServices.cs')
 endpoint_sources = '\n'.join(p.read_text(encoding='utf-8') for p in (ROOT/'backend/src/VisionStudio.Api/Endpoints').glob('*.cs'))
-catalog = read_safe('backend/src/VisionStudio.Engine/NodeCatalog.cs')
+catalog = read_family('backend/src/VisionStudio.Engine/NodeCatalog*.cs')
 # NodeCatalog composes batch catalogs; inspect only helpers actually referenced by Items.
 for helper in sorted(set(re.findall(r'\b(\w+Catalog)\.Items\b', catalog))):
     catalog += '\n' + read_safe(f'backend/src/VisionStudio.Engine/{helper}.cs')
@@ -975,7 +975,7 @@ trace_store_dependency=read_safe('backend/src/VisionStudio.Api/TraceabilityStore
 dependency_source=read_safe('backend/src/VisionStudio.Api/RuntimeDependencies.cs')
 job_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/JobEndpoints.cs')
 trace_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/TraceEndpoints.cs')
-production_source=read_safe('backend/src/VisionStudio.Api/ProductionRuntime.cs')
+production_source=read_family('backend/src/VisionStudio.Api/ProductionRuntime*.cs')
 job_store_source=read_safe('backend/src/VisionStudio.Api/JobStore.cs')
 for token in ['RuntimeDependencyManifest','EngineRuntimeDependency','PluginRuntimeDependency','CameraRuntimeDependency','DeviceRuntimeDependency','RobotRuntimeDependency','CalibrationRuntimeDependency','ManifestHash','CaptureAsync','ValidateAsync','ValidateOrThrowAsync']:
     if token not in dependency_source: fail(f'Runtime dependency manifest implementation missing: {token}')
@@ -1122,7 +1122,7 @@ ok('V0.42 per-run PTP evidence + timing diagnostics + report v4 trend present')
 
 # V0.43 Production PTP drift guard
 ptp_guard=read_safe('backend/src/VisionStudio.Api/ProductionPtpDriftGuard.cs')
-production_runtime=read_safe('backend/src/VisionStudio.Api/ProductionRuntime.cs')
+production_runtime=read_family('backend/src/VisionStudio.Api/ProductionRuntime*.cs')
 production_ui=read_safe('frontend/src/components/ProductionPanel.tsx')
 ptp_guard_tests=read_safe('backend/tests/VisionStudio.Api.Tests/ProductionPtpDriftGuardTests.cs')
 for token in ['PtpDriftGuardEnabled','PtpGuardWindowRuns','PtpGuardMinimumEvidenceRuns','PtpGuardMinimumReadyRate','PtpGuardCheckEveryCycles']:

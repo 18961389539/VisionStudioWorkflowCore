@@ -59,6 +59,14 @@
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理） |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
 
+覆盖率产物写在**系统临时目录**（`vite.config.ts` 的 `reportsDirectory`），门禁跑完只把
+`coverage-summary.json` / `lcov.info` 复制回 `artifacts/test-results/frontend-coverage/` 留档。
+原因：vitest 的 v8 provider 会无条件递归删除内部的 `.tmp`（每个测试文件一个 json，100+ 个），
+在本机会撞上批量删除守卫并抛 unhandled error——日志只剩一行 `RUN`，看起来像测试自己崩了。
+临时目录是守卫明确放行的范围，而覆盖率本来就是一次性中间物。
+后端覆盖率同理单独放 `artifacts/test-results/backend-coverage/`，每轮只清几个 GUID 子目录，
+避免旧报告混进"并集覆盖"把本轮没走到的行顶成已覆盖。
+
 ### 为什么用 oxlint 而不是 ESLint
 
 项目用 **TypeScript 7 原生编译器**，而 `typescript-eslint` 的 peer 范围是 `>=4.8.4 <6.1.0`，
@@ -103,6 +111,7 @@ spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进�
 |---|---|
 | `apiContractParityCoverage.test.ts` | 契约对账的**覆盖面**只许变长：读 `types.ts` 与 `generated/apiContractParity.ts` 源码，要求除 `PENDING` 里的类型外全部有 `BackendFitsFrontend` 断言；`PENDING` 目前只剩 `WorkflowModuleParameter`，且 `PENDING.size <= 1` |
 | `i18nStatusKeys.test.ts` | 状态键必须是稳定标识符（`^[A-Za-z][A-Za-z0-9_.-]{0,39}$`），挡住"用英文句子当键"；并断言 `Running/Succeeded/Failed/Cancelled/Queued/Interrupted/Breakpoint` 必须存在 |
+| `i18nStableKeys.test.ts` | 目录翻译表的稳定键守卫：描述/参数描述/节点名的键必须是 `类型` 或 `类型.参数`；分类/分组只允许短契约 token；悬空语义键相对目录金样只许减（基线 126）；分组中文值必须唯一（否则 `canonicalParameterGroup` 反查会写回错的契约值）；分类/分组零回落；用真实目录金样跑双语本地化 |
 
 契约断言本身是编译期的（`BackendFitsFrontend<Frontend, Backend extends Frontend>`），
 覆盖率用例防的是"新加一个 DTO 但没人写断言"——那种缺口不会让编译失败。

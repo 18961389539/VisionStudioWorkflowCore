@@ -14,7 +14,7 @@ import type { NodeCatalogItem } from '../types';
 import type { Lang } from './lang';
 import { optionLabels, parameterLabels, variantLabels } from './catalogLabels';
 
-const nodeNames: Record<string, string> = {
+export const nodeNames: Record<string, string> = {
   'jlvision.featureExtract': '亚像素特征提取', 'jlvision.segmentation': '高级区域分割',
   'jlvision.regionAnalysis': '区域关系与距离分析', 'measure.fitRectangle': '矩形轮廓拟合',
   'geometry.intersections': '几何求交', 'jlvision.dxf': 'DXF 轮廓读写',
@@ -126,7 +126,7 @@ const nodeNames: Record<string, string> = {
 };
 
 // 分类名是后端目录的契约值（不是可自由改写的显示文案）；新增分类必须在此登记中文。
-const categories: Record<string, string> = {
+export const categories: Record<string, string> = {
   Script: '脚本',
   Defect: '缺陷检测',
   Region: '区域处理',
@@ -138,7 +138,7 @@ const categories: Record<string, string> = {
 
 
 // 分组名由后端目录声明（契约值）；新增分组必须在此登记中文，否则中文界面回落英文。
-const parameterGroups: Record<string, string> = {
+export const parameterGroups: Record<string, string> = {
   Detector: '检测器', Refinement: '细化',
   'Mean limits': '均值判定', 'Variation limits': '波动判定', Region: '有效区域',
   'Parameters': '参数',
@@ -161,14 +161,14 @@ const parameterGroups: Record<string, string> = {
   Clustering: '聚类', Denoising: '降噪', Neighborhood: '邻域', Stitching: '图像拼接', Dictionary: '字典',
   Formats: '码制', Engine: '引擎', Mode: '模式', 'Gray Range': '灰度范围', 'Color Range': '颜色范围',
   Sorting: '排序', Match: '匹配规则', Comparison: '比较', Regex: '正则', 'Ignore Region': '忽略区域',
-  Operation: '操作', Board: '标定板', Lattice: '网格', Quality: '质量', 'Managed Chamfer': '托管 Chamfer',
+  Operation: '操作', Board: '标定板', Lattice: '点阵', Quality: '质量', 'Managed Chamfer': '托管 Chamfer',
   Coordinates: '坐标', Difference: '差分', Alignment: '对齐',
   Contours: '轮廓选择', Limits: '限值', Script: '脚本', 'Sort Keys': '排序字段', 'Binary Kernel': '二值核', 'Gray Kernel': '灰度核', Hysteresis: '迟滞',
-  Datum: '基准', 'Basic Dimension': '基本尺寸', Tolerance: '公差', MMC: '最大实体', Reporting: '报告', Measurement: '测量',
+  Datum: '基准', 'Basic Dimension': '基本尺寸', Tolerance: '公差', MMC: '最大实体', Reporting: '报告', Measurement: '测量项',
   Kernel: '卷积核', Anchor: '锚点', Band: '频带', Direction: '方向',
   Views: '视图', 'Quality Gates': '质量门限', Failure: '失败处理', Completion: '完成等待',
   'Top Left': '左上角', 'Top Right': '右上角', 'Bottom Right': '右下角', 'Bottom Left': '左下角',
-  Log: '日志', Endpoint: '端点', Source: '来源', Decode: '解码', Storage: '存储', Grid: '网格', Mask: '掩码', Statistics: '统计', Capability: '过程能力', Extraction: '提取', Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐',
+  Log: '日志', Endpoint: '端点', Source: '输入来源', Decode: '解码设置', Storage: '存储', Grid: '网格', Mask: '掩码', Statistics: '统计', Capability: '过程能力', Extraction: '提取', Template: '模板', Join: '拼接', Number: '数值', Substring: '截取', Trim: '去空白', Replace: '替换', Pad: '补齐',
   'Fields': '字段',
   'Channel': '通道',
   'Message': '消息',
@@ -181,6 +181,47 @@ const parameterGroups: Record<string, string> = {
   'Encoder': '编码器',
   'Trigger': '触发',
   'Zone': '公差带',
+  // 2026-11-12 补齐：目录实际使用但此前未登记中文的分组（原中文界面静默回落英文）。
+  Compatibility: '兼容性',
+  'Offline Replay': '离线回放',
+  Asset: '资产',
+  'Quality Gate': '质量门',
+  ROI: 'ROI 区域',
+  Transform: '变换',
+  Size: '尺寸',
+  Shape: '形状',
+  Contrast: '对比度',
+  Registration: '配准',
+  Merging: '合并',
+  SLIC: 'SLIC 超像素',
+  Construction: '构造',
+  Matrices: '矩阵',
+  Gates: '门限组',
+  Estimator: '估计器',
+  Solver: '求解器',
+  'Host Protocol': '主机协议',
+  Data: '数据',
+  'Initial Alignment': '初始对齐',
+  Array: '数组',
+  Curvature: '曲率',
+  Distance: '距离',
+  Circle: '圆',
+  'Reference Capture': '参考采集',
+  Gear: '齿轮',
+  Thread: '螺纹',
+  Chain: '尺寸链',
+  Weights: '权重',
+  CLAHE: 'CLAHE 增强',
+  'Legacy Rectangle': '旧版矩形',
+  Thresholds: '阈值组',
+  Center: '中心',
+  'Radial Band': '径向带',
+  Angular: '角度',
+  Gains: '增益',
+  Raster: '栅格',
+  Values: '取值',
+  Adjust: '调整',
+  'Pick Offset': '抓取偏移',
 };
 const sourceParameterGroups = Object.fromEntries(Object.entries(parameterGroups).map(([source, translated]) => [translated, source]));
 
@@ -394,7 +435,7 @@ export const portNames: Record<string, string> = {
   'worstPoint': '最差点',
 };
 
-const descriptions: Record<string, string> = {
+export const descriptions: Record<string, string> = {
   'defect.filter': '用一套可归因的规则抑制误检，而不是把全局阈值一降了事。每条被剔除的缺陷按原因分桶计数（面积 / 长宽比 / 圆度 / 对比度 / 边缘余量 / 数量限制），某一桶突然变多就说明该调哪一根旋钮；反过来调低阈值只会静默接受漏检。对比度与边缘余量需要图像或画布端口，未连接时这两条规则会被跳过并在诊断里写明，而不是悄悄放行。所有启用的规则取“与”：任何一条不通过就剔除。',
   'defect.geometry': '测量缺陷而不只是数它：逐条给出长度、宽度、方向、细长比与填充率，以及质量报告要的汇总（最大长度/宽度、主方向、细长缺陷数）。接上轮廓用最小外接矩形（精确）；不接轮廓则退回轴对齐包围盒，并在诊断里写明来源——45 度的划痕按包围盒量出来会宽一倍。方向折叠到 0..180°，10 度和 190 度是同一道划痕。空检测列表返回 found=false 与零汇总，不报错。',
   'defect.edgeDefect': '把边缘偏差曲线切成一个个边缘缺陷。接采样点（contour.toPoints / feature.ridge 输出）加且只加一个名义要素（直线或圆），节点算法向有符号偏差、标出超差样本、沿轮廓合并（包括被毛刺分开的两瓣缺口），每个缺陷输出一条 DetectionList（含深度、弧长与包围盒）。这是 tolerance.profile 的互补面：那个回答“边缘是否超差”，这个回答“缺口在哪、多深”。要求采样点沿轮廓有序；无序点云会产生无意义区段，因此偏差是沿折线量的，不是最近点搜索。',
@@ -472,17 +513,6 @@ const descriptions: Record<string, string> = {
   'region.transform': '采用与仿射变换图像相同的像素坐标约定，以最近邻变换区域，保留对象和孔洞，裁剪到输出边界并移除空对象。',
   'measure.lineSpacing': '沿线段 A 均匀采样，按法向或指定角度与线段 B 求交，输出绝对间距的均值、极值和总体标准差。无交叠时 found=false；输入来自找线节点，本节点不直接寻找图像边缘。',
   'calibration.detectBoard': '使用 JLVision 提取完整孤立棋盘格内角点或对称圆点阵，并验证投影格子。报告清晰度（Laplacian 方差）、覆盖率与 Pass/Warn/Fail 质量结论及采集建议；可选 minBlurVariance/minCoverage，开启 rejectWeakViews 时不追加失败视图。可累积最多 100 张视图供内参标定或标定向导使用。',
-  'Grayscale flat-field correction: (image-dark)/(bright-dark)*target. Auto target is mean bright-dark. All gain pixels must exceed minGain. References must match dimensions; byte output clips, real output preserves range.': '按（图像−暗场）÷（亮场−暗场）×目标灰度进行校正；彩色转灰度。自动目标取明暗场差值均值。每个像素增益须超过最小值；参考图尺寸一致。8 位输出截断，浮点输出保留数值范围。',
-  'Detect local bright/dark deviations using JLVision dynamic threshold. Background comes from the input or a local mean with an odd window. Connect image or domainImage; optional region further limits detection. Output objects are not split.': '与输入背景图或局部均值比较，检测亮暗缺陷。普通图像与限定域图像只连接一个；可再用区域限制检测范围。输出区域需通过连通域节点拆分目标。',
-  'Compare aligned grayscale images with JLVision arithmetic. Output is float32; signed mode preserves negative differences. No automatic alignment or brightness compensation.': '对已对齐的灰度图进行差分；输出为浮点图，带符号模式保留负值。输入须先完成定位对齐，曝光变化也会产生差异。',
-  'Compare aligned image and good reference, threshold differences, split defects, and filter pixel area. Bright means image-reference; dark means reference-image. Optional region/domain limits inspection. Threshold includes equality.': '与对齐的良品图比较，按差异阈值提取缺陷、拆分连通域并筛选像素面积。亮缺陷取当前图减标准图，暗缺陷方向相反；可限定区域或处理域。阈值包含端点。',
-  'Grayscale mean, population deviation, min/max and range over the union of region pixels intersected with the image domain. Overlapping objects count once. Empty selection returns found=false and omits statistics; check found before consuming them.': '统计区域并集与处理域交集内的平均灰度、总体标准差、最小最大值和极差。重叠像素只计一次。空区域返回未找到，不输出灰度统计值；下游先判断 found。',
-  'JLVision inclusive gray-range region. Connect exactly one image or domainImage. Color is converted to gray. Disconnected objects remain one region until connectedComponents.': '按包含端点的灰度范围生成区域。普通图像和限定域图像只连接一个；彩色自动转灰度。多个目标需用连通域拆分节点分开。',
-  'Union input region objects and split with JLVision native connectivity. Object indices are not tracking IDs. Empty input returns zero objects.': '合并输入区域后按原生连通性拆分。序号不表示跨帧目标身份；空区域正常返回零个目标。',
-  'JLVision attribute selection on existing objects; does not split objects. Chain filters for multiple criteria. Area counts pixels; anisometry is the equivalent-ellipse axis ratio.': '筛选已有区域对象，不自动拆分。多条件可串联筛选节点。面积按像素计数；轴比取等效椭圆长短轴比。',
-  'Set operations on the unions of A and B. Both must use the same image dimensions and coordinate system. Difference is A minus B; split the result explicitly if needed.': '对 A、B 各自并集进行运算。尺寸和坐标系须一致；差集为 A 减去 B。运算后可继续拆分连通域。',
-  'Fill enclosed holes in each JLVision region object without bridging disconnected objects or altering input runs.': '填充每个区域对象的封闭孔洞，不连接分离目标，不修改输入区域。',
-  'Preserve owned image pixels and attach an explicit region domain. Repeated reductions intersect domains. Connect domainImage to region.fromThreshold; regular Image ports deliberately reject it to prevent silent domain loss.': '保留原始像素并附加处理域；重复限定取交集。输出连接阈值生成区域的限定域图像端口。普通图像端口拒绝此类型，防止丢失处理域。',
   'contour.extract': '提取轮廓并保留外轮廓/孔洞层级。接线：二值图（或可走 Otsu）→ Contour 列表；没有轮廓时 found=false，不当作硬失败。关键参数：层级、近似精度。可串联 contour.filter，再接厚度、圆度、直线度。提取前建议先阈值或形态学清理。',
   'contour.filter': '按面积、圆度、层级及包围盒中心位置筛选轮廓，保留父子引用并重新编号。droppedCount 包含条件过滤和数量限制；仅合格轮廓超过数量上限时 truncated=true。位置窗必须与轮廓使用同一坐标系。',
   'contour.properties': '计算轮廓重心、最小外接矩形、实心度等属性，并输出目标列表。大坐标下采用相对坐标累加；无效轮廓会明确报错，空列表需先分支处理。',
@@ -650,7 +680,7 @@ const descriptions: Record<string, string> = {
 /** 参数级中文描述（key = `${节点类型}.${参数名}`）。
  *  后端下发的是面向实现的英文说明；这里优先替换为面向操作的中文说明，
  *  并尽量给出“调大会怎样 / 什么时候调”的具体例子。未命中的参数回落后端原文。 */
-const parameterDescriptions: Record<string, string> = {
+export const parameterDescriptions: Record<string, string> = {
   'value.string.op': '严格按所选运算执行；未知运算直接失败，不做透传兜底。仅拼接、文本转数值需要 A；数值转文本需要 value 输入。',
   'value.string.template': '占位符 {a} {b} {c} {d} {value} 与序号别名 {0}..{3} 会被替换，{{ 和 }} 输出字面花括号。未知占位符、未闭合花括号、引用 {value} 却未接数值输入都会失败；未接线的字符串输入展开为空串。',
   'value.string.separator': '插入到 a、b、c、d 的非空段之间。空段被跳过；分隔符为空时直接相连。',
