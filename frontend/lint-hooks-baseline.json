@@ -1,0 +1,4 @@
+{
+  "_comment": "react/exhaustive-deps 存量基线（只许减）。scripts/check-hooks-deps.mjs 用 oxlint -D 统计后与这里比较；修掉一处就同步下调。不要为了让新代码通过而上调这个数字。",
+  "exhaustiveDeps": 63
+}

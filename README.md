@@ -66,7 +66,7 @@ cd frontend; npm install; npm run dev
 ```powershell
 ./scripts/quality-gate.ps1                          # 全量（提交前本地跑这个）
 ./scripts/quality-gate.ps1 -Scope Backend           # 后端段
-./scripts/quality-gate.ps1 -Scope Frontend          # 前端段（lint + 单测覆盖率 + 构建）
+./scripts/quality-gate.ps1 -Scope Frontend          # 前端段（lint + 单测覆盖率 + 构建 + 产物体积预算）
 ./scripts/quality-gate.ps1 -Scope E2E               # Playwright 真浏览器
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：复用现成 node_modules
 ```

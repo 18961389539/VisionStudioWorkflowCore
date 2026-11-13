@@ -1,0 +1,33 @@
+{
+  "_comment": "前端产物 gzip 体积预算（棘轮）：只许降不许升。未列出的 chunk 不得超过 defaultMaxGzipKB；所有产物之和不得超过 totalMaxGzipKB。体积按 gzip -9 计算，chunk 名不含内容哈希。",
+  "_updated": "2026-11-13",
+  "_note": "首版基线取自 2026-11-13 实测构建（vite 8.3.8）。只登记超过 defaultMaxGzipKB 的 chunk；小 chunk 走默认上限。拆分或懒加载后应同步下调记录值。",
+  "defaultMaxGzipKB": 20,
+  "totalMaxGzipKB": 1420,
+  "budgets": {
+    "vendor-antd.js": 312,
+    "index.js": 216,
+    "ScriptEditor.js": 197,
+    "catalog.generated.js": 175,
+    "catalog.zh.js": 157,
+    "vendor-konva.js": 100,
+    "vendor-react.js": 69,
+    "vendor-xyflow.js": 59,
+    "CalibrationPanel.js": 20,
+    "index.css": 17,
+    "TracePanel.js": 15,
+    "vendor-signalr.js": 15,
+    "JobPanel.js": 11,
+    "ParameterTuningPanel.js": 9,
+    "PluginPackagePanel.js": 7,
+    "DatasetValidationPanel.js": 5,
+    "ModelAssetPanel.js": 4,
+    "WorkflowModulePanel.js": 4,
+    "HardwareProvenancePanel.js": 4,
+    "ModelPackagePanel.js": 3,
+    "FrameTreePanel.js": 2,
+    "AboutPanel.js": 2,
+    "catalog.js": 2,
+    "vendor-xyflow.css": 3
+  }
+}

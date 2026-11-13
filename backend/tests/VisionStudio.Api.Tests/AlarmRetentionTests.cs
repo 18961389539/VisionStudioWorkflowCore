@@ -81,4 +81,87 @@ public sealed class AlarmRetentionTests
         Assert.Equal(3, capped.Items.Count); // 不超过实际条数；take 被夹到上限
         Assert.Equal(3, capped.Total);
     }
+
+    [Fact]
+    public async Task Raise_ReplacesActiveAlarmWithSameCodeAndSource()
+    {
+        using var env = new TempWebHostEnvironment();
+        var store = new AlarmStore(env);
+
+        var first = await store.RaiseAsync("SAME", AlarmSeverity.Warning, "src", "first", null, default);
+        var second = await store.RaiseAsync("SAME", AlarmSeverity.Critical, "src", "second", "run-1", default);
+
+        var page = await store.ListAsync(false, 0, 10, default);
+        Assert.Equal(1, page.Total);
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Equal(second.Id, page.Items[0].Id);
+        Assert.Equal(AlarmSeverity.Critical, page.Items[0].Severity);
+    }
+
+    [Fact]
+    public async Task RevisionStamp_ChangesOnRaiseAcknowledgeAndRecover()
+    {
+        using var env = new TempWebHostEnvironment();
+        var store = new AlarmStore(env);
+
+        var initial = store.RevisionStamp();
+        var alarm = await store.RaiseAsync("R-1", AlarmSeverity.Warning, "src", "message", null, default);
+        var afterRaise = store.RevisionStamp();
+        Assert.NotEqual(initial, afterRaise);
+
+        await store.AcknowledgeAsync(alarm.Id, default);
+        var afterAcknowledge = store.RevisionStamp();
+        Assert.NotEqual(afterRaise, afterAcknowledge);
+
+        await store.RecoverAsync("R-1", "src", default);
+        Assert.NotEqual(afterAcknowledge, store.RevisionStamp());
+    }
+
+    [Fact]
+    public async Task LegacyJson_IsImportedAndArchivedOnFirstUse()
+    {
+        using var env = new TempWebHostEnvironment();
+        var production = Path.Combine(env.ContentRootPath, "data", "production");
+        Directory.CreateDirectory(production);
+        var legacy = Path.Combine(production, "alarms.json");
+        await File.WriteAllTextAsync(legacy, """
+[
+  {
+    "id": "legacy-1",
+    "code": "LEGACY-ACTIVE",
+    "severity": "Critical",
+    "source": "legacy",
+    "message": "active alarm",
+    "active": true,
+    "acknowledged": false,
+    "raisedAt": "2026-10-26T08:00:00+00:00"
+  },
+  {
+    "id": "legacy-2",
+    "code": "LEGACY-RECOVERED",
+    "severity": "Warning",
+    "source": "legacy",
+    "message": "recovered alarm",
+    "active": false,
+    "acknowledged": true,
+    "raisedAt": "2026-10-26T07:00:00+00:00",
+    "recoveredAt": "2026-10-26T07:30:00+00:00",
+    "acknowledgedAt": "2026-10-26T07:10:00+00:00"
+  }
+]
+""");
+
+        var store = new AlarmStore(env);
+        var page = await store.ListAsync(false, 0, 10, default);
+
+        Assert.Equal(2, page.Total);
+        Assert.Contains(page.Items, x => x.Code == "LEGACY-ACTIVE" && x.Active);
+        Assert.Contains(page.Items, x => x.Code == "LEGACY-RECOVERED" && !x.Active && x.Acknowledged);
+        Assert.False(File.Exists(legacy));
+        Assert.Single(Directory.GetFiles(production, "alarms.json.migrated-*"));
+
+        // 归档后再次构造不会重复导入。
+        var reopened = new AlarmStore(env);
+        Assert.Equal(2, (await reopened.ListAsync(false, 0, 10, default)).Total);
+    }
 }

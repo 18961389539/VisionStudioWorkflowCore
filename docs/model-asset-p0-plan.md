@@ -15,12 +15,12 @@ GC 与导入导出、签名/加密分发、前端完整资产浏览器（P0 只�
 
 | 现有资产 | 位置 | 复用方式 |
 | --- | --- | --- |
-| 版本化资产存储（337 行） | `VisionStudio.Api/CameraIntrinsicAssetStore.cs` | 照搬结构：`assets` + `versions` + `publication_history`，自带 `snapshot_hash` / `model_hash` / `created_by` |
+| 版本化资产存储（337 行） | `VisionStudio.Api/Calibration/CameraIntrinsicAssetStore.cs` | 照搬结构：`assets` + `versions` + `publication_history`，自带 `snapshot_hash` / `model_hash` / `created_by` |
 | 版本化 DDL | `VisionStudio.Api/SchemaMigrations.cs`（当前 v23） | 追加 v24，三张 `CREATE TABLE IF NOT EXISTS`，`CurrentVersion` 改 24 |
 | 薄端点封装（147 行） | `VisionStudio.Api/Endpoints/CameraEndpoints.cs` | 端点形状、权限特性、错误码直接对齐 |
 | 模型缓存 | `VisionStudio.Engine/Algorithms/JLVisionModelCache.cs` | 运行时缓存键用 `sha256`，已支持 |
 | 引擎侧宿主注入 | `VisionStudio.Engine/DeviceCommandOwnership.cs`（AsyncLocal） | 用同一模式注入只读的 `IModelAssetReader`，不让 Engine 依赖 Api |
-| 模型包服务 | `VisionStudio.Api/ModelPackageService.cs` | **不混用**：它是文件系统 ONNX 包；模型资产是 SQLite 二进制，边界写进文档 |
+| 模型包服务 | `VisionStudio.Api/Assets/ModelPackageService.cs` | **不混用**：它是文件系统 ONNX 包；模型资产是 SQLite 二进制，边界写进文档 |
 
 ## 三、任务分解
 

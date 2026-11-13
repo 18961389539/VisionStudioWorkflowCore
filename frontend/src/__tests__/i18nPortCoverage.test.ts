@@ -6,12 +6,11 @@ import { portNames } from '../i18n/catalog.zh';
  * 端口中文覆盖率棘轮（2026-11-13）。
  *
  * 目录标签与参数描述已迁到语义键，并由 i18nStableKeys / catalogLocalization 守住；
- * 端口名仍有存量未翻译。这里不要求一次补齐，而是锁住"只减不增"：
- * 新增节点/端口必须同时补中文，否则未翻译数量增加会失败。
+ * 端口名在 2026-11-13 已清零（157 → 0），基线固定为 0：新增节点/端口必须同时补中文。
  *
  * 动态分支/循环端口（case1…、point1…）由 localizePortName 规则生成，不在此表登记。
  */
-const UNTRANSLATED_PORT_BASELINE = 157;
+const UNTRANSLATED_PORT_BASELINE = 0;
 const DYNAMIC_PORT = /^(case|point)\d+$/;
 const CJK = /[\u3400-\u9fff]/;
 

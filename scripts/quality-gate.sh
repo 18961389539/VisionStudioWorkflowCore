@@ -2,7 +2,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESULTS="$ROOT/artifacts/test-results"
-MIN_LINE_COVERAGE="${MIN_LINE_COVERAGE:-60}"
+MIN_LINE_COVERAGE="${MIN_LINE_COVERAGE:-84}"
+MIN_BRANCH_COVERAGE="${MIN_BRANCH_COVERAGE:-62}"
 rm -rf "$RESULTS"
 mkdir -p "$RESULTS"
 echo "== VisionStudio V0.63 Quality Gate =="
@@ -36,11 +37,13 @@ if command -v pwsh >/dev/null 2>&1; then
 else
   echo "Skipping PowerShell warning baseline: pwsh is unavailable." >&2
 fi
-python3 "$ROOT/scripts/check-coverage.py" "$RESULTS" --min-line "$MIN_LINE_COVERAGE"
+python3 "$ROOT/scripts/check-coverage.py" "$RESULTS" --min-line "$MIN_LINE_COVERAGE" --min-branch "$MIN_BRANCH_COVERAGE"
 (
   cd "$ROOT/frontend"
   npm ci --no-audit --no-fund
+  npm run check:theme
   npm test
   npm run build
+  python3 "$ROOT/scripts/check-bundle-budget.py"
 )
 echo "Quality Gate PASSED"

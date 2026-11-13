@@ -8,7 +8,7 @@
 ```powershell
 ./scripts/quality-gate.ps1                  # 全量（本地提交前）
 ./scripts/quality-gate.ps1 -Scope Backend   # 静态审计 + 度量下限 + 发布/迁移回归 + dotnet test + 覆盖率
-./scripts/quality-gate.ps1 -Scope Frontend  # npm ci + oxlint + 单测覆盖率 + 生产构建
+./scripts/quality-gate.ps1 -Scope Frontend  # npm ci + oxlint + 单测覆盖率 + 生产构建 + 产物体积预算
 ./scripts/quality-gate.ps1 -Scope E2E       # Playwright 真浏览器
 
 ./scripts/quality-gate.ps1 -Scope Frontend -SkipInstall   # 本地迭代：跳过 npm ci
@@ -42,7 +42,7 @@
 | `test-publish-runtime.sh` | Bash 发布路径与 Windows 路径同一安全契约 | 同上；无 bash 的主机会跳过并打印说明 |
 | `dotnet test`（Release，排除 Soak，收集覆盖率） | 宿主 + 引擎行为 | 修代码；确实需要改期望时在 CHANGELOG 里写清理由 |
 | `check-warning-baseline.ps1` | 编译器/分析器告警不新增（`scripts/warning-baseline.txt`） | 修掉告警；确属误报则显式加入基线，让下一次 review 看得到 |
-| `check-coverage.py` | 合并行/分支覆盖率下限 | 行 81 / 分支 60 是棘轮：只升不降，提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
+| `check-coverage.py` | 合并行/分支覆盖率下限 | 行 84 / 分支 62 是棘轮：只升不降（2026-11-13 实测 85.0% / 62.5%，各留约 1 点余量），提升后同步上调脚本默认值与 workflow 的 `MIN_LINE_COVERAGE`/`MIN_BRANCH_COVERAGE` |
 | `static-audit.py` 的空 catch 规则（2026-11-12，2026-11-13 清零） | 未写忽略原因的空 `catch` 不得新增（`scripts/empty-catch-baseline.json` 存量已清零） | 写 `catch { } // 原因`（或 `/* */`），或补上真正的错误处理。新增即失败，不再有按文件锁定的存量额度 |
 | `dotnet list package --vulnerable`（2026-11-12） | NuGet 已知漏洞只拦 high/critical；离线时打印跳过而不是失败 | 在 `backend/Directory.Packages.props` 升版本。版本只在这一处改——24 个包原先散落在 15 个 csproj 里 |
 
@@ -55,9 +55,11 @@
 |---|---|
 | `npm ci` | 锁文件与 package.json 一致（不允许"本地能装、CI 装不上"） |
 | `npm audit --audit-level=high`（2026-11-12） | 前端依赖已知漏洞（只拦 high/critical）。首次接入即发现 vite 8.3.2 与 undici 各带 high |
-| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径 |
+| `npm run lint`（oxlint，`--max-warnings 0`） | 未使用变量/导入、hooks 规则、JSX 正确性等；**零告警**口径。另运行 `check-hooks-deps.mjs`：`react/exhaustive-deps` 存量基线 65 处只许减（新代码新增即失败） |
+| `npm run check:theme`（2026-11-13） | 主题令牌守卫：颜色只能出现在 `:root` / `[data-vs-theme='light']` 两个块里；语义 token 在深/浅主题下按 WCAG 校验对比度（文字 4.5:1、图形 3:1）。此前 62 行硬编码颜色在浅色主题下最低仅 2.2:1 |
 | `npm run test:coverage` | 单测 + 覆盖率阈值（写在 `vite.config.ts` 的 `test.coverage.thresholds`，棘轮同理）；其中 `apiUsage.test.ts` 另有静默失败棘轮：组件里禁止用 `if (!response.ok) return;` 把失败渲染成空数据，白名单仅保留附加信息路径与组件文档反例 |
 | `npm run build` | `tsc -b`（`strict: true`）+ 生产构建；类型不过不产出包 |
+| `check-bundle-budget.py`（2026-11-13） | 构建产物 gzip 体积预算（`scripts/bundle-budget.json`）：未登记 chunk 不超过默认 20 kB，已登记 chunk 只许降，所有产物之和不超过总量上限。中文词表曾以 445 kB 裸体积进过 index——单测和覆盖率都看不见这类回退 |
 
 覆盖率产物写在**系统临时目录**（`vite.config.ts` 的 `reportsDirectory`），门禁跑完只把
 `coverage-summary.json` / `lcov.info` 复制回 `artifacts/test-results/frontend-coverage/` 留档。
@@ -80,9 +82,11 @@ Vitest 5 的 `fsModuleCachePath` 也指到系统临时目录：默认 `node_modu
 在 TS 7 上无法解析（不是"能跑但报警"，是直接解析失败）。oxlint 是 Rust 实现，不依赖 TS 编译 API，
 规则覆盖 `no-unused-vars` / `rules-of-hooks` / JSX 正确性等我们真正需要的那部分。
 
-React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处、`exhaustive-deps` 49 处，
-2026-11-12 首次启用时统计）暂未开启：这些是"重写渲染方式"级别的改造，一次性开启会让门禁长期变红
-而失去意义。收敛路径见 `docs/improvement-backlog-2026-10-23.md`。
+React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处，2026-11-12 首次启用时统计）暂未开启：
+这些是"重写渲染方式"级别的改造，一次性开启会让门禁长期变红而失去意义。
+`exhaustive-deps` 已先行接入（2026-11-13）：规则本体仍保持 `off`，由 `frontend/scripts/check-hooks-deps.mjs`
+用 `oxlint -D` 单独统计并与 `lint-hooks-baseline.json` 的存量基线（当前 63，2026-11-13 由 65 下调）比较——新代码新增违规直接失败，
+修掉一处则要求同步下调基线。这样不必一次性改写 26 个存量组件里的内联 `refresh/load`。
 
 `no-unused-vars` 对 `src/__tests__/**` 关闭：测试里 `const { result, rerender } = renderHook(...)`
 的解构本身就是对被调 API 的说明，逐个改名只会增加噪音。生产代码不受此豁免。
@@ -97,7 +101,7 @@ React Compiler 系列规则（`set-state-in-effect` 82 处、`refs` 56 处、`ex
 ## E2E 段
 
 Playwright + Chromium，覆盖 jsdom 无法验证的部分：布局引擎、Canvas 绘制、指针事件链、真实导航。
-失败时上传 `frontend/playwright-report`。单列一段的原因：它和单测的稳定性与耗时不是一个量级，
+失败时上传 `artifacts/test-results/playwright-report`。单列一段的原因：它和单测的稳定性与耗时不是一个量级，
 混在一起会把"断言挂了"和"浏览器没起来"混成同一个红叉。
 
 spec 用 `page.route('**/api/**')` 把后端全量桩化，**不依赖 .NET 进程**：真实浏览器 + 固定响应，
@@ -141,13 +145,14 @@ health → 登录 → `/api/catalog` → `/api/run` → `/api/traces/{runId}` �
   环境去重只在 Windows PowerShell 5.1 执行，pwsh（CI 的 shell）直接跳过——已用 pwsh 7 +
   `CI=true` 本地复跑 9 个用例确认这条路径。
 
-## 前端的两条棘轮（在 `npm run test:coverage` 里）
+## 前端的棘轮（在 `npm run test:coverage` 里）
 
 | 用例 | 守什么 |
 |---|---|
-| `apiContractParityCoverage.test.ts` | 契约对账的**覆盖面**只许变长：读 `types.ts` 与 `generated/apiContractParity.ts` 源码，要求除 `PENDING` 里的类型外全部有 `BackendFitsFrontend` 断言；`PENDING` 目前只剩 `WorkflowModuleParameter`，且 `PENDING.size <= 1` |
+| `apiContractParityCoverage.test.ts` | 契约对账的**覆盖面**只许变长：读 `types.ts` 与 `generated/apiContractParity.ts` 源码，要求全部同名 DTO 都有 `BackendFitsFrontend` 断言；`PENDING` 已于 2026-11-13 清空，棘轮收紧到 `PENDING.size <= 0`——此后再出现同名 DTO 未对账会直接失败，没有登记缓冲 |
 | `i18nStatusKeys.test.ts` | 状态键必须是稳定标识符（`^[A-Za-z][A-Za-z0-9_.-]{0,39}$`），挡住"用英文句子当键"；并断言 `Running/Succeeded/Failed/Cancelled/Queued/Interrupted/Breakpoint` 必须存在 |
 | `i18nStableKeys.test.ts` | 目录翻译表的稳定键守卫：描述/参数描述/节点名的键必须是 `类型` 或 `类型.参数`；分类/分组只允许短契约 token；悬空语义键相对目录金样只许减（基线 126）；分组中文值必须唯一（否则 `canonicalParameterGroup` 反查会写回错的契约值）；分类/分组零回落；用真实目录金样跑双语本地化 |
+| `i18nPortCoverage.test.ts` | 端口中文覆盖：目录里每个端口名必须有中文映射（动态 `caseN`/`pointN` 由规则生成）；基线固定 **0**，新增端口未补中文直接失败 |
 
 契约断言本身是编译期的（`BackendFitsFrontend<Frontend, Backend extends Frontend>`），
 覆盖率用例防的是"新加一个 DTO 但没人写断言"——那种缺口不会让编译失败。

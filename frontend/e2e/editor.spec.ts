@@ -82,12 +82,18 @@ test.describe('编辑器画布（真实浏览器）', () => {
   test('Ctrl+K 命令面板可直接加节点（真实画布命中链路）', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // 画布可见只代表 DOM 渲染完成，Ctrl+K 的全局监听随首个 effect 挂载；
-    // 满载（7 个 worker 并发）时直接按键会抢在挂载前，属于测试竞态。
+    // 画布可见只代表 DOM 渲染完成，Ctrl+K 的全局监听随首个 effect 挂载；满载并发时
+    // 按键会抢在监听器注册前。`.react-flow` 可见与监听器就绪之间没有可观察信号，
+    // 固定等待在满载下仍会随机失败，因此改为「已打开就通过，否则再按一次」的重试。
+    // 每轮先探测可见性，避免连按两次把已经打开的面板关掉。
     await expect(page.locator('.react-flow')).toBeVisible();
-    await page.keyboard.press('Control+KeyK');
     const search = page.getByLabel('命令面板搜索');
-    await expect(search).toBeVisible();
+    await expect.poll(async () => {
+      if (await search.isVisible()) return true;
+      await page.keyboard.press('Control+KeyK');
+      await page.waitForTimeout(150);
+      return search.isVisible();
+    }, { timeout: 15_000 }).toBe(true);
     await search.fill('阈值');
     await page.keyboard.press('Enter');
 

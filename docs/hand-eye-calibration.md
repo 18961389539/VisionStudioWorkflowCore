@@ -88,7 +88,7 @@ r_iθ = Wrap(closure_i.θ - meanAngle) · angularWeight
 | 2D 求解与指标 | `backend/src/VisionStudio.Engine/Nodes/CalibrationAdvancedNodes.cs` |
 | 3D 求解与剔除 | `backend/src/VisionStudio.Engine/Nodes/HandEye3DCalibrationNode.cs` |
 | 参数范围（唯一来源） | `backend/src/VisionStudio.Engine/Nodes/HandEyeSettings.cs` |
-| 资产存储（通用基类） | `backend/src/VisionStudio.Api/CalibrationAssetStoreCore.cs` |
-| 会话存储（原子写） | `backend/src/VisionStudio.Api/WizardSessionStore.cs` |
+| 资产存储（通用基类） | `backend/src/VisionStudio.Api/Calibration/CalibrationAssetStoreCore.cs` |
+| 会话存储（原子写） | `backend/src/VisionStudio.Api/Calibration/WizardSessionStore.cs` |
 | 向导服务 | `CalibrationWizardService.HandEye.cs` / `.HandEye3D.cs` |
 | 前端向导 | `CalibrationHandEyeWizard.tsx` / `CalibrationHandEye3DWizard.tsx` + `handEyeWizardShared.ts` |

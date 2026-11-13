@@ -6,7 +6,7 @@
     2026-11-12：增加 -Scope，让 CI 把一条 25 分钟的串行流水线拆成可并行的三段：
 
       Backend  静态审计 + 度量下限 + 发布/迁移回归 + dotnet test + 告警基线 + 覆盖率
-      Frontend npm ci + lint + 单测与覆盖率 + 生产构建
+      Frontend npm ci + lint + 单测与覆盖率 + 生产构建 + 产物体积预算
       E2E      Playwright 真浏览器回归
       All（默认，本地用）以上全部，按原顺序执行
 
@@ -37,13 +37,12 @@ $runBackend = $Scope -in @('All', 'Backend')
 $runFrontend = $Scope -in @('All', 'Frontend')
 $runE2E = $Scope -in @('All', 'E2E')
 
-# 覆盖率棘轮（只升不降）。2026-10-29 实测 83.47% 合并行覆盖率，取 81 留约 2.5 点余量：
-# 原默认 60 只能防"腰斩"，挡不住每次合并掉零点几个点的慢性退化，最终仍会滑到 60 附近。
-# 提升覆盖后必须同步上调此值与 workflow 里的 MIN_LINE_COVERAGE。
-$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '81' }
-# 分支覆盖率棘轮（2026-10-29 接入）：实测 62.04%，取 60 留约 2 点余量。
+# 覆盖率棘轮（只升不降）。2026-11-13 实测合并行 85.0% / 分支 62.5%，取 84 / 62 各留约 1 点余量。
+# 旧锚点 81 / 60 来自 2026-10-29，已低于实测约 4 个点——那等于允许每次合并掉零点几分的慢性退化。
+# 提升覆盖后必须同步上调此值与 workflow 里的 MIN_LINE_COVERAGE / MIN_BRANCH_COVERAGE。
+$minCoverage = if ($env:MIN_LINE_COVERAGE) { $env:MIN_LINE_COVERAGE } else { '84' }
 # 行覆盖率挡不住"行走了、分支只走一边"——`if (x) return;` 走一次就算整行覆盖。
-$minBranchCoverage = if ($env:MIN_BRANCH_COVERAGE) { $env:MIN_BRANCH_COVERAGE } else { '60' }
+$minBranchCoverage = if ($env:MIN_BRANCH_COVERAGE) { $env:MIN_BRANCH_COVERAGE } else { '62' }
 
 # Native commands (python / dotnet / npm) do not raise terminating errors through
 # ErrorActionPreference: every native step must check its exit code and abort with a non-zero
@@ -302,10 +301,15 @@ try {
     # 静态检查（2026-11-12 接入）：oxlint（Rust 实现，不依赖 TypeScript 编译 API）。
     # 项目使用 TS 7 原生编译器，typescript-eslint 的 peer 范围只到 <6.1，无法在此版本上解析，
     # 因此选用 oxlint：口径为「零告警」，新增未使用变量/死导入立即失败。
-    # React Compiler 系列规则（set-state-in-effect / refs / exhaustive-deps）尚未接入，
-    # 基线数量见 docs/quality-gates.md，按批收敛后再逐条开启。
+    # React Compiler 规则分批收敛：exhaustive-deps 已由 scripts/check-hooks-deps.mjs 以
+    # 存量基线（65，只许减）纳入 lint；set-state-in-effect / refs 仍关闭。
     npm run lint
     Assert-LastExitCode 'frontend lint'
+
+    # 主题令牌守卫（2026-11-13）：硬编码颜色只能出现在 :root / light 令牌块里，
+    # 并按 WCAG 阈值检查深/浅两套主题的对比度（文字 4.5:1、图形 3:1）。
+    npm run check:theme
+    Assert-LastExitCode 'frontend theme tokens'
 
     # 覆盖率门禁（2026-10-23 接入）：阈值写在 vite.config.ts 的 test.coverage.thresholds，
     # 取首次基线（语句 69.29 / 分支 65.99 / 函数 59.35 / 行 74.02）并各留约 1% 余量。
@@ -332,6 +336,12 @@ try {
 
     npm run build
     Assert-LastExitCode 'npm run build'
+
+    # 产物体积预算（2026-11-13 接入）：覆盖率与单测挡不住"某个依赖悄悄回到首屏"，
+    # 中文词表曾以 445 kB 裸体积进过 index。这里对 dist/assets 的 gzip 体积做棘轮，
+    # 新增大块 chunk 必须先登记，记录值只许降（scripts/bundle-budget.json）。
+    & $python "$root/scripts/check-bundle-budget.py"
+    Assert-LastExitCode 'bundle size budget'
 }
 finally { Pop-Location }
 }

@@ -91,11 +91,11 @@ curl -H "Authorization: Bearer <operator-token>" http://localhost:5000/api/diagn
 
 ## 验证
 
-- `backend/tests/VisionStudio.Engine.Tests/NodeTimeoutTests.cs`：8 项（4 条归因分支 + 钳制理论值 + 上限配置与非法值）。
-- `backend/tests/VisionStudio.Engine.Tests/NodeDurationStatisticsTests.cs`：10 项
+- `backend/tests/VisionStudio.Engine.Tests/Runtime/NodeTimeoutTests.cs`：8 项（4 条归因分支 + 钳制理论值 + 上限配置与非法值）。
+- `backend/tests/VisionStudio.Engine.Tests/Runtime/NodeDurationStatisticsTests.cs`：10 项
   （最近秩分位数、样本门槛、环形覆盖、偏紧判定、排序、非法样本、建议值受上限钳制、
   dispatcher 成功/超时两条路径都记账）。
-- `backend/tests/VisionStudio.Api.Tests/SecurityTests.cs`：`node-durations` 也纳入 401 理论值。
+- `backend/tests/VisionStudio.Api.Tests/Operations/SecurityTests.cs`：`node-durations` 也纳入 401 理论值。
 - `frontend/src/__tests__/nodeConfigurationDialogDraft.test.tsx`：3 项（回显、写入、清空后移除参数）。
 
 ### 一个环境坑（结论与直觉相反）

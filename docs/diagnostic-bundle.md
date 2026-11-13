@@ -7,7 +7,7 @@
 
 - 服务：`backend/src/VisionStudio.Api/Diagnostics/DiagnosticBundleService.cs`
 - 端点：`DiagnosticsEndpoints.cs`，`RequireAdministrator("diagnostics.bundle", "diagnostics")`
-- 测试：`backend/tests/VisionStudio.Api.Tests/DiagnosticBundleTests.cs`
+- 测试：`backend/tests/VisionStudio.Api.Tests/Operations/DiagnosticBundleTests.cs`
 
 ## 包里有什么
 

@@ -40,6 +40,10 @@
   `Directory.Packages.props`；前后端各跑一次 high/critical 漏洞扫描（离线时明确打印"跳过"，不静默当通过）。
 - **监视面板改为推送**：相机/设备/机器人列表由 `/hubs/monitor` 在内容变化时广播，定时轮询降为
   10 s 兜底；数据陈旧的 TTL 判定拆成独立 500 ms 节拍，不跟着轮询放慢。
+- **报警存储迁移到 SQLite**：`production/alarms.json` 在首次使用时导入 `visionstudio.db` 的
+  `alarms` 表（schema v29），原文件归档为 `alarms.json.migrated-<时间戳>`；列表/确认/恢复接口
+  契约不变。升级后旧宿主会因 schema v29 高于自身支持版本而拒绝启动——**回滚需先恢复旧版本的
+  数据快照**，不要让新库直接落到旧包上。
 - **交付可追溯**：发布产物新增 `build-info.json`（版本、commit、分支、工作区是否脏、API DLL 哈希）；
   版本变更必须在本文件有对应小节，否则静态审计失败。
 - **参数分组中文反查冲突**：`Lattice`/`Grid`、`Measure`/`Measurement`、`Provenance`/`Source`、
@@ -49,6 +53,14 @@
   `解码`→`解码设置`(Decode)。已保存的配方若含旧中文分组名，升级后需重新选一次分组。
 
 ### 内部改进（不改变现场行为）
+
+- 浅色主题可读性：62 处绕过主题令牌的硬编码颜色收敛为语义 token，文字/图形对比度按 WCAG AA
+  （4.5:1 / 3:1）加 `npm run check:theme` 门禁；深色主题视觉不变，浅色主题的警告、链接、节点状态色加深
+  （此前警告色与端口色在白底上最低约 2.2:1）。
+- 前端验证补强：生产操作台真浏览器 e2e（告警确认链路、状态接口失败时降级为"状态未确认"）
+  与 CameraPanel 连接/参数失败单测；`react/exhaustive-deps` 以 65 处存量基线纳入 lint 棘轮。
+- i18n 收尾：端口显示名剩余 157 条未翻译全部补齐（齿轮/螺纹/粗糙度/位姿等测量域），
+  `i18nPortCoverage` 基线固定为 0；端口面板与节点端口提示不再中英混排。
 
 - 三个巨型文件按域纯移动拆分：`VisionWorkflowCompiler` 1740 → 5 个 partial（最大 584 行）、
   `NodeCatalog` 1622 → 6 个（最大 471 行）、`ProductionRuntime` 1498 → 5 个（最大 416 行）。
