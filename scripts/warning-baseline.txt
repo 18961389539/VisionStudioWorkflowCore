@@ -4,9 +4,9 @@
 #
 # 2026-11-10：清理 2026-10-29 批次中已修复的 6 条（GetGenericIndexer→GetArray、
 # 循环外缓存 Rows/Cols），基线 22 条且无新增。
-backend/src/VisionStudio.Api/GigENetworkCommissioning.cs(466,80) : warning CA1416
-backend/src/VisionStudio.Api/PluginPackageManagement.cs(147,33) : warning SYSLIB0057
-backend/src/VisionStudio.Api/PluginPackageManagement.cs(427,37) : warning SYSLIB0057
+backend/src/VisionStudio.Api/Camera/GigENetworkCommissioning.cs(466,80) : warning CA1416
+backend/src/VisionStudio.Api/Plugin/PluginPackageManagement.cs(147,33) : warning SYSLIB0057
+backend/src/VisionStudio.Api/Plugin/PluginPackageManagement.cs(427,37) : warning SYSLIB0057
 backend/src/VisionStudio.Api/Security/VisionStudioAuthenticationHandler.cs(18,25) : warning CS0108
 backend/src/VisionStudio.Camera.Basler/BaslerPylonCameraDevice.cs(356,54) : warning CS8603
 backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs(397,54) : warning CS8603
@@ -15,14 +15,14 @@ backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(101,33) : warning OCV
 backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(94,23) : warning CS0618
 backend/src/VisionStudio.Engine/Nodes/MaskToVisionNodes.cs(96,29) : warning OCVS002
 backend/src/VisionStudio.Engine/Nodes/MergedNodeAliases.cs(200,86) : warning CS8625
-backend/tests/VisionStudio.Api.Tests/PluginPackageManagementTests.cs(112,20) : warning SYSLIB0057
-backend/tests/VisionStudio.Api.Tests/SqliteStorageTests.cs(66,26) : warning CS8602
-backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(21,20) : warning xUnit2031
-backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(32,21) : warning xUnit2031
-backend/tests/VisionStudio.Api.Tests/WorkflowModuleTests.cs(57,25) : warning CS8602
-backend/tests/VisionStudio.Engine.Tests/HybridRuntimeTests.cs(40,21) : warning xUnit2031
-backend/tests/VisionStudio.Engine.Tests/P0CompletionNodeTests.cs(50,9) : warning xUnit2013
-backend/tests/VisionStudio.Engine.Tests/ParallelDispositionTests.cs(215,12) : warning xUnit2031
-backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs(18,21) : warning xUnit2031
-backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs(19,21) : warning xUnit2031
-backend/tests/VisionStudio.Engine.Tests/WorkflowCoreRuntimeTests.cs(31,19) : warning xUnit2031
+backend/tests/VisionStudio.Api.Tests/Plugin/PluginPackageManagementTests.cs(112,20) : warning SYSLIB0057
+backend/tests/VisionStudio.Api.Tests/Storage/SqliteStorageTests.cs(66,26) : warning CS8602
+backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs(21,20) : warning xUnit2031
+backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs(32,21) : warning xUnit2031
+backend/tests/VisionStudio.Api.Tests/Workflow/WorkflowModuleTests.cs(57,25) : warning CS8602
+backend/tests/VisionStudio.Engine.Tests/Runtime/HybridRuntimeTests.cs(40,21) : warning xUnit2031
+backend/tests/VisionStudio.Engine.Tests/Nodes/Flow/P0CompletionNodeTests.cs(50,9) : warning xUnit2013
+backend/tests/VisionStudio.Engine.Tests/Runtime/ParallelDispositionTests.cs(215,12) : warning xUnit2031
+backend/tests/VisionStudio.Engine.Tests/Runtime/RecursiveStructuredWorkflowTests.cs(18,21) : warning xUnit2031
+backend/tests/VisionStudio.Engine.Tests/Runtime/RecursiveStructuredWorkflowTests.cs(19,21) : warning xUnit2031
+backend/tests/VisionStudio.Engine.Tests/Runtime/WorkflowCoreRuntimeTests.cs(31,19) : warning xUnit2031

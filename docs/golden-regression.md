@@ -7,7 +7,7 @@
 金样回归补的就是这一层：**输入是提交进仓库的固定 PNG，不再由代码生成**，断言走真实工作流运行器
 （`WorkflowCoreVisionRunner` → 编译 → 调度 → 节点），而不是直接调某个算法类。
 
-- 用例：`backend/tests/VisionStudio.Engine.Tests/GoldenWorkflowRegressionTests.cs`
+- 用例：`backend/tests/VisionStudio.Engine.Tests/Runtime/GoldenWorkflowRegressionTests.cs`
 - 夹具：`backend/tests/VisionStudio.Engine.Tests/Fixtures/*.png`（`CopyToOutputDirectory=PreserveNewest`）
 - 生成脚本：`scripts/generate-golden-fixtures.py`（纯标准库，不依赖 numpy/OpencvSharp）
 

@@ -54,7 +54,7 @@ measure.caliperWidth     ─┘        (value 由数值输入接入)
 
 ## 验证
 
-- 后端：`backend/tests/VisionStudio.Engine.Tests/StringNodeTests.cs` 10 项（模板/别名/转义、未知占位符、`{value}` 未接线、拼接跳空、数值格式、严格解析、子串裁剪、替换三种模式、补齐、非法配置、maxLength）。
+- 后端：`backend/tests/VisionStudio.Engine.Tests/Nodes/Flow/StringNodeTests.cs` 10 项（模板/别名/转义、未知占位符、`{value}` 未接线、拼接跳空、数值格式、严格解析、子串裁剪、替换三种模式、补齐、非法配置、maxLength）。
 - Engine 全量：**1844 项通过**（含 14 项目录契约测试）。
 - 目录：`catalog.generated.json` 重新生成，`--check` 通过，172 节点 / hash `c56159c2…`。
 - 前端：`catalogLocalization`（选项中文覆盖率）、`nodeIcons`、`toolbox` 通过；`tsc -b` 无错误。

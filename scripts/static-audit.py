@@ -415,9 +415,9 @@ ok(f'Workflow sample references: {len(sample_files)}')
 
 # V0.28 storage migration/backup/capacity + retained catalog/diagnostics/dependency/security/modular/plugin/hybrid hardening artifacts
 required = [
-    'backend/tests/VisionStudio.Engine.Tests/FaultInjectionTests.cs',
-    'backend/tests/VisionStudio.Engine.Tests/WorkflowPropertyTests.cs',
-    'backend/tests/VisionStudio.Engine.Tests/SoakStabilityTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/FaultInjectionTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/WorkflowPropertyTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/SoakStabilityTests.cs',
     'backend/tests/VisionStudio.Api.Tests/Storage/PersistenceConcurrencyTests.cs',
     'backend/tests/VisionStudio.Api.Tests/OpenApiContractTests.cs',
     'backend/tests/VisionStudio.Api.Tests/Production/ProductionRuntimeTests.cs',
@@ -430,8 +430,8 @@ required = [
     'backend/src/VisionStudio.Api/Production/ProductionRuntime.cs',
     'backend/src/VisionStudio.Api/AlarmStore.cs',
     'backend/src/VisionStudio.Engine/WorkflowFingerprint.cs',
-    'backend/tests/VisionStudio.Engine.Tests/WorkflowFingerprintTests.cs',
-    'backend/tests/VisionStudio.Engine.Tests/ParallelCapabilityTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/WorkflowFingerprintTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/ParallelCapabilityTests.cs',
     'frontend/src/components/ProductionPanel.tsx',
     'scripts/publish-runtime.ps1',
     'scripts/publish-runtime.sh',
@@ -442,7 +442,7 @@ required = [
     'backend/src/VisionStudio.Engine/Runtime/VisionPipelineExecutor.cs',
     'backend/src/VisionStudio.Engine/Runtime/VisionPipelineStep.cs',
     'backend/src/VisionStudio.Engine/Runtime/VisionExecutionPolicy.cs',
-    'backend/tests/VisionStudio.Engine.Tests/HybridRuntimeTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/HybridRuntimeTests.cs',
     'backend/src/VisionStudio.Abstractions/VisionStudio.Abstractions.csproj',
     'backend/src/VisionStudio.Abstractions/PluginContracts.cs',
     'backend/src/VisionStudio.Abstractions/ExecutionContracts.cs',
@@ -484,7 +484,7 @@ required = [
     'backend/src/VisionStudio.Engine/CatalogSnapshot.cs',
     'backend/src/VisionStudio.CatalogExporter/VisionStudio.CatalogExporter.csproj',
     'backend/src/VisionStudio.CatalogExporter/Program.cs',
-    'backend/tests/VisionStudio.Engine.Tests/CatalogSnapshotTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Contracts/CatalogSnapshotTests.cs',
     'frontend/src/generated/catalog.generated.json',
     'scripts/generate-frontend-catalog.ps1',
     'scripts/generate-frontend-catalog.sh',
@@ -498,7 +498,7 @@ required = [
     'STORAGE_MAINTENANCE.md',
     'MIGRATION_V027_TO_V028.md',
     'backend/src/VisionStudio.Engine/Runtime/StructuredWorkflowIr.cs',
-    'backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Runtime/RecursiveStructuredWorkflowTests.cs',
     'samples/nested-structured-workflow.json',
     'STRUCTURED_WORKFLOW_IR.md',
     'MIGRATION_V028_TO_V029.md',
@@ -531,7 +531,7 @@ required = [
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraAdapterProvider.cs',
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCameraDevice.cs',
     'backend/src/VisionStudio.Api/Camera/CameraAdapterOptions.cs',
-    'backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Camera/CameraAcquisitionTests.cs',
     'CAMERA_VENDOR_ADAPTERS.md',
     'MIGRATION_V032_TO_V033.md',
     'backend/src/VisionStudio.Engine/Camera/CameraFeatureProfiles.cs',
@@ -539,7 +539,7 @@ required = [
     'backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraFeatures.cs',
     'backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs',
     'backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs',
-    'backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs',
+    'backend/tests/VisionStudio.Engine.Tests/Camera/CameraFeatureProfileTests.cs',
     'backend/tests/VisionStudio.Api.Tests/Camera/CameraFeatureProfileStoreTests.cs',
     'CAMERA_COMMISSIONING.md',
     'MIGRATION_V033_TO_V034.md',
@@ -659,7 +659,7 @@ ok('V0.21 hybrid Workflow Core + VisionPipelineExecutor semantics retained')
 # V0.29 recursive structured workflow IR
 structured_ir=read_safe('backend/src/VisionStudio.Engine/Runtime/StructuredWorkflowIr.cs')
 workflow_data=read_safe('backend/src/VisionStudio.Engine/Runtime/VisionWorkflowData.cs')
-recursive_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/RecursiveStructuredWorkflowTests.cs')
+recursive_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/Runtime/RecursiveStructuredWorkflowTests.cs')
 frontend_app=read_safe('frontend/src/App.tsx')
 for token in ['StructuredWorkflowIrBuilder','FindNearestCommonJoin','excludedBoundaryJoinId','StructuredControlRegion','ValidateNoCrossBranchData']:
     if token not in structured_ir: fail(f'V0.29 structured IR token missing: {token}')
@@ -770,7 +770,7 @@ hik_provider=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotMvsCame
 camera_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraEndpoints.cs')
 camera_options=read_safe('backend/src/VisionStudio.Api/Camera/CameraAdapterOptions.cs')
 camera_ui=read_safe('frontend/src/components/CameraPanel.tsx')
-camera_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraAcquisitionTests.cs')
+camera_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/Camera/CameraAcquisitionTests.cs')
 for token in ['CameraOutputPixelFormat','ICameraTelemetryProvider','CameraDiscoveredDevice','ICameraAdapterProvider','ExternalTriggerSource']:
     if token not in camera_contracts: fail(f'V0.33 camera contract missing: {token}')
 for token in ['CameraFrameTimeoutException','FrameTimeouts','DriverDroppedFrames','ReconnectAsync']:
@@ -818,7 +818,7 @@ hik_features=read_safe('backend/src/VisionStudio.Camera.Hikrobot/HikrobotCameraF
 profile_store=read_safe('backend/src/VisionStudio.Api/Camera/CameraFeatureProfileStore.cs')
 profile_schema=read_family('backend/src/VisionStudio.Api/SchemaMigrations*.cs')
 profile_endpoints=read_safe('backend/src/VisionStudio.Api/Endpoints/CameraFeatureProfileEndpoints.cs')
-profile_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/CameraFeatureProfileTests.cs')
+profile_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/Camera/CameraFeatureProfileTests.cs')
 profile_store_tests=read_safe('backend/tests/VisionStudio.Api.Tests/Camera/CameraFeatureProfileStoreTests.cs')
 for token in ['CameraFeatureDescriptor','CameraCommissioningProfile','CameraCommissioningCapabilities','ICameraFeatureProvider','CommissioningProfileHash']:
     if token not in camera_profile_contracts: fail(f'V0.34 commissioning contract missing: {token}')
@@ -1059,7 +1059,7 @@ ok('V0.35 multi-camera PTP diagnostics + Action Command runtime + skew measureme
 frameset_contract=read_safe('backend/src/VisionStudio.Abstractions/VisionData.cs')
 frameset_runtime=read_safe('backend/src/VisionStudio.Engine/Camera/VisionFrameSet.cs')
 camera_nodes=read_safe('backend/src/VisionStudio.Engine/Nodes/CameraNodes.cs')
-frameset_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/FrameSetWorkflowTests.cs')
+frameset_tests=read_safe('backend/tests/VisionStudio.Engine.Tests/Camera/FrameSetWorkflowTests.cs')
 frameset_sample=json.loads(read_safe('samples/synchronized-frameset-workflow.json'))
 for token in ['FrameSet','IVisionFrameSet','VisionFrameSetFrameInfo','VisionValue FrameSet']:
     if token not in frameset_contract: fail(f'V0.36 FrameSet contract missing: {token}')
@@ -1824,7 +1824,7 @@ ok('script.csharp stays a non-Stable trusted-code capability; editor endpoints a
 for _fixture in ('scratch-640x480.png', 'edge-640x480.png', 'ring-640x480.png'):
     if not (ROOT / 'backend/tests/VisionStudio.Engine.Tests/Fixtures' / _fixture).is_file():
         fail(f'Golden regression fixture missing: {_fixture} (regenerate with scripts/generate-golden-fixtures.py)')
-_golden = read_safe('backend/tests/VisionStudio.Engine.Tests/GoldenWorkflowRegressionTests.cs')
+_golden = read_safe('backend/tests/VisionStudio.Engine.Tests/Runtime/GoldenWorkflowRegressionTests.cs')
 for _token in ['WorkflowCoreVisionRunner', 'image.threshold', 'measure.caliper', 'measure.caliperCircle']:
     if _token not in _golden: fail(f'Golden regression no longer runs the real pipeline path: {_token}')
 ok('Golden regression fixtures + pipeline-level cases present')
